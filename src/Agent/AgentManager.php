@@ -204,6 +204,9 @@ class AgentManager
         $this->register(new BuiltinAgents\CodeWriterAgent());
         $this->register(new BuiltinAgents\ResearcherAgent());
         $this->register(new BuiltinAgents\ReviewerAgent());
+        $this->register(new BuiltinAgents\ExploreAgent());
+        $this->register(new BuiltinAgents\PlanAgent());
+        $this->register(new BuiltinAgents\VerificationAgent());
     }
 
     /**

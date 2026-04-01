@@ -31,6 +31,9 @@ class AgentManagerTest extends TestCase
         $this->assertTrue($manager->has('code-writer'));
         $this->assertTrue($manager->has('researcher'));
         $this->assertTrue($manager->has('reviewer'));
+        $this->assertTrue($manager->has('explore'));
+        $this->assertTrue($manager->has('plan'));
+        $this->assertTrue($manager->has('verification'));
     }
 
     public function test_get_builtin_agent(): void
@@ -63,6 +66,42 @@ class AgentManagerTest extends TestCase
         $this->assertContains('code-writer', $names);
         $this->assertContains('researcher', $names);
         $this->assertContains('reviewer', $names);
+        $this->assertContains('explore', $names);
+        $this->assertContains('plan', $names);
+        $this->assertContains('verification', $names);
+    }
+
+    public function test_explore_agent_is_read_only(): void
+    {
+        $manager = AgentManager::getInstance();
+        $agent = $manager->get('explore');
+
+        $this->assertTrue($agent->readOnly());
+        $this->assertNotNull($agent->disallowedTools());
+        $this->assertContains('write_file', $agent->disallowedTools());
+        $this->assertContains('edit_file', $agent->disallowedTools());
+        $this->assertStringContainsString('READ-ONLY', $agent->systemPrompt());
+    }
+
+    public function test_plan_agent_is_read_only(): void
+    {
+        $manager = AgentManager::getInstance();
+        $agent = $manager->get('plan');
+
+        $this->assertTrue($agent->readOnly());
+        $this->assertStringContainsString('Critical Files for Implementation', $agent->systemPrompt());
+    }
+
+    public function test_verification_agent_properties(): void
+    {
+        $manager = AgentManager::getInstance();
+        $agent = $manager->get('verification');
+
+        $this->assertTrue($agent->readOnly());
+        $this->assertStringContainsString('try to break it', $agent->systemPrompt());
+        $this->assertStringContainsString('VERDICT: PASS', $agent->systemPrompt());
+        $this->assertStringContainsString('VERDICT: FAIL', $agent->systemPrompt());
+        $this->assertStringContainsString('VERDICT: PARTIAL', $agent->systemPrompt());
     }
 
     public function test_get_nonexistent_returns_null(): void

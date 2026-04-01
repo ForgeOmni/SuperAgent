@@ -49,6 +49,16 @@ class MarkdownAgentDefinition extends AgentDefinition
         return $this->frontmatter['allowed_tools'] ?? null;
     }
 
+    public function disallowedTools(): ?array
+    {
+        return $this->frontmatter['disallowed_tools'] ?? null;
+    }
+
+    public function readOnly(): bool
+    {
+        return (bool) ($this->frontmatter['read_only'] ?? false);
+    }
+
     public function model(): ?string
     {
         $model = $this->frontmatter['model'] ?? null;

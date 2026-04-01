@@ -154,25 +154,24 @@ class AgentTool extends Tool
                 $backend->setTeamContext($this->teamContext);
             }
             
-            // Prepare system prompt based on agent type
-            $systemPrompt = $this->getSystemPromptForType($subagentType);
-            
-            // Prepare allowed tools based on agent type
-            $allowedTools = $this->getAllowedToolsForType($subagentType);
-            
-            // Create spawn configuration
+            // Resolve agent definition
+            $definition = AgentManager::getInstance()->get($subagentType);
+
+            // Prepare spawn configuration from agent definition
             $config = new AgentSpawnConfig(
                 name: $name,
                 prompt: $prompt,
                 teamName: $teamName,
                 model: $model,
-                systemPrompt: $systemPrompt,
+                systemPrompt: $definition?->systemPrompt(),
                 permissionMode: $mode,
                 backend: $backendType,
                 isolation: $isolation,
                 runInBackground: $runInBackground,
-                allowedTools: $allowedTools,
+                allowedTools: $definition?->allowedTools(),
+                deniedTools: $definition?->disallowedTools(),
                 planModeRequired: $mode === PermissionMode::PLAN,
+                readOnly: $definition?->readOnly() ?? false,
             );
             
             // Spawn the agent
@@ -284,25 +283,6 @@ class AgentTool extends Tool
         return $prefix . '_' . substr(uniqid(), -6);
     }
     
-    /**
-     * Get system prompt for agent type via AgentManager.
-     */
-    private function getSystemPromptForType(string $type): ?string
-    {
-        $definition = AgentManager::getInstance()->get($type);
-
-        return $definition?->systemPrompt();
-    }
-
-    /**
-     * Get allowed tools for agent type via AgentManager.
-     */
-    private function getAllowedToolsForType(string $type): ?array
-    {
-        $definition = AgentManager::getInstance()->get($type);
-
-        return $definition?->allowedTools();
-    }
     
     /**
      * Check status of active agents.

@@ -33,6 +33,23 @@ abstract class AgentDefinition
     }
 
     /**
+     * Tools that this agent is NOT allowed to use.
+     * Used by read-only agents to deny write/edit tools.
+     */
+    public function disallowedTools(): ?array
+    {
+        return null;
+    }
+
+    /**
+     * Whether this agent operates in read-only mode (cannot modify files or system state).
+     */
+    public function readOnly(): bool
+    {
+        return false;
+    }
+
+    /**
      * Default model override. Return null to use the default model.
      */
     public function model(): ?string
