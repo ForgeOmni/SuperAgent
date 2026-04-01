@@ -10,6 +10,7 @@ use SuperAgent\Console\Commands\SuperAgentMakeToolCommand;
 use Illuminate\Console\Application;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Container\Container;
+use Illuminate\Foundation\Application as LaravelApplication;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Output\BufferedOutput;
 
@@ -17,17 +18,17 @@ class ConsoleTest extends TestCase
 {
     private Application $artisan;
     private BufferedOutput $output;
-    
+
     protected function setUp(): void
     {
         parent::setUp();
-        
-        $container = new Container();
-        $container->singleton('events', function() {
+
+        $app = new LaravelApplication(getcwd());
+        $app->singleton('events', function() {
             return new Dispatcher();
         });
-        
-        $this->artisan = new Application($container, new Dispatcher(), '1.0.0');
+
+        $this->artisan = new Application($app, new Dispatcher(), '1.0.0');
         $this->output = new BufferedOutput();
     }
     
@@ -60,7 +61,7 @@ class ConsoleTest extends TestCase
         $command = new SuperAgentMakeToolCommand();
         
         $this->assertEquals('superagent:make-tool', $command->getName());
-        $this->assertStringContainsString('Create', $command->getDescription());
+        $this->assertStringContainsString('Generate', $command->getDescription());
     }
     
     public function testToolsCommandListsAvailableTools()
@@ -75,7 +76,7 @@ class ConsoleTest extends TestCase
         $outputContent = $this->output->fetch();
         
         // Should show headers
-        $this->assertStringContainsString('Available Tools', $outputContent);
+        $this->assertStringContainsString('SuperAgent Tools', $outputContent);
     }
     
     public function testMakeToolCommandRequiresName()
@@ -94,14 +95,14 @@ class ConsoleTest extends TestCase
     public function testRunCommandHandlesPromptOption()
     {
         $command = new SuperAgentRunCommand();
-        
+
         // Get the definition
         $definition = $command->getDefinition();
-        
-        // Check that 'prompt' option exists
-        $this->assertTrue($definition->hasOption('prompt'));
-        $promptOpt = $definition->getOption('prompt');
-        $this->assertFalse($promptOpt->isValueRequired());
+
+        // 'prompt' is a required argument in the signature
+        $this->assertTrue($definition->hasArgument('prompt'));
+        $promptArg = $definition->getArgument('prompt');
+        $this->assertTrue($promptArg->isRequired());
     }
     
     public function testChatCommandHandlesModelOption()
@@ -139,12 +140,12 @@ class ConsoleTest extends TestCase
     public function testRunCommandHandlesFileInput()
     {
         $command = new SuperAgentRunCommand();
-        
+
         // Get the definition
         $definition = $command->getDefinition();
-        
-        // Check that 'file' option exists
-        $this->assertTrue($definition->hasOption('file'));
+
+        // Check that 'output' option exists (saves output to file)
+        $this->assertTrue($definition->hasOption('output'));
     }
     
     public function testMakeToolCommandCreatesCorrectStructure()

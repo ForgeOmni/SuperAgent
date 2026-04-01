@@ -270,8 +270,8 @@ use SuperAgent\MCP\Types\ServerConfig;
 
 $mcpManager = MCPManager::getInstance();
 
-// Register MCP server
-$config = new ServerConfig(
+// Register MCP server (use static factory methods)
+$config = ServerConfig::stdio(
     name: 'github-mcp',
     command: 'npx',
     args: ['-y', '@modelcontextprotocol/server-github'],
@@ -287,20 +287,18 @@ $mcpManager->connect('github-mcp');
 ### Observability
 
 ```php
-use SuperAgent\Telemetry\TracingManager;
+use SuperAgent\Telemetry\SimpleTracingManager;
 use SuperAgent\Telemetry\MetricsCollector;
 
-// Enable tracing
-$tracer = TracingManager::getInstance();
-$spanId = $tracer->startSpan('agent.query');
+// Enable tracing (via SimpleTracingManager)
+$tracer = SimpleTracingManager::getInstance();
+$spanId = $tracer->startSpan('agent.query', 'api');
 
 // Record metrics
 $metrics = MetricsCollector::getInstance();
-$metrics->recordCounter('api.requests', 1);
+$metrics->incrementCounter('api.requests');
 $metrics->recordHistogram('response.time', 150.5);
-
-// End tracing
-$tracer->endSpan($spanId);
+$metrics->recordTiming('query.duration', 320.0);
 ```
 
 ## 🔧 CLI Commands
@@ -700,17 +698,24 @@ use SuperAgent\Telemetry\StructuredLogger;
 
 $logger = StructuredLogger::getInstance();
 
-// Add context information
-$logger->withContext([
+// Set global context
+$logger->setGlobalContext([
     'user_id' => auth()->id(),
-    'request_id' => request()->id(),
 ]);
+$logger->setSessionId('session-123');
 
-// Log operations
-$logger->info('Agent query completed', [
-    'tokens_used' => $response->usage->total_tokens,
-    'cost' => $response->usage->estimated_cost,
-    'duration' => $duration,
+// Log LLM requests
+$logger->logLLMRequest(
+    model: 'claude-3-haiku-20240307',
+    inputTokens: 500,
+    outputTokens: 200,
+    duration: $duration,
+    metadata: ['query_type' => 'analysis']
+);
+
+// Log errors
+$logger->logError('API timeout', new \RuntimeException('Connection timed out'), [
+    'provider' => 'anthropic',
 ]);
 ```
 

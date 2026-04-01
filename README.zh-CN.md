@@ -251,8 +251,8 @@ use SuperAgent\MCP\Types\ServerConfig;
 
 $mcpManager = MCPManager::getInstance();
 
-// 注册 MCP 服务器
-$config = new ServerConfig(
+// 注册 MCP 服务器（使用静态工厂方法）
+$config = ServerConfig::stdio(
     name: 'github-mcp',
     command: 'npx',
     args: ['-y', '@modelcontextprotocol/server-github'],
@@ -656,17 +656,24 @@ use SuperAgent\Telemetry\StructuredLogger;
 
 $logger = StructuredLogger::getInstance();
 
-// 添加上下文信息
-$logger->withContext([
+// 设置全局上下文
+$logger->setGlobalContext([
     'user_id' => auth()->id(),
-    'request_id' => request()->id(),
 ]);
+$logger->setSessionId('session-123');
 
-// 记录操作
-$logger->info('Agent 查询完成', [
-    'tokens_used' => $response->usage->total_tokens,
-    'cost' => $response->usage->estimated_cost,
-    'duration' => $duration,
+// 记录 LLM 请求
+$logger->logLLMRequest(
+    model: 'claude-3-haiku-20240307',
+    inputTokens: 500,
+    outputTokens: 200,
+    duration: $duration,
+    metadata: ['query_type' => 'analysis']
+);
+
+// 记录错误
+$logger->logError('API 超时', new \RuntimeException('连接超时'), [
+    'provider' => 'anthropic',
 ]);
 ```
 

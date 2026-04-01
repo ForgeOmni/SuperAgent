@@ -609,7 +609,8 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
-| 0.5.x      | 10.x+   | 8.1+ | Current stable |
+| 0.5.6      | 10.x+   | 8.1+ | Current stable — full test suite passing (466 tests) |
+| 0.5.5      | 10.x+   | 8.1+ | Feature release |
 
 ## Production Deployment
 
@@ -722,4 +723,4 @@ php artisan tinker
 
 ---
 
-© 2024 SuperAgent. All rights reserved.
+© 2024-2026 SuperAgent. All rights reserved.

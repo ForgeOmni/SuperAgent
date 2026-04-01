@@ -6,7 +6,7 @@ use Illuminate\Console\Command;
 use SuperAgent\Agent;
 use SuperAgent\Config\Config;
 use SuperAgent\Providers\AnthropicProvider;
-use SuperAgent\Tools\ToolRegistry;
+use SuperAgent\Tools\BuiltinToolRegistry;
 
 class SuperAgentRunCommand extends Command
 {
@@ -145,17 +145,16 @@ class SuperAgentRunCommand extends Command
     {
         $requestedTools = $this->option('tools');
         
+        $allTools = BuiltinToolRegistry::all();
+
         if (empty($requestedTools)) {
-            return ToolRegistry::getInstance()->getAllTools();
+            return array_values($allTools);
         }
 
-        $registry = ToolRegistry::getInstance();
         $tools = [];
-        
         foreach ($requestedTools as $toolName) {
-            $tool = $registry->getTool($toolName);
-            if ($tool) {
-                $tools[] = $tool;
+            if (isset($allTools[$toolName])) {
+                $tools[] = $allTools[$toolName];
             }
         }
 

@@ -114,7 +114,11 @@ class Phase1ToolsTest extends TestCase
 
         $this->assertTrue($result->isSuccess());
         $this->assertStringContainsString('file2.php', $result->content);
-        $this->assertStringContainsString('subdir/file3.php', $result->content);
+        // On Windows, path separator may be backslash
+        $this->assertTrue(
+            str_contains($result->content, 'subdir/file3.php') || str_contains($result->content, 'subdir\\file3.php'),
+            "Expected subdir/file3.php or subdir\\file3.php in result"
+        );
     }
 
     public function testGrepTool(): void

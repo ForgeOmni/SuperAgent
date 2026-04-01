@@ -5,16 +5,20 @@ namespace Tests\Unit;
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Config\ConfigWatcher;
 use SuperAgent\Config\HotReload;
+use Illuminate\Foundation\Application;
 
 class ConfigTest extends TestCase
 {
     private string $tempFile;
-    
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->tempFile = sys_get_temp_dir() . '/test_config_' . uniqid() . '.json';
         file_put_contents($this->tempFile, json_encode(['key' => 'value']));
+
+        // Ensure base_path() works for HotReload tests
+        new Application(sys_get_temp_dir());
     }
     
     protected function tearDown(): void
@@ -50,17 +54,20 @@ class ConfigTest extends TestCase
     {
         $watcher = new ConfigWatcher();
         $changeDetected = false;
-        
+
         $watcher->watch($this->tempFile, function($file) use (&$changeDetected) {
             $changeDetected = true;
         });
-        
-        // Simulate file change
-        sleep(1); // Ensure different timestamp
+
+        // Simulate file change — touch with a future timestamp to ensure filemtime differs
+        sleep(1);
         file_put_contents($this->tempFile, json_encode(['key' => 'new_value']));
-        
+        clearstatcache(true, $this->tempFile);
+        touch($this->tempFile, time() + 2);
+        clearstatcache(true, $this->tempFile);
+
         $watcher->check();
-        
+
         $this->assertTrue($changeDetected);
     }
     

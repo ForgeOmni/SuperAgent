@@ -3,7 +3,7 @@
 namespace SuperAgent\Console\Commands;
 
 use Illuminate\Console\Command;
-use SuperAgent\Tools\ToolRegistry;
+use SuperAgent\Tools\BuiltinToolRegistry;
 
 class SuperAgentToolsCommand extends Command
 {
@@ -16,8 +16,7 @@ class SuperAgentToolsCommand extends Command
 
     public function handle(): int
     {
-        $registry = ToolRegistry::getInstance();
-        $tools = $registry->getAllTools();
+        $tools = BuiltinToolRegistry::all();
         
         // Apply filters
         if ($category = $this->option('category')) {

@@ -6,7 +6,7 @@ use Illuminate\Console\Command;
 use SuperAgent\Agent;
 use SuperAgent\Config\Config;
 use SuperAgent\Providers\AnthropicProvider;
-use SuperAgent\Tools\ToolRegistry;
+use SuperAgent\Tools\BuiltinToolRegistry;
 
 class SuperAgentChatCommand extends Command
 {
@@ -74,18 +74,16 @@ class SuperAgentChatCommand extends Command
     {
         $requestedTools = $this->option('tools');
         
+        $allTools = BuiltinToolRegistry::all();
+
         if (empty($requestedTools)) {
-            // Enable all tools by default
-            return ToolRegistry::getInstance()->getAllTools();
+            return array_values($allTools);
         }
 
-        $registry = ToolRegistry::getInstance();
         $tools = [];
-        
         foreach ($requestedTools as $toolName) {
-            $tool = $registry->getTool($toolName);
-            if ($tool) {
-                $tools[] = $tool;
+            if (isset($allTools[$toolName])) {
+                $tools[] = $allTools[$toolName];
             } else {
                 $this->warn("Tool not found: {$toolName}");
             }
@@ -139,7 +137,7 @@ class SuperAgentChatCommand extends Command
 
     private function listTools(): void
     {
-        $tools = ToolRegistry::getInstance()->getAllTools();
+        $tools = BuiltinToolRegistry::all();
         
         $this->info('Available tools:');
         foreach ($tools as $tool) {

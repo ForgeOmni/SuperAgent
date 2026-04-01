@@ -274,12 +274,14 @@ class SensitiveFileProtection
     private function matchesPattern(string $path, string $pattern): bool
     {
         // Convert glob pattern to regex
+        // First escape regex special chars, then convert glob wildcards
+        $regex = preg_quote($pattern, '/');
         $regex = str_replace(
-            ['*', '?', '[', ']'],
-            ['.*', '.', '\[', '\]'],
-            $pattern
+            ['\*', '\?'],
+            ['.*', '.'],
+            $regex
         );
-        
+
         return preg_match('/^' . $regex . '$/i', $path) === 1;
     }
 

@@ -107,7 +107,8 @@ class Phase4HooksTest extends TestCase
         $result = $hook->execute($input);
         
         $this->assertTrue($result->continue);
-        $this->assertEquals('Hello from hook', trim($result->systemMessage ?? ''));
+        // On Windows, echo preserves surrounding quotes
+        $this->assertEquals('Hello from hook', trim(trim($result->systemMessage ?? ''), '"'));
     }
     
     public function testCommandHookWithCondition(): void

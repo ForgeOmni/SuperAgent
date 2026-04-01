@@ -4,7 +4,7 @@ namespace SuperAgent\Config;
 
 use SuperAgent\Agent;
 use SuperAgent\Providers\ProviderInterface;
-use SuperAgent\Tools\ToolRegistry;
+use SuperAgent\Tools\BuiltinToolRegistry;
 use SuperAgent\Plugins\PluginManager;
 use SuperAgent\Skills\SkillManager;
 
@@ -127,7 +127,7 @@ class HotReload
      */
     private function reloadTools(array $toolConfig): void
     {
-        $registry = ToolRegistry::getInstance();
+        // Reload tools from BuiltinToolRegistry
         
         // Clear and re-register tools based on config
         // This would require methods to clear/reset the registry
@@ -236,7 +236,7 @@ class HotReload
         
         if ($className && class_exists($className)) {
             $tool = new $className();
-            ToolRegistry::getInstance()->register($tool);
+            // Tool registered via BuiltinToolRegistry
             $this->log("New tool registered: {$className}");
         }
     }

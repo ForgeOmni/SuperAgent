@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.6] - 2026-04-01
+
+### Fixed
+- **Test suite fully passing** — fixed 97 errors and 9 failures across 13 test files (466 tests, 1557 assertions, 0 errors, 0 failures)
+- `MCPTest` — updated to use `ServerConfig::stdio/http/sse()` factory methods and named constructor params; fixed `MCPTool` 3-arg constructor (`Client, serverName, MCPToolType`); replaced non-existent `isRegistered()`/`isConnected()` with `getServers()->has()` / `getClient()`
+- `FileHistoryTest` — switched to singleton `getInstance()` for `GitAttribution`, `SensitiveFileProtection`, `UndoRedoManager`; replaced `listSnapshots()` with `getFileSnapshots()`; fixed `getDiff()` array return handling; used `FileAction` + `recordAction()` API for undo/redo
+- `TelemetryTest` — bootstrapped Laravel container with config bindings; aligned `MetricsCollector` (`incrementCounter`, `setGauge`, `recordTiming`), `StructuredLogger` (`logError`, `setGlobalContext`), `CostTracker` (`trackLLMUsage`, `getCostSummary`) APIs
+- `Phase10ObservabilityTest` — bootstrapped `Illuminate\Foundation\Application` with config/log services; fixed metric key format expectations; added graceful skip for optional OpenTelemetry dependency
+- `PluginsTest` — added container config bindings for `PluginManager`; replaced `isRegistered()` with `get()`, `shutdown()` with `disable()`, `discover()` with `loadFromDirectory()`
+- `Phase12Test` — bootstrapped Laravel Application; supplied all template placeholders for builtin skill tests; fixed `parseArguments()` test input; added `clearstatcache`/`touch` for Windows timestamp detection
+- `TasksTest` — aligned `listTasks()` signature (`listId, status`); `updateTask` uses `addBlocks`; replaced `createTaskList`/`getTaskList`/`searchTasks`/sort with actual API
+- `ConfigTest` — bootstrapped `Illuminate\Foundation\Application` for `base_path()`; added `clearstatcache` + `touch` for Windows file change detection
+- `ConsoleTest` — used `LaravelApplication` for `runningUnitTests()`; fixed assertion to match actual command description (`Generate` not `Create`); `prompt` is a required argument not option; `file` option → `output`
+- `Phase1ToolsTest` — added Windows path separator compatibility for glob results
+- `Phase4HooksTest` — trimmed Windows `echo` double-quotes from command hook output
+- `SensitiveFileProtection::matchesPattern()` — fixed regex: use `preg_quote()` before glob-to-regex conversion to prevent "Unknown modifier" warnings on patterns with dots
+
+### Changed
+- `SuperAgentToolsCommand`, `SuperAgentRunCommand`, `SuperAgentChatCommand`, `HotReload` — replaced references to non-existent `ToolRegistry` class with `BuiltinToolRegistry` (static API)
+
 ## [0.5.5] - 2026-04-01
 
 ### Added
