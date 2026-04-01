@@ -458,23 +458,29 @@ class TranslatorAgent extends AgentDefinition
 }
 ```
 
-### 自动载入 Skills 和 Agents
+### 自动载入 Skills、Agents 和 MCP
 
-Skills 和 Agent 定义文件可以从配置的目录中自动载入，同时支持 `.php` 和 `.md` 文件。所有路径会递归扫描。不存在的路径会自动跳过。
+SuperAgent 可以通过 `load_claude_code` 开关自动载入 Claude Code 标准目录下的 skills、agents 和 MCP 服务，也支持从自定义路径载入。Skills 和 agents 同时支持 `.php` 和 `.md` 文件。所有目录路径递归扫描，不存在的路径自动跳过。
 
 ```php
 // config/superagent.php
 'skills' => [
+    'load_claude_code' => false,                // 从 .claude/commands/ 和 .claude/skills/ 载入
     'paths' => [
-        '.claude/skills',                       // 默认值，相对项目根目录
-        app_path('SuperAgent/Skills'),           // Laravel app 目录
-        '/absolute/path/to/shared/skills',       // 绝对路径
+        // app_path('SuperAgent/Skills'),
+        // '/absolute/path/to/shared/skills',
     ],
 ],
 'agents' => [
+    'load_claude_code' => false,                // 从 .claude/agents/ 载入
     'paths' => [
-        '.claude/agents',                       // 默认值，相对项目根目录
-        app_path('SuperAgent/Agents'),           // Laravel app 目录
+        // app_path('SuperAgent/Agents'),
+    ],
+],
+'mcp' => [
+    'load_claude_code' => false,                // 从 .mcp.json 和 ~/.claude.json 载入
+    'paths' => [
+        // 'custom/mcp-servers.json',            // 额外的 MCP 配置文件（JSON）
     ],
 ],
 ```
@@ -484,6 +490,7 @@ Skills 和 Agent 定义文件可以从配置的目录中自动载入，同时支
 ```php
 use SuperAgent\Skills\SkillManager;
 use SuperAgent\Agent\AgentManager;
+use SuperAgent\MCP\MCPManager;
 
 // 从任意目录载入（递归）
 SkillManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
@@ -492,9 +499,13 @@ AgentManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
 // 载入单个文件（PHP 或 Markdown）
 SkillManager::getInstance()->loadFromFile('/path/to/biznet.md');
 AgentManager::getInstance()->loadFromFile('/path/to/ai-advisor.md');
+
+// 从 Claude Code 配置或自定义 JSON 文件载入 MCP 服务
+MCPManager::getInstance()->loadFromClaudeCode();
+MCPManager::getInstance()->loadFromJsonFile('/path/to/mcp-servers.json');
 ```
 
-PHP 文件可以使用任意命名空间 — 载入器会从源文件中解析 `namespace` 和 `class` 声明。Markdown 文件使用 YAML frontmatter 存放元数据，正文作为 prompt 模板。
+PHP 文件可以使用任意命名空间 — 载入器会从源文件中解析 `namespace` 和 `class` 声明。Markdown 文件使用 YAML frontmatter 存放元数据，正文作为 prompt 模板。MCP 配置文件同时支持 Claude Code 格式（`mcpServers`）和 SuperAgent 格式（`servers`），支持 `${VAR}` 和 `${VAR:-default}` 环境变量展开。
 
 ## 📊 性能优化
 

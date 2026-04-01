@@ -61,15 +61,36 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | MCP Configuration
+    |--------------------------------------------------------------------------
+    | load_claude_code: Automatically import MCP servers from Claude Code's
+    |   project config (.mcp.json) and user config (~/.claude.json).
+    |   Project-level configs take precedence over user-level.
+    */
+    'mcp' => [
+        'load_claude_code' => env('SUPERAGENT_MCP_LOAD_CLAUDE_CODE', false),
+        'paths' => [
+            // Additional MCP config files (JSON) to load from.
+            // Supports both Claude Code format (mcpServers) and SuperAgent format (servers).
+            // e.g. '.claude/mcp-custom.json',
+            // e.g. '/absolute/path/to/mcp-config.json',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Skills Configuration
     |--------------------------------------------------------------------------
-    | Directories to auto-load skill files from. All paths are scanned
-    | recursively. Supports absolute paths or paths relative to base_path().
-    | Non-existent paths are silently skipped.
+    | load_claude_code: Automatically load skills from Claude Code's
+    |   .claude/commands/ and .claude/skills/ directories.
+    | paths: Additional directories to auto-load skill files from.
+    |   All paths are scanned recursively. Supports absolute paths
+    |   or paths relative to base_path(). Non-existent paths are
+    |   silently skipped.
     */
     'skills' => [
+        'load_claude_code' => env('SUPERAGENT_SKILLS_LOAD_CLAUDE_CODE', false),
         'paths' => [
-            '.claude/skills',
             // app_path('SuperAgent/Skills'),
             // '/absolute/path/to/custom/skills',
         ],
@@ -79,13 +100,16 @@ return [
     |--------------------------------------------------------------------------
     | Agents Configuration
     |--------------------------------------------------------------------------
-    | Directories to auto-load agent definition files from. All paths are
-    | scanned recursively. Supports absolute paths or paths relative to
-    | base_path(). Non-existent paths are silently skipped.
+    | load_claude_code: Automatically load agent definitions from Claude
+    |   Code's .claude/agents/ directory.
+    | paths: Additional directories to auto-load agent definition files
+    |   from. All paths are scanned recursively. Supports absolute paths
+    |   or paths relative to base_path(). Non-existent paths are
+    |   silently skipped.
     */
     'agents' => [
+        'load_claude_code' => env('SUPERAGENT_AGENTS_LOAD_CLAUDE_CODE', false),
         'paths' => [
-            '.claude/agents',
             // app_path('SuperAgent/Agents'),
             // '/absolute/path/to/custom/agents',
         ],

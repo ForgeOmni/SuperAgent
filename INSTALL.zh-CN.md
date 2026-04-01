@@ -294,33 +294,27 @@ mkdir -p app/SuperAgent/{Tools,Skills,Plugins,Agents}
 # 工具会自动被发现和注册
 ```
 
-### Skill 和 Agent 自动载入
+### Skill、Agent 和 MCP 自动载入
 
-Skills 和 Agent 定义文件会从 `config/superagent.php` 中配置的路径自动载入，所有路径递归扫描。不存在的路径会自动跳过。
+Skills、Agents 和 MCP 服务可以通过 `load_claude_code` 从 Claude Code 目录自动载入，也可以从自定义路径载入。在 `config/superagent.php` 中配置：
 
 ```php
 // config/superagent.php
 'skills' => [
-    'paths' => [
-        '.claude/skills',                       // 默认值，相对项目根目录
-        app_path('SuperAgent/Skills'),
-    ],
+    'load_claude_code' => false,                // .claude/commands/ 和 .claude/skills/
+    'paths' => [],                              // 额外的目录
 ],
 'agents' => [
-    'paths' => [
-        '.claude/agents',                       // 默认值，相对项目根目录
-        app_path('SuperAgent/Agents'),
-    ],
+    'load_claude_code' => false,                // .claude/agents/
+    'paths' => [],                              // 额外的目录
+],
+'mcp' => [
+    'load_claude_code' => false,                // .mcp.json 和 ~/.claude.json
+    'paths' => [],                              // 额外的 JSON 配置文件
 ],
 ```
 
-创建默认目录：
-
-```bash
-mkdir -p .claude/skills .claude/agents
-```
-
-同时支持 PHP（`.php`）和 Markdown（`.md`）文件。PHP 文件不限制命名空间。Markdown 文件使用 YAML frontmatter 存放元数据（name、description、allowed_tools 等），正文作为 prompt 模板 — `$ARGUMENTS`、`$LANGUAGE` 等占位符由 LLM 理解，程序不做替换。
+所有目录路径递归扫描，不存在的路径自动跳过。Skills 和 agents 同时支持 PHP（`.php`）和 Markdown（`.md`）文件。PHP 文件不限制命名空间。Markdown 文件使用 YAML frontmatter 存放元数据（name、description、allowed_tools 等），正文作为 prompt 模板 — `$ARGUMENTS`、`$LANGUAGE` 等占位符由 LLM 理解，程序不做替换。MCP 配置文件同时支持 Claude Code 格式（`mcpServers`）和 SuperAgent 格式（`servers`），支持 `${VAR}` 和 `${VAR:-default}` 环境变量展开。
 
 ## 验证安装
 

@@ -294,33 +294,27 @@ mkdir -p app/SuperAgent/{Tools,Skills,Plugins,Agents}
 # Tools will be automatically discovered and registered
 ```
 
-### Skill & Agent Auto-Loading
+### Skill, Agent & MCP Auto-Loading
 
-Skills and agent definitions are automatically loaded from paths configured in `config/superagent.php`. All paths are scanned recursively. Non-existent paths are silently skipped.
+Skills, agents, and MCP servers can be auto-loaded from Claude Code directories (via `load_claude_code`) and from custom paths. Configure in `config/superagent.php`:
 
 ```php
 // config/superagent.php
 'skills' => [
-    'paths' => [
-        '.claude/skills',                       // default, relative to project root
-        app_path('SuperAgent/Skills'),
-    ],
+    'load_claude_code' => false,                // .claude/commands/ and .claude/skills/
+    'paths' => [],                              // additional directories
 ],
 'agents' => [
-    'paths' => [
-        '.claude/agents',                       // default, relative to project root
-        app_path('SuperAgent/Agents'),
-    ],
+    'load_claude_code' => false,                // .claude/agents/
+    'paths' => [],                              // additional directories
+],
+'mcp' => [
+    'load_claude_code' => false,                // .mcp.json and ~/.claude.json
+    'paths' => [],                              // additional JSON config files
 ],
 ```
 
-Create the default directories:
-
-```bash
-mkdir -p .claude/skills .claude/agents
-```
-
-Both PHP (`.php`) and Markdown (`.md`) files are supported. PHP files can use any namespace. Markdown files use YAML frontmatter for metadata (name, description, allowed_tools, etc.) and the body as the prompt template — placeholders like `$ARGUMENTS` and `$LANGUAGE` are interpreted by the LLM, not substituted by the program.
+All directory paths are scanned recursively. Non-existent paths are silently skipped. Both PHP (`.php`) and Markdown (`.md`) files are supported for skills and agents. PHP files can use any namespace. Markdown files use YAML frontmatter for metadata (name, description, allowed_tools, etc.) and the body as the prompt template — placeholders like `$ARGUMENTS` and `$LANGUAGE` are interpreted by the LLM, not substituted by the program. MCP config files support both Claude Code format (`mcpServers`) and SuperAgent format (`servers`), with `${VAR}` and `${VAR:-default}` environment variable expansion.
 
 ## Verification
 

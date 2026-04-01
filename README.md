@@ -502,23 +502,29 @@ class TranslatorAgent extends AgentDefinition
 }
 ```
 
-### Auto-Loading Skills & Agents
+### Auto-Loading Skills, Agents & MCP
 
-Skills and agent definitions can be auto-loaded from configured directories. Both `.php` and `.md` files are supported. All paths are scanned recursively. Non-existent paths are silently skipped.
+SuperAgent can auto-load skills, agents, and MCP servers from Claude Code's standard directories via the `load_claude_code` flag, and from any additional paths you configure. Both `.php` and `.md` files are supported for skills and agents. All directory paths are scanned recursively. Non-existent paths are silently skipped.
 
 ```php
 // config/superagent.php
 'skills' => [
+    'load_claude_code' => false,                // load from .claude/commands/ and .claude/skills/
     'paths' => [
-        '.claude/skills',                       // default, relative to project root
-        app_path('SuperAgent/Skills'),           // Laravel app directory
-        '/absolute/path/to/shared/skills',       // absolute path
+        // app_path('SuperAgent/Skills'),
+        // '/absolute/path/to/shared/skills',
     ],
 ],
 'agents' => [
+    'load_claude_code' => false,                // load from .claude/agents/
     'paths' => [
-        '.claude/agents',                       // default, relative to project root
-        app_path('SuperAgent/Agents'),           // Laravel app directory
+        // app_path('SuperAgent/Agents'),
+    ],
+],
+'mcp' => [
+    'load_claude_code' => false,                // load from .mcp.json and ~/.claude.json
+    'paths' => [
+        // 'custom/mcp-servers.json',            // additional MCP config files (JSON)
     ],
 ],
 ```
@@ -528,6 +534,7 @@ You can also load manually at runtime:
 ```php
 use SuperAgent\Skills\SkillManager;
 use SuperAgent\Agent\AgentManager;
+use SuperAgent\MCP\MCPManager;
 
 // Load from any directory (recursive)
 SkillManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
@@ -536,9 +543,13 @@ AgentManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
 // Load a single file (PHP or Markdown)
 SkillManager::getInstance()->loadFromFile('/path/to/biznet.md');
 AgentManager::getInstance()->loadFromFile('/path/to/ai-advisor.md');
+
+// Load MCP servers from Claude Code configs or custom JSON files
+MCPManager::getInstance()->loadFromClaudeCode();
+MCPManager::getInstance()->loadFromJsonFile('/path/to/mcp-servers.json');
 ```
 
-PHP files can use any namespace — the loader parses `namespace` and `class` from the source. Markdown files use YAML frontmatter for metadata and the body as the prompt template.
+PHP files can use any namespace — the loader parses `namespace` and `class` from the source. Markdown files use YAML frontmatter for metadata and the body as the prompt template. MCP config files support both Claude Code format (`mcpServers`) and SuperAgent format (`servers`), with `${VAR}` and `${VAR:-default}` environment variable expansion.
 
 ## 📊 Performance Optimization
 

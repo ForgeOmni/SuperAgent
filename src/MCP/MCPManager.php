@@ -24,6 +24,86 @@ class MCPManager
         $this->clients = collect();
         $this->tools = collect();
         $this->resources = collect();
+        $this->loadConfiguredSources();
+    }
+
+    /**
+     * Load MCP servers from configured sources.
+     */
+    private function loadConfiguredSources(): void
+    {
+        try {
+            if (!$this->isLaravelAvailable()) {
+                return;
+            }
+
+            // Load from Claude Code configs if enabled
+            if (config('superagent.mcp.load_claude_code', false)) {
+                $this->loadFromClaudeCode();
+            }
+
+            // Load from additional configured paths (JSON files)
+            $paths = config('superagent.mcp.paths', []);
+            foreach ($paths as $path) {
+                $resolved = $this->resolvePath($path);
+                $this->loadFromJsonFile($resolved);
+            }
+        } catch (\Throwable) {
+            // Silently skip if config is unavailable
+        }
+    }
+
+    /**
+     * Load MCP servers from a JSON config file.
+     *
+     * Accepts both Claude Code format (mcpServers) and
+     * SuperAgent format (servers).
+     */
+    public function loadFromJsonFile(string $filePath): void
+    {
+        if (!is_file($filePath)) {
+            return;
+        }
+
+        $config = $this->readJsonFile($filePath);
+        if ($config === null) {
+            return;
+        }
+
+        $servers = $config['mcpServers'] ?? $config['servers'] ?? [];
+
+        foreach ($servers as $name => $serverConfig) {
+            $serverConfig = $this->expandEnvVars($serverConfig);
+            $server = $this->buildServerConfig($name, $serverConfig);
+
+            if ($server && !$this->servers->has($name)) {
+                $this->registerServer($server);
+            }
+        }
+    }
+
+    /**
+     * Resolve a path that may be relative to base_path().
+     */
+    private function resolvePath(string $path): string
+    {
+        if (str_starts_with($path, '/') || str_starts_with($path, DIRECTORY_SEPARATOR)) {
+            return $path;
+        }
+
+        return $this->resolveBasePath($path);
+    }
+
+    /**
+     * Check if Laravel is fully booted.
+     */
+    private function isLaravelAvailable(): bool
+    {
+        try {
+            return function_exists('app') && app()->bound('config');
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     public static function getInstance(): self
@@ -210,37 +290,191 @@ class MCPManager
     }
 
     /**
-     * Load configuration from file or array.
+     * Load configuration from array.
+     *
+     * Accepts both SuperAgent format (key: "servers") and
+     * Claude Code format (key: "mcpServers").
      */
     public function loadConfiguration(array $config): void
     {
-        foreach ($config['servers'] ?? [] as $name => $serverConfig) {
-            $type = $serverConfig['type'] ?? 'stdio';
-            
-            $server = match ($type) {
-                'stdio' => ServerConfig::stdio(
-                    $name,
-                    $serverConfig['command'],
-                    $serverConfig['args'] ?? [],
-                    $serverConfig['env'] ?? null
-                ),
-                'sse' => ServerConfig::sse(
-                    $name,
-                    $serverConfig['url'],
-                    $serverConfig['headers'] ?? null
-                ),
-                'http' => ServerConfig::http(
-                    $name,
-                    $serverConfig['url'],
-                    $serverConfig['headers'] ?? null
-                ),
-                default => null,
-            };
+        // Support both formats
+        $servers = $config['servers'] ?? $config['mcpServers'] ?? [];
+
+        foreach ($servers as $name => $serverConfig) {
+            $server = $this->buildServerConfig($name, $serverConfig);
 
             if ($server) {
                 $this->registerServer($server);
             }
         }
+    }
+
+    /**
+     * Load MCP servers from Claude Code's .mcp.json file.
+     *
+     * Claude Code stores project-level MCP configs at the project root
+     * in .mcp.json with the format:
+     * {
+     *   "mcpServers": {
+     *     "server-name": { "type": "stdio", "command": "...", ... }
+     *   }
+     * }
+     */
+    public function loadFromClaudeCodeProject(?string $projectRoot = null): void
+    {
+        $projectRoot ??= $this->resolveBasePath('');
+        $file = rtrim($projectRoot, '/') . '/.mcp.json';
+
+        if (!is_file($file)) {
+            return;
+        }
+
+        $config = $this->readJsonFile($file);
+        if ($config === null) {
+            return;
+        }
+
+        $servers = $config['mcpServers'] ?? [];
+
+        foreach ($servers as $name => $serverConfig) {
+            $serverConfig = $this->expandEnvVars($serverConfig);
+            $server = $this->buildServerConfig($name, $serverConfig);
+
+            if ($server && !$this->servers->has($name)) {
+                $this->registerServer($server);
+            }
+        }
+    }
+
+    /**
+     * Load MCP servers from Claude Code's user config (~/.claude.json).
+     *
+     * User-level and local-scope MCP servers are stored in
+     * ~/.claude.json under "mcpServers".
+     */
+    public function loadFromClaudeCodeUser(): void
+    {
+        $home = $_ENV['HOME'] ?? getenv('HOME') ?? ($_SERVER['HOME'] ?? null);
+        if ($home === null) {
+            return;
+        }
+
+        $file = $home . '/.claude.json';
+        if (!is_file($file)) {
+            return;
+        }
+
+        $config = $this->readJsonFile($file);
+        if ($config === null) {
+            return;
+        }
+
+        $servers = $config['mcpServers'] ?? [];
+
+        foreach ($servers as $name => $serverConfig) {
+            $serverConfig = $this->expandEnvVars($serverConfig);
+            $server = $this->buildServerConfig($name, $serverConfig);
+
+            if ($server && !$this->servers->has($name)) {
+                $this->registerServer($server);
+            }
+        }
+    }
+
+    /**
+     * Load MCP servers from all Claude Code config sources.
+     *
+     * Loads project-level (.mcp.json) first, then user-level (~/.claude.json).
+     * Project configs take precedence — if a server name already exists,
+     * the user-level config is skipped for that server.
+     */
+    public function loadFromClaudeCode(?string $projectRoot = null): void
+    {
+        $this->loadFromClaudeCodeProject($projectRoot);
+        $this->loadFromClaudeCodeUser();
+    }
+
+    /**
+     * Build a ServerConfig from a config array.
+     */
+    private function buildServerConfig(string $name, array $serverConfig): ?ServerConfig
+    {
+        $type = $serverConfig['type'] ?? 'stdio';
+
+        return match ($type) {
+            'stdio' => ServerConfig::stdio(
+                $name,
+                $serverConfig['command'],
+                $serverConfig['args'] ?? [],
+                $serverConfig['env'] ?? null
+            ),
+            'sse' => ServerConfig::sse(
+                $name,
+                $serverConfig['url'],
+                $serverConfig['headers'] ?? null
+            ),
+            'http' => ServerConfig::http(
+                $name,
+                $serverConfig['url'],
+                $serverConfig['headers'] ?? null
+            ),
+            default => null,
+        };
+    }
+
+    /**
+     * Read and decode a JSON file.
+     */
+    private function readJsonFile(string $path): ?array
+    {
+        $content = file_get_contents($path);
+        if ($content === false) {
+            return null;
+        }
+
+        $data = json_decode($content, true);
+        return is_array($data) ? $data : null;
+    }
+
+    /**
+     * Recursively expand ${VAR} and ${VAR:-default} in config values.
+     */
+    private function expandEnvVars(mixed $value): mixed
+    {
+        if (is_string($value)) {
+            return preg_replace_callback(
+                '/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*?))?\}/',
+                function (array $m): string {
+                    $envVal = $_ENV[$m[1]] ?? getenv($m[1]);
+                    if ($envVal !== false && $envVal !== '') {
+                        return $envVal;
+                    }
+                    return $m[2] ?? '';
+                },
+                $value
+            );
+        }
+
+        if (is_array($value)) {
+            return array_map(fn($v) => $this->expandEnvVars($v), $value);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Get base path, using Laravel's base_path() if available, otherwise cwd.
+     */
+    private function resolveBasePath(string $relative): string
+    {
+        try {
+            if (function_exists('base_path') && function_exists('app') && app()->bound('config')) {
+                return base_path($relative);
+            }
+        } catch (\Throwable) {
+        }
+
+        return getcwd() . ($relative !== '' ? '/' . $relative : '');
     }
 
     /**

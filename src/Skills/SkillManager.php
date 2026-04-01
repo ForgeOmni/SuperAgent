@@ -175,11 +175,17 @@ class SkillManager
     }
 
     /**
-     * Load skills from all configured paths.
-     * Default config value is ['.claude/skills'].
+     * Load skills from Claude Code directories and configured paths.
      */
     private function loadConfiguredPaths(): void
     {
+        // Load from Claude Code directories if enabled
+        if ($this->config('superagent.skills.load_claude_code', false)) {
+            $this->loadFromDirectory($this->resolveBasePath('.claude/commands'), recursive: true);
+            $this->loadFromDirectory($this->resolveBasePath('.claude/skills'), recursive: true);
+        }
+
+        // Load from additional configured paths
         $paths = $this->config('superagent.skills.paths', []);
 
         foreach ($paths as $path) {

@@ -207,11 +207,16 @@ class AgentManager
     }
 
     /**
-     * Load agents from all configured paths.
-     * Default config value is ['.claude/agents'].
+     * Load agents from Claude Code directory and configured paths.
      */
     private function loadConfiguredPaths(): void
     {
+        // Load from Claude Code directory if enabled
+        if ($this->config('superagent.agents.load_claude_code', false)) {
+            $this->loadFromDirectory($this->resolveBasePath('.claude/agents'), recursive: true);
+        }
+
+        // Load from additional configured paths
         $paths = $this->config('superagent.agents.paths', []);
 
         foreach ($paths as $path) {
