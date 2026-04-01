@@ -1,0 +1,526 @@
+# SuperAgent - Multi-Provider AI Agent SDK for Laravel
+
+[![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
+[![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+> **🌍 Language**: [English](README.md) | [中文](README.zh-CN.md)  
+> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL.zh-CN.md)
+
+SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider support, comprehensive tooling, advanced permissions, and observability features.
+
+## 🚀 Features
+
+### Core Features
+- **Multi-Provider Support** - Anthropic, OpenAI, Bedrock, OpenRouter and more
+- **56+ Built-in Tools** - File operations, code editing, web search, task management and more
+- **Streaming Output** - Real-time responses for better user experience
+- **Cost Tracking** - Accurate token usage and cost statistics
+
+### Advanced Features
+- **Permission System** - 6 permission modes with intelligent security control
+- **Lifecycle Hooks** - Insert custom logic at critical points
+- **Context Compression** - Smart conversation history management to overcome token limits
+- **Memory System** - Cross-session persistence with long-term learning capabilities
+- **Multi-Agent Collaboration** - Swarm mode for task distribution and coordination
+- **MCP Protocol** - Integration with Model Context Protocol ecosystem
+- **Observability** - OpenTelemetry integration with complete tracing
+- **File History** - Version control with rollback capabilities
+
+## 📦 Installation
+
+### System Requirements
+- PHP >= 8.1
+- Laravel >= 10.0
+- Composer >= 2.0
+
+### Install via Composer
+
+```bash
+composer require forgeomni/superagent
+```
+
+### Publish Configuration
+
+```bash
+php artisan vendor:publish --provider="SuperAgent\SuperAgentServiceProvider"
+```
+
+### Configure Environment Variables
+
+Add to your `.env` file:
+
+```env
+# Anthropic
+ANTHROPIC_API_KEY=your_anthropic_api_key
+
+# OpenAI (optional)
+OPENAI_API_KEY=your_openai_api_key
+
+# AWS Bedrock (optional)
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+AWS_DEFAULT_REGION=us-east-1
+
+# OpenRouter (optional)
+OPENROUTER_API_KEY=your_openrouter_api_key
+```
+
+📋 **Quick Links**: [Installation Guide](INSTALL.md) | [中文安装手册](INSTALL.zh-CN.md) | [中文版本](README.zh-CN.md)
+
+## 🎯 Quick Start
+
+### Basic Usage
+
+```php
+use SuperAgent\Agent;
+use SuperAgent\Config\Config;
+use SuperAgent\Providers\AnthropicProvider;
+
+// Create configuration
+$config = Config::fromArray([
+    'provider' => [
+        'type' => 'anthropic',
+        'api_key' => env('ANTHROPIC_API_KEY'),
+        'model' => 'claude-3-haiku-20240307',
+    ],
+    'streaming' => true,
+]);
+
+// Initialize Agent
+$provider = new AnthropicProvider($config->provider);
+$agent = new Agent($provider, $config);
+
+// Execute query
+$response = $agent->query("Analyze performance issues in this code");
+echo $response->content;
+```
+
+### Streaming Response
+
+```php
+// Enable streaming output
+$stream = $agent->stream("Write a quicksort algorithm");
+
+foreach ($stream as $chunk) {
+    if (isset($chunk['content'])) {
+        echo $chunk['content'];  // Real-time output
+    }
+}
+```
+
+### Using Tools
+
+```php
+use SuperAgent\Tools\Builtin\FileReadTool;
+use SuperAgent\Tools\Builtin\FileWriteTool;
+use SuperAgent\Tools\Builtin\BashTool;
+
+// Register tools
+$agent->registerTool(new FileReadTool());
+$agent->registerTool(new FileWriteTool());
+$agent->registerTool(new BashTool());
+
+// Agent will automatically use tools to complete tasks
+$response = $agent->query("Read config.php file, analyze configuration and provide optimization suggestions");
+```
+
+## 🛠 Advanced Features
+
+### Permission Management
+
+```php
+use SuperAgent\Permissions\PermissionMode;
+
+// Set permission mode
+$config->permissions->mode = PermissionMode::AcceptEdits; // Auto-approve file edits
+
+// Custom permission callback
+$config->permissions->callback = function($tool, $params) {
+    // Deny delete operations
+    if ($tool === 'bash' && str_contains($params['command'], 'rm')) {
+        return false;
+    }
+    return true;
+};
+```
+
+### Hook System
+
+```php
+use SuperAgent\Hooks\HookRegistry;
+
+$hooks = HookRegistry::getInstance();
+
+// Register pre-tool-use hook
+$hooks->register('pre_tool_use', function($data) {
+    logger()->info('Tool usage', $data);
+    return $data;
+});
+
+// Register post-query hook
+$hooks->register('on_query_complete', function($response) {
+    // Save to database
+    DB::table('agent_logs')->insert([
+        'response' => $response->content,
+        'timestamp' => now(),
+    ]);
+});
+```
+
+### Context Compression
+
+```php
+// Configure auto-compression
+$config->context->autoCompact = true;
+$config->context->compactThreshold = 3000; // Token threshold
+$config->context->compactStrategy = 'smart'; // Compression strategy
+
+// Manually trigger compression
+$agent->compactContext();
+```
+
+### Task Management
+
+```php
+use SuperAgent\Tasks\TaskManager;
+
+$taskManager = TaskManager::getInstance();
+
+// Create task
+$task = $taskManager->createTask([
+    'subject' => 'Optimize database queries',
+    'description' => 'Analyze and optimize slow queries in the system',
+    'status' => 'pending',
+    'metadata' => ['priority' => 'high'],
+]);
+
+// Update task progress
+$taskManager->updateTask($task->id, [
+    'status' => 'in_progress',
+    'metadata' => ['progress' => 50],
+]);
+```
+
+### MCP Integration
+
+```php
+use SuperAgent\MCP\MCPManager;
+use SuperAgent\MCP\Types\ServerConfig;
+
+$mcpManager = MCPManager::getInstance();
+
+// Register MCP server
+$config = new ServerConfig(
+    name: 'github-mcp',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-github'],
+    env: ['GITHUB_TOKEN' => env('GITHUB_TOKEN')]
+);
+
+$mcpManager->registerServer($config);
+$mcpManager->connect('github-mcp');
+
+// MCP tools will be automatically registered with Agent
+```
+
+### Observability
+
+```php
+use SuperAgent\Telemetry\TracingManager;
+use SuperAgent\Telemetry\MetricsCollector;
+
+// Enable tracing
+$tracer = TracingManager::getInstance();
+$spanId = $tracer->startSpan('agent.query');
+
+// Record metrics
+$metrics = MetricsCollector::getInstance();
+$metrics->recordCounter('api.requests', 1);
+$metrics->recordHistogram('response.time', 150.5);
+
+// End tracing
+$tracer->endSpan($spanId);
+```
+
+## 🔧 CLI Commands
+
+### Interactive Chat
+
+```bash
+php artisan superagent:chat
+```
+
+### Execute Single Query
+
+```bash
+php artisan superagent:run --prompt="Optimize this code" --file=app/Models/User.php
+```
+
+### List Available Tools
+
+```bash
+php artisan superagent:tools
+```
+
+### Create Custom Tool
+
+```bash
+php artisan superagent:make-tool MyCustomTool
+```
+
+## 🎨 Custom Extensions
+
+### Create Custom Tool
+
+```php
+namespace App\SuperAgent\Tools;
+
+use SuperAgent\Tools\BaseTool;
+use SuperAgent\Tools\ToolResult;
+
+class CustomTool extends BaseTool
+{
+    public function name(): string
+    {
+        return 'custom_tool';
+    }
+    
+    public function description(): string
+    {
+        return 'Custom tool description';
+    }
+    
+    public function inputSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'input' => ['type' => 'string', 'description' => 'Input parameter'],
+            ],
+            'required' => ['input'],
+        ];
+    }
+    
+    public function execute(array $params): ToolResult
+    {
+        // Implement tool logic
+        $result = $this->processInput($params['input']);
+        
+        return new ToolResult(
+            success: true,
+            data: ['result' => $result]
+        );
+    }
+}
+```
+
+### Create Plugin
+
+```php
+namespace App\SuperAgent\Plugins;
+
+use SuperAgent\Plugins\BasePlugin;
+
+class MyPlugin extends BasePlugin
+{
+    public function name(): string
+    {
+        return 'my-plugin';
+    }
+    
+    public function boot(): void
+    {
+        // Plugin boot logic
+        $this->registerTool(new MyCustomTool());
+        $this->registerHook('pre_query', [$this, 'preQueryHandler']);
+    }
+    
+    public function preQueryHandler($query)
+    {
+        // Pre-query processing
+        return $query;
+    }
+}
+```
+
+### Create Skill
+
+```php
+namespace App\SuperAgent\Skills;
+
+use SuperAgent\Skills\Skill;
+
+class CodeReviewSkill extends Skill
+{
+    public function name(): string
+    {
+        return 'code_review';
+    }
+    
+    public function description(): string
+    {
+        return 'Perform code review';
+    }
+    
+    public function template(): string
+    {
+        return <<<PROMPT
+Please review the following code:
+- Check for potential bugs
+- Evaluate code quality  
+- Provide improvement suggestions
+
+Code:
+{code}
+
+Provide detailed improvement recommendations.
+PROMPT;
+    }
+    
+    public function execute(array $args = []): string
+    {
+        $prompt = str_replace('{code}', $args['code'], $this->template());
+        return $this->agent->query($prompt)->content;
+    }
+}
+```
+
+## 📊 Performance Optimization
+
+### Cache Strategy
+
+```php
+// config/superagent.php
+'cache' => [
+    'enabled' => true,
+    'driver' => 'redis',  // Use Redis for better performance
+    'ttl' => 3600,        // Cache time (seconds)
+    'prefix' => 'superagent_',
+],
+```
+
+### Batch Processing
+
+```php
+// Batch process tasks
+$tasks = [
+    "Analyze code quality",
+    "Generate unit tests",
+    "Write documentation",
+];
+
+$results = $agent->batch($tasks, [
+    'concurrency' => 3,  // Concurrency level
+    'timeout' => 30,     // Timeout in seconds
+]);
+```
+
+## 🔐 Security Best Practices
+
+1. **API Key Management**
+   - Never hardcode API keys in code
+   - Use environment variables or key management services
+   - Regularly rotate API keys
+
+2. **Permission Control**
+   - Use strict permission modes in production
+   - Audit all tool calls
+   - Limit access to sensitive operations
+
+3. **Input Validation**
+   - Validate and sanitize user input
+   - Use parameterized queries to prevent injection
+   - Implement rate limiting
+
+4. **Error Handling**
+   - Don't expose sensitive error information to users
+   - Log detailed errors for debugging
+   - Implement graceful degradation
+
+## 📈 Monitoring and Logging
+
+### Configure Logging
+
+```php
+// config/superagent.php
+'logging' => [
+    'enabled' => true,
+    'channel' => 'superagent',
+    'level' => 'info',
+    'separate_files' => true,  // Separate log files
+],
+```
+
+### Custom Log Handling
+
+```php
+use SuperAgent\Telemetry\StructuredLogger;
+
+$logger = StructuredLogger::getInstance();
+
+// Add context information
+$logger->withContext([
+    'user_id' => auth()->id(),
+    'request_id' => request()->id(),
+]);
+
+// Log operations
+$logger->info('Agent query completed', [
+    'tokens_used' => $response->usage->total_tokens,
+    'cost' => $response->usage->estimated_cost,
+    'duration' => $duration,
+]);
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## 📄 License
+
+MIT License - See [LICENSE](LICENSE) file for details
+
+## 🙋 Support
+
+- 📖 [Documentation](https://superagent-docs.example.com)
+- 💬 [Discussions](https://github.com/yourusername/superagent/discussions)
+- 🐛 [Issue Tracker](https://github.com/yourusername/superagent/issues)
+- 📧 Email: support@superagent.dev
+- 💼 Enterprise Support: enterprise@superagent.dev
+
+## 🗺 Roadmap
+
+
+### Coming Soon
+- ✨ More model support (Gemini, Mistral)
+- 🎯 Visual debugging tools
+- 🔄 Automatic task orchestration
+- 📊 Performance analytics dashboard
+- 🌐 Multi-language support
+
+## 📚 Documentation Navigation
+
+### Language Versions
+- 🇺🇸 [English README](README.md)
+- 🇨🇳 [中文 README](README.zh-CN.md)
+
+### Installation Guides
+- 📖 [English Installation Guide](INSTALL.md)
+- 📖 [中文安装手册](INSTALL.zh-CN.md)
+
+### Additional Resources
+- 🤝 [Contributing Guide](CONTRIBUTING.md)
+- 📄 [License](LICENSE)
+
+---
+
+<p align="center">
+  Made with ❤️ by the SuperAgent Team
+</p>
