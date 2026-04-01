@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Agent;
 
+use SuperAgent\Support\MarkdownFrontmatter;
+
 /**
  * Registry and loader for agent definitions.
  */
@@ -87,9 +89,7 @@ class AgentManager
 
     /**
      * Load agent definitions from a directory.
-     *
-     * Scans for *Agent.php files, parses their namespace from the source,
-     * requires the file, and registers the AgentDefinition instance.
+     * Supports both PHP (*Agent.php) and Markdown (*.md) files.
      */
     public function loadFromDirectory(string $directory, bool $recursive = false): void
     {
@@ -97,36 +97,27 @@ class AgentManager
             return;
         }
 
-        $pattern = $recursive
+        // Load PHP files
+        $phpFiles = $recursive
             ? $this->globRecursive($directory, '*Agent.php')
-            : glob($directory . '/*Agent.php');
+            : (glob($directory . '/*Agent.php') ?: []);
 
-        foreach ($pattern as $file) {
-            $className = $this->resolveClassNameFromFile($file);
+        foreach ($phpFiles as $file) {
+            $this->loadPhpFile($file, throw: false);
+        }
 
-            if ($className === null) {
-                continue;
-            }
+        // Load Markdown files
+        $mdFiles = $recursive
+            ? $this->globRecursive($directory, '*.md')
+            : (glob($directory . '/*.md') ?: []);
 
-            if (!class_exists($className, false)) {
-                require_once $file;
-            }
-
-            if (!class_exists($className, false)) {
-                continue;
-            }
-
-            if (!is_subclass_of($className, AgentDefinition::class)) {
-                continue;
-            }
-
-            $agent = new $className();
-            $this->register($agent);
+        foreach ($mdFiles as $file) {
+            $this->loadMarkdownFile($file, throw: false);
         }
     }
 
     /**
-     * Load a single agent definition file from any path.
+     * Load a single agent definition file (PHP or Markdown).
      */
     public function loadFromFile(string $filePath): void
     {
@@ -134,25 +125,74 @@ class AgentManager
             throw new \RuntimeException("Agent file not found: {$filePath}");
         }
 
-        $className = $this->resolveClassNameFromFile($filePath);
+        $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+
+        match ($ext) {
+            'php' => $this->loadPhpFile($filePath, throw: true),
+            'md' => $this->loadMarkdownFile($filePath, throw: true),
+            default => throw new \RuntimeException("Unsupported agent file format: {$ext} ({$filePath})"),
+        };
+    }
+
+    /**
+     * Load an agent definition from a PHP file.
+     */
+    private function loadPhpFile(string $file, bool $throw): void
+    {
+        $className = $this->resolveClassNameFromFile($file);
 
         if ($className === null) {
-            throw new \RuntimeException("Could not resolve class name from file: {$filePath}");
+            if ($throw) {
+                throw new \RuntimeException("Could not resolve class name from file: {$file}");
+            }
+            return;
         }
 
         if (!class_exists($className, false)) {
-            require_once $filePath;
+            require_once $file;
         }
 
         if (!class_exists($className, false)) {
-            throw new \RuntimeException("Class {$className} not found after loading: {$filePath}");
+            if ($throw) {
+                throw new \RuntimeException("Class {$className} not found after loading: {$file}");
+            }
+            return;
         }
 
         if (!is_subclass_of($className, AgentDefinition::class)) {
-            throw new \RuntimeException("Class {$className} is not an AgentDefinition subclass");
+            if ($throw) {
+                throw new \RuntimeException("Class {$className} is not an AgentDefinition subclass");
+            }
+            return;
         }
 
         $this->register(new $className());
+    }
+
+    /**
+     * Load an agent definition from a Markdown file.
+     */
+    private function loadMarkdownFile(string $file, bool $throw): void
+    {
+        try {
+            $parsed = MarkdownFrontmatter::parseFile($file);
+            $frontmatter = $parsed['frontmatter'];
+            $body = $parsed['body'];
+
+            if (empty($frontmatter['name'])) {
+                if ($throw) {
+                    throw new \RuntimeException("Markdown agent file missing 'name' in frontmatter: {$file}");
+                }
+                return;
+            }
+
+            $agent = new MarkdownAgentDefinition($frontmatter, $body);
+            $this->register($agent);
+        } catch (\RuntimeException $e) {
+            if ($throw) {
+                throw $e;
+            }
+        }
     }
 
     /**

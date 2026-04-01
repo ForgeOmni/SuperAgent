@@ -2,6 +2,8 @@
 
 namespace SuperAgent\Skills;
 
+use SuperAgent\Support\MarkdownFrontmatter;
+
 class SkillManager
 {
     private static ?self $instance = null;
@@ -82,56 +84,74 @@ class SkillManager
 
     /**
      * Parse and execute a skill command.
-     * Format: /skillname arg1=value1 arg2=value2
+     *
+     * Supports two formats:
+     *   /skillname key=value key2=value2          — key=value pairs
+     *   /skillname some free-form text here       — entire text becomes $ARGUMENTS
+     *   /skillname free text key=value mixed      — both: free text as $ARGUMENTS + key=value pairs
      */
     public function parseAndExecute(string $command): ?string
     {
         if (!str_starts_with($command, '/')) {
             return null; // Not a skill command
         }
-        
+
         // Parse command
         $parts = explode(' ', substr($command, 1), 2);
         $skillName = $parts[0];
         $argString = $parts[1] ?? '';
-        
+
         $skill = $this->get($skillName);
         if (!$skill) {
             return null;
         }
-        
+
         // Parse arguments
         $args = $this->parseArguments($argString);
-        
+
         return $this->execute($skillName, $args);
     }
 
     /**
      * Parse argument string into array.
+     *
+     * Extracts key=value pairs into named args.
+     * Everything that is NOT a key=value pair is collected
+     * into the 'arguments' key (for $ARGUMENTS substitution).
      */
     private function parseArguments(string $argString): array
     {
         $args = [];
-        
-        if (empty($argString)) {
+
+        if (empty(trim($argString))) {
             return $args;
         }
-        
-        // Simple parsing: key=value pairs
+
+        // Extract key=value pairs
+        $remaining = $argString;
         preg_match_all('/(\w+)=([^\s]+|"[^"]*")/', $argString, $matches, PREG_SET_ORDER);
-        
+
         foreach ($matches as $match) {
             $key = $match[1];
             $value = $match[2];
-            
+
             // Remove quotes if present
             if (str_starts_with($value, '"') && str_ends_with($value, '"')) {
                 $value = substr($value, 1, -1);
             }
-            
+
             $args[$key] = $value;
+
+            // Remove the matched key=value from remaining text
+            $remaining = str_replace($match[0], '', $remaining);
         }
-        
+
+        // The remaining text (non key=value parts) becomes $ARGUMENTS
+        $remaining = trim(preg_replace('/\s+/', ' ', $remaining));
+        if ($remaining !== '') {
+            $args['arguments'] = $remaining;
+        }
+
         return $args;
     }
 
@@ -233,10 +253,7 @@ class SkillManager
 
     /**
      * Load skills from a directory.
-     *
-     * Scans for *Skill.php files, parses their namespace from the source,
-     * requires the file, and registers the Skill instance.
-     * Works with any directory and namespace.
+     * Supports both PHP (*Skill.php) and Markdown (*.md) files.
      */
     public function loadFromDirectory(string $directory, bool $recursive = false): void
     {
@@ -244,37 +261,27 @@ class SkillManager
             return;
         }
 
-        $pattern = $recursive
+        // Load PHP files
+        $phpFiles = $recursive
             ? $this->globRecursive($directory, '*Skill.php')
-            : glob($directory . '/*Skill.php');
+            : (glob($directory . '/*Skill.php') ?: []);
 
-        foreach ($pattern as $file) {
-            $className = $this->resolveClassNameFromFile($file);
+        foreach ($phpFiles as $file) {
+            $this->loadPhpFile($file, throw: false);
+        }
 
-            if ($className === null) {
-                continue;
-            }
+        // Load Markdown files
+        $mdFiles = $recursive
+            ? $this->globRecursive($directory, '*.md')
+            : (glob($directory . '/*.md') ?: []);
 
-            // Require the file if the class isn't already loaded
-            if (!class_exists($className, false)) {
-                require_once $file;
-            }
-
-            if (!class_exists($className, false)) {
-                continue;
-            }
-
-            if (!is_subclass_of($className, Skill::class)) {
-                continue;
-            }
-
-            $skill = new $className();
-            $this->register($skill);
+        foreach ($mdFiles as $file) {
+            $this->loadMarkdownFile($file, throw: false);
         }
     }
 
     /**
-     * Load a single skill file from any path.
+     * Load a single skill file (PHP or Markdown).
      */
     public function loadFromFile(string $filePath): void
     {
@@ -282,25 +289,74 @@ class SkillManager
             throw new \RuntimeException("Skill file not found: {$filePath}");
         }
 
-        $className = $this->resolveClassNameFromFile($filePath);
+        $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+
+        match ($ext) {
+            'php' => $this->loadPhpFile($filePath, throw: true),
+            'md' => $this->loadMarkdownFile($filePath, throw: true),
+            default => throw new \RuntimeException("Unsupported skill file format: {$ext} ({$filePath})"),
+        };
+    }
+
+    /**
+     * Load a skill from a PHP file.
+     */
+    private function loadPhpFile(string $file, bool $throw): void
+    {
+        $className = $this->resolveClassNameFromFile($file);
 
         if ($className === null) {
-            throw new \RuntimeException("Could not resolve class name from file: {$filePath}");
+            if ($throw) {
+                throw new \RuntimeException("Could not resolve class name from file: {$file}");
+            }
+            return;
         }
 
         if (!class_exists($className, false)) {
-            require_once $filePath;
+            require_once $file;
         }
 
         if (!class_exists($className, false)) {
-            throw new \RuntimeException("Class {$className} not found after loading: {$filePath}");
+            if ($throw) {
+                throw new \RuntimeException("Class {$className} not found after loading: {$file}");
+            }
+            return;
         }
 
         if (!is_subclass_of($className, Skill::class)) {
-            throw new \RuntimeException("Class {$className} is not a Skill subclass");
+            if ($throw) {
+                throw new \RuntimeException("Class {$className} is not a Skill subclass");
+            }
+            return;
         }
 
         $this->register(new $className());
+    }
+
+    /**
+     * Load a skill from a Markdown file.
+     */
+    private function loadMarkdownFile(string $file, bool $throw): void
+    {
+        try {
+            $parsed = MarkdownFrontmatter::parseFile($file);
+            $frontmatter = $parsed['frontmatter'];
+            $body = $parsed['body'];
+
+            if (empty($frontmatter['name'])) {
+                if ($throw) {
+                    throw new \RuntimeException("Markdown skill file missing 'name' in frontmatter: {$file}");
+                }
+                return;
+            }
+
+            $skill = new MarkdownSkill($frontmatter, $body);
+            $this->register($skill);
+        } catch (\RuntimeException $e) {
+            if ($throw) {
+                throw $e;
+            }
+        }
     }
 
     /**
