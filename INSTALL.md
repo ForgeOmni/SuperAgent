@@ -320,7 +320,7 @@ Create the default directories:
 mkdir -p .claude/skills .claude/agents
 ```
 
-Place your `*Skill.php` and `*Agent.php` files in any configured directory — they will be discovered automatically regardless of namespace.
+Both PHP (`.php`) and Markdown (`.md`) files are supported. PHP files can use any namespace. Markdown files use YAML frontmatter for metadata (name, description, allowed_tools, etc.) and the body as the prompt template — placeholders like `$ARGUMENTS` and `$LANGUAGE` are interpreted by the LLM, not substituted by the program.
 
 ## Verification
 

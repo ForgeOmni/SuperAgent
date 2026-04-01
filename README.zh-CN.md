@@ -393,6 +393,37 @@ PROMPT;
 
 ### 创建 Agent 定义
 
+同时支持 PHP 类和 Markdown 文件两种格式。
+
+**Markdown 格式**（推荐 — 放在 `.claude/agents/` 目录下）：
+
+```markdown
+---
+name: ai-advisor
+description: "AI 策略顾问"
+model: inherit
+allowed_tools:
+  - read_file
+  - web_search
+---
+
+# AI 策略 Agent
+
+你是一个 AI 策略顾问，用务实的方法评估 AI/ML 应用场景。
+
+## 输入
+
+$ARGUMENTS
+
+## 语言
+
+使用 $LANGUAGE 输出。如未指定，默认使用英语。
+```
+
+模板中的 `$ARGUMENTS`、`$LANGUAGE` 等占位符由 LLM 根据用户输入的上下文来理解和填充，程序不做替换。所有 frontmatter 字段都会保留，可通过 `getMeta()` 访问。
+
+**PHP 格式：**
+
 ```php
 namespace App\SuperAgent\Agents;
 
@@ -429,7 +460,7 @@ class TranslatorAgent extends AgentDefinition
 
 ### 自动载入 Skills 和 Agents
 
-Skills 和 Agent 定义文件可以从配置的目录中自动载入，所有路径会递归扫描。不存在的路径会自动跳过。
+Skills 和 Agent 定义文件可以从配置的目录中自动载入，同时支持 `.php` 和 `.md` 文件。所有路径会递归扫描。不存在的路径会自动跳过。
 
 ```php
 // config/superagent.php
@@ -458,12 +489,12 @@ use SuperAgent\Agent\AgentManager;
 SkillManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
 AgentManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
 
-// 载入单个文件
-SkillManager::getInstance()->loadFromFile('/path/to/MySkill.php');
-AgentManager::getInstance()->loadFromFile('/path/to/MyAgent.php');
+// 载入单个文件（PHP 或 Markdown）
+SkillManager::getInstance()->loadFromFile('/path/to/biznet.md');
+AgentManager::getInstance()->loadFromFile('/path/to/ai-advisor.md');
 ```
 
-文件可以使用任意命名空间 — 载入器会直接从源文件中解析 `namespace` 和 `class` 声明。
+PHP 文件可以使用任意命名空间 — 载入器会从源文件中解析 `namespace` 和 `class` 声明。Markdown 文件使用 YAML frontmatter 存放元数据，正文作为 prompt 模板。
 
 ## 📊 性能优化
 

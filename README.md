@@ -437,6 +437,37 @@ PROMPT;
 
 ### Create Agent Definition
 
+Both PHP classes and Markdown files are supported.
+
+**Markdown format** (recommended — place in `.claude/agents/`):
+
+```markdown
+---
+name: ai-advisor
+description: "AI Strategy Advisor"
+model: inherit
+allowed_tools:
+  - read_file
+  - web_search
+---
+
+# AI Strategy Agent
+
+You are an AI strategy advisor. Evaluate AI/ML scenarios with a pragmatic approach.
+
+## Input
+
+$ARGUMENTS
+
+## Language
+
+Output in $LANGUAGE. If unspecified, default to English.
+```
+
+Placeholders like `$ARGUMENTS` and `$LANGUAGE` are interpreted by the LLM from the user's input context, not substituted by the program. All frontmatter fields are preserved and accessible via `getMeta()`.
+
+**PHP format:**
+
 ```php
 namespace App\SuperAgent\Agents;
 
@@ -473,7 +504,7 @@ class TranslatorAgent extends AgentDefinition
 
 ### Auto-Loading Skills & Agents
 
-Skills and agent definitions can be auto-loaded from configured directories. All paths are scanned recursively. Non-existent paths are silently skipped.
+Skills and agent definitions can be auto-loaded from configured directories. Both `.php` and `.md` files are supported. All paths are scanned recursively. Non-existent paths are silently skipped.
 
 ```php
 // config/superagent.php
@@ -502,12 +533,12 @@ use SuperAgent\Agent\AgentManager;
 SkillManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
 AgentManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
 
-// Load a single file
-SkillManager::getInstance()->loadFromFile('/path/to/MySkill.php');
-AgentManager::getInstance()->loadFromFile('/path/to/MyAgent.php');
+// Load a single file (PHP or Markdown)
+SkillManager::getInstance()->loadFromFile('/path/to/biznet.md');
+AgentManager::getInstance()->loadFromFile('/path/to/ai-advisor.md');
 ```
 
-Files can use any namespace — the loader parses the `namespace` and `class` declarations directly from the source file.
+PHP files can use any namespace — the loader parses `namespace` and `class` from the source. Markdown files use YAML frontmatter for metadata and the body as the prompt template.
 
 ## 📊 Performance Optimization
 
