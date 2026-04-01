@@ -107,6 +107,45 @@ $agent->registerTool(new BashTool());
 $response = $agent->query("读取 config.php 文件，分析配置并生成优化建议");
 ```
 
+### 多 Provider 实例
+
+你可以注册多个 Anthropic 兼容 API（或任何 Provider），并在每次创建 Agent 时指定使用哪一个：
+
+```php
+// config/superagent.php
+'default_provider' => 'anthropic',
+'providers' => [
+    'anthropic' => [
+        'api_key' => env('ANTHROPIC_API_KEY'),
+        'model' => 'claude-sonnet-4-20250514',
+    ],
+    'my-proxy' => [
+        'driver' => 'anthropic',           // 复用 AnthropicProvider 类
+        'api_key' => env('MY_PROXY_KEY'),
+        'base_url' => 'https://proxy.example.com',
+        'model' => 'claude-sonnet-4-20250514',
+    ],
+    'another-api' => [
+        'driver' => 'anthropic',
+        'api_key' => env('ANOTHER_API_KEY'),
+        'base_url' => 'https://another.example.com',
+        'model' => 'claude-3-haiku-20240307',
+    ],
+],
+```
+
+创建 Agent 时通过 provider 名称指定：
+
+```php
+use SuperAgent\Agent;
+
+$agent1 = new Agent(['provider' => 'anthropic']);     // 官方 Anthropic API
+$agent2 = new Agent(['provider' => 'my-proxy']);       // 代理 API
+$agent3 = new Agent(['provider' => 'another-api']);    // 另一个兼容 API
+```
+
+`driver` 字段决定使用哪个 Provider 类来实例化（支持 `anthropic`、`openai`、`openrouter`、`bedrock`、`ollama`），配置的 key（如 `my-proxy`）作为实例名用于选择。如果省略 `driver`，则使用 key 本身作为 driver 名，保持向后兼容。
+
 ## 🛠 高级功能
 
 ### 权限管理

@@ -125,6 +125,45 @@ $agent->registerTool(new BashTool());
 $response = $agent->query("Read config.php file, analyze configuration and provide optimization suggestions");
 ```
 
+### Multiple Provider Instances
+
+You can register multiple Anthropic-compatible APIs (or any provider) with different configurations, and select which one to use per Agent:
+
+```php
+// config/superagent.php
+'default_provider' => 'anthropic',
+'providers' => [
+    'anthropic' => [
+        'api_key' => env('ANTHROPIC_API_KEY'),
+        'model' => 'claude-sonnet-4-20250514',
+    ],
+    'my-proxy' => [
+        'driver' => 'anthropic',           // Reuse AnthropicProvider class
+        'api_key' => env('MY_PROXY_KEY'),
+        'base_url' => 'https://proxy.example.com',
+        'model' => 'claude-sonnet-4-20250514',
+    ],
+    'another-api' => [
+        'driver' => 'anthropic',
+        'api_key' => env('ANOTHER_API_KEY'),
+        'base_url' => 'https://another.example.com',
+        'model' => 'claude-3-haiku-20240307',
+    ],
+],
+```
+
+Then specify which provider to use when creating an Agent:
+
+```php
+use SuperAgent\Agent;
+
+$agent1 = new Agent(['provider' => 'anthropic']);     // Official Anthropic API
+$agent2 = new Agent(['provider' => 'my-proxy']);       // Proxy API
+$agent3 = new Agent(['provider' => 'another-api']);    // Another compatible API
+```
+
+The `driver` field determines which provider class to instantiate (e.g. `anthropic`, `openai`, `openrouter`, `bedrock`, `ollama`), while the config key (e.g. `my-proxy`) serves as the instance name for selection. If `driver` is omitted, the config key itself is used as the driver name, maintaining backward compatibility.
+
 ## 🛠 Advanced Features
 
 ### Permission Management

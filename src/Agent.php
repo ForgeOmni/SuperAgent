@@ -7,6 +7,10 @@ use SuperAgent\Contracts\ToolInterface;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\Message;
 use SuperAgent\Providers\AnthropicProvider;
+use SuperAgent\Providers\BedrockProvider;
+use SuperAgent\Providers\OllamaProvider;
+use SuperAgent\Providers\OpenAIProvider;
+use SuperAgent\Providers\OpenRouterProvider;
 
 class Agent
 {
@@ -207,9 +211,18 @@ class Agent
             }
         }
 
-        return match ($providerName) {
+        // Use 'driver' to determine which provider class to use,
+        // falling back to the provider name itself.
+        // This allows named instances like 'anthropic-proxy' with driver 'anthropic'.
+        $driver = $providerConfig['driver'] ?? $providerName;
+
+        return match ($driver) {
             'anthropic' => new AnthropicProvider($providerConfig),
-            default => throw new \InvalidArgumentException("Unsupported provider: {$providerName}"),
+            'openai' => new OpenAIProvider($providerConfig),
+            'openrouter' => new OpenRouterProvider($providerConfig),
+            'bedrock' => new BedrockProvider($providerConfig),
+            'ollama' => new OllamaProvider($providerConfig),
+            default => throw new \InvalidArgumentException("Unsupported provider driver: {$driver}"),
         };
     }
 
