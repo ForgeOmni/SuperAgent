@@ -162,7 +162,17 @@ $agent2 = new Agent(['provider' => 'my-proxy']);       // Proxy API
 $agent3 = new Agent(['provider' => 'another-api']);    // Another compatible API
 ```
 
-The `driver` field determines which provider class to instantiate (e.g. `anthropic`, `openai`, `openrouter`, `bedrock`, `ollama`), while the config key (e.g. `my-proxy`) serves as the instance name for selection. If `driver` is omitted, the config key itself is used as the driver name, maintaining backward compatibility.
+The `driver` field determines which provider class to instantiate, while the config key (e.g. `my-proxy`) serves as the instance name for selection. If `driver` is omitted, the config key itself is used as the driver name, maintaining backward compatibility.
+
+**Supported driver types:**
+
+| Driver | Provider Class | Description |
+|--------|---------------|-------------|
+| `anthropic` | `AnthropicProvider` | Anthropic Claude API and compatible endpoints |
+| `openai` | `OpenAIProvider` | OpenAI API and compatible endpoints (e.g. DeepSeek, Azure OpenAI) |
+| `openrouter` | `OpenRouterProvider` | OpenRouter multi-model gateway |
+| `bedrock` | `BedrockProvider` | AWS Bedrock managed AI service |
+| `ollama` | `OllamaProvider` | Ollama local model runtime |
 
 ## 🛠 Advanced Features
 

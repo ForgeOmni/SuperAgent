@@ -144,7 +144,17 @@ $agent2 = new Agent(['provider' => 'my-proxy']);       // 代理 API
 $agent3 = new Agent(['provider' => 'another-api']);    // 另一个兼容 API
 ```
 
-`driver` 字段决定使用哪个 Provider 类来实例化（支持 `anthropic`、`openai`、`openrouter`、`bedrock`、`ollama`），配置的 key（如 `my-proxy`）作为实例名用于选择。如果省略 `driver`，则使用 key 本身作为 driver 名，保持向后兼容。
+`driver` 字段决定使用哪个 Provider 类来实例化，配置的 key（如 `my-proxy`）作为实例名用于选择。如果省略 `driver`，则使用 key 本身作为 driver 名，保持向后兼容。
+
+**支持的 driver 类型：**
+
+| Driver | Provider 类 | 说明 |
+|--------|-------------|------|
+| `anthropic` | `AnthropicProvider` | Anthropic Claude API 及兼容端点 |
+| `openai` | `OpenAIProvider` | OpenAI API 及兼容端点（如 DeepSeek、Azure OpenAI） |
+| `openrouter` | `OpenRouterProvider` | OpenRouter 多模型网关 |
+| `bedrock` | `BedrockProvider` | AWS Bedrock 托管 AI 服务 |
+| `ollama` | `OllamaProvider` | Ollama 本地模型运行时 |
 
 ## 🛠 高级功能
 

@@ -485,9 +485,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
-| 1.0.x      | 10.x-11.x | 8.1+ | Current stable |
-| 0.5.x      | 9.x-10.x  | 8.0+ | Maintenance |
-| 0.2.x      | 9.x       | 8.0+ | End of life |
+| 0.5.x      | 10.x+   | 8.1+ | Current stable |
 
 ## Production Deployment
 
