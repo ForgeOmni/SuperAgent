@@ -7,6 +7,10 @@ use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\Contracts\ToolInterface;
 use SuperAgent\Enums\StopReason;
 use SuperAgent\Exceptions\SuperAgentException;
+use SuperAgent\Hooks\HookEvent;
+use SuperAgent\Hooks\HookInput;
+use SuperAgent\Hooks\HookRegistry;
+use SuperAgent\Hooks\HookResult;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
@@ -32,6 +36,8 @@ class QueryEngine
 
     protected float $totalCostUsd = 0.0;
 
+    protected ?HookRegistry $hookRegistry = null;
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -42,12 +48,14 @@ class QueryEngine
         ?array $allowedTools = null,
         array $deniedTools = [],
         protected readonly float $maxBudgetUsd = 0.0,
+        ?HookRegistry $hookRegistry = null,
     ) {
         foreach ($this->tools as $tool) {
             $this->toolMap[$tool->name()] = $tool;
         }
         $this->allowedTools = $allowedTools;
         $this->deniedTools = $deniedTools;
+        $this->hookRegistry = $hookRegistry;
     }
 
     public function getMessages(): array
@@ -138,6 +146,18 @@ class QueryEngine
         return $lastMessage;
     }
 
+    /**
+     * Execute tools with full pipeline:
+     *
+     * 1. Permission check (allowed/denied lists)
+     * 2. Tool lookup
+     * 3. Input validation (tool.validateInput if available)
+     * 4. PreToolUse hooks (can modify input, allow/deny/ask, prevent continuation)
+     * 5. Resolve hook permission decision
+     * 6. Execute tool
+     * 7. PostToolUse hooks (can inject context, prevent continuation)
+     * 8. On failure: PostToolUseFailure hooks
+     */
     protected function executeTools(AssistantMessage $assistantMessage): ToolResultMessage
     {
         $results = [];
@@ -147,7 +167,7 @@ class QueryEngine
             $toolInput = $block->toolInput ?? [];
             $toolUseId = $block->toolUseId;
 
-            // Permission check
+            // --- Step 1: Permission check (allowed/denied lists) ---
             if (! $this->isToolAllowed($toolName)) {
                 $content = "Error: Tool '{$toolName}' is not permitted.";
                 $results[] = ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
@@ -155,6 +175,7 @@ class QueryEngine
                 continue;
             }
 
+            // --- Step 2: Tool lookup ---
             if (! isset($this->toolMap[$toolName])) {
                 $content = "Error: Unknown tool '{$toolName}'";
                 $results[] = ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
@@ -162,25 +183,220 @@ class QueryEngine
                 continue;
             }
 
+            $tool = $this->toolMap[$toolName];
+
+            // --- Step 3: Input validation ---
+            if (method_exists($tool, 'validateInput')) {
+                $validationError = $tool->validateInput($toolInput);
+                if ($validationError !== null) {
+                    $content = "Error: Invalid input for tool '{$toolName}': {$validationError}";
+                    $results[] = ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
+                    $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
+                    continue;
+                }
+            }
+
+            // --- Step 4: PreToolUse hooks ---
+            $hookResult = $this->runPreToolUseHooks($toolName, $toolUseId, $toolInput);
+
+            // Hook may have modified the input
+            if ($hookResult->updatedInput !== null) {
+                $toolInput = $hookResult->updatedInput;
+            }
+
+            // --- Step 5: Resolve hook permission decision ---
+            $permissionDecision = $this->resolveHookPermission($hookResult, $toolName);
+
+            if ($permissionDecision === 'deny') {
+                $reason = $hookResult->permissionReason ?? "Denied by hook";
+                $content = "Error: Tool '{$toolName}' denied by hook: {$reason}";
+                $results[] = ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
+                $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
+
+                // Run permission denied hooks
+                $this->runHook(HookEvent::PERMISSION_DENIED, [
+                    'tool_name' => $toolName,
+                    'tool_input' => $toolInput,
+                    'reason' => $reason,
+                ]);
+                continue;
+            }
+
+            // If hook says stop processing entirely
+            if (! $hookResult->continue) {
+                $content = $hookResult->stopReason ?? "Execution stopped by PreToolUse hook";
+                $results[] = ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
+                $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
+                continue;
+            }
+
+            // --- Step 6: Execute tool ---
             try {
-                $tool = $this->toolMap[$toolName];
                 $result = $tool->execute($toolInput);
                 $content = $result->contentAsString();
+                $isError = $result->isError;
+
+                // --- Step 7: PostToolUse hooks ---
+                $postResult = $this->runPostToolUseHooks($toolName, $toolUseId, $toolInput, $content, $isError);
+
+                // PostToolUse hooks can inject additional context
+                if ($postResult->systemMessage !== null) {
+                    $content .= "\n\n[Hook Context]: " . $postResult->systemMessage;
+                }
 
                 $results[] = [
                     'tool_use_id' => $toolUseId,
                     'content' => $content,
-                    'is_error' => $result->isError,
+                    'is_error' => $isError,
                 ];
-                $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, $result->isError);
+                $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, $isError);
+
+                // If PostToolUse hook says prevent continuation, stop after this tool
+                if ($postResult->preventContinuation) {
+                    break;
+                }
+
             } catch (\Throwable $e) {
-                $content = "Error executing tool '{$toolName}': {$e->getMessage()}";
-                $results[] = ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
-                $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
+                $errorContent = "Error executing tool '{$toolName}': {$e->getMessage()}";
+
+                // --- Step 8: PostToolUseFailure hooks ---
+                $failResult = $this->runPostToolUseFailureHooks(
+                    $toolName, $toolUseId, $toolInput, $e->getMessage()
+                );
+
+                if ($failResult->systemMessage !== null) {
+                    $errorContent .= "\n\n[Hook Context]: " . $failResult->systemMessage;
+                }
+
+                $results[] = ['tool_use_id' => $toolUseId, 'content' => $errorContent, 'is_error' => true];
+                $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $errorContent, true);
             }
         }
 
         return ToolResultMessage::fromResults($results);
+    }
+
+    /**
+     * Run PreToolUse hooks and return merged result.
+     */
+    protected function runPreToolUseHooks(string $toolName, string $toolUseId, array $toolInput): HookResult
+    {
+        if ($this->hookRegistry === null) {
+            return HookResult::continue();
+        }
+
+        return $this->hookRegistry->executeHooks(
+            HookEvent::PRE_TOOL_USE,
+            new HookInput(
+                event: HookEvent::PRE_TOOL_USE,
+                additionalData: [
+                    'tool_name' => $toolName,
+                    'tool_use_id' => $toolUseId,
+                    'tool_input' => $toolInput,
+                ],
+            ),
+        );
+    }
+
+    /**
+     * Run PostToolUse hooks.
+     */
+    protected function runPostToolUseHooks(
+        string $toolName,
+        string $toolUseId,
+        array $toolInput,
+        string $toolOutput,
+        bool $isError,
+    ): HookResult {
+        if ($this->hookRegistry === null) {
+            return HookResult::continue();
+        }
+
+        return $this->hookRegistry->executeHooks(
+            HookEvent::POST_TOOL_USE,
+            new HookInput(
+                event: HookEvent::POST_TOOL_USE,
+                additionalData: [
+                    'tool_name' => $toolName,
+                    'tool_use_id' => $toolUseId,
+                    'tool_input' => $toolInput,
+                    'tool_output' => $toolOutput,
+                    'is_error' => $isError,
+                ],
+            ),
+        );
+    }
+
+    /**
+     * Run PostToolUseFailure hooks.
+     */
+    protected function runPostToolUseFailureHooks(
+        string $toolName,
+        string $toolUseId,
+        array $toolInput,
+        string $error,
+    ): HookResult {
+        if ($this->hookRegistry === null) {
+            return HookResult::continue();
+        }
+
+        return $this->hookRegistry->executeHooks(
+            HookEvent::POST_TOOL_USE_FAILURE,
+            new HookInput(
+                event: HookEvent::POST_TOOL_USE_FAILURE,
+                additionalData: [
+                    'tool_name' => $toolName,
+                    'tool_use_id' => $toolUseId,
+                    'tool_input' => $toolInput,
+                    'error' => $error,
+                ],
+            ),
+        );
+    }
+
+    /**
+     * Run a generic hook event.
+     */
+    protected function runHook(HookEvent $event, array $data): HookResult
+    {
+        if ($this->hookRegistry === null) {
+            return HookResult::continue();
+        }
+
+        return $this->hookRegistry->executeHooks(
+            $event,
+            new HookInput(event: $event, additionalData: $data),
+        );
+    }
+
+    /**
+     * Resolve a PreToolUse hook's permission result into a final decision.
+     *
+     * Hook 'allow' does NOT bypass settings deny rules — the allowed/denied
+     * tool lists still apply. Hook 'deny' takes immediate effect.
+     *
+     * @return string|null 'allow', 'deny', or null (normal flow)
+     */
+    protected function resolveHookPermission(HookResult $hookResult, string $toolName): ?string
+    {
+        if ($hookResult->permissionBehavior === null) {
+            return null; // No hook permission decision, use normal flow
+        }
+
+        if ($hookResult->permissionBehavior === 'deny') {
+            return 'deny';
+        }
+
+        if ($hookResult->permissionBehavior === 'allow') {
+            // Hook allow does NOT bypass settings deny rules
+            if (in_array($toolName, $this->deniedTools, true)) {
+                return 'deny'; // Settings deny overrides hook allow
+            }
+            return 'allow';
+        }
+
+        // 'ask' — for now, treat as normal flow (future: user interaction)
+        return null;
     }
 
     protected function isToolAllowed(string $toolName): bool
