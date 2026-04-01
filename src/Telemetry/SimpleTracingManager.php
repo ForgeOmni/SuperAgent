@@ -15,6 +15,7 @@ class SimpleTracingManager
     private Collection $activeSpans;
     private bool $enabled = true;
     private array $exporters = [];
+    private ?EventSampler $eventSampler = null;
 
     private function __construct()
     {
@@ -152,6 +153,68 @@ class SimpleTracingManager
     public function setEnabled(bool $enabled): void
     {
         $this->enabled = $enabled;
+    }
+
+    /**
+     * Set the event sampler for per-event-type sampling rate control.
+     */
+    public function setEventSampler(EventSampler $sampler): void
+    {
+        $this->eventSampler = $sampler;
+    }
+
+    /**
+     * Get the event sampler.
+     */
+    public function getEventSampler(): ?EventSampler
+    {
+        return $this->eventSampler;
+    }
+
+    /**
+     * Log a named event through the sampling pipeline.
+     *
+     * If an EventSampler is configured, events are probabilistically sampled
+     * based on per-event-type rates. The sample_rate is attached to metadata
+     * for downstream analytics correction.
+     *
+     * @param string $eventName Event type (e.g., 'tool_execution', 'api_query')
+     * @param array  $metadata  Event metadata
+     * @return bool Whether the event was logged (false = dropped by sampling)
+     */
+    public function logEvent(string $eventName, array $metadata = []): bool
+    {
+        if (!$this->enabled) {
+            return false;
+        }
+
+        // Apply sampling if configured
+        if ($this->eventSampler !== null) {
+            $enriched = $this->eventSampler->enrichMetadata($eventName, $metadata);
+            if ($enriched === null) {
+                return false; // Dropped by sampling
+            }
+            $metadata = $enriched;
+        }
+
+        // Create a span-like record for the event
+        $event = [
+            'type' => 'event',
+            'name' => $eventName,
+            'timestamp' => microtime(true),
+            'metadata' => $metadata,
+        ];
+
+        // Export
+        foreach ($this->exporters as $exporter) {
+            try {
+                $exporter($event);
+            } catch (\Exception $e) {
+                // Don't fail on export errors
+            }
+        }
+
+        return true;
     }
 
     /**
