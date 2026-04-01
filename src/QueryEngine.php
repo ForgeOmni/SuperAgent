@@ -11,11 +11,13 @@ use SuperAgent\Hooks\HookEvent;
 use SuperAgent\Hooks\HookInput;
 use SuperAgent\Hooks\HookRegistry;
 use SuperAgent\Hooks\HookResult;
+use SuperAgent\Hooks\StopHooksPipeline;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
 use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\UserMessage;
+use SuperAgent\TokenBudget\TokenBudgetTracker;
 use SuperAgent\Tools\ToolResult;
 
 class QueryEngine
@@ -38,6 +40,16 @@ class QueryEngine
 
     protected ?HookRegistry $hookRegistry = null;
 
+    protected ?TokenBudgetTracker $budgetTracker = null;
+
+    protected ?StopHooksPipeline $stopHooksPipeline = null;
+
+    /** Token budget for continuation logic (null = use maxTurns instead) */
+    protected ?int $tokenBudget = null;
+
+    /** Total output tokens consumed in current turn */
+    protected int $turnOutputTokens = 0;
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -49,6 +61,7 @@ class QueryEngine
         array $deniedTools = [],
         protected readonly float $maxBudgetUsd = 0.0,
         ?HookRegistry $hookRegistry = null,
+        ?int $tokenBudget = null,
     ) {
         foreach ($this->tools as $tool) {
             $this->toolMap[$tool->name()] = $tool;
@@ -56,6 +69,15 @@ class QueryEngine
         $this->allowedTools = $allowedTools;
         $this->deniedTools = $deniedTools;
         $this->hookRegistry = $hookRegistry;
+        $this->tokenBudget = $tokenBudget;
+
+        if ($this->tokenBudget !== null) {
+            $this->budgetTracker = new TokenBudgetTracker();
+        }
+
+        if ($this->hookRegistry !== null) {
+            $this->stopHooksPipeline = new StopHooksPipeline($this->hookRegistry);
+        }
     }
 
     public function getMessages(): array
@@ -76,17 +98,25 @@ class QueryEngine
     /**
      * Run the agentic loop: send prompt, handle tool calls, repeat until done.
      *
+     * Uses token budget continuation logic when tokenBudget is set:
+     *  - Continues if under 90% of budget and no diminishing returns
+     *  - Stops on diminishing returns (3+ continuations with <500 token deltas)
+     *
+     * Falls back to fixed maxTurns when no token budget is configured.
+     *
      * @return Generator<int, AssistantMessage>
      */
     public function run(string|array $prompt): Generator
     {
         $this->messages[] = new UserMessage($prompt);
         $this->turnCount = 0;
+        $this->turnOutputTokens = 0;
+        $this->budgetTracker?->reset();
 
         while ($this->turnCount < $this->maxTurns) {
             $this->turnCount++;
 
-            // Budget check
+            // USD budget check
             if ($this->maxBudgetUsd > 0 && $this->totalCostUsd >= $this->maxBudgetUsd) {
                 throw new SuperAgentException(
                     "Budget exhausted: \${$this->totalCostUsd} >= \${$this->maxBudgetUsd}"
@@ -96,12 +126,13 @@ class QueryEngine
             $assistantMessage = $this->callProvider();
             $this->messages[] = $assistantMessage;
 
-            // Track cost
+            // Track cost and output tokens
             if ($assistantMessage->usage) {
                 $this->totalCostUsd += CostCalculator::calculate(
                     $this->options['model'] ?? $this->provider->getModel(),
                     $assistantMessage->usage,
                 );
+                $this->turnOutputTokens += $assistantMessage->usage->outputTokens ?? 0;
             }
 
             $this->streamingHandler?->emitTurn($assistantMessage, $this->turnCount);
@@ -109,15 +140,69 @@ class QueryEngine
             yield $assistantMessage;
 
             if (! $assistantMessage->hasToolUse() || $assistantMessage->stopReason !== StopReason::ToolUse) {
+                // --- Run stop hooks pipeline at turn end ---
+                $this->runStopHooksPipeline($assistantMessage);
+
                 $this->streamingHandler?->emitFinalMessage($assistantMessage);
                 return;
             }
 
             $toolResults = $this->executeTools($assistantMessage);
             $this->messages[] = $toolResults;
+
+            // --- Token budget continuation check ---
+            if ($this->budgetTracker !== null && $this->tokenBudget !== null) {
+                $decision = $this->budgetTracker->check(
+                    budget: $this->tokenBudget,
+                    globalTurnTokens: $this->turnOutputTokens,
+                    isSubAgent: ($this->options['agent_id'] ?? null) !== null,
+                );
+
+                if ($decision->shouldStop()) {
+                    // Run stop hooks before exiting
+                    $this->runStopHooksPipeline($assistantMessage);
+                    $this->streamingHandler?->emitFinalMessage($assistantMessage);
+                    return;
+                }
+
+                // Inject nudge message for the model to continue
+                if ($decision->nudgeMessage !== null) {
+                    $this->messages[] = new UserMessage($decision->nudgeMessage);
+                }
+            }
         }
 
         throw new SuperAgentException("Agent loop exceeded max turns ({$this->maxTurns})");
+    }
+
+    /**
+     * Run the stop hooks pipeline at turn end.
+     */
+    protected function runStopHooksPipeline(AssistantMessage $lastMessage): void
+    {
+        if ($this->stopHooksPipeline === null) {
+            return;
+        }
+
+        $result = $this->stopHooksPipeline->execute(
+            messages: $this->messages,
+            assistantMessages: [$lastMessage],
+            context: [
+                'session_id' => $this->options['session_id'] ?? 'unknown',
+                'cwd' => $this->options['cwd'] ?? getcwd() ?: '.',
+                'agent_id' => $this->options['agent_id'] ?? null,
+                'agent_type' => $this->options['agent_type'] ?? null,
+                'is_teammate' => $this->options['is_teammate'] ?? false,
+                'teammate_name' => $this->options['teammate_name'] ?? '',
+                'team_name' => $this->options['team_name'] ?? '',
+                'in_progress_tasks' => $this->options['in_progress_tasks'] ?? [],
+            ],
+        );
+
+        // Inject blocking errors as user messages
+        foreach ($result->blockingErrors as $error) {
+            $this->messages[] = new UserMessage("[Stop Hook Error]: {$error}");
+        }
     }
 
     protected function callProvider(): AssistantMessage

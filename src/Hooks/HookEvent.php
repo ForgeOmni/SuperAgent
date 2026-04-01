@@ -35,7 +35,11 @@ enum HookEvent: string
     // Task hooks
     case TASK_CREATED = 'TaskCreated';
     case TASK_COMPLETED = 'TaskCompleted';
-    
+
+    // Teammate hooks
+    case TEAMMATE_IDLE = 'TeammateIdle';
+    case SUBAGENT_STOP = 'SubagentStop';
+
     // File system hooks
     case CWD_CHANGED = 'CwdChanged';
     case FILE_CHANGED = 'FileChanged';
@@ -61,6 +65,8 @@ enum HookEvent: string
             self::CONFIG_CHANGE => 'Fired when configuration changes',
             self::TASK_CREATED => 'Fired when a task is created',
             self::TASK_COMPLETED => 'Fired when a task completes',
+            self::TEAMMATE_IDLE => 'Fired when a teammate agent becomes idle',
+            self::SUBAGENT_STOP => 'Fired when a sub-agent stops',
             self::CWD_CHANGED => 'Fired when current directory changes',
             self::FILE_CHANGED => 'Fired when watched files change',
         };

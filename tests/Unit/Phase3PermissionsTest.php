@@ -90,10 +90,10 @@ class Phase3PermissionsTest extends TestCase
         $this->assertTrue($dangerous->isHighRisk());
         $this->assertTrue($dangerous->requiresApproval());
         
-        // Complex commands
+        // Complex commands (now caught by security validator as shell metacharacters)
         $complex = $classifier->classify('echo "test" | grep pattern && npm install');
         $this->assertTrue($complex->isTooComplex);
-        $this->assertEquals('high', $complex->risk);
+        $this->assertEquals('critical', $complex->risk);
         
         // Medium risk
         $medium = $classifier->classify('curl https://example.com');

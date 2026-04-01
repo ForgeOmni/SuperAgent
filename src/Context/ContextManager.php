@@ -10,6 +10,7 @@ use SuperAgent\Context\Strategies\CompressionResult;
 use SuperAgent\Context\Strategies\CompressionStrategy;
 use SuperAgent\Context\Strategies\ConversationCompressor;
 use SuperAgent\Context\Strategies\MicroCompressor;
+use SuperAgent\Context\Strategies\SessionMemoryCompressor;
 use SuperAgent\Hooks\HookEvent;
 use SuperAgent\Hooks\HookInput;
 use SuperAgent\Hooks\HookRegistry;
@@ -46,18 +47,27 @@ class ContextManager
      */
     private function initializeStrategies(): void
     {
-        // Add micro compressor
+        // Add micro compressor (priority 1 - fastest, tried first)
         $this->strategies[] = new MicroCompressor($this->tokenEstimator, $this->config);
-        
-        // Add conversation compressor if provider is available
+
         if ($this->provider !== null) {
+            // Add session memory compressor (priority 5 - structured summary with boundary protection)
+            if ($this->config->enableSessionMemory) {
+                $this->strategies[] = new SessionMemoryCompressor(
+                    $this->tokenEstimator,
+                    $this->config,
+                    $this->provider,
+                );
+            }
+
+            // Add conversation compressor (priority 10 - fallback)
             $this->strategies[] = new ConversationCompressor(
                 $this->tokenEstimator,
                 $this->config,
-                $this->provider
+                $this->provider,
             );
         }
-        
+
         // Sort by priority
         usort($this->strategies, fn($a, $b) => $a->getPriority() <=> $b->getPriority());
     }

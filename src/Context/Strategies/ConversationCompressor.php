@@ -62,9 +62,9 @@ class ConversationCompressor implements CompressionStrategy
         }
         
         // Generate summary
-        $summary = $this->generateSummary($messagesToCompress, $summaryPrompt);
-        
-        if ($summary === null) {
+        $rawSummary = $this->generateSummary($messagesToCompress, $summaryPrompt);
+
+        if ($rawSummary === null) {
             // Summary generation failed
             return new CompressionResult(
                 compressedMessages: [],
@@ -73,7 +73,10 @@ class ConversationCompressor implements CompressionStrategy
                 metadata: ['error' => 'Summary generation failed'],
             );
         }
-        
+
+        // Format: strip <analysis> scratchpad, extract <summary>
+        $summary = $this->formatCompactSummary($rawSummary);
+
         // Calculate token savings
         $originalTokens = $this->tokenEstimator->estimateMessagesTokens(
             array_map(fn($m) => $m->toArray(), $messagesToCompress)
@@ -258,24 +261,80 @@ class ConversationCompressor implements CompressionStrategy
     }
     
     /**
-     * Get the default summary prompt
+     * Get the default summary prompt (9-section structured format from Claude Code).
      */
     private function getDefaultSummaryPrompt(): string
     {
-        return <<<PROMPT
-You are a conversation summarizer. Create a concise but comprehensive summary of the conversation.
+        return <<<'PROMPT'
+CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
 
-Focus on:
-1. Key decisions made
-2. Important information discovered
-3. Problems solved or errors encountered
-4. Current state and context
-5. Any pending tasks or questions
+Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
+This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
 
-Keep the summary structured and easy to scan.
-Preserve technical details and specific values when important.
-Use bullet points for clarity.
+Before providing your final summary, wrap your analysis in <analysis> tags. In your analysis:
+
+1. Chronologically analyze each message. For each section identify:
+   - The user's explicit requests and intents
+   - Your approach to addressing them
+   - Key decisions, technical concepts and code patterns
+   - Specific details: file names, code snippets, function signatures, file edits
+   - Errors and how you fixed them
+   - Specific user feedback, especially if they told you to do something differently.
+2. Double-check for technical accuracy and completeness.
+
+Your summary should include these sections:
+
+1. Primary Request and Intent: Capture all user requests and intents in detail
+2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks
+3. Files and Code Sections: Enumerate files examined, modified, or created with code snippets and why they matter
+4. Errors and fixes: List all errors and fixes, including user feedback
+5. Problem Solving: Document problems solved and ongoing troubleshooting
+6. All user messages: List ALL non-tool-result user messages (critical for understanding feedback)
+7. Pending Tasks: Outline pending tasks explicitly asked for
+8. Current Work: Describe precisely what was being worked on immediately before this summary
+9. Optional Next Step: The next step directly in line with the user's most recent explicit request
+
+Output format:
+
+<analysis>
+[Your analysis]
+</analysis>
+
+<summary>
+1. Primary Request and Intent: ...
+2. Key Technical Concepts: ...
+3. Files and Code Sections: ...
+4. Errors and fixes: ...
+5. Problem Solving: ...
+6. All user messages: ...
+7. Pending Tasks: ...
+8. Current Work: ...
+9. Optional Next Step: ...
+</summary>
+
+REMINDER: Do NOT call any tools. Respond with plain text only.
 PROMPT;
+    }
+
+    /**
+     * Format summary by stripping analysis scratchpad and extracting summary section.
+     */
+    private function formatCompactSummary(string $summary): string
+    {
+        // Strip analysis section (drafting scratchpad)
+        $formatted = preg_replace('/<analysis>[\s\S]*?<\/analysis>/', '', $summary);
+
+        // Extract summary section
+        if (preg_match('/<summary>([\s\S]*?)<\/summary>/', $formatted, $matches)) {
+            $content = trim($matches[1] ?? '');
+            $formatted = preg_replace(
+                '/<summary>[\s\S]*?<\/summary>/',
+                "Summary:\n{$content}",
+                $formatted,
+            );
+        }
+
+        return trim(preg_replace('/\n\n+/', "\n\n", $formatted));
     }
     
     /**

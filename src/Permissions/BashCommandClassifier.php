@@ -6,6 +6,13 @@ namespace SuperAgent\Permissions;
 
 class BashCommandClassifier
 {
+    private ?BashSecurityValidator $securityValidator = null;
+
+    public function __construct(?BashSecurityValidator $securityValidator = null)
+    {
+        $this->securityValidator = $securityValidator ?? new BashSecurityValidator();
+    }
+
     private const SAFE_ENV_VARS = [
         'NODE_ENV',
         'PYTHONUNBUFFERED',
@@ -82,7 +89,7 @@ class BashCommandClassifier
     public function classify(string $command): CommandClassification
     {
         $command = trim($command);
-        
+
         if (empty($command)) {
             return new CommandClassification(
                 risk: 'low',
@@ -91,9 +98,23 @@ class BashCommandClassifier
                 isTooComplex: false,
             );
         }
-        
+
+        // --- Phase 1: Security validator (23 injection/obfuscation checks) ---
+        $securityResult = $this->securityValidator->validate($command);
+        if ($securityResult->isDenied()) {
+            return new CommandClassification(
+                risk: 'critical',
+                category: 'security',
+                prefix: null,
+                isTooComplex: true,
+                reason: $securityResult->reason,
+                securityCheckId: $securityResult->checkId,
+            );
+        }
+
+        // --- Phase 2: Original classification logic ---
         $components = $this->parseCommand($command);
-        
+
         if ($components['isTooComplex']) {
             return new CommandClassification(
                 risk: 'high',
@@ -103,9 +124,9 @@ class BashCommandClassifier
                 reason: 'Command contains substitutions, expansions, or control flow',
             );
         }
-        
+
         $prefix = $this->extractPrefix($components['commands']);
-        
+
         foreach (self::SAFE_COMMAND_PREFIXES as $safePrefix) {
             if (str_starts_with($prefix ?? '', $safePrefix)) {
                 return new CommandClassification(
@@ -116,7 +137,7 @@ class BashCommandClassifier
                 );
             }
         }
-        
+
         $mainCommand = $components['commands'][0] ?? null;
         if ($mainCommand && isset(self::DANGEROUS_COMMANDS[$mainCommand])) {
             $info = self::DANGEROUS_COMMANDS[$mainCommand];
@@ -128,7 +149,7 @@ class BashCommandClassifier
                 reason: "Command '{$mainCommand}' is classified as {$info['risk']} risk",
             );
         }
-        
+
         if ($this->containsDangerousPatterns($command)) {
             return new CommandClassification(
                 risk: 'high',
@@ -138,13 +159,21 @@ class BashCommandClassifier
                 reason: 'Command contains dangerous patterns',
             );
         }
-        
+
         return new CommandClassification(
             risk: 'medium',
             category: 'unknown',
             prefix: $prefix,
             isTooComplex: false,
         );
+    }
+
+    /**
+     * Check if a command is read-only (delegates to security validator).
+     */
+    public function isReadOnly(string $command): bool
+    {
+        return $this->securityValidator->isCommandReadOnly($command);
     }
     
     private function parseCommand(string $command): array
@@ -242,6 +271,8 @@ class CommandClassification
         public readonly ?string $prefix,
         public readonly bool $isTooComplex,
         public readonly ?string $reason = null,
+        /** Numeric security check ID if denied by BashSecurityValidator */
+        public readonly ?int $securityCheckId = null,
     ) {}
     
     public function isHighRisk(): bool
