@@ -71,7 +71,8 @@ class QueryEngine
         $this->hookRegistry = $hookRegistry;
         $this->tokenBudget = $tokenBudget;
 
-        if ($this->tokenBudget !== null) {
+        if ($this->tokenBudget !== null
+            && \SuperAgent\Config\ExperimentalFeatures::enabled('token_budget')) {
             $this->budgetTracker = new TokenBudgetTracker();
         }
 

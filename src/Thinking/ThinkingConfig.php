@@ -110,11 +110,12 @@ class ThinkingConfig
     }
 
     /**
-     * Apply ultrathink if keyword detected: boost budget to max.
+     * Apply ultrathink if keyword detected and feature enabled: boost budget to max.
      */
     public function maybeApplyUltrathink(string $userMessage): self
     {
-        if (self::hasUltrathinkKeyword($userMessage)) {
+        if (self::hasUltrathinkKeyword($userMessage)
+            && \SuperAgent\Config\ExperimentalFeatures::enabled('ultrathink')) {
             return new self('enabled', self::MAX_BUDGET_TOKENS);
         }
         return $this;

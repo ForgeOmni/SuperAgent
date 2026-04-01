@@ -61,6 +61,109 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Telemetry Configuration
+    |--------------------------------------------------------------------------
+    | Master switch and per-subsystem controls for telemetry.
+    | When 'enabled' is false, all telemetry subsystems are disabled
+    | regardless of their individual settings — no data is collected or sent.
+    */
+    'telemetry' => [
+        'enabled' => env('SUPERAGENT_TELEMETRY_ENABLED', false),
+
+        'logging' => [
+            'enabled' => env('SUPERAGENT_TELEMETRY_LOGGING', false),
+        ],
+        'metrics' => [
+            'enabled' => env('SUPERAGENT_TELEMETRY_METRICS', false),
+        ],
+        'events' => [
+            'enabled' => env('SUPERAGENT_TELEMETRY_EVENTS', false),
+        ],
+        'cost_tracking' => [
+            'enabled' => env('SUPERAGENT_TELEMETRY_COST_TRACKING', false),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Security Prompt Guardrails
+    |--------------------------------------------------------------------------
+    | When enabled, additional safety instructions are injected into the
+    | system prompt to restrict security-related operations (e.g. refusing
+    | destructive techniques, requiring authorization context for dual-use
+    | security tools). When disabled, these prompt-level guardrails are
+    | removed — the model's own safety training still applies.
+    */
+    'security_guardrails' => env('SUPERAGENT_SECURITY_GUARDRAILS', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Experimental Features
+    |--------------------------------------------------------------------------
+    | Feature flags for experimental capabilities. All default to true (enabled).
+    | Set SUPERAGENT_EXPERIMENTAL=false to disable all experimental features,
+    | or toggle individual features via their env vars.
+    |
+    | Note: features marked [NOT IMPLEMENTED] are defined for forward
+    | compatibility and have no effect yet.
+    */
+    'experimental' => [
+        'enabled' => env('SUPERAGENT_EXPERIMENTAL', true),
+
+        // --- Interaction & UI ---
+
+        // Deep thinking mode: "ultrathink" keyword boosts reasoning budget to max
+        'ultrathink' => env('SUPERAGENT_EXP_ULTRATHINK', true),
+
+        // Token budget tracking and usage warnings (dynamic continuation strategy)
+        'token_budget' => env('SUPERAGENT_EXP_TOKEN_BUDGET', true),
+
+        // Prompt cache-break detection in compaction/query flow
+        'prompt_cache_break_detection' => env('SUPERAGENT_EXP_PROMPT_CACHE', true),
+
+        // --- Agents, Memory & Planning ---
+
+        // Built-in explore/plan agent presets (ExploreAgent, PlanAgent)
+        'builtin_agents' => env('SUPERAGENT_EXP_BUILTIN_AGENTS', true),
+
+        // Verification agent for task validation
+        'verification_agent' => env('SUPERAGENT_EXP_VERIFICATION_AGENT', true),
+
+        // Plan V2 interview phase (iterative pair-planning workflow)
+        'plan_interview' => env('SUPERAGENT_EXP_PLAN_INTERVIEW', true),
+
+        // Local cron/trigger tools for background automation
+        'agent_triggers' => env('SUPERAGENT_EXP_AGENT_TRIGGERS', true),
+
+        // Remote trigger tool (API-based remote agent tasks)
+        'agent_triggers_remote' => env('SUPERAGENT_EXP_AGENT_TRIGGERS_REMOTE', true),
+
+        // Post-query automatic memory extraction
+        'extract_memories' => env('SUPERAGENT_EXP_EXTRACT_MEMORIES', true),
+
+        // Smart reminders around context compaction
+        'compaction_reminders' => env('SUPERAGENT_EXP_COMPACTION_REMINDERS', true),
+
+        // Cached microcompact state through query flows
+        'cached_microcompact' => env('SUPERAGENT_EXP_CACHED_MICROCOMPACT', true),
+
+        // Team-memory files (shared memory with TEAM scope)
+        'team_memory' => env('SUPERAGENT_EXP_TEAM_MEMORY', true),
+
+        // --- Tools & Infrastructure ---
+
+        // Classifier-assisted bash permission decisions (BashCommandClassifier)
+        'bash_classifier' => env('SUPERAGENT_EXP_BASH_CLASSIFIER', true),
+
+        // [NOT IMPLEMENTED] Push-to-talk voice input and dictation
+        'voice_mode' => env('SUPERAGENT_EXP_VOICE_MODE', false),
+
+        // [NOT IMPLEMENTED] IDE remote-control bridge (VS Code, JetBrains)
+        'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | MCP Configuration
     |--------------------------------------------------------------------------
     | load_claude_code: Automatically import MCP servers from Claude Code's

@@ -17,7 +17,8 @@ class CostTracker
     {
         $this->costs = collect();
         $this->sessionCosts = collect();
-        $this->enabled = config('superagent.telemetry.cost_tracking.enabled', true);
+        $this->enabled = config('superagent.telemetry.enabled', false)
+            && config('superagent.telemetry.cost_tracking.enabled', false);
         $this->loadModelPricing();
     }
 

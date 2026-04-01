@@ -27,7 +27,8 @@ class Phase10ObservabilityTest extends TestCase
             return new Repository([
                 'superagent' => [
                     'telemetry' => [
-                        'enabled'        => false,
+                        'enabled'        => true,
+                        'tracing'        => ['enabled' => false],
                         'metrics'        => ['enabled' => true],
                         'logging'        => ['enabled' => true],
                         'cost_tracking'  => ['enabled' => true],

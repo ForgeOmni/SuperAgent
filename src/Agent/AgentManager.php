@@ -200,13 +200,24 @@ class AgentManager
      */
     private function loadBuiltinAgents(): void
     {
+        $exp = \SuperAgent\Config\ExperimentalFeatures::class;
+
+        // Core agents — always available
         $this->register(new BuiltinAgents\GeneralPurposeAgent());
         $this->register(new BuiltinAgents\CodeWriterAgent());
         $this->register(new BuiltinAgents\ResearcherAgent());
         $this->register(new BuiltinAgents\ReviewerAgent());
-        $this->register(new BuiltinAgents\ExploreAgent());
-        $this->register(new BuiltinAgents\PlanAgent());
-        $this->register(new BuiltinAgents\VerificationAgent());
+
+        // Explore & Plan agents — gated by builtin_agents flag
+        if ($exp::enabled('builtin_agents')) {
+            $this->register(new BuiltinAgents\ExploreAgent());
+            $this->register(new BuiltinAgents\PlanAgent());
+        }
+
+        // Verification agent — gated by verification_agent flag
+        if ($exp::enabled('verification_agent')) {
+            $this->register(new BuiltinAgents\VerificationAgent());
+        }
     }
 
     /**

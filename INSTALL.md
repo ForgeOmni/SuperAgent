@@ -152,8 +152,31 @@ SUPERAGENT_CACHE_TTL=3600
 # Debug mode
 SUPERAGENT_DEBUG=false
 
-# Observability
+# Observability (master switch — all subsystems off when false)
 SUPERAGENT_TELEMETRY_ENABLED=false
+SUPERAGENT_TELEMETRY_LOGGING=false
+SUPERAGENT_TELEMETRY_METRICS=false
+SUPERAGENT_TELEMETRY_EVENTS=false
+SUPERAGENT_TELEMETRY_COST_TRACKING=false
+
+# Security prompt guardrails
+SUPERAGENT_SECURITY_GUARDRAILS=false
+
+# Experimental features (master switch — all flags on when true)
+SUPERAGENT_EXPERIMENTAL=true
+# SUPERAGENT_EXP_ULTRATHINK=true
+# SUPERAGENT_EXP_TOKEN_BUDGET=true
+# SUPERAGENT_EXP_PROMPT_CACHE=true
+# SUPERAGENT_EXP_BUILTIN_AGENTS=true
+# SUPERAGENT_EXP_VERIFICATION_AGENT=true
+# SUPERAGENT_EXP_PLAN_INTERVIEW=true
+# SUPERAGENT_EXP_AGENT_TRIGGERS=true
+# SUPERAGENT_EXP_AGENT_TRIGGERS_REMOTE=true
+# SUPERAGENT_EXP_EXTRACT_MEMORIES=true
+# SUPERAGENT_EXP_COMPACTION_REMINDERS=true
+# SUPERAGENT_EXP_CACHED_MICROCOMPACT=true
+# SUPERAGENT_EXP_TEAM_MEMORY=true
+# SUPERAGENT_EXP_BASH_CLASSIFIER=true
 
 # ========== Permission Configuration ==========
 
@@ -382,6 +405,77 @@ $manager->create(
 );
 ```
 
+### Telemetry Master Switch
+
+All telemetry subsystems (tracing, logging, metrics, events, cost tracking) are gated by a master switch. When `telemetry.enabled` is `false`, no data is collected regardless of individual subsystem settings:
+
+```php
+// config/superagent.php
+'telemetry' => [
+    'enabled' => env('SUPERAGENT_TELEMETRY_ENABLED', false),
+    'logging'       => ['enabled' => env('SUPERAGENT_TELEMETRY_LOGGING', false)],
+    'metrics'       => ['enabled' => env('SUPERAGENT_TELEMETRY_METRICS', false)],
+    'events'        => ['enabled' => env('SUPERAGENT_TELEMETRY_EVENTS', false)],
+    'cost_tracking' => ['enabled' => env('SUPERAGENT_TELEMETRY_COST_TRACKING', false)],
+],
+```
+
+### Security Prompt Guardrails
+
+When enabled, additional safety instructions are injected into the system prompt to restrict security-related operations. When disabled, only the model's built-in safety training applies:
+
+```php
+// config/superagent.php
+'security_guardrails' => env('SUPERAGENT_SECURITY_GUARDRAILS', false),
+```
+
+### Experimental Feature Flags
+
+15 granular feature flags let you enable or disable experimental capabilities. All default to `true` (enabled) when the master switch is on. Some tools, agents, and behaviors are gated by these flags:
+
+```php
+// config/superagent.php
+'experimental' => [
+    'enabled' => env('SUPERAGENT_EXPERIMENTAL', true),
+
+    'ultrathink' => env('SUPERAGENT_EXP_ULTRATHINK', true),
+    'token_budget' => env('SUPERAGENT_EXP_TOKEN_BUDGET', true),
+    'prompt_cache_break_detection' => env('SUPERAGENT_EXP_PROMPT_CACHE', true),
+    'builtin_agents' => env('SUPERAGENT_EXP_BUILTIN_AGENTS', true),
+    'verification_agent' => env('SUPERAGENT_EXP_VERIFICATION_AGENT', true),
+    'plan_interview' => env('SUPERAGENT_EXP_PLAN_INTERVIEW', true),
+    'agent_triggers' => env('SUPERAGENT_EXP_AGENT_TRIGGERS', true),
+    'agent_triggers_remote' => env('SUPERAGENT_EXP_AGENT_TRIGGERS_REMOTE', true),
+    'extract_memories' => env('SUPERAGENT_EXP_EXTRACT_MEMORIES', true),
+    'compaction_reminders' => env('SUPERAGENT_EXP_COMPACTION_REMINDERS', true),
+    'cached_microcompact' => env('SUPERAGENT_EXP_CACHED_MICROCOMPACT', true),
+    'team_memory' => env('SUPERAGENT_EXP_TEAM_MEMORY', true),
+    'bash_classifier' => env('SUPERAGENT_EXP_BASH_CLASSIFIER', true),
+    'voice_mode' => env('SUPERAGENT_EXP_VOICE_MODE', false),   // NOT IMPLEMENTED
+    'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),  // NOT IMPLEMENTED
+],
+```
+
+**Gated components:**
+
+| Flag | Gated Component |
+|------|----------------|
+| `builtin_agents` | ExploreAgent, PlanAgent registration |
+| `verification_agent` | VerificationAgent registration |
+| `agent_triggers` | `schedule_cron` tool |
+| `agent_triggers_remote` | `remote_trigger` tool |
+| `team_memory` | `team_create`, `team_delete` tools |
+| `ultrathink` | Ultrathink keyword boost behavior |
+| `token_budget` | Token budget tracking in QueryEngine |
+| `prompt_cache_break_detection` | Auto prompt caching in AnthropicProvider |
+| `bash_classifier` | Classifier-assisted bash permission decisions |
+| `plan_interview` | Plan V2 interview phase workflow |
+| `extract_memories` | Session memory extraction defaults |
+| `compaction_reminders` | Auto-compact defaults in CompressionConfig |
+| `cached_microcompact` | Micro-compact defaults in CompressionConfig |
+
+The `ExperimentalFeatures` class falls back to env vars when running outside a Laravel application (e.g. in unit tests).
+
 ### Analytics Sampling
 
 Configure per-event-type sampling rates:
@@ -609,7 +703,8 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
-| 0.5.6      | 10.x+   | 8.1+ | Current stable — full test suite passing (466 tests) |
+| 0.5.7      | 10.x+   | 8.1+ | Current stable — telemetry master switch, security guardrails, experimental feature flags (452 tests) |
+| 0.5.6      | 10.x+   | 8.1+ | Full test suite passing (466 tests) |
 | 0.5.5      | 10.x+   | 8.1+ | Feature release |
 
 ## Production Deployment

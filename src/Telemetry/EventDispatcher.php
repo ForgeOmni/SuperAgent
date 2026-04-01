@@ -17,7 +17,8 @@ class EventDispatcher
     {
         $this->listeners = collect();
         $this->eventHistory = collect();
-        $this->enabled = config('superagent.telemetry.events.enabled', true);
+        $this->enabled = config('superagent.telemetry.enabled', false)
+            && config('superagent.telemetry.events.enabled', false);
     }
 
     public static function getInstance(): self

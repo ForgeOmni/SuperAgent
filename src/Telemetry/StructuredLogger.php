@@ -15,7 +15,8 @@ class StructuredLogger
 
     private function __construct()
     {
-        $this->enabled = config('superagent.telemetry.logging.enabled', true);
+        $this->enabled = config('superagent.telemetry.enabled', false)
+            && config('superagent.telemetry.logging.enabled', false);
         $this->sessionId = uniqid('session_');
         $this->requestId = uniqid('request_');
     }

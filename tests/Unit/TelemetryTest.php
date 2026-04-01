@@ -26,7 +26,7 @@ class TelemetryTest extends TestCase
         $config = new ConfigRepository([
             'superagent' => [
                 'telemetry' => [
-                    'enabled' => false,
+                    'enabled' => true,
                     'metrics' => ['enabled' => true],
                     'logging' => ['enabled' => false],
                     'cost_tracking' => ['enabled' => true],

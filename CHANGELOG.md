@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-04-01
+
+### Added
+- **Telemetry Master Switch** — hierarchical telemetry control: new `telemetry.enabled` master gate in config; all 5 telemetry subsystems (TracingManager, MetricsCollector, StructuredLogger, CostTracker, EventDispatcher) now require both the master switch AND their individual flag to be enabled. When master is off, no data is collected regardless of subsystem settings
+- **Security Prompt Guardrails** — new `security_guardrails` config flag; when enabled, safety instructions are injected into SystemPromptBuilder's intro section to restrict security-related operations (dual-use tools, destructive techniques). Disabled by default
+- **Experimental Feature Flags** — 15 granular feature flags with master switch (`experimental.enabled`) in config, each backed by env vars:
+  - `ultrathink` — gate ultrathink keyword boost in ThinkingConfig
+  - `token_budget` — gate TokenBudgetTracker creation in QueryEngine
+  - `prompt_cache_break_detection` — gate auto prompt caching in AnthropicProvider
+  - `builtin_agents` — gate ExploreAgent/PlanAgent registration in AgentManager
+  - `verification_agent` — gate VerificationAgent registration in AgentManager
+  - `plan_interview` — gate Plan V2 interview phase in EnterPlanModeTool
+  - `agent_triggers` — gate `schedule_cron` tool in BuiltinToolRegistry
+  - `agent_triggers_remote` — gate `remote_trigger` tool in BuiltinToolRegistry
+  - `extract_memories` — gate session memory extraction default in CompressionConfig
+  - `compaction_reminders` — gate auto-compact default in CompressionConfig
+  - `cached_microcompact` — gate micro-compact default in CompressionConfig
+  - `team_memory` — gate `team_create`/`team_delete` tools in BuiltinToolRegistry
+  - `bash_classifier` — gate classifier-assisted bash permission checks in PermissionEngine
+  - `voice_mode` — [NOT IMPLEMENTED] placeholder for future voice input
+  - `bridge_mode` — [NOT IMPLEMENTED] placeholder for future IDE remote-control bridge
+- **ExperimentalFeatures env fallback** — `ExperimentalFeatures::enabled()` now falls back to env vars (via `$_ENV`/`getenv()`) when running outside a Laravel application (e.g. unit tests without a booted container), with `configAvailable()` detection
+
+### Changed
+- **BuiltinToolRegistry** — tool registration now split into always-available core tools and feature-flag-gated experimental tools (`schedule_cron`, `remote_trigger`, `team_create`, `team_delete`)
+- **AgentManager::loadBuiltinAgents()** — ExploreAgent/PlanAgent gated by `builtin_agents` flag; VerificationAgent gated by `verification_agent` flag
+- **CompressionConfig::fromArray()** — `enableMicroCompact`, `enableSessionMemory`, `enableAutoCompact` defaults now driven by experimental feature flags instead of hardcoded values
+- **AnthropicProvider** — `prompt_caching` option falls back to `prompt_cache_break_detection` feature flag when not explicitly set
+- **Telemetry classes** — CostTracker, EventDispatcher, MetricsCollector, StructuredLogger, TracingManager constructors now check `telemetry.enabled AND subsystem.enabled` (was subsystem-only)
+- **ExperimentalFeatures::enabled()** — master switch default changed from `false` to `true` to match config defaults
+
+### Fixed
+- **Phase10ObservabilityTest** — set telemetry master switch to `true` and added `tracing.enabled => false` in test config to match new hierarchical telemetry gate (fixes 11 failures)
+- **TelemetryTest** — set telemetry master switch to `true` in test config (fixes 7 failures)
+- Test suite: 452 tests, 1557 assertions, 0 errors, 0 failures
+
 ## [0.5.6] - 2026-04-01
 
 ### Fixed

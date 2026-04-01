@@ -269,11 +269,19 @@ class SystemPromptBuilder
 
     private function getIntroSection(): string
     {
-        return <<<'SECTION'
+        $intro = <<<'SECTION'
 You are an interactive AI agent that assists users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 IMPORTANT: You must NEVER generate or guess URLs unless confident they are for helping the user with programming.
 SECTION;
+
+        if (config('superagent.security_guardrails', false)) {
+            $intro .= "\n" . <<<'GUARDRAILS'
+IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.
+GUARDRAILS;
+        }
+
+        return $intro;
     }
 
     private function getSystemRulesSection(): string

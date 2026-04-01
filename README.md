@@ -13,7 +13,7 @@ SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider suppo
 
 ### Core Features
 - **Multi-Provider Support** - Anthropic, OpenAI, Bedrock, OpenRouter and more
-- **59+ Built-in Tools** - File operations, code editing, web search, task management, tool search and more
+- **59+ Built-in Tools** - File operations, code editing, web search, task management, tool search and more (core tools always available; experimental tools gated by feature flags)
 - **Streaming Output** - Real-time responses for better user experience
 - **Cost Tracking** - Accurate token usage and cost statistics
 
@@ -30,6 +30,9 @@ SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider suppo
 - **Batch Skill** - `/batch` command for parallel large-scale changes across 5–30 isolated worktree agents, each opening a PR
 - **MCP Protocol** - Integration with Model Context Protocol ecosystem, with server instruction injection into system prompt
 - **Prompt Cache Optimization** - Dynamic system prompt assembly with static/dynamic boundary for prompt caching
+- **Telemetry Master Switch** - Hierarchical telemetry control: master `telemetry.enabled` gate plus per-subsystem toggles (logging, metrics, events, cost_tracking) — when master is off, no data is collected regardless of individual settings
+- **Security Prompt Guardrails** - Optional safety instructions injected into the system prompt to restrict security-related operations; configurable via `security_guardrails` flag
+- **Experimental Feature Flags** - 15 granular feature flags (with master switch) to gate experimental capabilities: ultrathink, token budget, prompt cache detection, builtin agents, verification agent, plan interview, agent triggers (local/remote), memory extraction, compaction reminders, cached microcompact, team memory, bash classifier, voice mode, bridge mode
 - **Observability** - OpenTelemetry integration with complete tracing and per-event-type analytics sampling rate control
 - **File History** - LRU cache (100 message-level snapshots) with per-message rewind, diff stats (insertions/deletions/filesChanged), and snapshot inheritance
 - **Tool Use Summaries** - Haiku-generated git-commit-subject-style summaries after tool batches
@@ -300,6 +303,57 @@ $metrics->incrementCounter('api.requests');
 $metrics->recordHistogram('response.time', 150.5);
 $metrics->recordTiming('query.duration', 320.0);
 ```
+
+### Telemetry Master Switch
+
+All telemetry subsystems are gated by a master switch. When `telemetry.enabled` is `false`, no telemetry data is collected regardless of individual subsystem settings:
+
+```env
+# Master switch — must be true for any telemetry to function
+SUPERAGENT_TELEMETRY_ENABLED=false
+
+# Individual subsystem toggles (only effective when master is ON)
+SUPERAGENT_TELEMETRY_LOGGING=false
+SUPERAGENT_TELEMETRY_METRICS=false
+SUPERAGENT_TELEMETRY_EVENTS=false
+SUPERAGENT_TELEMETRY_COST_TRACKING=false
+```
+
+### Security Prompt Guardrails
+
+When enabled, additional safety instructions are injected into the system prompt to restrict security-related operations (e.g. refusing destructive techniques, requiring authorization context for dual-use security tools):
+
+```env
+SUPERAGENT_SECURITY_GUARDRAILS=false
+```
+
+### Experimental Feature Flags
+
+Granular feature flags allow you to enable or disable experimental capabilities independently. All default to `true` (enabled) when the master switch is on:
+
+```env
+# Master switch — set to false to disable all experimental features
+SUPERAGENT_EXPERIMENTAL=true
+
+# Individual feature toggles
+SUPERAGENT_EXP_ULTRATHINK=true           # "ultrathink" keyword boosts reasoning budget
+SUPERAGENT_EXP_TOKEN_BUDGET=true          # Token budget tracking and usage warnings
+SUPERAGENT_EXP_PROMPT_CACHE=true          # Prompt cache-break detection
+SUPERAGENT_EXP_BUILTIN_AGENTS=true        # Explore/Plan agent presets
+SUPERAGENT_EXP_VERIFICATION_AGENT=true    # Verification agent for task validation
+SUPERAGENT_EXP_PLAN_INTERVIEW=true        # Plan V2 interview phase workflow
+SUPERAGENT_EXP_AGENT_TRIGGERS=true        # Local cron/trigger tools
+SUPERAGENT_EXP_AGENT_TRIGGERS_REMOTE=true # Remote trigger tool (API-based)
+SUPERAGENT_EXP_EXTRACT_MEMORIES=true      # Post-query memory extraction
+SUPERAGENT_EXP_COMPACTION_REMINDERS=true  # Smart reminders around context compaction
+SUPERAGENT_EXP_CACHED_MICROCOMPACT=true   # Cached microcompact state
+SUPERAGENT_EXP_TEAM_MEMORY=true           # Team-memory files (shared memory)
+SUPERAGENT_EXP_BASH_CLASSIFIER=true       # Classifier-assisted bash permissions
+SUPERAGENT_EXP_VOICE_MODE=false           # [NOT IMPLEMENTED] Voice input
+SUPERAGENT_EXP_BRIDGE_MODE=false          # [NOT IMPLEMENTED] IDE remote-control bridge
+```
+
+The `ExperimentalFeatures` class also falls back to env vars when running outside a Laravel application (e.g. in unit tests), so feature flags work consistently across all environments.
 
 ## 🔧 CLI Commands
 

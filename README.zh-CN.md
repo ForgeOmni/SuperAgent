@@ -13,7 +13,7 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 
 ### 基础功能
 - **多模型支持** - 支持 Anthropic Claude、OpenAI GPT、AWS Bedrock、OpenRouter 等主流模型
-- **59+ 内置工具** - 文件操作、代码编辑、Web 搜索、任务管理、工具搜索等开箱即用
+- **59+ 内置工具** - 文件操作、代码编辑、Web 搜索、任务管理、工具搜索等开箱即用（核心工具始终可用；实验性工具受 feature flag 控制）
 - **流式输出** - 实时响应，提供更好的用户体验
 - **成本追踪** - 精确统计 Token 使用量和费用
 
@@ -30,6 +30,9 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Batch 技能** - `/batch` 命令，将大任务拆分为 5-30 个独立工作单元，在隔离 worktree 中并行执行并各自提 PR
 - **MCP 协议支持** - 接入 Model Context Protocol 生态，支持服务端指令注入 System Prompt
 - **Prompt 缓存优化** - 动态 System Prompt 组装，静态/动态边界分离实现 Prompt 缓存
+- **遥测主开关** - 分层遥测控制：`telemetry.enabled` 总开关加子系统独立开关（logging、metrics、events、cost_tracking）— 总开关关闭时，无论子系统设置如何，均不采集数据
+- **安全 Prompt 护栏** - 可选的安全指令注入 System Prompt，限制安全相关操作；通过 `security_guardrails` 开关控制
+- **实验性 Feature Flags** - 15 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、语音模式、IDE 桥接模式
 - **可观测性** - OpenTelemetry 集成，完整链路追踪，及按事件类型动态调整分析采样率
 - **文件版本控制** - LRU 缓存（100 个消息级快照），按消息回退，diff 统计（insertions/deletions/filesChanged），快照继承
 - **工具使用摘要** - Haiku 生成 git-commit-subject 风格的工具批次执行摘要
@@ -582,6 +585,57 @@ $mcpManager->connect('github-mcp');
 $instructions = $mcpManager->getConnectedInstructions();
 // ['github-mcp' => '使用 search_repos 查找仓库...']
 ```
+
+### 遥测主开关
+
+所有遥测子系统受主开关控制。当 `telemetry.enabled` 为 `false` 时，无论子系统设置如何，不采集任何遥测数据：
+
+```env
+# 主开关 — 必须为 true 才能启用任何遥测功能
+SUPERAGENT_TELEMETRY_ENABLED=false
+
+# 子系统独立开关（仅在主开关为 ON 时生效）
+SUPERAGENT_TELEMETRY_LOGGING=false
+SUPERAGENT_TELEMETRY_METRICS=false
+SUPERAGENT_TELEMETRY_EVENTS=false
+SUPERAGENT_TELEMETRY_COST_TRACKING=false
+```
+
+### 安全 Prompt 护栏
+
+启用后，额外的安全指令会注入 System Prompt，限制安全相关操作（如拒绝破坏性技术、要求双用途安全工具的授权上下文）：
+
+```env
+SUPERAGENT_SECURITY_GUARDRAILS=false
+```
+
+### 实验性 Feature Flags
+
+细粒度的 feature flag 允许独立启用或禁用实验性功能。当总开关为 `true` 时，所有功能默认启用：
+
+```env
+# 总开关 — 设为 false 可禁用所有实验性功能
+SUPERAGENT_EXPERIMENTAL=true
+
+# 各功能独立开关
+SUPERAGENT_EXP_ULTRATHINK=true           # "ultrathink" 关键词提升推理预算
+SUPERAGENT_EXP_TOKEN_BUDGET=true          # Token 预算追踪和用量警告
+SUPERAGENT_EXP_PROMPT_CACHE=true          # Prompt 缓存中断检测
+SUPERAGENT_EXP_BUILTIN_AGENTS=true        # Explore/Plan Agent 预设
+SUPERAGENT_EXP_VERIFICATION_AGENT=true    # 验证 Agent
+SUPERAGENT_EXP_PLAN_INTERVIEW=true        # Plan V2 面试阶段工作流
+SUPERAGENT_EXP_AGENT_TRIGGERS=true        # 本地 cron/触发器工具
+SUPERAGENT_EXP_AGENT_TRIGGERS_REMOTE=true # 远程触发器工具（API）
+SUPERAGENT_EXP_EXTRACT_MEMORIES=true      # 查询后自动记忆提取
+SUPERAGENT_EXP_COMPACTION_REMINDERS=true  # 上下文压缩智能提醒
+SUPERAGENT_EXP_CACHED_MICROCOMPACT=true   # 缓存微压缩状态
+SUPERAGENT_EXP_TEAM_MEMORY=true           # 团队记忆文件（共享记忆）
+SUPERAGENT_EXP_BASH_CLASSIFIER=true       # 分类器辅助 bash 权限决策
+SUPERAGENT_EXP_VOICE_MODE=false           # [未实现] 语音输入
+SUPERAGENT_EXP_BRIDGE_MODE=false          # [未实现] IDE 远程控制桥接
+```
+
+`ExperimentalFeatures` 类在 Laravel 应用外运行时（如单元测试）会回退到环境变量，确保 feature flag 在所有环境中一致工作。
 
 ## 📊 性能优化
 

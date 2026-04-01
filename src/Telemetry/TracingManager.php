@@ -29,7 +29,8 @@ class TracingManager
     {
         $this->activeSpans = collect();
         $this->spanMetadata = collect();
-        $this->enabled = config('superagent.telemetry.enabled', false);
+        $masterEnabled = config('superagent.telemetry.enabled', false);
+        $this->enabled = $masterEnabled && config('superagent.telemetry.tracing.enabled', true);
         
         if ($this->enabled) {
             $this->initialize();

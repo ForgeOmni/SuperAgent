@@ -44,10 +44,15 @@ class CompressionConfig
     ) {}
     
     /**
-     * Create config from array (e.g., from config file)
+     * Create config from array (e.g., from config file).
+     *
+     * When experimental feature flags are enabled, the corresponding
+     * compression features default to ON (can still be overridden).
      */
     public static function fromArray(array $config): self
     {
+        $exp = \SuperAgent\Config\ExperimentalFeatures::class;
+
         return new self(
             minTokens: $config['min_tokens'] ?? self::DEFAULT_MIN_TOKENS,
             maxTokens: $config['max_tokens'] ?? self::DEFAULT_MAX_TOKENS,
@@ -55,9 +60,9 @@ class CompressionConfig
             keepRecentMessages: $config['keep_recent_messages'] ?? self::DEFAULT_KEEP_RECENT,
             maxRetries: $config['max_retries'] ?? self::DEFAULT_MAX_RETRIES,
             compactableTools: $config['compactable_tools'] ?? self::DEFAULT_COMPACTABLE_TOOLS,
-            enableMicroCompact: $config['enable_micro_compact'] ?? true,
-            enableSessionMemory: $config['enable_session_memory'] ?? false,
-            enableAutoCompact: $config['enable_auto_compact'] ?? true,
+            enableMicroCompact: $config['enable_micro_compact'] ?? $exp::enabled('cached_microcompact'),
+            enableSessionMemory: $config['enable_session_memory'] ?? $exp::enabled('extract_memories'),
+            enableAutoCompact: $config['enable_auto_compact'] ?? $exp::enabled('compaction_reminders'),
             enableCacheEditing: $config['enable_cache_editing'] ?? false,
             summaryModel: $config['summary_model'] ?? null,
         );

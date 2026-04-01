@@ -152,8 +152,31 @@ SUPERAGENT_CACHE_TTL=3600
 # 调试模式
 SUPERAGENT_DEBUG=false
 
-# 可观测性
+# 可观测性（主开关 — 关闭时所有子系统不采集数据）
 SUPERAGENT_TELEMETRY_ENABLED=false
+SUPERAGENT_TELEMETRY_LOGGING=false
+SUPERAGENT_TELEMETRY_METRICS=false
+SUPERAGENT_TELEMETRY_EVENTS=false
+SUPERAGENT_TELEMETRY_COST_TRACKING=false
+
+# 安全 Prompt 护栏
+SUPERAGENT_SECURITY_GUARDRAILS=false
+
+# 实验性功能（总开关 — 为 true 时所有 flag 默认启用）
+SUPERAGENT_EXPERIMENTAL=true
+# SUPERAGENT_EXP_ULTRATHINK=true
+# SUPERAGENT_EXP_TOKEN_BUDGET=true
+# SUPERAGENT_EXP_PROMPT_CACHE=true
+# SUPERAGENT_EXP_BUILTIN_AGENTS=true
+# SUPERAGENT_EXP_VERIFICATION_AGENT=true
+# SUPERAGENT_EXP_PLAN_INTERVIEW=true
+# SUPERAGENT_EXP_AGENT_TRIGGERS=true
+# SUPERAGENT_EXP_AGENT_TRIGGERS_REMOTE=true
+# SUPERAGENT_EXP_EXTRACT_MEMORIES=true
+# SUPERAGENT_EXP_COMPACTION_REMINDERS=true
+# SUPERAGENT_EXP_CACHED_MICROCOMPACT=true
+# SUPERAGENT_EXP_TEAM_MEMORY=true
+# SUPERAGENT_EXP_BASH_CLASSIFIER=true
 
 # ========== 权限配置 ==========
 
@@ -380,6 +403,77 @@ $manager->create(
     gitRepoUrl: 'https://github.com/org/repo',
 );
 ```
+
+### 遥测主开关
+
+所有遥测子系统（追踪、日志、指标、事件、成本追踪）受主开关控制。当 `telemetry.enabled` 为 `false` 时，无论子系统设置如何，不采集任何数据：
+
+```php
+// config/superagent.php
+'telemetry' => [
+    'enabled' => env('SUPERAGENT_TELEMETRY_ENABLED', false),
+    'logging'       => ['enabled' => env('SUPERAGENT_TELEMETRY_LOGGING', false)],
+    'metrics'       => ['enabled' => env('SUPERAGENT_TELEMETRY_METRICS', false)],
+    'events'        => ['enabled' => env('SUPERAGENT_TELEMETRY_EVENTS', false)],
+    'cost_tracking' => ['enabled' => env('SUPERAGENT_TELEMETRY_COST_TRACKING', false)],
+],
+```
+
+### 安全 Prompt 护栏
+
+启用后，额外的安全指令会注入 System Prompt，限制安全相关操作。禁用时仅依赖模型自身的安全训练：
+
+```php
+// config/superagent.php
+'security_guardrails' => env('SUPERAGENT_SECURITY_GUARDRAILS', false),
+```
+
+### 实验性 Feature Flags
+
+15 个细粒度 feature flag 独立控制实验性功能。部分工具、Agent 和行为受这些 flag 控制：
+
+```php
+// config/superagent.php
+'experimental' => [
+    'enabled' => env('SUPERAGENT_EXPERIMENTAL', true),
+
+    'ultrathink' => env('SUPERAGENT_EXP_ULTRATHINK', true),
+    'token_budget' => env('SUPERAGENT_EXP_TOKEN_BUDGET', true),
+    'prompt_cache_break_detection' => env('SUPERAGENT_EXP_PROMPT_CACHE', true),
+    'builtin_agents' => env('SUPERAGENT_EXP_BUILTIN_AGENTS', true),
+    'verification_agent' => env('SUPERAGENT_EXP_VERIFICATION_AGENT', true),
+    'plan_interview' => env('SUPERAGENT_EXP_PLAN_INTERVIEW', true),
+    'agent_triggers' => env('SUPERAGENT_EXP_AGENT_TRIGGERS', true),
+    'agent_triggers_remote' => env('SUPERAGENT_EXP_AGENT_TRIGGERS_REMOTE', true),
+    'extract_memories' => env('SUPERAGENT_EXP_EXTRACT_MEMORIES', true),
+    'compaction_reminders' => env('SUPERAGENT_EXP_COMPACTION_REMINDERS', true),
+    'cached_microcompact' => env('SUPERAGENT_EXP_CACHED_MICROCOMPACT', true),
+    'team_memory' => env('SUPERAGENT_EXP_TEAM_MEMORY', true),
+    'bash_classifier' => env('SUPERAGENT_EXP_BASH_CLASSIFIER', true),
+    'voice_mode' => env('SUPERAGENT_EXP_VOICE_MODE', false),   // 未实现
+    'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),  // 未实现
+],
+```
+
+**受控组件对照表：**
+
+| Flag | 受控组件 |
+|------|---------|
+| `builtin_agents` | ExploreAgent、PlanAgent 注册 |
+| `verification_agent` | VerificationAgent 注册 |
+| `agent_triggers` | `schedule_cron` 工具 |
+| `agent_triggers_remote` | `remote_trigger` 工具 |
+| `team_memory` | `team_create`、`team_delete` 工具 |
+| `ultrathink` | ultrathink 关键词提升行为 |
+| `token_budget` | QueryEngine 中的 Token 预算追踪 |
+| `prompt_cache_break_detection` | AnthropicProvider 自动 Prompt 缓存 |
+| `bash_classifier` | 分类器辅助 bash 权限决策 |
+| `plan_interview` | Plan V2 面试阶段工作流 |
+| `extract_memories` | CompressionConfig 会话记忆提取默认值 |
+| `compaction_reminders` | CompressionConfig 自动压缩默认值 |
+| `cached_microcompact` | CompressionConfig 微压缩默认值 |
+
+`ExperimentalFeatures` 类在 Laravel 应用外运行时（如单元测试）会回退到环境变量。
 
 ### 分析采样率控制
 
@@ -608,7 +702,8 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
-| 0.5.6      | 10.x+   | 8.1+ | 当前稳定版 — 全部测试通过（466 项测试） |
+| 0.5.7      | 10.x+   | 8.1+ | 当前稳定版 — 遥测主开关、安全护栏、实验性 feature flags（452 项测试） |
+| 0.5.6      | 10.x+   | 8.1+ | 全部测试通过（466 项测试） |
 | 0.5.5      | 10.x+   | 8.1+ | 功能发布版 |
 
 ## 生产环境部署

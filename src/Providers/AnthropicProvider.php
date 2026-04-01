@@ -186,7 +186,8 @@ class AnthropicProvider implements LLMProvider
         if ($systemPrompt !== null) {
             $body['system'] = $this->formatSystemPrompt(
                 $systemPrompt,
-                $options['prompt_caching'] ?? false,
+                $options['prompt_caching']
+                    ?? \SuperAgent\Config\ExperimentalFeatures::enabled('prompt_cache_break_detection'),
             );
         }
 

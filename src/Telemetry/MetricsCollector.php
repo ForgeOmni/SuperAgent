@@ -20,7 +20,8 @@ class MetricsCollector
         $this->counters = collect();
         $this->gauges = collect();
         $this->histograms = collect();
-        $this->enabled = config('superagent.telemetry.metrics.enabled', false);
+        $this->enabled = config('superagent.telemetry.enabled', false)
+            && config('superagent.telemetry.metrics.enabled', false);
     }
 
     public static function getInstance(): self

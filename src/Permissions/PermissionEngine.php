@@ -140,6 +140,11 @@ class PermissionEngine
     
     private function checkBashPermissions(string $command): ?PermissionDecision
     {
+        // Skip classifier-assisted checks when the feature flag is off
+        if (!\SuperAgent\Config\ExperimentalFeatures::enabled('bash_classifier')) {
+            return null;
+        }
+
         $classification = $this->bashClassifier->classify($command);
         
         if ($classification->isHighRisk()) {

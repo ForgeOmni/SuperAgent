@@ -83,38 +83,41 @@ use SuperAgent\Tools\Builtin\PushNotificationTool;
 class BuiltinToolRegistry
 {
     /**
-     * Get all built-in tools (59 tools total).
+     * Get all built-in tools, respecting experimental feature flags.
+     *
+     * Core tools are always available. Experimental tools require their
+     * corresponding feature flag to be enabled in config.
      *
      * @return array<string, Tool>
      */
     public static function all(): array
     {
-        return [
-            // Execution tools (4)
+        $tools = [
+            // Execution tools (4) — always available
             'bash' => new BashTool(),
             'repl' => new REPLTool(),
             'sleep' => new SleepTool(),
             'powershell' => new PowerShellTool(),
-            
-            // File tools (6)
+
+            // File tools (6) — always available
             'read_file' => new ReadFileTool(),
             'write_file' => new WriteFileTool(),
             'file_edit' => new FileEditTool(),
             'multi_edit' => new MultiEditTool(),
             'notebook_edit' => new NotebookEditTool(),
             'send_user_file' => new SendUserFileTool(),
-            
-            // Search tools (3)
+
+            // Search tools (3) — always available
             'glob' => new GlobTool(),
             'grep' => new GrepTool(),
             'tool_search' => new ToolSearchTool(),
-            
-            // Network tools (3)
+
+            // Network tools (3) — always available
             'http_request' => new HttpRequestTool(),
             'web_search' => new WebSearchTool(),
             'web_fetch' => new WebFetchTool(),
-            
-            // Task management tools (7)
+
+            // Task management tools (7) — always available
             'task_create' => new TaskCreateTool(),
             'task_get' => new TaskGetTool(),
             'task_list' => new TaskListTool(),
@@ -122,62 +125,80 @@ class BuiltinToolRegistry
             'task_stop' => new TaskStopTool(),
             'task_output' => new TaskOutputTool(),
             'todo_write' => new TodoWriteTool(),
-            
-            // Planning tools (3)
+
+            // Planning tools (3) — always available
             'enter_plan_mode' => new EnterPlanModeTool(),
             'exit_plan_mode' => new ExitPlanModeTool(),
             'verify_plan_execution' => new VerifyPlanExecutionTool(),
-            
-            // Automation tools (6)
+
+            // Core automation tools (4) — always available
             'workflow' => new WorkflowTool(),
             'skill' => new SkillTool(),
             'discover_skills' => new DiscoverSkillsTool(),
-            'schedule_cron' => new ScheduleCronTool(),
-            'remote_trigger' => new RemoteTriggerTool(),
             'web_browser' => new WebBrowserTool(),
-            
-            // Code and snippet tools (2)
+
+            // Code and snippet tools (2) — always available
             'snip' => new SnipTool(),
             'lsp' => new LSPTool(),
-            
-            // Monitoring and debugging tools (4)
+
+            // Monitoring and debugging tools (4) — always available
             'monitor' => new MonitorTool(),
             'terminal_capture' => new TerminalCaptureTool(),
             'ctx_inspect' => new CtxInspectTool(),
             'overflow_test' => new OverflowTestTool(),
-            
-            // Agent and team tools (5)
+
+            // Agent and team tools (3) — always available
             'agent' => new AgentTool(),
             'send_message' => new SendMessageTool(),
-            'team_create' => new TeamCreateTool(),
-            'team_delete' => new TeamDeleteTool(),
             'list_peers' => new ListPeersTool(),
-            
-            // MCP tools (4)
+
+            // MCP tools (4) — always available
             'mcp' => new MCPTool(),
             'list_mcp_resources' => new ListMcpResourcesTool(),
             'read_mcp_resource' => new ReadMcpResourceTool(),
             'mcp_auth' => new McpAuthTool(),
-            
-            // Git and review tools (5)
+
+            // Git and review tools (5) — always available
             'enter_worktree' => new EnterWorktreeTool(),
             'exit_worktree' => new ExitWorktreeTool(),
             'subscribe_pr' => new SubscribePRTool(),
             'suggest_background_pr' => new SuggestBackgroundPRTool(),
             'review_artifact' => new ReviewArtifactTool(),
-            
-            // System/Control tools (2)
+
+            // System/Control tools (2) — always available
             'config' => new ConfigTool(),
             'brief' => new BriefTool(),
-            
-            // Interaction and notification tools (3)
+
+            // Interaction and notification tools (3) — always available
             'ask_user' => new AskUserQuestionTool(),
             'push_notification' => new PushNotificationTool(),
             'synthetic_output' => new SyntheticOutputTool(),
-            
-            // Special tools (1)
+
+            // Special tools (1) — always available
             'tungsten' => new TungstenTool(),
         ];
+
+        // --- Experimental tools (gated by feature flags) ---
+
+        $exp = \SuperAgent\Config\ExperimentalFeatures::class;
+
+        // Agent triggers: local cron scheduling
+        if ($exp::enabled('agent_triggers')) {
+            $tools['schedule_cron'] = new ScheduleCronTool();
+        }
+
+        // Agent triggers remote: API-based remote agent tasks
+        if ($exp::enabled('agent_triggers_remote')) {
+            $tools['remote_trigger'] = new RemoteTriggerTool();
+        }
+
+        // Team memory: team create/delete tools
+        if ($exp::enabled('team_memory')) {
+            $tools['team_create'] = new TeamCreateTool();
+            $tools['team_delete'] = new TeamDeleteTool();
+        }
+
+        return $tools;
     }
 
     /**

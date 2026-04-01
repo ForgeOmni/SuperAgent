@@ -25,7 +25,7 @@ class EnterPlanModeTool extends Tool
     private static bool $inPlanMode = false;
     private static array $currentPlan = [];
 
-    /** Whether the interview phase workflow is active */
+    /** Whether the interview phase workflow is active (gated by experimental.plan_interview) */
     private static bool $interviewPhaseEnabled = true;
 
     /** Plan file path (persisted to disk) */
@@ -91,7 +91,7 @@ class EnterPlanModeTool extends Tool
         $description = $input['description'] ?? '';
         $estimatedSteps = $input['estimated_steps'] ?? null;
         $tags = $input['tags'] ?? [];
-        $useInterview = $input['interview'] ?? self::$interviewPhaseEnabled;
+        $useInterview = $input['interview'] ?? self::isInterviewPhaseEnabled();
 
         if (empty($description)) {
             return ToolResult::error('Plan description is required.');
@@ -327,7 +327,8 @@ INST;
 
     public static function isInterviewPhaseEnabled(): bool
     {
-        return self::$interviewPhaseEnabled;
+        return self::$interviewPhaseEnabled
+            && \SuperAgent\Config\ExperimentalFeatures::enabled('plan_interview');
     }
 
     public static function setInterviewPhaseEnabled(bool $enabled): void
