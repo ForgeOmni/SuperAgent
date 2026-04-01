@@ -19,13 +19,15 @@ SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider suppo
 
 ### Advanced Features
 - **Permission System** - 6 permission modes with intelligent security control
-- **Lifecycle Hooks** - Insert custom logic at critical points
+- **Lifecycle Hooks** - Hook into tool execution pipeline with permission decisions (allow/deny/ask) and input modification
 - **Context Compression** - Smart conversation history management to overcome token limits
 - **Memory System** - Cross-session persistence with long-term learning capabilities
-- **Multi-Agent Collaboration** - Swarm mode for task distribution and coordination
-- **MCP Protocol** - Integration with Model Context Protocol ecosystem
+- **Multi-Agent Collaboration** - Swarm mode with specialized agents (Explore, Plan, Verification, Code-Writer, Researcher, Reviewer) and fork semantics for context-sharing sub-agents
+- **MCP Protocol** - Integration with Model Context Protocol ecosystem, with server instruction injection into system prompt
+- **Prompt Cache Optimization** - Dynamic system prompt assembly with static/dynamic boundary for prompt caching
 - **Observability** - OpenTelemetry integration with complete tracing
 - **File History** - Version control with rollback capabilities
+- **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
 
 ## 📦 Installation
 
@@ -550,6 +552,71 @@ MCPManager::getInstance()->loadFromJsonFile('/path/to/mcp-servers.json');
 ```
 
 PHP files can use any namespace — the loader parses `namespace` and `class` from the source. Markdown files use YAML frontmatter for metadata and the body as the prompt template. MCP config files support both Claude Code format (`mcpServers`) and SuperAgent format (`servers`), with `${VAR}` and `${VAR:-default}` environment variable expansion.
+
+### Fork Semantics
+
+Fork an agent that inherits the parent's full conversation context and system prompt. Fork children share the prompt cache prefix for token efficiency.
+
+```php
+use SuperAgent\Agent\ForkContext;
+
+// Create a fork context from the current agent's state
+$fork = new ForkContext(
+    parentMessages: $agent->getMessages(),
+    parentSystemPrompt: $currentSystemPrompt,
+    parentToolNames: ['bash', 'read_file', 'edit_file'],
+);
+
+// Fork context is passed to AgentSpawnConfig
+$config = new AgentSpawnConfig(
+    name: 'research-fork',
+    prompt: 'Investigate the auth module',
+    forkContext: $fork,
+);
+// $config->isFork() === true
+```
+
+Fork children are prevented from recursively forking. They follow a structured output format (Scope/Result/Key files/Issues) and execute directly without delegation.
+
+### Dynamic System Prompt
+
+The system prompt is built from modular sections with a static/dynamic split optimized for prompt caching:
+
+```php
+use SuperAgent\Prompt\SystemPromptBuilder;
+
+$prompt = SystemPromptBuilder::create()
+    ->withTools(['bash', 'read_file', 'edit_file', 'agent'])
+    ->withMcpInstructions($mcpManager)    // inject MCP server usage instructions
+    ->withMemory($memoryContent)           // inject cross-session memory
+    ->withLanguage('zh-CN')                // set response language
+    ->withEnvironment([                    // inject runtime info
+        'Platform' => 'darwin',
+        'PHP Version' => PHP_VERSION,
+    ])
+    ->withCustomSection('project', $projectRules)
+    ->build();
+```
+
+**Section layout:**
+- Static prefix (cacheable): identity, system rules, task philosophy, actions, tool usage, tone, output efficiency
+- Cache boundary marker (`__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__`)
+- Dynamic suffix (session-specific): MCP instructions, memory, environment, language, custom sections
+
+When prompt caching is enabled, the Anthropic provider splits the system prompt at the boundary marker and applies `cache_control` to the static prefix, so it stays cached across turns while the dynamic suffix can change freely.
+
+### MCP Instruction Injection
+
+Connected MCP servers can provide instructions on how to use their tools. These instructions are captured during the MCP initialize handshake and automatically injected into the system prompt via `SystemPromptBuilder::withMcpInstructions()`.
+
+```php
+$mcpManager = MCPManager::getInstance();
+$mcpManager->connect('github-mcp');
+
+// Server instructions (if provided) are now available:
+$instructions = $mcpManager->getConnectedInstructions();
+// ['github-mcp' => 'Use search_repos to find repositories...']
+```
 
 ## 📊 Performance Optimization
 

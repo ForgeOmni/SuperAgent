@@ -19,13 +19,15 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 
 ### 高级功能
 - **智能权限系统** - 6 种权限模式，智能安全控制
-- **生命周期钩子** - 在关键节点插入自定义逻辑
+- **生命周期钩子** - 工具执行 pipeline 中的权限决策（allow/deny/ask）和输入修改
 - **上下文压缩** - 智能管理对话历史，突破 Token 限制
 - **记忆系统** - 跨会话持久化，长期学习能力
-- **多 Agent 协作** - Swarm 模式，任务分发与协同
-- **MCP 协议支持** - 接入 Model Context Protocol 生态
+- **多 Agent 协作** - Swarm 模式，内置专业 Agent（Explore、Plan、Verification、Code-Writer、Researcher、Reviewer），支持 Fork 语义共享上下文
+- **MCP 协议支持** - 接入 Model Context Protocol 生态，支持服务端指令注入 System Prompt
+- **Prompt 缓存优化** - 动态 System Prompt 组装，静态/动态边界分离实现 Prompt 缓存
 - **可观测性** - OpenTelemetry 集成，完整链路追踪
 - **文件版本控制** - 自动快照，随时回滚
+- **Claude Code 兼容** - 自动载入 Claude Code 目录下的 skills、agents 和 MCP 配置
 
 ## 📦 快速安装
 
@@ -506,6 +508,71 @@ MCPManager::getInstance()->loadFromJsonFile('/path/to/mcp-servers.json');
 ```
 
 PHP 文件可以使用任意命名空间 — 载入器会从源文件中解析 `namespace` 和 `class` 声明。Markdown 文件使用 YAML frontmatter 存放元数据，正文作为 prompt 模板。MCP 配置文件同时支持 Claude Code 格式（`mcpServers`）和 SuperAgent 格式（`servers`），支持 `${VAR}` 和 `${VAR:-default}` 环境变量展开。
+
+### Fork 语义
+
+Fork 一个继承父级完整对话上下文和 System Prompt 的子 Agent。Fork 子 Agent 共享 Prompt 缓存前缀，节省 Token。
+
+```php
+use SuperAgent\Agent\ForkContext;
+
+// 从当前 Agent 状态创建 fork 上下文
+$fork = new ForkContext(
+    parentMessages: $agent->getMessages(),
+    parentSystemPrompt: $currentSystemPrompt,
+    parentToolNames: ['bash', 'read_file', 'edit_file'],
+);
+
+// Fork 上下文传递给 AgentSpawnConfig
+$config = new AgentSpawnConfig(
+    name: 'research-fork',
+    prompt: '调查认证模块',
+    forkContext: $fork,
+);
+// $config->isFork() === true
+```
+
+Fork 子 Agent 禁止递归 fork，遵循结构化输出格式（Scope/Result/Key files/Issues），直接执行不委托。
+
+### 动态 System Prompt
+
+System Prompt 由模块化的 section 组成，静态/动态分离设计优化 Prompt 缓存：
+
+```php
+use SuperAgent\Prompt\SystemPromptBuilder;
+
+$prompt = SystemPromptBuilder::create()
+    ->withTools(['bash', 'read_file', 'edit_file', 'agent'])
+    ->withMcpInstructions($mcpManager)    // 注入 MCP 服务端使用说明
+    ->withMemory($memoryContent)           // 注入跨会话记忆
+    ->withLanguage('zh-CN')                // 设置响应语言
+    ->withEnvironment([                    // 注入运行时信息
+        'Platform' => 'darwin',
+        'PHP Version' => PHP_VERSION,
+    ])
+    ->withCustomSection('project', $projectRules)
+    ->build();
+```
+
+**Section 布局：**
+- 静态前缀（可缓存）：身份、系统规则、任务哲学、风险操作、工具使用、语气、输出效率
+- 缓存边界标记（`__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__`）
+- 动态后缀（会话特定）：MCP 指令、记忆、环境信息、语言、自定义 section
+
+启用 Prompt 缓存时，Anthropic Provider 会在边界标记处拆分 System Prompt，对静态前缀应用 `cache_control`，使其在多轮对话中保持缓存，动态后缀可自由变化。
+
+### MCP 指令注入
+
+已连接的 MCP 服务可以提供其工具的使用说明。这些说明在 MCP 初始化握手时被捕获，通过 `SystemPromptBuilder::withMcpInstructions()` 自动注入 System Prompt。
+
+```php
+$mcpManager = MCPManager::getInstance();
+$mcpManager->connect('github-mcp');
+
+// 服务端提供的使用说明现在可用：
+$instructions = $mcpManager->getConnectedInstructions();
+// ['github-mcp' => '使用 search_repos 查找仓库...']
+```
 
 ## 📊 性能优化
 

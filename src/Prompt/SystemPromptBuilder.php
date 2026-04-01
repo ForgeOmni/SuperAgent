@@ -52,6 +52,14 @@ class SystemPromptBuilder
 
     /**
      * Inject MCP server instructions into the prompt.
+     *
+     * MCP servers can provide instructions on how to use their tools.
+     * These are captured during the MCP initialize handshake and injected
+     * into the system prompt so the model knows how to use external tools.
+     *
+     * Supports two sources:
+     * 1. Connected client instructions (from MCP initialize response)
+     * 2. Static instructions from server config
      */
     public function withMcpInstructions(?MCPManager $mcpManager): self
     {
@@ -60,16 +68,27 @@ class SystemPromptBuilder
         }
 
         $instructions = [];
+
+        // Get instructions from connected clients (dynamic, from server handshake)
+        foreach ($mcpManager->getConnectedInstructions() as $name => $text) {
+            $instructions[] = "## {$name}\n{$text}";
+        }
+
+        // Fallback: check static config instructions for unconnected servers
         foreach ($mcpManager->getServers() as $name => $config) {
+            if (isset($instructions[$name])) {
+                continue; // Already have dynamic instructions from this server
+            }
             if (isset($config->config['instructions']) && $config->config['instructions'] !== '') {
-                $instructions[] = "## MCP Server: {$name}\n{$config->config['instructions']}";
+                $instructions[] = "## {$name}\n{$config->config['instructions']}";
             }
         }
 
         if (! empty($instructions)) {
             $this->dynamicSections['mcp_instructions'] = new PromptSection(
                 'mcp_instructions',
-                "# MCP Server Instructions\n\n" . implode("\n\n", $instructions),
+                "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n"
+                . implode("\n\n", $instructions),
             );
         }
 

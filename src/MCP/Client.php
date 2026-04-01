@@ -21,6 +21,7 @@ class Client
     private int $messageId = 1;
     private array $pendingRequests = [];
     private bool $initialized = false;
+    private ?string $instructions = null;
 
     public function __construct(
         private readonly ServerConfig $config,
@@ -64,6 +65,11 @@ class Client
 
         if (isset($response['capabilities'])) {
             $this->capabilities = new ServerCapabilities($response['capabilities']);
+        }
+
+        // Capture server instructions (for system prompt injection)
+        if (isset($response['instructions']) && is_string($response['instructions'])) {
+            $this->instructions = $response['instructions'];
         }
 
         // Notify initialized
@@ -386,5 +392,22 @@ class Client
     public function isInitialized(): bool
     {
         return $this->initialized;
+    }
+
+    /**
+     * Get the server's instructions (for system prompt injection).
+     * MCP servers can provide instructions on how to use their tools.
+     */
+    public function getInstructions(): ?string
+    {
+        return $this->instructions;
+    }
+
+    /**
+     * Get the server config.
+     */
+    public function getConfig(): ServerConfig
+    {
+        return $this->config;
     }
 }

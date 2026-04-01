@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Swarm;
 
+use SuperAgent\Agent\ForkContext;
 use SuperAgent\Permissions\PermissionMode;
 
 /**
@@ -28,5 +29,14 @@ class AgentSpawnConfig
         public readonly ?string $color = null,
         public readonly bool $planModeRequired = false,
         public readonly bool $readOnly = false,
+        public readonly ?ForkContext $forkContext = null,
     ) {}
+
+    /**
+     * Whether this spawn is a fork (inherits parent context).
+     */
+    public function isFork(): bool
+    {
+        return $this->forkContext !== null;
+    }
 }

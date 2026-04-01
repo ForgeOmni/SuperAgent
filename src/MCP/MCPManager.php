@@ -516,6 +516,27 @@ class MCPManager
     /**
      * Read a resource.
      */
+    /**
+     * Get MCP instructions from all connected servers.
+     * Used by SystemPromptBuilder to inject tool usage instructions
+     * into the system prompt.
+     *
+     * @return array<string, string> serverName => instructions
+     */
+    public function getConnectedInstructions(): array
+    {
+        $instructions = [];
+
+        foreach ($this->clients as $name => $client) {
+            $serverInstructions = $client->getInstructions();
+            if ($serverInstructions !== null && $serverInstructions !== '') {
+                $instructions[$name] = $serverInstructions;
+            }
+        }
+
+        return $instructions;
+    }
+
     public function readResource(string $serverName, string $uri): mixed
     {
         $client = $this->getClient($serverName);

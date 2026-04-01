@@ -316,6 +316,27 @@ Skills, agents, and MCP servers can be auto-loaded from Claude Code directories 
 
 All directory paths are scanned recursively. Non-existent paths are silently skipped. Both PHP (`.php`) and Markdown (`.md`) files are supported for skills and agents. PHP files can use any namespace. Markdown files use YAML frontmatter for metadata (name, description, allowed_tools, etc.) and the body as the prompt template — placeholders like `$ARGUMENTS` and `$LANGUAGE` are interpreted by the LLM, not substituted by the program. MCP config files support both Claude Code format (`mcpServers`) and SuperAgent format (`servers`), with `${VAR}` and `${VAR:-default}` environment variable expansion.
 
+### Prompt Caching
+
+Enable prompt caching for the Anthropic provider to reduce token costs. The `SystemPromptBuilder` uses a cache boundary marker to split the system prompt into a cacheable static prefix and a session-specific dynamic suffix:
+
+```php
+use SuperAgent\Prompt\SystemPromptBuilder;
+
+$prompt = SystemPromptBuilder::create()
+    ->withTools($toolNames)
+    ->withMcpInstructions($mcpManager)
+    ->withMemory($memory)
+    ->build();
+
+// Pass to Agent with prompt_caching enabled
+$agent = new Agent([
+    'api_key' => env('ANTHROPIC_API_KEY'),
+    'system_prompt' => $prompt,
+    'options' => ['prompt_caching' => true],
+]);
+```
+
 ## Verification
 
 ### 1️⃣ Run Health Check

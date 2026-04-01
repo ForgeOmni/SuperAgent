@@ -14,6 +14,7 @@ use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
 use SuperAgent\Messages\Usage;
 use SuperAgent\StreamingHandler;
+use SuperAgent\Prompt\SystemPromptBuilder;
 use SuperAgent\Tools\Tool;
 
 class AnthropicProvider implements LLMProvider
@@ -124,6 +125,50 @@ class AnthropicProvider implements LLMProvider
         return 'anthropic';
     }
 
+    /**
+     * Format the system prompt for the Anthropic API.
+     *
+     * If the prompt contains the cache boundary marker, splits it into
+     * static (cacheable) and dynamic blocks with appropriate cache_control.
+     * This enables prompt caching: the static prefix stays cached across
+     * turns while the dynamic suffix can change without busting the cache.
+     *
+     * @return string|array The formatted system prompt (string or block array)
+     */
+    protected function formatSystemPrompt(string $systemPrompt, bool $enableCaching): string|array
+    {
+        $boundary = SystemPromptBuilder::CACHE_BOUNDARY;
+
+        if (! $enableCaching || ! str_contains($systemPrompt, $boundary)) {
+            // No caching or no boundary marker — return as plain string
+            return $systemPrompt;
+        }
+
+        // Split at boundary marker
+        $parts = explode($boundary, $systemPrompt, 2);
+        $staticContent = trim($parts[0]);
+        $dynamicContent = trim($parts[1] ?? '');
+
+        $blocks = [];
+
+        if ($staticContent !== '') {
+            $blocks[] = [
+                'type' => 'text',
+                'text' => $staticContent,
+                'cache_control' => ['type' => 'ephemeral'],
+            ];
+        }
+
+        if ($dynamicContent !== '') {
+            $blocks[] = [
+                'type' => 'text',
+                'text' => $dynamicContent,
+            ];
+        }
+
+        return ! empty($blocks) ? $blocks : $systemPrompt;
+    }
+
     protected function buildRequestBody(
         array $messages,
         array $tools,
@@ -138,7 +183,10 @@ class AnthropicProvider implements LLMProvider
         ];
 
         if ($systemPrompt !== null) {
-            $body['system'] = $systemPrompt;
+            $body['system'] = $this->formatSystemPrompt(
+                $systemPrompt,
+                $options['prompt_caching'] ?? false,
+            );
         }
 
         if (! empty($tools)) {
