@@ -13,20 +13,29 @@ SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider suppo
 
 ### Core Features
 - **Multi-Provider Support** - Anthropic, OpenAI, Bedrock, OpenRouter and more
-- **56+ Built-in Tools** - File operations, code editing, web search, task management and more
+- **59+ Built-in Tools** - File operations, code editing, web search, task management, tool search and more
 - **Streaming Output** - Real-time responses for better user experience
 - **Cost Tracking** - Accurate token usage and cost statistics
 
 ### Advanced Features
 - **Permission System** - 6 permission modes with intelligent security control
-- **Lifecycle Hooks** - Hook into tool execution pipeline with permission decisions (allow/deny/ask) and input modification
-- **Context Compression** - Smart conversation history management to overcome token limits
-- **Memory System** - Cross-session persistence with long-term learning capabilities
-- **Multi-Agent Collaboration** - Swarm mode with specialized agents (Explore, Plan, Verification, Code-Writer, Researcher, Reviewer) and fork semantics for context-sharing sub-agents
+- **Bash Security Validator** - 23 injection/obfuscation checks (command substitution, IFS injection, Unicode whitespace, Zsh attacks, obfuscated flags, parser differentials) with read-only command classification
+- **Lifecycle Hooks** - Hook into tool execution pipeline with permission decisions (allow/deny/ask), input modification, and stop hooks pipeline (Stop → TaskCompleted → TeammateIdle)
+- **Smart Context Compaction** - Session memory compressor with semantic boundary protection (tool_use/tool_result pair preservation, min token/message expansion, 9-section structured summary), micro compressor, and conversation compressor with analysis scratchpad stripping
+- **Token Budget Continuation** - Dynamic budget-based agent loop control (90% completion threshold, diminishing returns detection) replacing fixed maxTurns
+- **Memory System** - Cross-session persistence with real-time session memory extraction (3-gate trigger: 10K init, 5K growth, 3 tool calls), KAIROS append-only daily logs, and auto-dream nightly consolidation into MEMORY.md
+- **Extended Thinking** - Adaptive/enabled/disabled modes, ultrathink keyword trigger, model capability detection (Claude 4+), budget token management
+- **Coordinator Mode** - Dual-mode architecture: Coordinator (pure synthesis/delegation with Agent/SendMessage/TaskStop) vs Worker (full execution tools), with 4-phase workflow and session mode persistence
+- **Multi-Agent Collaboration** - Swarm mode with specialized agents (Explore, Plan, Verification, Code-Writer, Researcher, Reviewer, Coordinator) and fork semantics for context-sharing sub-agents
+- **Batch Skill** - `/batch` command for parallel large-scale changes across 5–30 isolated worktree agents, each opening a PR
 - **MCP Protocol** - Integration with Model Context Protocol ecosystem, with server instruction injection into system prompt
 - **Prompt Cache Optimization** - Dynamic system prompt assembly with static/dynamic boundary for prompt caching
-- **Observability** - OpenTelemetry integration with complete tracing
-- **File History** - Version control with rollback capabilities
+- **Observability** - OpenTelemetry integration with complete tracing and per-event-type analytics sampling rate control
+- **File History** - LRU cache (100 message-level snapshots) with per-message rewind, diff stats (insertions/deletions/filesChanged), and snapshot inheritance
+- **Tool Use Summaries** - Haiku-generated git-commit-subject-style summaries after tool batches
+- **Tool Search & Deferred Loading** - Fuzzy keyword search with scoring, select mode, auto-threshold deferred loading (10% context window)
+- **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
+- **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
 
 ## 📦 Installation
@@ -724,8 +733,7 @@ MIT License - See [LICENSE](LICENSE) file for details
 - 📖 [Documentation](https://superagent-docs.example.com)
 - 💬 [Discussions](https://github.com/yourusername/superagent/discussions)
 - 🐛 [Issue Tracker](https://github.com/yourusername/superagent/issues)
-- 📧 Email: support@superagent.dev
-- 💼 Enterprise Support: enterprise@superagent.dev
+- 📧 Email: mliz1984@gmail.com
 
 ## 🗺 Roadmap
 

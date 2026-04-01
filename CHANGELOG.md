@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-04-01
+
+### Added
+
+#### High Value — Agent Quality
+- **Smart Context Compaction** - `SessionMemoryCompressor` with semantic boundary protection: tool_use/tool_result pair preservation, backward expansion to meet min token (10K) and min message (5) thresholds, compact boundary floor, 9-section structured summary prompt with analysis scratchpad stripping
+- **Token Budget Continuation** - `TokenBudgetTracker` replaces fixed maxTurns with dynamic budget-based continuation: 90% completion threshold, diminishing returns detection (3+ continuations with <500 token deltas), nudge messages for model continuation
+- **Bash Security Validator** - 23 injection/obfuscation checks: incomplete commands, jq system()/file args, obfuscated flags (ANSI-C/locale/empty quotes), shell metacharacters, dangerous variables, newlines/carriage returns, command substitution ($()/{}/backticks/Zsh patterns), input/output redirection, IFS injection, git commit substitution, /proc/*/environ, malformed tokens, backslash-escaped whitespace/operators, brace expansion, control chars, Unicode whitespace, mid-word #, Zsh dangerous commands, comment-quote desync, quoted newlines. Plus read-only command classification with 50+ safe prefixes
+- **Stop Hooks Pipeline** - 3-phase turn-end hook execution: Stop → TaskCompleted → TeammateIdle, with preventContinuation support and blocking error collection. New `TEAMMATE_IDLE` and `SUBAGENT_STOP` hook events
+
+#### Medium Value — Product Experience
+- **Coordinator Mode** - Dual-mode architecture: Coordinator (pure synthesis/delegation with only Agent/SendMessage/TaskStop tools) vs Worker (full execution tools). Includes 4-phase workflow system prompt (research→synthesis→implementation→verification), tool filtering for both modes, session mode persistence and restoration
+- **Real-time Session Memory Extraction** - `SessionMemoryExtractor` with 3-gate trigger (10K token init, 5K growth delta, 3 tool calls OR natural break), 10-section structured template, cursor tracking, extraction-in-progress guards
+- **KAIROS Daily Logs** - `DailyLog` with append-only entries at `{memoryDir}/logs/YYYY/MM/YYYY-MM-DD.md`. `AutoDreamConsolidator` enhanced with 4-phase consolidation prompt, KAIROS log ingestion as primary source, MEMORY.md size enforcement (<200 lines, <25KB)
+- **Extended Thinking** - `ThinkingConfig` with adaptive/enabled/disabled modes, ultrathink keyword detection (regex), model capability detection (Claude 4+ thinking, 4.6+ adaptive), budget token management. Integrated into `AnthropicProvider` with automatic temperature removal
+- **File History LRU Cache** - `FileSnapshotManager` enhanced with per-message LRU snapshots (100 cap), `rewindToMessage()`, `getDiffStats()` (insertions/deletions/filesChanged), snapshot inheritance for unchanged files, mtime fast-path change detection
+
+#### Lower Priority — Polish
+- **Plan V2 Interview Phase** - Iterative pair-planning workflow: explore with read-only tools, incrementally update structured plan file (context/approach/files/verification), ask user about ambiguities, periodic reminders, plan file persistence with word-slug naming
+- **Tool Use Summary Generator** - Haiku-generated git-commit-subject-style summaries after tool batches (~40 chars), non-blocking, with tool input/output truncation
+- **Remote Agent Tasks** - `RemoteAgentManager` for out-of-process agent execution via API triggers: create/list/get/run/update/delete, cron scheduling with local-to-UTC conversion, MCP connection configuration
+- **Tool Search (real implementation)** - `ToolSearchTool` replaces placeholder: select mode (`select:Name1,Name2`), keyword fuzzy search with scoring (10pt name, 12pt MCP, 4pt hint, 2pt description), CamelCase/MCP name splitting, deferred tool registry with auto-threshold (10% context window), discovered tool tracking, delta computation
+- **Analytics Sampling Rate Control** - `EventSampler` with per-event-type configurable rates, probabilistic sampling decision, sample_rate metadata enrichment. Integrated into `SimpleTracingManager.logEvent()`
+- **Batch Skill** - `/batch` command for parallel large-scale changes: 3-phase workflow (research & plan → spawn 5-30 worktree-isolated workers → track progress with PR status table), worker instructions with simplify/test/commit/PR creation
+
+### Fixed
+- `SkillsTest` — added missing `template()` to all 13 anonymous Skill subclasses, fixed API mismatches (`list()` → `getAll()`, `listByCategory()` → `getByCategory()`, `examples()` → `example()`, parameters array format)
+- `Phase3PermissionsTest` — updated assertion for new security validator classification (`high` → `critical` for shell metacharacter commands)
+
+### Changed
+- `ContextManager` now registers `SessionMemoryCompressor` at priority 5 between micro (1) and conversation (10) when session memory is enabled
+- `ConversationCompressor` upgraded to 9-section CC summary prompt with `<analysis>` scratchpad + `<summary>` extraction via `formatCompactSummary()`
+- `BashCommandClassifier` now runs `BashSecurityValidator` as Phase 1 before existing classification, adds `securityCheckId` field and `isReadOnly()` delegation
+- `QueryEngine` integrates `TokenBudgetTracker` for dynamic continuation and `StopHooksPipeline` for turn-end hooks
+- `HookEvent` enum gains `TEAMMATE_IDLE` and `SUBAGENT_STOP` events
+- `AnthropicProvider.buildRequestBody()` supports `thinking` parameter with auto temperature removal
+- `FileSnapshotManager` gains `MessageSnapshot`, `FileBackup`, `DiffStats` types and LRU eviction
+- `AutoDreamConsolidator` reads KAIROS daily logs as primary source, enforces MEMORY.md size limits
+- `SkillManager` registers `BatchSkill` as built-in skill
+
 ## [0.5.2] - 2026-04-01
 
 ### Added

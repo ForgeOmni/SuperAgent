@@ -316,6 +316,87 @@ Skills, agents, and MCP servers can be auto-loaded from Claude Code directories 
 
 All directory paths are scanned recursively. Non-existent paths are silently skipped. Both PHP (`.php`) and Markdown (`.md`) files are supported for skills and agents. PHP files can use any namespace. Markdown files use YAML frontmatter for metadata (name, description, allowed_tools, etc.) and the body as the prompt template — placeholders like `$ARGUMENTS` and `$LANGUAGE` are interpreted by the LLM, not substituted by the program. MCP config files support both Claude Code format (`mcpServers`) and SuperAgent format (`servers`), with `${VAR}` and `${VAR:-default}` environment variable expansion.
 
+### Extended Thinking
+
+Enable extended thinking for deeper reasoning on complex tasks:
+
+```php
+use SuperAgent\Thinking\ThinkingConfig;
+
+// Adaptive thinking (model decides when to think)
+$agent = new Agent([
+    'options' => ['thinking' => ThinkingConfig::adaptive()],
+]);
+
+// Fixed budget thinking
+$agent = new Agent([
+    'options' => ['thinking' => ThinkingConfig::enabled(budgetTokens: 20000)],
+]);
+
+// Ultrathink keyword in user messages auto-boosts to max budget
+// Just include "ultrathink" in your prompt
+```
+
+Set via environment: `MAX_THINKING_TOKENS=20000`
+
+### Coordinator Mode
+
+Enable dual-mode architecture for complex multi-agent orchestration:
+
+```env
+# Enable coordinator mode
+CLAUDE_CODE_COORDINATOR_MODE=1
+```
+
+The coordinator only has Agent/SendMessage/TaskStop tools and delegates all work to isolated worker agents.
+
+### Batch Skill
+
+Use `/batch` to parallelize large-scale changes:
+
+```bash
+# In the agent CLI
+/batch migrate from react to vue
+/batch replace all uses of lodash with native equivalents
+```
+
+Requires a git repository. Spawns 5–30 worktree-isolated agents, each creating a PR.
+
+### Remote Agent Tasks
+
+Configure out-of-process agents with cron scheduling:
+
+```php
+use SuperAgent\Remote\RemoteAgentManager;
+
+$manager = new RemoteAgentManager(
+    apiBaseUrl: 'https://api.anthropic.com',
+    apiKey: env('ANTHROPIC_API_KEY'),
+);
+
+$manager->create(
+    name: 'nightly-review',
+    prompt: 'Review all PRs merged today',
+    cronExpression: '0 2 * * *', // 2 AM UTC daily
+    gitRepoUrl: 'https://github.com/org/repo',
+);
+```
+
+### Analytics Sampling
+
+Configure per-event-type sampling rates:
+
+```php
+use SuperAgent\Telemetry\EventSampler;
+
+$sampler = new EventSampler([
+    'api_query' => ['sample_rate' => 0.1],     // Log 10% of API queries
+    'tool_execution' => ['sample_rate' => 0.5], // Log 50% of tool executions
+]);
+
+$tracingManager->setEventSampler($sampler);
+```
+
 ### Prompt Caching
 
 Enable prompt caching for the Anthropic provider to reduce token costs. The `SystemPromptBuilder` uses a cache boundary marker to split the system prompt into a cacheable static prefix and a session-specific dynamic suffix:
@@ -602,8 +683,7 @@ server {
 ### 💼 Technical Support
 
 - Community support: [GitHub Discussions](https://github.com/yourusername/superagent/discussions)
-- Email support: support@superagent.dev
-- Enterprise support: enterprise@superagent.dev
+- Email support: mliz1984@gmail.com
 - Discord server: [Join our community](https://discord.gg/superagent)
 
 ### 🔍 Debugging Tips

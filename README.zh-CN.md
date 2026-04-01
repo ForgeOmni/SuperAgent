@@ -13,20 +13,29 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 
 ### 基础功能
 - **多模型支持** - 支持 Anthropic Claude、OpenAI GPT、AWS Bedrock、OpenRouter 等主流模型
-- **56+ 内置工具** - 文件操作、代码编辑、Web 搜索、任务管理等开箱即用
+- **59+ 内置工具** - 文件操作、代码编辑、Web 搜索、任务管理、工具搜索等开箱即用
 - **流式输出** - 实时响应，提供更好的用户体验
 - **成本追踪** - 精确统计 Token 使用量和费用
 
 ### 高级功能
 - **智能权限系统** - 6 种权限模式，智能安全控制
-- **生命周期钩子** - 工具执行 pipeline 中的权限决策（allow/deny/ask）和输入修改
-- **上下文压缩** - 智能管理对话历史，突破 Token 限制
-- **记忆系统** - 跨会话持久化，长期学习能力
-- **多 Agent 协作** - Swarm 模式，内置专业 Agent（Explore、Plan、Verification、Code-Writer、Researcher、Reviewer），支持 Fork 语义共享上下文
+- **Bash 安全验证器** - 23 项注入/混淆检查（命令替换、IFS 注入、Unicode 空白、Zsh 攻击、混淆 flag、解析差异），附带只读命令分类
+- **生命周期钩子** - 工具执行 pipeline 中的权限决策（allow/deny/ask）、输入修改，及停止钩子管道（Stop → TaskCompleted → TeammateIdle）
+- **智能上下文压缩** - 带语义边界保护的会话记忆压缩器（tool_use/tool_result 对保护、最小 token/消息扩展、9 段式结构化摘要），微压缩器，以及带分析草稿剥离的对话压缩器
+- **Token 预算续跑逻辑** - 动态预算驱动的 Agent 循环控制（90% 完成阈值、收益递减检测），替代固定 maxTurns
+- **记忆系统** - 跨会话持久化，含实时会话记忆提取（三重门控：10K 初始化、5K 增长、3 次工具调用）、KAIROS 追加式每日日志、及夜间 auto-dream 合并到 MEMORY.md
+- **Extended Thinking** - 自适应/启用/禁用三种模式，ultrathink 关键词触发，模型能力检测（Claude 4+），思考 token 预算管理
+- **Coordinator 模式** - 双模式架构：Coordinator（纯综合委派，仅 Agent/SendMessage/TaskStop）vs Worker（全部执行工具），4 阶段工作流及会话模式持久化
+- **多 Agent 协作** - Swarm 模式，内置专业 Agent（Explore、Plan、Verification、Code-Writer、Researcher、Reviewer、Coordinator），支持 Fork 语义共享上下文
+- **Batch 技能** - `/batch` 命令，将大任务拆分为 5-30 个独立工作单元，在隔离 worktree 中并行执行并各自提 PR
 - **MCP 协议支持** - 接入 Model Context Protocol 生态，支持服务端指令注入 System Prompt
 - **Prompt 缓存优化** - 动态 System Prompt 组装，静态/动态边界分离实现 Prompt 缓存
-- **可观测性** - OpenTelemetry 集成，完整链路追踪
-- **文件版本控制** - 自动快照，随时回滚
+- **可观测性** - OpenTelemetry 集成，完整链路追踪，及按事件类型动态调整分析采样率
+- **文件版本控制** - LRU 缓存（100 个消息级快照），按消息回退，diff 统计（insertions/deletions/filesChanged），快照继承
+- **工具使用摘要** - Haiku 生成 git-commit-subject 风格的工具批次执行摘要
+- **工具搜索与延迟加载** - 模糊关键词搜索带评分、select 模式、自动阈值延迟加载（10% 上下文窗口）
+- **远程 Agent 任务** - 通过 API 触发器实现进程外 Agent 执行，支持 cron 调度
+- **Plan V2 面试阶段** - 迭代式结对规划，结构化计划文件，周期性提醒，执行前用户审批
 - **Claude Code 兼容** - 自动载入 Claude Code 目录下的 skills、agents 和 MCP 配置
 
 ## 📦 快速安装
@@ -682,8 +691,7 @@ $logger->info('Agent 查询完成', [
 - 📖 [文档中心](https://superagent-docs.example.com)
 - 💬 [社区讨论](https://github.com/yourusername/superagent/discussions)
 - 🐛 [问题反馈](https://github.com/yourusername/superagent/issues)
-- 📧 邮箱: support@superagent.dev
-- 💼 商业支持: enterprise@superagent.dev
+- 📧 邮箱: mliz1984@gmail.com
 
 ## 🗺 路线图
 
