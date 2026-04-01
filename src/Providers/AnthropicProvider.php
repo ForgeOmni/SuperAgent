@@ -15,6 +15,7 @@ use SuperAgent\Messages\Message;
 use SuperAgent\Messages\Usage;
 use SuperAgent\StreamingHandler;
 use SuperAgent\Prompt\SystemPromptBuilder;
+use SuperAgent\Thinking\ThinkingConfig;
 use SuperAgent\Tools\Tool;
 
 class AnthropicProvider implements LLMProvider
@@ -197,6 +198,27 @@ class AnthropicProvider implements LLMProvider
         foreach (['temperature', 'top_p', 'top_k', 'stop_sequences', 'metadata'] as $key) {
             if (isset($options[$key])) {
                 $body[$key] = $options[$key];
+            }
+        }
+
+        // Extended thinking support
+        $thinkingConfig = $options['thinking'] ?? null;
+        if ($thinkingConfig instanceof ThinkingConfig) {
+            $thinkingParam = $thinkingConfig->toApiParameter($body['model']);
+            if ($thinkingParam !== null) {
+                $body['thinking'] = $thinkingParam;
+                // When thinking is enabled, temperature must not be set (API requirement)
+                unset($body['temperature']);
+            }
+        } elseif (isset($options['thinking_budget_tokens']) && (int) $options['thinking_budget_tokens'] > 0) {
+            // Shorthand: pass thinking_budget_tokens directly
+            $model = $body['model'];
+            if (ThinkingConfig::modelSupportsThinking($model)) {
+                $body['thinking'] = [
+                    'type' => 'enabled',
+                    'budget_tokens' => (int) $options['thinking_budget_tokens'],
+                ];
+                unset($body['temperature']);
             }
         }
 

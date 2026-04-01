@@ -9,6 +9,7 @@ use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use SuperAgent\LLM\ProviderInterface;
 use SuperAgent\Memory\Storage\MemoryStorageInterface;
+use SuperAgent\Memory\DailyLog;
 
 class AutoDreamConsolidator
 {
@@ -18,15 +19,23 @@ class AutoDreamConsolidator
     private const SCAN_THROTTLE_KEY = 'memory_autodream_scan_throttle';
     
     private SimpleCache $cache;
-    
+    private ?DailyLog $dailyLog = null;
+
+    /** File-based consolidation lock (mtime IS lastConsolidatedAt) */
+    private ?string $lockFile = null;
+
     public function __construct(
         private MemoryStorageInterface $storage,
         private ProviderInterface $provider,
         private MemoryConfig $config,
         private LoggerInterface $logger = new NullLogger(),
         ?SimpleCache $cache = null,
+        ?DailyLog $dailyLog = null,
     ) {
-        $this->cache = $cache ?? new SimpleCache($config->getBasePath(getcwd()));
+        $basePath = $config->getBasePath(getcwd());
+        $this->cache = $cache ?? new SimpleCache($basePath);
+        $this->dailyLog = $dailyLog ?? new DailyLog($basePath, $logger);
+        $this->lockFile = $basePath . '/.consolidate-lock';
     }
     
     /**
@@ -151,22 +160,41 @@ class AutoDreamConsolidator
     }
     
     /**
-     * Phase 2: Gather - Look for new information
+     * Phase 2: Gather - Look for new information from KAIROS daily logs.
+     * Priority: daily logs > existing memories that drifted > transcript search
      */
     private function gather(): array
     {
         $this->logger->debug('AutoDream Phase 2: Gather');
-        
+
         $newInfo = [];
-        
-        // Get recent daily logs
-        $logs = $this->storage->getDailyLogs(7);
-        
-        foreach ($logs as $log) {
-            $extracted = $this->extractFromLog($log['content']);
+
+        // Primary source: KAIROS daily logs since last consolidation
+        $lastRun = $this->cache->get(self::LAST_RUN_KEY);
+        $since = $lastRun ? Carbon::parse($lastRun) : Carbon::now()->subDays(7);
+
+        $dailyLogs = $this->dailyLog->getLogsSince($since);
+
+        foreach ($dailyLogs as $date => $content) {
+            if (empty(trim($content))) {
+                continue;
+            }
+            $extracted = $this->extractFromLog($content);
             $newInfo = array_merge($newInfo, $extracted);
+            $this->logger->debug("Extracted from daily log {$date}", [
+                'entries_found' => count($extracted),
+            ]);
         }
-        
+
+        // Fallback: storage daily logs (legacy format)
+        if (empty($newInfo)) {
+            $legacyLogs = $this->storage->getDailyLogs(7);
+            foreach ($legacyLogs as $log) {
+                $extracted = $this->extractFromLog($log['content'] ?? '');
+                $newInfo = array_merge($newInfo, $extracted);
+            }
+        }
+
         return $newInfo;
     }
     
@@ -206,15 +234,16 @@ class AutoDreamConsolidator
     }
     
     /**
-     * Phase 4: Prune - Update index and remove stale entries
+     * Phase 4: Prune - Update MEMORY.md index and remove stale entries.
+     * Enforces: < 200 lines, < 25KB for MEMORY.md
      */
     private function prune(array $memories): void
     {
         $this->logger->debug('AutoDream Phase 4: Prune');
-        
+
         // Remove expired memories
         $cutoffDate = Carbon::now()->subDays($this->config->expireMemoryDays);
-        
+
         foreach ($memories as $memory) {
             if ($memory->createdAt < $cutoffDate && $memory->isStale($this->config->expireMemoryDays)) {
                 $this->logger->info('Removing expired memory', [
@@ -224,35 +253,114 @@ class AutoDreamConsolidator
                 $this->storage->delete($memory->id);
             }
         }
-        
+
         // Resolve contradictions
         $this->resolveContradictions($memories);
-        
-        // Update index
+
+        // Update index with size enforcement
         $this->storage->updateIndex();
+
+        // Enforce MEMORY.md size limits
+        $this->enforceEntrypointLimits();
+    }
+
+    /**
+     * Enforce MEMORY.md size limits (< 200 lines, < 25KB).
+     */
+    private function enforceEntrypointLimits(): void
+    {
+        $basePath = $this->config->getBasePath(getcwd());
+        $entrypoint = $basePath . '/MEMORY.md';
+
+        if (!file_exists($entrypoint)) {
+            return;
+        }
+
+        $content = file_get_contents($entrypoint);
+        if ($content === false) {
+            return;
+        }
+
+        $lines = explode("\n", $content);
+        $bytes = strlen($content);
+        $modified = false;
+
+        // Enforce line limit
+        if (count($lines) > $this->config->maxEntrypointLines) {
+            $lines = array_slice($lines, 0, $this->config->maxEntrypointLines);
+            $lines[] = '';
+            $lines[] = '<!-- Truncated: MEMORY.md exceeded ' . $this->config->maxEntrypointLines . ' lines -->';
+            $modified = true;
+        }
+
+        // Enforce byte limit
+        $content = implode("\n", $lines);
+        if (strlen($content) > $this->config->maxEntrypointBytes) {
+            $content = substr($content, 0, $this->config->maxEntrypointBytes);
+            $content .= "\n\n<!-- Truncated: MEMORY.md exceeded " . $this->config->maxEntrypointBytes . " bytes -->";
+            $modified = true;
+        }
+
+        if ($modified) {
+            file_put_contents($entrypoint, $content);
+            $this->logger->info('MEMORY.md truncated to fit size limits');
+        }
     }
     
     /**
-     * Extract information from a daily log
+     * Get the 4-phase consolidation prompt (from CC auto-dream).
+     */
+    public function getConsolidationPrompt(string $memoryDir): string
+    {
+        return <<<PROMPT
+## Phase 1 — Orient
+- Read MEMORY.md (entrypoint index)
+- Skim existing topic files
+- Review logs/ subdirectory for daily entries
+
+## Phase 2 — Gather recent signal
+Priority order:
+1. Daily logs (logs/YYYY/MM/YYYY-MM-DD.md) — primary source
+2. Existing memories that have drifted from current state
+3. Codebase contradictions (facts in memory that code disproves)
+
+## Phase 3 — Consolidate
+- Merge new signal into existing topic files
+- Convert relative dates to absolute (e.g., "yesterday" → "2026-03-31")
+- Delete contradicted facts
+- Create new topic files for genuinely new subjects
+
+## Phase 4 — Prune and index
+- Update MEMORY.md: < {$this->config->maxEntrypointLines} lines, < {$this->config->maxEntrypointBytes} bytes
+- Format: - [Title](file.md) — one-line hook (~150 chars)
+- Remove stale pointers, demote verbose entries
+- Resolve contradictions (newer wins unless explicitly overridden)
+PROMPT;
+    }
+
+    /**
+     * Extract information from a daily log using the 4-phase prompt.
      */
     private function extractFromLog(string $content): array
     {
         $prompt = <<<PROMPT
-Extract any important information from this daily log that should be consolidated into long-term memory.
+Extract important information from this daily log that should be consolidated into long-term memory.
 
 LOG CONTENT:
 {$content}
 
-Focus on:
-- User preferences and feedback
-- Project decisions and context
-- External references
-- Patterns that should be remembered
+Priority:
+- User corrections and preferences (feedback type)
+- Project decisions and context (project type)
+- Facts about user's role and goals (user type)
+- Pointers to external systems (reference type)
+- Convert relative dates to absolute dates
+- Skip ephemeral details (in-progress state, debugging steps)
 
 Return extracted memories in the format:
 TYPE: [user|feedback|project|reference]
 NAME: [short name]
-CONTENT: [memory content]
+CONTENT: [memory content with Why: and How to apply: for feedback/project types]
 ---
 PROMPT;
         
