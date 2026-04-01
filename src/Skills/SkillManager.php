@@ -255,6 +255,7 @@ class SkillManager
         $this->register(new BuiltinSkills\DocumentSkill());
         $this->register(new BuiltinSkills\ReviewSkill());
         $this->register(new BuiltinSkills\DebugSkill());
+        $this->register(new BuiltinSkills\BatchSkill());
     }
 
     /**
