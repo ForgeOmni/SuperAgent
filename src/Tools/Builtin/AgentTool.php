@@ -6,6 +6,7 @@ namespace SuperAgent\Tools\Builtin;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use SuperAgent\Agent\AgentManager;
 use SuperAgent\Permissions\PermissionMode;
 use SuperAgent\Swarm\AgentSpawnConfig;
 use SuperAgent\Swarm\AgentStatus;
@@ -63,7 +64,7 @@ class AgentTool extends Tool
                 'subagent_type' => [
                     'type' => 'string',
                     'description' => 'The type of specialized agent to use for this task',
-                    'enum' => ['general-purpose', 'code-writer', 'researcher', 'reviewer'],
+                    'enum' => AgentManager::getInstance()->getNames(),
                 ],
                 'name' => [
                     'type' => 'string',
@@ -284,29 +285,23 @@ class AgentTool extends Tool
     }
     
     /**
-     * Get system prompt for agent type.
+     * Get system prompt for agent type via AgentManager.
      */
     private function getSystemPromptForType(string $type): ?string
     {
-        return match ($type) {
-            'code-writer' => 'You are a code-writing specialist. Focus on implementing clean, efficient, and well-tested code.',
-            'researcher' => 'You are a research specialist. Focus on gathering information, analyzing data, and providing comprehensive findings.',
-            'reviewer' => 'You are a code review specialist. Focus on identifying issues, suggesting improvements, and ensuring code quality.',
-            default => null,
-        };
+        $definition = AgentManager::getInstance()->get($type);
+
+        return $definition?->systemPrompt();
     }
-    
+
     /**
-     * Get allowed tools for agent type.
+     * Get allowed tools for agent type via AgentManager.
      */
     private function getAllowedToolsForType(string $type): ?array
     {
-        return match ($type) {
-            'code-writer' => ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob'],
-            'researcher' => ['read_file', 'bash', 'grep', 'glob', 'web_search', 'web_fetch'],
-            'reviewer' => ['read_file', 'grep', 'glob', 'bash'],
-            default => null, // All tools allowed
-        };
+        $definition = AgentManager::getInstance()->get($type);
+
+        return $definition?->allowedTools();
     }
     
     /**

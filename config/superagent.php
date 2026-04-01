@@ -59,4 +59,36 @@ return [
 
     'denied_tools' => [],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Skills Configuration
+    |--------------------------------------------------------------------------
+    | Directories to auto-load skill files from. All paths are scanned
+    | recursively. Supports absolute paths or paths relative to base_path().
+    | Non-existent paths are silently skipped.
+    */
+    'skills' => [
+        'paths' => [
+            '.claude/skills',
+            // app_path('SuperAgent/Skills'),
+            // '/absolute/path/to/custom/skills',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Agents Configuration
+    |--------------------------------------------------------------------------
+    | Directories to auto-load agent definition files from. All paths are
+    | scanned recursively. Supports absolute paths or paths relative to
+    | base_path(). Non-existent paths are silently skipped.
+    */
+    'agents' => [
+        'paths' => [
+            '.claude/agents',
+            // app_path('SuperAgent/Agents'),
+            // '/absolute/path/to/custom/agents',
+        ],
+    ],
+
 ];

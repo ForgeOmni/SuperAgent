@@ -20,6 +20,7 @@ class SkillManager
     private function __construct()
     {
         $this->loadBuiltinSkills();
+        $this->loadConfiguredPaths();
     }
 
     /**
@@ -154,6 +155,70 @@ class SkillManager
     }
 
     /**
+     * Load skills from all configured paths.
+     * Default config value is ['.claude/skills'].
+     */
+    private function loadConfiguredPaths(): void
+    {
+        $paths = $this->config('superagent.skills.paths', []);
+
+        foreach ($paths as $path) {
+            $resolved = $this->resolvePath($path);
+            $this->loadFromDirectory($resolved, recursive: true);
+        }
+    }
+
+    /**
+     * Resolve a path that may be relative to base_path().
+     */
+    private function resolvePath(string $path): string
+    {
+        // Already absolute
+        if (str_starts_with($path, '/') || str_starts_with($path, DIRECTORY_SEPARATOR)) {
+            return $path;
+        }
+
+        return $this->resolveBasePath($path);
+    }
+
+    /**
+     * Get base path, using Laravel's base_path() if available, otherwise cwd.
+     */
+    private function resolveBasePath(string $relative): string
+    {
+        if ($this->isLaravelAvailable()) {
+            return base_path($relative);
+        }
+
+        return getcwd() . '/' . $relative;
+    }
+
+    /**
+     * Read a config value, using Laravel's config() if available.
+     */
+    private function config(string $key, mixed $default = null): mixed
+    {
+        if ($this->isLaravelAvailable()) {
+            return config($key, $default);
+        }
+
+        return $default;
+    }
+
+    /**
+     * Check if Laravel is fully booted.
+     */
+    private function isLaravelAvailable(): bool
+    {
+        try {
+            return function_exists('app')
+                && app()->bound('config');
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
      * Load built-in skills.
      */
     private function loadBuiltinSkills(): void
@@ -168,26 +233,117 @@ class SkillManager
 
     /**
      * Load skills from a directory.
+     *
+     * Scans for *Skill.php files, parses their namespace from the source,
+     * requires the file, and registers the Skill instance.
+     * Works with any directory and namespace.
      */
-    public function loadFromDirectory(string $directory): void
+    public function loadFromDirectory(string $directory, bool $recursive = false): void
     {
         if (!is_dir($directory)) {
             return;
         }
-        
-        $files = glob($directory . '/*Skill.php');
-        
-        foreach ($files as $file) {
-            $className = 'App\\SuperAgent\\Skills\\' . basename($file, '.php');
-            
-            if (class_exists($className)) {
-                $skill = new $className();
-                
-                if ($skill instanceof Skill) {
-                    $this->register($skill);
-                }
+
+        $pattern = $recursive
+            ? $this->globRecursive($directory, '*Skill.php')
+            : glob($directory . '/*Skill.php');
+
+        foreach ($pattern as $file) {
+            $className = $this->resolveClassNameFromFile($file);
+
+            if ($className === null) {
+                continue;
             }
+
+            // Require the file if the class isn't already loaded
+            if (!class_exists($className, false)) {
+                require_once $file;
+            }
+
+            if (!class_exists($className, false)) {
+                continue;
+            }
+
+            if (!is_subclass_of($className, Skill::class)) {
+                continue;
+            }
+
+            $skill = new $className();
+            $this->register($skill);
         }
+    }
+
+    /**
+     * Load a single skill file from any path.
+     */
+    public function loadFromFile(string $filePath): void
+    {
+        if (!is_file($filePath)) {
+            throw new \RuntimeException("Skill file not found: {$filePath}");
+        }
+
+        $className = $this->resolveClassNameFromFile($filePath);
+
+        if ($className === null) {
+            throw new \RuntimeException("Could not resolve class name from file: {$filePath}");
+        }
+
+        if (!class_exists($className, false)) {
+            require_once $filePath;
+        }
+
+        if (!class_exists($className, false)) {
+            throw new \RuntimeException("Class {$className} not found after loading: {$filePath}");
+        }
+
+        if (!is_subclass_of($className, Skill::class)) {
+            throw new \RuntimeException("Class {$className} is not a Skill subclass");
+        }
+
+        $this->register(new $className());
+    }
+
+    /**
+     * Resolve the fully qualified class name by parsing the PHP file.
+     */
+    private function resolveClassNameFromFile(string $filePath): ?string
+    {
+        $contents = file_get_contents($filePath);
+        if ($contents === false) {
+            return null;
+        }
+
+        $namespace = null;
+        $class = null;
+
+        if (preg_match('/^\s*namespace\s+([^;]+)\s*;/m', $contents, $m)) {
+            $namespace = trim($m[1]);
+        }
+
+        if (preg_match('/^\s*class\s+(\w+)/m', $contents, $m)) {
+            $class = $m[1];
+        }
+
+        if ($class === null) {
+            return null;
+        }
+
+        return $namespace ? $namespace . '\\' . $class : $class;
+    }
+
+    /**
+     * Recursively glob for files matching a pattern.
+     */
+    private function globRecursive(string $directory, string $pattern): array
+    {
+        $files = glob($directory . '/' . $pattern) ?: [];
+
+        $dirs = glob($directory . '/*', GLOB_ONLYDIR | GLOB_NOSORT) ?: [];
+        foreach ($dirs as $dir) {
+            $files = array_merge($files, $this->globRecursive($dir, $pattern));
+        }
+
+        return $files;
     }
 
     /**

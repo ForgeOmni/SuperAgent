@@ -289,10 +289,38 @@ return [
 
 ```bash
 # 创建目录结构
-mkdir -p app/SuperAgent/{Tools,Skills,Plugins}
+mkdir -p app/SuperAgent/{Tools,Skills,Plugins,Agents}
 
 # 工具会自动被发现和注册
 ```
+
+### Skill 和 Agent 自动载入
+
+Skills 和 Agent 定义文件会从 `config/superagent.php` 中配置的路径自动载入，所有路径递归扫描。不存在的路径会自动跳过。
+
+```php
+// config/superagent.php
+'skills' => [
+    'paths' => [
+        '.claude/skills',                       // 默认值，相对项目根目录
+        app_path('SuperAgent/Skills'),
+    ],
+],
+'agents' => [
+    'paths' => [
+        '.claude/agents',                       // 默认值，相对项目根目录
+        app_path('SuperAgent/Agents'),
+    ],
+],
+```
+
+创建默认目录：
+
+```bash
+mkdir -p .claude/skills .claude/agents
+```
+
+将 `*Skill.php` 和 `*Agent.php` 文件放入任意已配置的目录即可自动发现，不限制命名空间。
 
 ## 验证安装
 

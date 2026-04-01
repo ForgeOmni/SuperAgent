@@ -435,6 +435,80 @@ PROMPT;
 }
 ```
 
+### Create Agent Definition
+
+```php
+namespace App\SuperAgent\Agents;
+
+use SuperAgent\Agent\AgentDefinition;
+
+class TranslatorAgent extends AgentDefinition
+{
+    public function name(): string
+    {
+        return 'translator';
+    }
+
+    public function description(): string
+    {
+        return 'Translation specialist for multilingual content';
+    }
+
+    public function systemPrompt(): ?string
+    {
+        return 'You are a translation specialist. Translate content accurately while preserving tone and context.';
+    }
+
+    public function allowedTools(): ?array
+    {
+        return ['read_file', 'write_file', 'edit_file'];
+    }
+
+    public function category(): string
+    {
+        return 'content';
+    }
+}
+```
+
+### Auto-Loading Skills & Agents
+
+Skills and agent definitions can be auto-loaded from configured directories. All paths are scanned recursively. Non-existent paths are silently skipped.
+
+```php
+// config/superagent.php
+'skills' => [
+    'paths' => [
+        '.claude/skills',                       // default, relative to project root
+        app_path('SuperAgent/Skills'),           // Laravel app directory
+        '/absolute/path/to/shared/skills',       // absolute path
+    ],
+],
+'agents' => [
+    'paths' => [
+        '.claude/agents',                       // default, relative to project root
+        app_path('SuperAgent/Agents'),           // Laravel app directory
+    ],
+],
+```
+
+You can also load manually at runtime:
+
+```php
+use SuperAgent\Skills\SkillManager;
+use SuperAgent\Agent\AgentManager;
+
+// Load from any directory (recursive)
+SkillManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
+AgentManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
+
+// Load a single file
+SkillManager::getInstance()->loadFromFile('/path/to/MySkill.php');
+AgentManager::getInstance()->loadFromFile('/path/to/MyAgent.php');
+```
+
+Files can use any namespace — the loader parses the `namespace` and `class` declarations directly from the source file.
+
 ## 📊 Performance Optimization
 
 ### Cache Strategy

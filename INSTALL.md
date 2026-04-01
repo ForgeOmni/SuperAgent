@@ -289,10 +289,38 @@ Create custom tool directories:
 
 ```bash
 # Create directory structure
-mkdir -p app/SuperAgent/{Tools,Skills,Plugins}
+mkdir -p app/SuperAgent/{Tools,Skills,Plugins,Agents}
 
 # Tools will be automatically discovered and registered
 ```
+
+### Skill & Agent Auto-Loading
+
+Skills and agent definitions are automatically loaded from paths configured in `config/superagent.php`. All paths are scanned recursively. Non-existent paths are silently skipped.
+
+```php
+// config/superagent.php
+'skills' => [
+    'paths' => [
+        '.claude/skills',                       // default, relative to project root
+        app_path('SuperAgent/Skills'),
+    ],
+],
+'agents' => [
+    'paths' => [
+        '.claude/agents',                       // default, relative to project root
+        app_path('SuperAgent/Agents'),
+    ],
+],
+```
+
+Create the default directories:
+
+```bash
+mkdir -p .claude/skills .claude/agents
+```
+
+Place your `*Skill.php` and `*Agent.php` files in any configured directory — they will be discovered automatically regardless of namespace.
 
 ## Verification
 

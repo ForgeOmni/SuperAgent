@@ -391,6 +391,80 @@ PROMPT;
 }
 ```
 
+### 创建 Agent 定义
+
+```php
+namespace App\SuperAgent\Agents;
+
+use SuperAgent\Agent\AgentDefinition;
+
+class TranslatorAgent extends AgentDefinition
+{
+    public function name(): string
+    {
+        return 'translator';
+    }
+
+    public function description(): string
+    {
+        return '多语言翻译专家';
+    }
+
+    public function systemPrompt(): ?string
+    {
+        return '你是一个翻译专家，在翻译内容时保持准确性，同时保留原文的语气和上下文。';
+    }
+
+    public function allowedTools(): ?array
+    {
+        return ['read_file', 'write_file', 'edit_file'];
+    }
+
+    public function category(): string
+    {
+        return 'content';
+    }
+}
+```
+
+### 自动载入 Skills 和 Agents
+
+Skills 和 Agent 定义文件可以从配置的目录中自动载入，所有路径会递归扫描。不存在的路径会自动跳过。
+
+```php
+// config/superagent.php
+'skills' => [
+    'paths' => [
+        '.claude/skills',                       // 默认值，相对项目根目录
+        app_path('SuperAgent/Skills'),           // Laravel app 目录
+        '/absolute/path/to/shared/skills',       // 绝对路径
+    ],
+],
+'agents' => [
+    'paths' => [
+        '.claude/agents',                       // 默认值，相对项目根目录
+        app_path('SuperAgent/Agents'),           // Laravel app 目录
+    ],
+],
+```
+
+也可以在运行时手动载入：
+
+```php
+use SuperAgent\Skills\SkillManager;
+use SuperAgent\Agent\AgentManager;
+
+// 从任意目录载入（递归）
+SkillManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
+AgentManager::getInstance()->loadFromDirectory('/any/path', recursive: true);
+
+// 载入单个文件
+SkillManager::getInstance()->loadFromFile('/path/to/MySkill.php');
+AgentManager::getInstance()->loadFromFile('/path/to/MyAgent.php');
+```
+
+文件可以使用任意命名空间 — 载入器会直接从源文件中解析 `namespace` 和 `class` 声明。
+
 ## 📊 性能优化
 
 ### 缓存配置
