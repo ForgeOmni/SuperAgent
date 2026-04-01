@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-04-01
+
+### Added
+- **AgentManager** - New registry and loader for agent definitions, mirroring SkillManager's architecture
+  - `AgentDefinition` abstract base class for defining agent types
+  - 4 built-in agent types extracted from AgentTool (general-purpose, code-writer, researcher, reviewer)
+  - `loadFromDirectory()` and `loadFromFile()` for loading from any path
+- **Markdown file support** - Both skills and agents can now be defined as `.md` files with YAML frontmatter
+  - `MarkdownSkill` and `MarkdownAgentDefinition` classes
+  - `MarkdownFrontmatter` parser (uses ext-yaml/symfony-yaml if available, otherwise built-in parser)
+  - All frontmatter fields preserved and accessible via `getMeta()`
+  - Placeholders (`$ARGUMENTS`, `$LANGUAGE`, etc.) left for LLM interpretation, not program substitution
+- **Claude Code compatibility** - `load_claude_code` config flag for all three modules
+  - Skills: auto-loads from `.claude/commands/` and `.claude/skills/`
+  - Agents: auto-loads from `.claude/agents/`
+  - MCP: auto-loads from `.mcp.json` (project) and `~/.claude.json` (user), with `${VAR}` and `${VAR:-default}` environment variable expansion
+- **MCP custom paths** - `mcp.paths` config for loading additional MCP server JSON config files
+- **`loadFromJsonFile()`** on MCPManager for loading MCP configs from any JSON file
+
+### Changed
+- `SkillManager::loadFromDirectory()` now parses namespace from source files instead of hardcoding `App\SuperAgent\Skills\`
+- `SkillManager::parseArguments()` now collects non key=value text into `arguments` key for `$ARGUMENTS` substitution
+- `AgentTool` now resolves agent types via `AgentManager` instead of hardcoded match statements
+- Default paths (`.claude/skills`, `.claude/agents`) removed from config — replaced by `load_claude_code` toggle
+- `MCPManager::loadConfiguration()` now accepts both SuperAgent format (`servers`) and Claude Code format (`mcpServers`)
+
 ## [0.5.1] - 2026-03-31
 
 ### Added
