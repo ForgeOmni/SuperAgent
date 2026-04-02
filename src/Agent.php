@@ -6,6 +6,8 @@ use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\Contracts\ToolInterface;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\Message;
+use SuperAgent\Bridge\BridgeFactory;
+use SuperAgent\Config\ExperimentalFeatures;
 use SuperAgent\Providers\AnthropicProvider;
 use SuperAgent\Providers\BedrockProvider;
 use SuperAgent\Providers\OllamaProvider;
@@ -199,7 +201,9 @@ class Agent
     protected function resolveProvider(array $config): LLMProvider
     {
         if (isset($config['provider']) && $config['provider'] instanceof LLMProvider) {
-            return $config['provider'];
+            $provider = $config['provider'];
+
+            return $this->maybeWrapWithBridge($provider, $config);
         }
 
         $providerName = $config['provider'] ?? static::config('superagent.default_provider', 'anthropic');
@@ -216,7 +220,7 @@ class Agent
         // This allows named instances like 'anthropic-proxy' with driver 'anthropic'.
         $driver = $providerConfig['driver'] ?? $providerName;
 
-        return match ($driver) {
+        $provider = match ($driver) {
             'anthropic' => new AnthropicProvider($providerConfig),
             'openai' => new OpenAIProvider($providerConfig),
             'openrouter' => new OpenRouterProvider($providerConfig),
@@ -224,6 +228,52 @@ class Agent
             'ollama' => new OllamaProvider($providerConfig),
             default => throw new \InvalidArgumentException("Unsupported provider driver: {$driver}"),
         };
+
+        return $this->maybeWrapWithBridge($provider, $config);
+    }
+
+    /**
+     * Wrap a non-Anthropic provider with Bridge enhancement if enabled.
+     *
+     * Priority (highest first):
+     *  1. $config['bridge_mode'] = true/false  — explicit per-instance override
+     *  2. config('superagent.bridge.auto_enhance') — config file setting
+     *  3. ExperimentalFeatures::enabled('bridge_mode') — feature flag
+     *
+     * Anthropic providers are never wrapped (they natively have these optimizations).
+     */
+    protected function maybeWrapWithBridge(LLMProvider $provider, array $config): LLMProvider
+    {
+        // Anthropic never needs bridge enhancement
+        if ($provider->name() === 'anthropic') {
+            return $provider;
+        }
+
+        // Already wrapped
+        if ($provider instanceof \SuperAgent\Bridge\EnhancedProvider) {
+            return $provider;
+        }
+
+        // Resolve bridge_mode: explicit param > config auto_enhance > feature flag
+        // Default is OFF to avoid surprising behavior — must be explicitly enabled.
+        if (array_key_exists('bridge_mode', $config)) {
+            $enabled = (bool) $config['bridge_mode'];
+        } else {
+            $autoEnhance = static::config('superagent.bridge.auto_enhance');
+            if ($autoEnhance !== null) {
+                $enabled = (bool) $autoEnhance;
+            } elseif (function_exists('config') && function_exists('app') && app()->bound('config')) {
+                $enabled = ExperimentalFeatures::enabled('bridge_mode');
+            } else {
+                $enabled = false; // No config available — default off
+            }
+        }
+
+        if (! $enabled) {
+            return $provider;
+        }
+
+        return BridgeFactory::wrapProvider($provider);
     }
 
     protected static function config(string $key, mixed $default = null): mixed

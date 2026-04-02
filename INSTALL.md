@@ -451,8 +451,7 @@ When enabled, additional safety instructions are injected into the system prompt
     'cached_microcompact' => env('SUPERAGENT_EXP_CACHED_MICROCOMPACT', true),
     'team_memory' => env('SUPERAGENT_EXP_TEAM_MEMORY', true),
     'bash_classifier' => env('SUPERAGENT_EXP_BASH_CLASSIFIER', true),
-    'voice_mode' => env('SUPERAGENT_EXP_VOICE_MODE', false),   // NOT IMPLEMENTED
-    'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),  // NOT IMPLEMENTED
+    'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),  // Enhance non-Anthropic models
 ],
 ```
 
@@ -472,6 +471,37 @@ When enabled, additional safety instructions are injected into the system prompt
 | `plan_interview` | Plan V2 interview phase workflow |
 | `extract_memories` | Session memory extraction defaults |
 | `compaction_reminders` | Auto-compact defaults in CompressionConfig |
+| `bridge_mode` | Bridge enhancement for non-Anthropic providers |
+
+### Bridge Mode Configuration
+
+When `bridge_mode` is enabled, non-Anthropic providers are automatically enhanced with CC optimization mechanisms. Anthropic/Claude is never wrapped — it natively has these optimizations.
+
+```php
+// config/superagent.php
+'bridge' => [
+    'auto_enhance' => env('SUPERAGENT_BRIDGE_AUTO_ENHANCE', null), // null = use bridge_mode flag
+    'provider' => env('SUPERAGENT_BRIDGE_PROVIDER', 'openai'),
+    'api_keys' => array_filter(explode(',', env('SUPERAGENT_BRIDGE_API_KEYS', ''))),
+    'max_tokens' => (int) env('SUPERAGENT_BRIDGE_MAX_TOKENS', 16384),
+    'enhancers' => [
+        'system_prompt'      => env('SUPERAGENT_BRIDGE_ENH_SYSTEM_PROMPT', true),
+        'context_compaction' => env('SUPERAGENT_BRIDGE_ENH_COMPACTION', true),
+        'bash_security'      => env('SUPERAGENT_BRIDGE_ENH_BASH_SECURITY', true),
+        'memory_injection'   => env('SUPERAGENT_BRIDGE_ENH_MEMORY', false),
+        'tool_schema'        => env('SUPERAGENT_BRIDGE_ENH_TOOL_SCHEMA', true),
+        'tool_summary'       => env('SUPERAGENT_BRIDGE_ENH_TOOL_SUMMARY', false),
+        'token_budget'       => env('SUPERAGENT_BRIDGE_ENH_TOKEN_BUDGET', false),
+        'cost_tracking'      => env('SUPERAGENT_BRIDGE_ENH_COST_TRACKING', true),
+    ],
+],
+```
+
+**Priority control** (highest first):
+1. Per-instance: `new Agent(['provider' => 'openai', 'bridge_mode' => true])`
+2. Config: `SUPERAGENT_BRIDGE_AUTO_ENHANCE=true`
+3. Feature flag: `SUPERAGENT_EXP_BRIDGE_MODE=true`
+4. Default: off
 | `cached_microcompact` | Micro-compact defaults in CompressionConfig |
 
 The `ExperimentalFeatures` class falls back to env vars when running outside a Laravel application (e.g. in unit tests).

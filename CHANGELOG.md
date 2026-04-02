@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-02
+
+### Added
+- **Bridge Mode** — Provider-agnostic enhancement proxy that injects Claude Code optimization mechanisms into non-Anthropic models (OpenAI, Bedrock, Ollama, OpenRouter). Anthropic/Claude is never wrapped — it natively has these optimizations
+  - `EnhancedProvider` — decorator implementing `LLMProvider` that wraps any non-Anthropic provider with an ordered enhancer pipeline (pre-request modification + post-response enhancement)
+  - `EnhancerInterface` — contract for all enhancers: `enhanceRequest()` modifies messages/tools/systemPrompt/options by reference; `enhanceResponse()` post-processes `AssistantMessage`
+  - `BridgeFactory` — factory with `createProvider()` (for HTTP proxy) and `wrapProvider()` (for SDK auto-enhance), resolves backend provider + enhancer pipeline from config
+  - `BridgeToolProxy` — lightweight `ToolInterface` wrapper for external tool definitions; `execute()` throws (bridge never executes tools — the client does)
+- **8 Bridge Enhancers** (each independently toggleable via `bridge.enhancers.*` config):
+  - `SystemPromptEnhancer` (P0) — injects CC's optimized system prompt sections (task philosophy, tool usage, output efficiency, security guardrails) via `SystemPromptBuilder`; prepends to client's existing prompt with `# Client Instructions` separator; result cached across calls
+  - `ContextCompactionEnhancer` (P0) — truncates old tool result content exceeding threshold (default 2000 chars), strips thinking blocks from old assistant messages; preserves recent N messages (default 10) untouched
+  - `BashSecurityEnhancer` (P0) — intercepts bash/shell tool_use blocks in responses, validates commands through `BashSecurityValidator` (23-point check); dangerous commands replaced with `[Bridge Security]` text warning including check ID and reason
+  - `MemoryInjectionEnhancer` (P1) — loads cross-session memories from `.claude/memory/` directory, parses YAML frontmatter (name/type/description), injects as `# Memories` section in system prompt
+  - `ToolSchemaEnhancer` (P1) — fixes JSON Schema issues (empty `properties: []` → `properties: {}`), applies configurable description enhancements from `bridge.tool_enhancements` map
+  - `ToolSummaryEnhancer` (P1) — rule-based truncation of verbose old tool results (keeps first N lines + char count indicator); preserves recent results unmodified
+  - `TokenBudgetEnhancer` (P2) — tracks output tokens across requests, detects diminishing returns (3+ continuations with <500 token deltas), injects metadata hints (`bridge_diminishing_returns`, `bridge_total_output_tokens`)
+  - `CostTrackingEnhancer` (P2) — per-request cost calculation via `CostCalculator`, USD budget enforcement (throws `SuperAgentException` on exhaustion), injects cost metadata (`bridge_request_cost_usd`, `bridge_total_cost_usd`)
+- **Bridge HTTP Proxy** — OpenAI-compatible API endpoints for tools like Codex CLI:
+  - `POST /v1/chat/completions` — accepts OpenAI Chat Completions format, returns SSE stream or JSON
+  - `POST /v1/responses` — accepts OpenAI Responses API format (Codex CLI), returns SSE events or JSON
+  - `GET /v1/models` — returns available model list
+  - `BridgeAuth` middleware — Bearer token authentication against `bridge.api_keys` config (empty = no auth for dev)
+  - `BridgeServiceProvider` — conditional route registration when `bridge_mode` feature flag is enabled
+- **Bridge Format Adapters**:
+  - `OpenAIMessageAdapter` — bidirectional conversion between OpenAI Chat Completions format and internal `Message` objects; extracts system messages as `$systemPrompt`; handles `role: "tool"` → `ToolResultMessage`, `tool_calls` → `ContentBlock::toolUse()`; generates OpenAI completion response format with usage
+  - `ResponsesApiAdapter` — converts Responses API `input[]` items (`message`, `function_call`, `function_call_output`) to internal messages; generates response output items and SSE stream events (`response.created`, `response.output_item.added`, `response.content_part.delta`, `response.function_call_arguments.delta`, `response.completed`)
+  - `OpenAIStreamTranslator` — translates `AssistantMessage` into OpenAI Chat Completions SSE chunks (`data: {...}\n\n`); handles role declaration, text deltas, indexed tool_calls, finish_reason, usage, `[DONE]` sentinel
+- **SDK Auto-Enhance** — `Agent::maybeWrapWithBridge()` automatically wraps non-Anthropic providers with `EnhancedProvider` based on 3-level priority:
+  1. Per-instance: `new Agent(['provider' => 'openai', 'bridge_mode' => true/false])`
+  2. Config: `bridge.auto_enhance` setting
+  3. Feature flag: `ExperimentalFeatures::enabled('bridge_mode')`
+  4. Default: off (conservative — must be explicitly enabled)
+- **Bridge configuration section** in `config/superagent.php`:
+  - `bridge.auto_enhance` — global SDK auto-enhance toggle (null = use feature flag)
+  - `bridge.provider` — backend provider for HTTP proxy mode
+  - `bridge.api_keys` — comma-separated auth keys for HTTP endpoints
+  - `bridge.model_map` — inbound→backend model name mapping
+  - `bridge.max_tokens` — default max output tokens
+  - `bridge.enhancers.*` — per-enhancer on/off toggles
+- **Provider configs** — added `openai`, `openrouter`, `ollama` provider configurations in `config/superagent.php` (previously only `anthropic` was configured)
+- **AssistantMessage::$metadata** — new `array` property for provider/bridge metadata (used by `CostTrackingEnhancer`, `TokenBudgetEnhancer`, `OpenRouterProvider`)
+
+### Changed
+- `bridge_mode` experimental feature flag — changed from `[NOT IMPLEMENTED]` placeholder to fully functional Bridge Mode
+- `SuperAgentServiceProvider::boot()` — conditionally registers `BridgeServiceProvider` when `bridge_mode` is enabled
+- `Agent::resolveProvider()` — now calls `maybeWrapWithBridge()` to auto-enhance non-Anthropic providers
+
+### Removed
+- `voice_mode` experimental feature flag — removed from config, `ExperimentalFeatures` env map, and all documentation (README, README.zh-CN, INSTALL, INSTALL.zh-CN)
+
+### Tests
+- 51 new Bridge unit tests (135 assertions):
+  - `EnhancedProviderTest` — decorator pipeline, enhancer ordering, response modification
+  - `OpenAIMessageAdapterTest` — system prompt extraction, tool_calls conversion, round-trip, completion response format
+  - `ResponsesApiAdapterTest` — string/item input, function_call/output items, mixed conversation, stream events
+  - `BashSecurityEnhancerTest` — safe passthrough, command substitution blocking, non-bash tool passthrough
+  - `ContextCompactionEnhancerTest` — short conversation skip, old result truncation, recent preservation
+  - `SystemPromptEnhancerTest` — injection, prepend, caching (Orchestra Testbench)
+  - `ToolSchemaEnhancerTest` — empty properties fix, non-empty preservation (Orchestra Testbench)
+  - `ToolSummaryEnhancerTest` — short passthrough, old truncation, recent preservation
+  - `CostTrackingEnhancerTest` — metadata tracking, accumulation, budget enforcement, reset
+  - `BridgeToolProxyTest` — properties, execute throws
+  - `OpenAIStreamTranslatorTest` — text/tool_call translation, model/id propagation, usage in finish chunk
+
 ## [0.5.7] - 2026-04-01
 
 ### Added
@@ -26,8 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `cached_microcompact` — gate micro-compact default in CompressionConfig
   - `team_memory` — gate `team_create`/`team_delete` tools in BuiltinToolRegistry
   - `bash_classifier` — gate classifier-assisted bash permission checks in PermissionEngine
-  - `voice_mode` — [NOT IMPLEMENTED] placeholder for future voice input
-  - `bridge_mode` — [NOT IMPLEMENTED] placeholder for future IDE remote-control bridge
+  - `bridge_mode` — placeholder for Bridge Mode (implemented in v0.6.0)
 - **ExperimentalFeatures env fallback** — `ExperimentalFeatures::enabled()` now falls back to env vars (via `$_ENV`/`getenv()`) when running outside a Laravel application (e.g. unit tests without a booted container), with `configAvailable()` detection
 
 ### Changed

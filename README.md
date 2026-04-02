@@ -32,7 +32,8 @@ SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider suppo
 - **Prompt Cache Optimization** - Dynamic system prompt assembly with static/dynamic boundary for prompt caching
 - **Telemetry Master Switch** - Hierarchical telemetry control: master `telemetry.enabled` gate plus per-subsystem toggles (logging, metrics, events, cost_tracking) — when master is off, no data is collected regardless of individual settings
 - **Security Prompt Guardrails** - Optional safety instructions injected into the system prompt to restrict security-related operations; configurable via `security_guardrails` flag
-- **Experimental Feature Flags** - 15 granular feature flags (with master switch) to gate experimental capabilities: ultrathink, token budget, prompt cache detection, builtin agents, verification agent, plan interview, agent triggers (local/remote), memory extraction, compaction reminders, cached microcompact, team memory, bash classifier, voice mode, bridge mode
+- **Bridge Mode** - Provider-agnostic enhancement proxy that injects CC optimization mechanisms (system prompt enhancement, context compaction, bash security, memory injection, tool schema optimization, cost tracking) into non-Anthropic models (OpenAI, Bedrock, Ollama, OpenRouter). Supports both HTTP proxy mode (for Codex CLI etc.) and SDK auto-enhance mode with 3-level priority control (`bridge_mode` param > config `auto_enhance` > feature flag)
+- **Experimental Feature Flags** - 15 granular feature flags (with master switch) to gate experimental capabilities: ultrathink, token budget, prompt cache detection, builtin agents, verification agent, plan interview, agent triggers (local/remote), memory extraction, compaction reminders, cached microcompact, team memory, bash classifier, bridge mode
 - **Observability** - OpenTelemetry integration with complete tracing and per-event-type analytics sampling rate control
 - **File History** - LRU cache (100 message-level snapshots) with per-message rewind, diff stats (insertions/deletions/filesChanged), and snapshot inheritance
 - **Tool Use Summaries** - Haiku-generated git-commit-subject-style summaries after tool batches
@@ -349,11 +350,68 @@ SUPERAGENT_EXP_COMPACTION_REMINDERS=true  # Smart reminders around context compa
 SUPERAGENT_EXP_CACHED_MICROCOMPACT=true   # Cached microcompact state
 SUPERAGENT_EXP_TEAM_MEMORY=true           # Team-memory files (shared memory)
 SUPERAGENT_EXP_BASH_CLASSIFIER=true       # Classifier-assisted bash permissions
-SUPERAGENT_EXP_VOICE_MODE=false           # [NOT IMPLEMENTED] Voice input
-SUPERAGENT_EXP_BRIDGE_MODE=false          # [NOT IMPLEMENTED] IDE remote-control bridge
+SUPERAGENT_EXP_BRIDGE_MODE=false          # Bridge mode: enhance non-Anthropic models with CC optimizations
 ```
 
 The `ExperimentalFeatures` class also falls back to env vars when running outside a Laravel application (e.g. in unit tests), so feature flags work consistently across all environments.
+
+### Bridge Mode (Enhance Non-Anthropic Models)
+
+Bridge mode injects Claude Code's optimization mechanisms into non-Anthropic models (OpenAI, Bedrock, Ollama, OpenRouter). Anthropic/Claude does NOT need this — it natively has these optimizations.
+
+**SDK auto-enhance mode** — automatically wraps non-Anthropic providers:
+
+```php
+use SuperAgent\Agent;
+
+// Enable per-instance
+$agent = new Agent(['provider' => 'openai', 'bridge_mode' => true]);
+
+// Force disable even when config is on
+$agent = new Agent(['provider' => 'openai', 'bridge_mode' => false]);
+
+// Use config default (bridge.auto_enhance or bridge_mode feature flag)
+$agent = new Agent(['provider' => 'openai']);
+
+// Anthropic is never wrapped regardless of settings
+$agent = new Agent(['provider' => 'anthropic', 'bridge_mode' => true]); // still raw
+```
+
+**HTTP proxy mode** — expose OpenAI-compatible endpoints for tools like Codex CLI:
+
+```env
+SUPERAGENT_EXP_BRIDGE_MODE=true
+SUPERAGENT_BRIDGE_PROVIDER=openai
+```
+
+```bash
+# Codex CLI connects to SuperAgent Bridge
+export OPENAI_BASE_URL=http://localhost:8000/v1
+codex "fix the login bug"
+```
+
+Endpoints: `POST /v1/chat/completions`, `POST /v1/responses`, `GET /v1/models`
+
+**Available enhancers** (each independently toggleable):
+
+| Enhancer | Config Key | Default | Effect |
+|----------|-----------|---------|--------|
+| System Prompt | `system_prompt` | on | Inject CC task/tool/style instructions |
+| Context Compaction | `context_compaction` | on | Truncate old tool results, strip thinking blocks |
+| Bash Security | `bash_security` | on | 23-point security validation on shell commands |
+| Memory Injection | `memory_injection` | off | Inject cross-session memories into system prompt |
+| Tool Schema | `tool_schema` | on | Fix JSON Schema issues, enhance descriptions |
+| Tool Summary | `tool_summary` | off | Compress verbose old tool results |
+| Token Budget | `token_budget` | off | Track token usage, detect diminishing returns |
+| Cost Tracking | `cost_tracking` | on | Per-request cost calculation, budget enforcement |
+
+```env
+SUPERAGENT_BRIDGE_ENH_SYSTEM_PROMPT=true
+SUPERAGENT_BRIDGE_ENH_COMPACTION=true
+SUPERAGENT_BRIDGE_ENH_BASH_SECURITY=true
+SUPERAGENT_BRIDGE_ENH_MEMORY=false
+SUPERAGENT_BRIDGE_ENH_COST_TRACKING=true
+```
 
 ## 🔧 CLI Commands
 

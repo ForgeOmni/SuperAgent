@@ -31,7 +31,30 @@ return [
             'max_retries' => 3,
         ],
 
-        // Future: openai, bedrock, vertex, etc.
+        'openai' => [
+            'api_key' => env('OPENAI_API_KEY'),
+            'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com'),
+            'model' => env('OPENAI_MODEL', 'gpt-4o'),
+            'max_tokens' => (int) env('OPENAI_MAX_TOKENS', 4096),
+            'max_retries' => 3,
+            'organization' => env('OPENAI_ORGANIZATION'),
+        ],
+
+        'openrouter' => [
+            'api_key' => env('OPENROUTER_API_KEY'),
+            'base_url' => env('OPENROUTER_BASE_URL', 'https://openrouter.ai'),
+            'model' => env('OPENROUTER_MODEL', 'anthropic/claude-3-5-sonnet'),
+            'max_tokens' => (int) env('OPENROUTER_MAX_TOKENS', 4096),
+            'max_retries' => 3,
+        ],
+
+        'ollama' => [
+            'api_key' => env('OLLAMA_API_KEY', 'ollama'),
+            'base_url' => env('OLLAMA_BASE_URL', 'http://localhost:11434'),
+            'model' => env('OLLAMA_MODEL', 'llama3'),
+            'max_tokens' => (int) env('OLLAMA_MAX_TOKENS', 4096),
+            'max_retries' => 2,
+        ],
     ],
 
     /*
@@ -155,11 +178,63 @@ return [
         // Classifier-assisted bash permission decisions (BashCommandClassifier)
         'bash_classifier' => env('SUPERAGENT_EXP_BASH_CLASSIFIER', true),
 
-        // [NOT IMPLEMENTED] Push-to-talk voice input and dictation
-        'voice_mode' => env('SUPERAGENT_EXP_VOICE_MODE', false),
-
-        // [NOT IMPLEMENTED] IDE remote-control bridge (VS Code, JetBrains)
+        // Bridge mode: proxy non-Anthropic models through CC optimization pipeline
         'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Bridge Configuration
+    |--------------------------------------------------------------------------
+    | When bridge_mode is enabled, SuperAgent exposes OpenAI-compatible API
+    | endpoints that apply CC optimization mechanisms (system prompt enhancement,
+    | context compaction, bash security, etc.) to non-Anthropic models.
+    |
+    | Anthropic/Claude does NOT need this — it natively has these optimizations.
+    */
+    'bridge' => [
+        // Route prefix for bridge endpoints
+        'prefix' => env('SUPERAGENT_BRIDGE_PREFIX', ''),
+
+        // API keys for bridge authentication (comma-separated)
+        // Empty = no auth required (development only)
+        'api_keys' => array_filter(explode(',', env('SUPERAGENT_BRIDGE_API_KEYS', ''))),
+
+        // Auto-enhance non-Anthropic providers when using the SDK directly.
+        // When true, Agent(['provider' => 'openai']) will automatically wrap
+        // with EnhancedProvider. Can be overridden per-instance:
+        //   new Agent(['provider' => 'openai', 'bridge_mode' => false])  // force off
+        //   new Agent(['provider' => 'openai', 'bridge_mode' => true])   // force on
+        // When null, falls back to the bridge_mode experimental feature flag.
+        'auto_enhance' => env('SUPERAGENT_BRIDGE_AUTO_ENHANCE', null),
+
+        // Backend provider: 'openai', 'openrouter', 'bedrock', 'ollama'
+        // NOT 'anthropic' — Claude already has these optimizations natively
+        'provider' => env('SUPERAGENT_BRIDGE_PROVIDER', 'openai'),
+
+        // Default model when none specified in request
+        'default_model' => env('SUPERAGENT_BRIDGE_MODEL', 'gpt-4o'),
+
+        // Model name mapping (inbound model → backend model)
+        // Models not in this map are passed through unchanged
+        'model_map' => [
+            // 'gpt-4o' => 'some-other-model',
+        ],
+
+        // Max output tokens
+        'max_tokens' => (int) env('SUPERAGENT_BRIDGE_MAX_TOKENS', 16384),
+
+        // Enhancer toggles — each can be independently enabled/disabled
+        'enhancers' => [
+            'system_prompt'      => env('SUPERAGENT_BRIDGE_ENH_SYSTEM_PROMPT', true),
+            'context_compaction' => env('SUPERAGENT_BRIDGE_ENH_COMPACTION', true),
+            'bash_security'      => env('SUPERAGENT_BRIDGE_ENH_BASH_SECURITY', true),
+            'memory_injection'   => env('SUPERAGENT_BRIDGE_ENH_MEMORY', false),
+            'tool_schema'        => env('SUPERAGENT_BRIDGE_ENH_TOOL_SCHEMA', true),
+            'tool_summary'       => env('SUPERAGENT_BRIDGE_ENH_TOOL_SUMMARY', false),
+            'token_budget'       => env('SUPERAGENT_BRIDGE_ENH_TOKEN_BUDGET', false),
+            'cost_tracking'      => env('SUPERAGENT_BRIDGE_ENH_COST_TRACKING', true),
+        ],
     ],
 
     /*

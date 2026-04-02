@@ -32,7 +32,8 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Prompt 缓存优化** - 动态 System Prompt 组装，静态/动态边界分离实现 Prompt 缓存
 - **遥测主开关** - 分层遥测控制：`telemetry.enabled` 总开关加子系统独立开关（logging、metrics、events、cost_tracking）— 总开关关闭时，无论子系统设置如何，均不采集数据
 - **安全 Prompt 护栏** - 可选的安全指令注入 System Prompt，限制安全相关操作；通过 `security_guardrails` 开关控制
-- **实验性 Feature Flags** - 15 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、语音模式、IDE 桥接模式
+- **Bridge 模式** - Provider 无关的增强代理，将 CC 优化机制（系统提示词增强、上下文压缩、Bash 安全验证、记忆注入、工具 Schema 优化、成本追踪）注入到非 Anthropic 模型（OpenAI、Bedrock、Ollama、OpenRouter）。支持 HTTP 代理模式（供 Codex CLI 等工具使用）和 SDK 自动增强模式，三级优先级控制（`bridge_mode` 参数 > 配置文件 `auto_enhance` > feature flag）
+- **实验性 Feature Flags** - 15 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、Bridge 模式
 - **可观测性** - OpenTelemetry 集成，完整链路追踪，及按事件类型动态调整分析采样率
 - **文件版本控制** - LRU 缓存（100 个消息级快照），按消息回退，diff 统计（insertions/deletions/filesChanged），快照继承
 - **工具使用摘要** - Haiku 生成 git-commit-subject 风格的工具批次执行摘要
@@ -264,6 +265,64 @@ $config = ServerConfig::stdio(
 
 $mcpManager->registerServer($config);
 $mcpManager->connect('github-mcp');
+```
+
+### Bridge 模式（增强非 Anthropic 模型）
+
+Bridge 模式将 Claude Code 的优化机制注入到非 Anthropic 模型（OpenAI、Bedrock、Ollama、OpenRouter）。Anthropic/Claude 不需要此功能——它原生已有这些优化。
+
+**SDK 自动增强模式** —— 自动包装非 Anthropic Provider：
+
+```php
+use SuperAgent\Agent;
+
+// 实例级强制开启
+$agent = new Agent(['provider' => 'openai', 'bridge_mode' => true]);
+
+// 实例级强制关闭（即使配置文件开启）
+$agent = new Agent(['provider' => 'openai', 'bridge_mode' => false]);
+
+// 使用配置默认值（bridge.auto_enhance 或 bridge_mode feature flag）
+$agent = new Agent(['provider' => 'openai']);
+
+// Anthropic 永远不被包装，无论设置如何
+$agent = new Agent(['provider' => 'anthropic', 'bridge_mode' => true]); // 仍为原始 Provider
+```
+
+**HTTP 代理模式** —— 暴露 OpenAI 兼容端点供 Codex CLI 等工具使用：
+
+```env
+SUPERAGENT_EXP_BRIDGE_MODE=true
+SUPERAGENT_BRIDGE_PROVIDER=openai
+```
+
+```bash
+# Codex CLI 连接到 SuperAgent Bridge
+export OPENAI_BASE_URL=http://localhost:8000/v1
+codex "修复登录 bug"
+```
+
+端点：`POST /v1/chat/completions`、`POST /v1/responses`、`GET /v1/models`
+
+**可用增强器**（每个可独立开关）：
+
+| 增强器 | 配置键 | 默认 | 效果 |
+|-------|-------|------|------|
+| 系统提示词 | `system_prompt` | 开 | 注入 CC 任务/工具/风格指令 |
+| 上下文压缩 | `context_compaction` | 开 | 截断旧工具结果，剥离 thinking 块 |
+| Bash 安全 | `bash_security` | 开 | 23 项安全检查拦截危险命令 |
+| 记忆注入 | `memory_injection` | 关 | 将跨会话记忆注入系统提示词 |
+| 工具 Schema | `tool_schema` | 开 | 修复 JSON Schema 问题，增强描述 |
+| 工具摘要 | `tool_summary` | 关 | 压缩冗长的旧工具结果 |
+| Token 预算 | `token_budget` | 关 | 追踪 Token 用量，检测收益递减 |
+| 成本追踪 | `cost_tracking` | 开 | 每请求成本计算，预算控制 |
+
+```env
+SUPERAGENT_BRIDGE_ENH_SYSTEM_PROMPT=true
+SUPERAGENT_BRIDGE_ENH_COMPACTION=true
+SUPERAGENT_BRIDGE_ENH_BASH_SECURITY=true
+SUPERAGENT_BRIDGE_ENH_MEMORY=false
+SUPERAGENT_BRIDGE_ENH_COST_TRACKING=true
 ```
 
 ## 🔧 命令行工具
@@ -631,8 +690,7 @@ SUPERAGENT_EXP_COMPACTION_REMINDERS=true  # 上下文压缩智能提醒
 SUPERAGENT_EXP_CACHED_MICROCOMPACT=true   # 缓存微压缩状态
 SUPERAGENT_EXP_TEAM_MEMORY=true           # 团队记忆文件（共享记忆）
 SUPERAGENT_EXP_BASH_CLASSIFIER=true       # 分类器辅助 bash 权限决策
-SUPERAGENT_EXP_VOICE_MODE=false           # [未实现] 语音输入
-SUPERAGENT_EXP_BRIDGE_MODE=false          # [未实现] IDE 远程控制桥接
+SUPERAGENT_EXP_BRIDGE_MODE=false          # Bridge 模式：用 CC 优化机制增强非 Anthropic 模型
 ```
 
 `ExperimentalFeatures` 类在 Laravel 应用外运行时（如单元测试）会回退到环境变量，确保 feature flag 在所有环境中一致工作。

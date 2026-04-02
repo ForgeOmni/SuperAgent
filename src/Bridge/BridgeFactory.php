@@ -26,9 +26,20 @@ class BridgeFactory
     public static function createProvider(?string $requestedModel = null): EnhancedProvider
     {
         $inner = self::resolveInnerProvider($requestedModel);
+
+        return self::wrapProvider($inner);
+    }
+
+    /**
+     * Wrap an existing provider with the enhancer pipeline.
+     *
+     * Used by Agent::maybeWrapWithBridge() to enhance SDK-created providers.
+     */
+    public static function wrapProvider(LLMProvider $provider): EnhancedProvider
+    {
         $enhancers = self::resolveEnhancers();
 
-        return new EnhancedProvider($inner, $enhancers);
+        return new EnhancedProvider($provider, $enhancers);
     }
 
     /**
@@ -36,12 +47,12 @@ class BridgeFactory
      */
     private static function resolveInnerProvider(?string $requestedModel): LLMProvider
     {
-        $providerName = config('superagent.bridge.provider', 'openai');
-        $providerConfig = config("superagent.providers.{$providerName}", []);
+        $providerName = self::cfg('superagent.bridge.provider', 'openai');
+        $providerConfig = self::cfg("superagent.providers.{$providerName}", []);
 
         // Apply model mapping
         if ($requestedModel !== null) {
-            $modelMap = config('superagent.bridge.model_map', []);
+            $modelMap = self::cfg('superagent.bridge.model_map', []);
             $resolvedModel = $modelMap[$requestedModel] ?? $requestedModel;
             $providerConfig['model'] = $resolvedModel;
         }
@@ -66,7 +77,7 @@ class BridgeFactory
     private static function resolveEnhancers(): array
     {
         $enhancers = [];
-        $config = config('superagent.bridge.enhancers', []);
+        $config = self::cfg('superagent.bridge.enhancers', []);
 
         // Each enhancer is loaded only if its config flag is true.
         // Order matters: system prompt first, then compaction, then security, etc.
@@ -89,5 +100,17 @@ class BridgeFactory
         }
 
         return $enhancers;
+    }
+
+    /**
+     * Safe config() wrapper that returns the default when Laravel isn't booted.
+     */
+    private static function cfg(string $key, mixed $default = null): mixed
+    {
+        if (function_exists('config') && function_exists('app') && app()->bound('config')) {
+            return config($key, $default);
+        }
+
+        return $default;
     }
 }

@@ -98,7 +98,6 @@ class ExperimentalFeatures
             'cached_microcompact' => 'SUPERAGENT_EXP_CACHED_MICROCOMPACT',
             'team_memory' => 'SUPERAGENT_EXP_TEAM_MEMORY',
             'bash_classifier' => 'SUPERAGENT_EXP_BASH_CLASSIFIER',
-            'voice_mode' => 'SUPERAGENT_EXP_VOICE_MODE',
             'bridge_mode' => 'SUPERAGENT_EXP_BRIDGE_MODE',
         ];
 

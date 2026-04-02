@@ -14,6 +14,9 @@ class AssistantMessage extends Message
 
     public ?Usage $usage = null;
 
+    /** @var array<string, mixed> Provider/bridge metadata */
+    public array $metadata = [];
+
     public function __construct()
     {
         parent::__construct(Role::Assistant);

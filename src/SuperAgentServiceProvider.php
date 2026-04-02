@@ -24,5 +24,10 @@ class SuperAgentServiceProvider extends ServiceProvider
                 __DIR__ . '/../config/superagent.php' => config_path('superagent.php'),
             ], 'superagent-config');
         }
+
+        // Register Bridge routes when bridge_mode is enabled
+        if (\SuperAgent\Config\ExperimentalFeatures::enabled('bridge_mode')) {
+            $this->app->register(\SuperAgent\Bridge\BridgeServiceProvider::class);
+        }
     }
 }
