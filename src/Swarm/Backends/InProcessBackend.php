@@ -15,6 +15,8 @@ use SuperAgent\Swarm\AgentStatus;
 use SuperAgent\Swarm\AgentTask;
 use SuperAgent\Swarm\BackendType;
 use SuperAgent\Swarm\TeamContext;
+use SuperAgent\Swarm\ParallelAgentCoordinator;
+use SuperAgent\Swarm\TeamMember;
 
 /**
  * In-process backend for running agents in the same PHP process.
@@ -27,16 +29,19 @@ class InProcessBackend implements BackendInterface
     private array $fibers = [];
     private LoggerInterface $logger;
     private ?TeamContext $teamContext = null;
+    private ParallelAgentCoordinator $coordinator;
     
     public function __construct(
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
+        $this->coordinator = ParallelAgentCoordinator::getInstance($this->logger);
     }
     
     public function setTeamContext(TeamContext $context): void
     {
         $this->teamContext = $context;
+        $this->coordinator->registerTeam($context);
     }
     
     public function getType(): BackendType
@@ -100,7 +105,7 @@ class InProcessBackend implements BackendInterface
             
             // Store agent and task info
             $this->agents[$agentId] = $agent;
-            $this->tasks[$taskId] = new AgentTask(
+            $task = new AgentTask(
                 taskId: $taskId,
                 agentId: $agentId,
                 agentName: $config->name,
@@ -108,6 +113,15 @@ class InProcessBackend implements BackendInterface
                 backend: BackendType::IN_PROCESS,
                 teamName: $config->teamName,
                 startedAt: new \DateTimeImmutable(),
+            );
+            $this->tasks[$taskId] = $task;
+            
+            // Register with coordinator for progress tracking
+            $this->coordinator->registerAgent(
+                $agentId,
+                $config->name,
+                $config->teamName,
+                $task
             );
             
             // Start agent execution in background if requested
@@ -208,6 +222,9 @@ class InProcessBackend implements BackendInterface
     
     public function cleanup(string $agentId): void
     {
+        // Unregister from coordinator
+        $this->coordinator->unregisterAgent($agentId);
+        
         // Remove agent
         unset($this->agents[$agentId]);
         unset($this->fibers[$agentId]);
@@ -248,20 +265,47 @@ class InProcessBackend implements BackendInterface
         // Create a fiber for concurrent execution
         $fiber = new \Fiber(function() use ($agent, $agentId, $prompt) {
             try {
+                // Get progress tracker
+                $tracker = $this->coordinator->getTracker($agentId);
+                
+                // Set activity
+                if ($tracker) {
+                    $tracker->setCurrentActivity("Starting agent execution");
+                }
+                
                 // Execute the agent with the prompt
                 $response = $agent->run($prompt);
+                
+                // Update tracker with final usage
+                if ($tracker && isset($response->usage)) {
+                    $tracker->updateFromResponse(
+                        $response->usage,
+                        $response->toolUses ?? null
+                    );
+                }
                 
                 // Update status on completion
                 $this->updateTaskStatus($agentId, AgentStatus::COMPLETED);
                 
+                if ($tracker) {
+                    $tracker->complete();
+                }
+                
                 $this->logger->info("Agent completed execution", [
                     'agent_id' => $agentId,
                     'response_length' => strlen($response->content ?? ''),
+                    'total_tokens' => $tracker ? $tracker->getTotalTokens() : 0,
                 ]);
                 
             } catch (\Exception $e) {
                 // Update status on failure
                 $this->updateTaskStatus($agentId, AgentStatus::FAILED);
+                
+                // Mark tracker as completed
+                $tracker = $this->coordinator->getTracker($agentId);
+                if ($tracker) {
+                    $tracker->complete();
+                }
                 
                 $this->logger->error("Agent execution failed", [
                     'agent_id' => $agentId,
@@ -271,6 +315,7 @@ class InProcessBackend implements BackendInterface
         });
         
         $this->fibers[$agentId] = $fiber;
+        $this->coordinator->registerFiber($agentId, $fiber);
         $fiber->start();
     }
     
@@ -354,6 +399,10 @@ class InProcessBackend implements BackendInterface
      */
     public function processMessages(): void
     {
+        // Use coordinator to process all fibers
+        $this->coordinator->processAllFibers();
+        
+        // Also handle mailbox-based messages
         foreach ($this->fibers as $agentId => $fiber) {
             if ($fiber->isSuspended()) {
                 // Check for new messages
@@ -364,5 +413,21 @@ class InProcessBackend implements BackendInterface
                 }
             }
         }
+    }
+    
+    /**
+     * Get parallel execution progress for all running agents.
+     */
+    public function getParallelProgress(): array
+    {
+        return $this->coordinator->getConsolidatedProgress();
+    }
+    
+    /**
+     * Get hierarchical display of running agents.
+     */
+    public function getHierarchicalDisplay(): array
+    {
+        return $this->coordinator->getHierarchicalDisplay();
     }
 }

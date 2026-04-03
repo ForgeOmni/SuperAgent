@@ -20,6 +20,7 @@ use SuperAgent\KnowledgeGraph\GraphCollector;
 use SuperAgent\KnowledgeGraph\KnowledgeGraph;
 use SuperAgent\KnowledgeGraph\KnowledgeGraphManager;
 use SuperAgent\SmartContext\SmartContextManager;
+use SuperAgent\Providers\ModelResolver;
 use SuperAgent\SkillDistillation\DistillationEngine;
 use SuperAgent\SkillDistillation\DistillationManager;
 use SuperAgent\SkillDistillation\DistillationStore;
@@ -229,6 +230,12 @@ class SuperAgentServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Register custom model aliases from config
+        $modelAliases = $this->app['config']->get('superagent.model_aliases', []);
+        if (! empty($modelAliases)) {
+            ModelResolver::registerAliases($modelAliases);
+        }
+
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__ . '/../config/superagent.php' => config_path('superagent.php'),

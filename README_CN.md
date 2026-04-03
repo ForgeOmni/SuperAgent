@@ -1,0 +1,398 @@
+# SuperAgent - 企业级Laravel多智能体编排SDK 🚀
+
+[![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
+[![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
+[![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![版本](https://img.shields.io/badge/version-0.6.6-purple)](https://github.com/xiyanyang/superagent)
+
+> **🌍 语言**: [English](README.md) | [中文](README_CN.md)  
+> **📖 文档**: [安装指南](INSTALL.md) | [安装手册](INSTALL_CN.md) | [API文档](docs/)
+
+SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
+
+## ✨ 核心特性
+
+### 🤖 多智能体编排
+- **并行执行** - 基于PHP Fiber的并发智能体执行
+- **团队协作** - 智能体团队管理与层级显示
+- **实时追踪** - 每个智能体的独立进度监控
+- **智能通信** - 内置智能体间消息传递协议
+
+### 🎯 自动模式检测
+- **智能任务分析** - 自动判断是否需要多智能体协作
+- **复杂度评估** - 基于任务复杂度自动选择执行模式
+- **资源优化** - 简单任务单智能体，复杂任务多智能体并行
+
+### 📊 企业级功能
+- **WebSocket实时监控** - 浏览器端实时仪表板
+- **性能分析** - 全面的性能指标和瓶颈分析
+- **依赖管理** - 复杂工作流编排与拓扑排序
+- **分布式扩展** - 跨多台机器/进程运行智能体
+- **持久化存储** - 自动保存进度，支持崩溃恢复
+- **智能体池化** - 预热智能体池，即时任务分配
+- **模板系统** - 10+预置模板，快速部署常见任务
+
+### 🔧 强大工具集
+- **59+内置工具** - 文件操作、代码编辑、Web搜索、任务管理等
+- **安全验证器** - 23项注入/混淆检查，命令分类
+- **智能上下文压缩** - 语义边界保护的会话记忆压缩
+- **Token预算控制** - 动态预算管理，智能成本控制
+
+### 🌍 多供应商支持
+- **Claude (Anthropic)** - 所有Claude 3模型
+- **OpenAI** - GPT-4、GPT-4 Turbo、GPT-3.5
+- **AWS Bedrock** - 通过AWS使用Claude
+- **Ollama** - 本地模型
+- **OpenRouter** - 100+模型统一API
+
+## 📦 安装
+
+### 系统要求
+- PHP >= 8.1
+- Composer
+- Laravel >= 10.0（可选，支持独立使用）
+
+### 通过Composer安装
+
+```bash
+composer require xiyanyang/superagent
+```
+
+### Laravel项目安装
+
+1. **安装包：**
+```bash
+composer require xiyanyang/superagent
+```
+
+2. **发布配置文件：**
+```bash
+php artisan vendor:publish --provider="SuperAgent\SuperAgentServiceProvider"
+```
+
+3. **配置`.env`文件：**
+```env
+# 主要供应商
+SUPERAGENT_PROVIDER=anthropic
+ANTHROPIC_API_KEY=你的API密钥
+
+# 可选供应商
+OPENAI_API_KEY=你的OpenAI密钥
+AWS_BEDROCK_REGION=us-east-1
+
+# 多智能体功能
+SUPERAGENT_WEBSOCKET_ENABLED=true
+SUPERAGENT_WEBSOCKET_PORT=8080
+SUPERAGENT_STORAGE_PATH=storage/superagent
+
+# 自动模式检测
+SUPERAGENT_AUTO_MODE=true
+```
+
+### 独立安装（无Laravel）
+
+```bash
+# 安装包
+composer require xiyanyang/superagent
+
+# 创建配置文件
+cp vendor/xiyanyang/superagent/config/superagent.php config/superagent.php
+```
+
+```php
+// 在应用中初始化
+use SuperAgent\SuperAgent;
+
+$config = require 'config/superagent.php';
+SuperAgent::initialize($config);
+```
+
+## 🚀 快速开始
+
+### 基础智能体
+
+```php
+use SuperAgent\Agent;
+
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'model' => 'claude-3-opus-20240229',
+]);
+
+$result = $agent->run("分析这个代码库并提出改进建议");
+echo $result->message->content;
+```
+
+### 自动多智能体模式
+
+```php
+use SuperAgent\Agent;
+
+// 启用自动检测
+$agent = new Agent([
+    'auto_mode' => true,  // 自动判断是否使用多智能体
+]);
+
+// 简单任务 - 自动使用单智能体
+$result = $agent->run("2+2等于多少？");
+
+// 复杂任务 - 自动启动多智能体团队
+$result = $agent->run("
+    分析这个项目的代码质量，
+    找出所有安全漏洞，
+    生成详细的修复方案，
+    并为每个问题创建测试用例
+");
+
+// 系统自动分析任务并决定：
+// ✅ 检测到4个子任务
+// ✅ 需要多种工具（代码分析、安全扫描、文档生成、测试创建）
+// ✅ 预估Token数超过10000
+// → 自动启动多智能体模式
+```
+
+### 多智能体团队编排
+
+```php
+use SuperAgent\Swarm\TeamContext;
+use SuperAgent\Swarm\Backends\InProcessBackend;
+use SuperAgent\Swarm\AgentSpawnConfig;
+use SuperAgent\Console\Output\ParallelAgentDisplay;
+
+// 创建团队
+$team = new TeamContext('research_team', 'team_leader');
+
+// 设置后端
+$backend = new InProcessBackend();
+$backend->setTeamContext($team);
+
+// 生成多个智能体
+$agents = [
+    $backend->spawn(new AgentSpawnConfig(
+        name: '数据收集器',
+        prompt: '从数据库收集销售数据',
+        teamName: 'research_team'
+    )),
+    $backend->spawn(new AgentSpawnConfig(
+        name: '数据分析师',
+        prompt: '分析销售趋势和异常',
+        teamName: 'research_team'
+    )),
+    $backend->spawn(new AgentSpawnConfig(
+        name: '报告撰写员',
+        prompt: '基于分析结果撰写报告',
+        teamName: 'research_team'
+    ))
+];
+
+// 实时监控进度
+$display = new ParallelAgentDisplay($output);
+$display->displayWithRefresh(500); // 每500ms刷新
+```
+
+### 使用智能体模板
+
+```php
+use SuperAgent\Swarm\Templates\AgentTemplateManager;
+
+$templates = AgentTemplateManager::getInstance();
+
+// 使用预置模板 - 代码审查
+$config = $templates->createSpawnConfig('code_reviewer', [
+    'repository' => '/path/to/repo',
+    'focus_areas' => '安全性、性能优化',
+    'standards' => 'PSR-12、安全最佳实践'
+]);
+
+$agent = $backend->spawn($config);
+
+// 可用模板类别：
+// - 数据处理：data_processor, etl_pipeline
+// - 代码分析：code_reviewer, security_scanner
+// - 研究任务：web_researcher, documentation_writer
+// - 测试生成：test_generator, performance_tester
+// - 自动化：ci_cd_agent, deployment_agent
+```
+
+### 依赖管理
+
+```php
+use SuperAgent\Swarm\Dependency\AgentDependencyManager;
+
+$depManager = new AgentDependencyManager();
+
+// 定义执行链
+$depManager->registerChain([
+    '数据提取',
+    '数据清洗',
+    '数据分析',
+    '报告生成'
+]);
+
+// 定义并行任务
+$depManager->registerParallel([
+    '单元测试',
+    '集成测试',
+    '性能测试'
+]);
+
+// 自动按依赖关系执行
+$depManager->processWaitingAgents($backend);
+```
+
+## 📊 实时监控仪表板
+
+### 启动WebSocket服务器
+
+```bash
+# 启动WebSocket服务器
+php artisan superagent:websocket
+
+# 另一个终端，启动仪表板
+php artisan superagent:dashboard
+
+# 访问 http://localhost:8080/dashboard
+```
+
+### 仪表板功能
+- 🔄 实时智能体状态更新
+- 📈 Token使用和成本追踪
+- 🎯 任务进度可视化
+- 📊 性能指标图表
+- 🌳 团队层级显示
+
+## 🎯 自动模式检测机制
+
+SuperAgent通过以下维度自动判断任务复杂度：
+
+### 检测维度
+1. **任务复杂度分析**
+   - 子任务数量检测
+   - 任务描述长度
+   - 关键词模式匹配
+
+2. **工具需求评估**
+   - 预测需要的工具种类
+   - 工具调用频率估算
+
+3. **Token预估**
+   - 输入/输出Token预测
+   - 上下文窗口需求
+
+4. **并行机会识别**
+   - 可并行执行的子任务
+   - 任务间依赖关系
+
+### 触发条件
+```php
+// 配置自动模式阈值
+'auto_mode' => [
+    'enabled' => true,
+    'threshold' => [
+        'complexity_score' => 0.7,  // 复杂度评分阈值
+        'min_subtasks' => 3,        // 最少子任务数
+        'min_tools' => 4,           // 最少工具种类
+        'estimated_tokens' => 10000, // 预估Token数
+    ],
+],
+```
+
+## 🛠️ 高级配置
+
+### 性能优化
+
+```php
+// config/superagent.php
+'performance' => [
+    'pool' => [
+        'enabled' => true,
+        'min_idle_agents' => 2,      // 最小空闲智能体
+        'max_idle_agents' => 10,     // 最大空闲智能体
+        'max_agent_lifetime' => 3600, // 智能体最大生命周期（秒）
+    ],
+    'cache' => [
+        'prompt_cache' => true,       // 启用提示缓存
+        'result_cache' => true,       // 启用结果缓存
+        'ttl' => 3600,               // 缓存生存时间
+    ],
+],
+```
+
+### 安全设置
+
+```php
+'security' => [
+    'bash_validator' => true,         // Bash命令验证
+    'permission_mode' => 'standard',  // 权限模式
+    'max_file_size' => 10485760,     // 最大文件大小（10MB）
+    'allowed_directories' => [        // 允许访问的目录
+        base_path(),
+        storage_path(),
+    ],
+],
+```
+
+## 📚 完整文档
+
+- [快速入门指南](docs/getting-started_CN.md)
+- [多智能体编排](docs/PARALLEL_AGENT_TRACKING_CN.md)
+- [高级特性](docs/PARALLEL_AGENT_ENHANCEMENTS_CN.md)
+- [API参考](docs/api-reference_CN.md)
+- [示例代码](examples/)
+
+## 🧪 测试
+
+```bash
+# 运行所有测试
+composer test
+
+# 运行单元测试
+composer test:unit
+
+# 运行集成测试
+composer test:integration
+
+# 运行多智能体测试
+php vendor/bin/phpunit tests/Unit/ParallelAgentTrackingTest.php
+```
+
+## 📈 性能基准
+
+| 指标 | 单智能体 | 10智能体 | 100智能体 | 1000智能体 |
+|------|---------|----------|-----------|------------|
+| 内存开销 | 2 MB | 15 MB | 120 MB | 1.1 GB |
+| 追踪延迟 | <1ms | <2ms | <10ms | <50ms |
+| WebSocket广播 | N/A | 5ms | 20ms | 100ms |
+| 存储写入 | 1ms | 5ms | 50ms | 500ms |
+
+## 🤝 贡献
+
+欢迎贡献！请查看[贡献指南](CONTRIBUTING_CN.md)了解详情。
+
+### 开发路线图
+- [ ] 支持更多LLM供应商
+- [ ] GraphQL API支持
+- [ ] Kubernetes原生部署
+- [ ] 智能体市场
+- [ ] 可视化工作流编辑器
+
+## 📄 许可证
+
+SuperAgent是基于[MIT许可证](LICENSE)的开源软件。
+
+## 🙏 致谢
+
+- 受Claude Code架构启发
+- 感谢Laravel和PHP社区
+- 特别感谢Anthropic提供Claude API
+
+## 🔗 相关链接
+
+- [GitHub仓库](https://github.com/xiyanyang/superagent)
+- [官方文档](https://superagent.xiyanyang.com)
+- [Discord社区](https://discord.gg/superagent)
+- [示例项目](https://github.com/xiyanyang/superagent-examples)
+
+---
+
+由SuperAgent团队用❤️制作 | [English](README.md) | [报告问题](https://github.com/xiyanyang/superagent/issues)

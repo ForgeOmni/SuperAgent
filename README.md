@@ -1,13 +1,14 @@
-# SuperAgent - Multi-Provider AI Agent SDK for Laravel
+# SuperAgent - Enterprise Multi-Agent Orchestration SDK for Laravel 🚀
 
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.6.6-purple)](https://github.com/xiyanyang/superagent)
 
-> **🌍 Language**: [English](README.md) | [中文](README.zh-CN.md)  
-> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL.zh-CN.md)
+> **🌍 Language**: [English](README.md) | [中文](README_CN.md)  
+> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [API Docs](docs/)
 
-SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider support, comprehensive tooling, advanced permissions, and observability features.
+SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Claude-level capabilities with multi-agent orchestration, real-time monitoring, and distributed scaling. Build and deploy AI agent teams that work in parallel with automatic task detection and intelligent resource management.
 
 ## 🚀 Features
 

@@ -10,9 +10,12 @@ use SuperAgent\Bridge\BridgeFactory;
 use SuperAgent\Config\ExperimentalFeatures;
 use SuperAgent\Providers\AnthropicProvider;
 use SuperAgent\Providers\BedrockProvider;
+use SuperAgent\Providers\ModelResolver;
 use SuperAgent\Providers\OllamaProvider;
 use SuperAgent\Providers\OpenAIProvider;
 use SuperAgent\Providers\OpenRouterProvider;
+use SuperAgent\AutoMode\TaskAnalyzer;
+use SuperAgent\AutoMode\AutoModeAgent;
 
 class Agent
 {
@@ -39,6 +42,10 @@ class Agent
 
     /** @var Message[] */
     protected array $messages = [];
+    
+    protected bool $autoMode = false;
+    
+    protected array $autoModeConfig = [];
 
     public function __construct(array $config = [])
     {
@@ -47,6 +54,10 @@ class Agent
         $this->maxBudgetUsd = (float) ($config['max_budget_usd'] ?? static::config('superagent.agent.max_budget_usd', 0));
         $this->systemPrompt = $config['system_prompt'] ?? null;
         $this->options = $config['options'] ?? [];
+        
+        // Auto-mode configuration
+        $this->autoMode = $config['auto_mode'] ?? static::config('superagent.auto_mode.enabled', false);
+        $this->autoModeConfig = $config['auto_mode_config'] ?? static::config('superagent.auto_mode', []);
 
         if (isset($config['tools'])) {
             $this->tools = $config['tools'];
@@ -78,7 +89,7 @@ class Agent
 
     public function withModel(string $model): static
     {
-        $this->provider->setModel($model);
+        $this->provider->setModel(ModelResolver::resolve($model));
 
         return $this;
     }
@@ -124,9 +135,47 @@ class Agent
 
         return $this;
     }
+    
+    public function withAutoMode(bool $enabled = true, array $config = []): static
+    {
+        $this->autoMode = $enabled;
+        if (!empty($config)) {
+            $this->autoModeConfig = array_merge($this->autoModeConfig, $config);
+        }
+        
+        return $this;
+    }
+    
+    /**
+     * Run the agent with automatic mode detection.
+     * This is the primary entry point for agent execution.
+     */
+    public function run(string $prompt, array $options = []): AgentResult
+    {
+        // If auto-mode is enabled, use AutoModeAgent
+        if ($this->autoMode) {
+            $autoAgent = new AutoModeAgent(
+                array_merge([
+                    'provider' => $this->provider,
+                    'auto_mode' => true,
+                    'analyzer_config' => $this->autoModeConfig,
+                    'tools' => $this->tools,
+                    'system_prompt' => $this->systemPrompt,
+                    'max_turns' => $this->maxTurns,
+                    'max_budget_usd' => $this->maxBudgetUsd,
+                ], $options)
+            );
+            
+            return $autoAgent->run($prompt, $options);
+        }
+        
+        // Otherwise use standard single-agent execution
+        return $this->prompt($prompt);
+    }
 
     /**
      * Run the agent with a prompt. Executes the full agentic loop.
+     * @deprecated Use run() instead for auto-mode support
      */
     public function prompt(string $prompt, ?StreamingHandler $streamingHandler = null): AgentResult
     {
@@ -213,6 +262,11 @@ class Agent
             if (isset($config[$key])) {
                 $providerConfig[$key] = $config[$key];
             }
+        }
+
+        // Resolve model aliases (e.g., "opus" → "claude-opus-4-20250514")
+        if (isset($providerConfig['model'])) {
+            $providerConfig['model'] = ModelResolver::resolve($providerConfig['model']);
         }
 
         // Use 'driver' to determine which provider class to use,

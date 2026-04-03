@@ -4,6 +4,39 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Automatic Multi-Agent Mode Detection
+    |--------------------------------------------------------------------------
+    |
+    | Automatically determine whether to use single or multi-agent mode
+    | based on task complexity analysis.
+    |
+    */
+    
+    'auto_mode' => [
+        'enabled' => env('SUPERAGENT_AUTO_MODE', false),
+        'threshold' => [
+            'complexity_score' => (float) env('SUPERAGENT_AUTO_MODE_COMPLEXITY', 0.7),
+            'min_subtasks' => (int) env('SUPERAGENT_AUTO_MODE_MIN_SUBTASKS', 3),
+            'min_tools' => (int) env('SUPERAGENT_AUTO_MODE_MIN_TOOLS', 4),
+            'estimated_tokens' => (int) env('SUPERAGENT_AUTO_MODE_MIN_TOKENS', 10000),
+        ],
+        'weights' => [
+            'length' => 0.15,
+            'keywords' => 0.25,
+            'subtasks' => 0.30,
+            'tools' => 0.20,
+            'tokens' => 0.10,
+        ],
+        'multi_agent_config' => [
+            'max_agents' => (int) env('SUPERAGENT_AUTO_MODE_MAX_AGENTS', 10),
+            'backend' => 'in_process',
+            'enable_display' => true,
+            'refresh_interval' => 500,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Default LLM Provider
     |--------------------------------------------------------------------------
     */
@@ -15,6 +48,22 @@ return [
     |--------------------------------------------------------------------------
     */
     'default_model' => env('SUPERAGENT_MODEL', 'claude-sonnet-4-6-20250627'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Model Aliases
+    |--------------------------------------------------------------------------
+    | Custom shorthand → full model ID mappings. These take precedence over
+    | the built-in alias resolution. Built-in aliases automatically resolve
+    | shorthands like "opus", "sonnet", "haiku" to the latest known model
+    | in that family, so you only need to add entries here for overrides
+    | or custom model names.
+    |
+    | Example: ['my-fast' => 'claude-haiku-4-5-20251001']
+    */
+    'model_aliases' => [
+        // 'my-fast' => 'claude-haiku-4-5-20251001',
+    ],
 
     /*
     |--------------------------------------------------------------------------
