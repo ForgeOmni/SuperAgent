@@ -341,6 +341,20 @@ class ParallelAgentCoordinator
     }
     
     /**
+     * Get all active agents and their trackers.
+     */
+    public function getActiveAgents(): array
+    {
+        $activeAgents = [];
+        foreach ($this->trackers as $agentId => $tracker) {
+            if ($tracker->getStatus() === 'running' || $tracker->getStatus() === 'pending') {
+                $activeAgents[$agentId] = $tracker;
+            }
+        }
+        return $activeAgents;
+    }
+    
+    /**
      * Get hierarchical display data similar to Claude Code's TeammateSpinnerTree.
      */
     public function getHierarchicalDisplay(): array
