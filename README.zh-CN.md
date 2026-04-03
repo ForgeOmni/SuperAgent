@@ -34,7 +34,10 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **安全 Prompt 护栏** - 可选的安全指令注入 System Prompt，限制安全相关操作；通过 `security_guardrails` 开关控制
 - **Guardrails DSL** - 声明式 YAML 规则引擎，用于安全、费用、合规和速率限制策略。支持组合条件（`all_of`/`any_of`/`not`）、7 种条件类型（tool、tool_content、tool_input、session、agent、token、rate）、8 种动作类型（deny、allow、ask、warn、log、pause、rate_limit、downgrade_model）、优先级排序的规则组，集成到 PermissionEngine pipeline
 - **Bridge 模式** - Provider 无关的增强代理，将 CC 优化机制（系统提示词增强、上下文压缩、Bash 安全验证、记忆注入、工具 Schema 优化、成本追踪）注入到非 Anthropic 模型（OpenAI、Bedrock、Ollama、OpenRouter）。支持 HTTP 代理模式（供 Codex CLI 等工具使用）和 SDK 自动增强模式，三级优先级控制（`bridge_mode` 参数 > 配置文件 `auto_enhance` > feature flag）
-- **实验性 Feature Flags** - 15 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、Bridge 模式
+- **Pipeline DSL** - 声明式 YAML 工作流引擎，用于多 Agent 管道编排。支持 6 种步骤类型（agent、parallel、conditional、approval、transform、loop），基于依赖的拓扑排序执行顺序，3 种失败策略（abort、continue、retry），通过 `{{steps.name.output}}` 模板的步骤间数据流，`input_from` 上下文注入，可插拔审批门控，Review-Fix 循环（多模型并行 review + 可配置退出条件 `output_contains`/`all_passed`/`any_passed`/`expression`），及事件监听器
+- **Cost Autopilot** - 智能预算控制，监控累计支出并自动升级成本节省措施：warn → 压缩上下文 → 降级模型（Opus → Sonnet → Haiku） → halt。支持会话和月度预算，持久化跨会话支出追踪，可配置阈值百分比，按 Provider 自动检测模型层级，及成本可观测事件监听
+- **自适应反馈** - 从用户修正中学习（权限拒绝、编辑回退、行为反馈），自动将重复模式提升为 Guardrails 规则或 Memory 条目。可配置提升阈值，5 种修正类别，持久化 JSON 存储，完整管理 CLI（`superagent:feedback list|show|delete|clear|export|import|promote|stats`），支持跨项目导入导出
+- **实验性 Feature Flags** - 18 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、Bridge 模式、Pipeline、Cost Autopilot、自适应反馈
 - **可观测性** - OpenTelemetry 集成，完整链路追踪，及按事件类型动态调整分析采样率
 - **文件版本控制** - LRU 缓存（100 个消息级快照），按消息回退，diff 统计（insertions/deletions/filesChanged），快照继承
 - **工具使用摘要** - Haiku 生成 git-commit-subject 风格的工具批次执行摘要
@@ -326,6 +329,150 @@ SUPERAGENT_BRIDGE_ENH_MEMORY=false
 SUPERAGENT_BRIDGE_ENH_COST_TRACKING=true
 ```
 
+### Pipeline DSL
+
+声明式 YAML 工作流引擎，用于编排多 Agent 管道：
+
+```yaml
+# pipelines.yaml
+version: "1.0"
+pipelines:
+  code-review:
+    description: "多 Agent 代码审查管道"
+    inputs:
+      - name: files
+        required: true
+    steps:
+      - name: security-scan
+        agent: researcher
+        prompt: "扫描 {{inputs.files}} 的安全漏洞"
+        on_failure: abort
+
+      - name: parallel-checks
+        parallel:
+          - name: style-check
+            agent: code-writer
+            prompt: "检查代码风格"
+          - name: test-coverage
+            agent: verification
+            prompt: "分析测试覆盖率"
+
+      - name: approval-gate
+        approval:
+          message: "所有检查通过，继续审查？"
+
+      - name: final-review
+        agent: reviewer
+        prompt: "综合审查结果"
+        input_from:
+          security: "{{steps.security-scan.output}}"
+        depends_on: [parallel-checks]
+    outputs:
+      report: "{{steps.final-review.output}}"
+```
+
+```php
+'pipelines' => [
+    'enabled' => env('SUPERAGENT_PIPELINES_ENABLED', false),
+    'files' => [base_path('pipelines.yaml')],
+],
+```
+
+**Review-Fix 循环** — 多模型迭代审查，自动退出：
+
+```yaml
+- name: review-fix-loop
+  loop:
+    max_iterations: 5
+    exit_when:
+      all_passed:                                        # 所有 reviewer 都通过才退出
+        - { step: claude-review, contains: "LGTM" }
+        - { step: gpt-review, contains: "LGTM" }
+    steps:
+      - name: reviews
+        parallel:                                        # 多模型并行 review
+          - name: claude-review
+            agent: reviewer
+            model: claude-sonnet-4-20250514
+            prompt: "审查 bug，没问题就说 LGTM"
+          - name: gpt-review
+            agent: reviewer
+            model: gpt-4o
+            prompt: "审查安全问题，没问题就说 LGTM"
+      - name: fix
+        agent: code-writer
+        prompt: "修复所有发现的问题"
+        input_from:
+          claude: "{{steps.claude-review.output}}"
+          gpt: "{{steps.gpt-review.output}}"
+```
+
+循环变量：`{{vars.loop.<name>.iteration}}`、`{{vars.loop.<name>.max}}`
+
+退出条件：`output_contains`、`output_not_contains`、`all_passed`、`any_passed`、`expression`
+
+完整示例请参考 `examples/pipeline.yaml`。
+
+### Cost Autopilot
+
+智能预算控制，自动升级成本节省措施：
+
+```
+预算消耗 →  50%  → ⚠️  Warn（日志警告）
+            70%  → 📦  Compact（压缩上下文）
+            80%  → ⬇️  Downgrade（Opus → Sonnet → Haiku）
+            95%  → 🛑  Halt（停止 Agent）
+```
+
+```php
+'cost_autopilot' => [
+    'enabled' => env('SUPERAGENT_COST_AUTOPILOT_ENABLED', false),
+    'session_budget_usd' => 5.00,    // 单次会话预算
+    'monthly_budget_usd' => 100.00,  // 月度预算
+    // 自定义阈值（可选，有默认值）
+    // 'thresholds' => [
+    //     ['at_pct' => 50, 'action' => 'warn'],
+    //     ['at_pct' => 80, 'action' => 'downgrade_model'],
+    //     ['at_pct' => 95, 'action' => 'halt'],
+    // ],
+],
+```
+
+模型层级从默认 Provider 自动检测（Anthropic: Opus → Sonnet → Haiku，OpenAI: GPT-4o → GPT-4o-mini → GPT-3.5），也可手动配置。
+
+### 自适应反馈
+
+从用户修正中自动学习，将重复模式提升为规则或记忆：
+
+```
+用户多次拒绝 → CorrectionCollector 提取模式 → 达到阈值（默认 3 次）
+                    ↓                                    ↓
+           tool_denied / edit_reverted         behavior / content 修正
+                    ↓                                    ↓
+           Guardrails Rule (warn/deny)        Memory Entry (feedback 类型)
+```
+
+```php
+'adaptive_feedback' => [
+    'enabled' => env('SUPERAGENT_ADAPTIVE_FEEDBACK_ENABLED', false),
+    'promotion_threshold' => 3,   // 触发阈值
+    'auto_promote' => true,       // 自动提升（false = 需手动 promote）
+],
+```
+
+管理命令：
+
+```bash
+php artisan superagent:feedback list [--category=tool_denied] [--search=keyword]
+php artisan superagent:feedback show <id>
+php artisan superagent:feedback delete <id>
+php artisan superagent:feedback clear
+php artisan superagent:feedback export [--output=path.json]
+php artisan superagent:feedback import <path.json>
+php artisan superagent:feedback promote <id>
+php artisan superagent:feedback stats
+```
+
 ## 🔧 命令行工具
 
 ```bash
@@ -340,6 +487,9 @@ php artisan superagent:tools
 
 # 创建自定义工具
 php artisan superagent:make-tool MyCustomTool
+
+# 管理自适应反馈
+php artisan superagent:feedback stats
 ```
 
 ## 🎨 扩展开发
@@ -759,6 +909,9 @@ SUPERAGENT_EXP_CACHED_MICROCOMPACT=true   # 缓存微压缩状态
 SUPERAGENT_EXP_TEAM_MEMORY=true           # 团队记忆文件（共享记忆）
 SUPERAGENT_EXP_BASH_CLASSIFIER=true       # 分类器辅助 bash 权限决策
 SUPERAGENT_EXP_BRIDGE_MODE=false          # Bridge 模式：用 CC 优化机制增强非 Anthropic 模型
+SUPERAGENT_EXP_PIPELINES=false            # Pipeline DSL：声明式 YAML 多 Agent 工作流引擎
+SUPERAGENT_EXP_COST_AUTOPILOT=false       # Cost Autopilot：自动模型降级、上下文压缩、预算控制
+SUPERAGENT_EXP_ADAPTIVE_FEEDBACK=false    # 自适应反馈：从用户修正中自动学习并生成规则/记忆
 ```
 
 `ExperimentalFeatures` 类在 Laravel 应用外运行时（如单元测试）会回退到环境变量，确保 feature flag 在所有环境中一致工作。

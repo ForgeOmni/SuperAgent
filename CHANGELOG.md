@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-04-03
+
+### Added
+- **Adaptive Feedback** — Self-improving agent that learns from user corrections and automatically generates Guardrails rules or Memory entries from recurring patterns
+  - `CorrectionStore` — persistent JSON storage for correction patterns with full CRUD, search, import/export, and statistics tracking
+  - `CorrectionCollector` — captures denial events and user corrections, normalizes them into generalizable patterns (e.g., `rm -rf /foo` → `bash: rm -rf`), with 5 recording methods: `recordDenial`, `recordCorrection`, `recordRevert`, `recordUnwantedContent`, `recordRejection`
+  - `AdaptiveFeedbackEngine` — evaluates patterns against configurable threshold, promotes tool denials to Guardrails rules (warn/deny based on frequency), promotes behavior corrections to Memory entries (feedback type), with event listeners for `feedback.promoted`, `feedback.rule_generated`, `feedback.memory_generated`
+  - `FeedbackManager` — high-level API providing list/show/delete/clear/import/export/promote/stats operations, plus auto-promotion and suggestion tracking
+  - `CorrectionPattern` — pattern with ID, category, occurrences, reasons history, promotion status, timestamps, and serialization
+  - `CorrectionCategory` enum — `tool_denied`, `output_rejected`, `behavior_correction`, `edit_reverted`, `content_unwanted` with category→promotion-type mapping
+  - `PromotionResult` — immutable result of pattern-to-rule/memory promotion with generated content
+  - `FeedbackCommand` — Artisan CLI (`superagent:feedback`) with 8 sub-commands: `list` (with `--category` and `--search` filters), `show`, `delete`, `clear`, `export` (to JSON file), `import` (from JSON file), `promote` (force-promote), `stats` (with approaching-threshold suggestions)
+- New `adaptive_feedback` configuration section in `config/superagent.php` with `enabled`, `promotion_threshold`, `auto_promote`, and `storage_path` settings
+- New `adaptive_feedback` experimental feature flag
+- `FeedbackManager`, `CorrectionStore` registered as conditional singletons in `SuperAgentServiceProvider`; `FeedbackCommand` registered as Artisan command
+
+- **Cost Autopilot** — Intelligent budget control system that monitors cumulative spending and automatically escalates through cost-saving actions to prevent budget overruns
+  - `CostAutopilot` — main engine that evaluates budget thresholds after each provider call, tracks fired thresholds to prevent re-triggering, resolves model downgrades via tier hierarchy, and emits events (`autopilot.warn`, `autopilot.downgrade`, `autopilot.compact`, `autopilot.halt`)
+  - `BudgetConfig` — configuration with session/monthly budget limits, customizable escalation thresholds (default: 50% warn, 70% compact, 80% downgrade, 95% halt), model tier definitions, and validation
+  - `BudgetTracker` — persistent cross-session spending tracker with daily/monthly period accumulation, JSON file storage with atomic writes, delta-based recording, and data pruning
+  - `ModelTier` — model tier definition with pricing data and priority ordering; includes preset hierarchies for Anthropic (Opus → Sonnet → Haiku) and OpenAI (GPT-4o → GPT-4o-mini → GPT-3.5-turbo)
+  - `AutopilotDecision` — immutable decision result describing actions to take (downgrade, compact, warn, halt), new/previous model names, tier info, and budget utilization percentage
+  - `CostAction` enum — `downgrade_model`, `compact_context`, `warn`, `halt`
+  - `ThresholdRule` — threshold definition binding a budget percentage to an action with optional message
+  - Auto-detection of model tiers from the default provider when not explicitly configured
+- New `cost_autopilot` configuration section in `config/superagent.php` with `enabled`, `session_budget_usd`, `monthly_budget_usd`, `thresholds`, `tiers`, and `storage_path` settings
+- New `cost_autopilot` experimental feature flag
+- `CostAutopilot` registered as conditional singleton in `SuperAgentServiceProvider` with automatic `BudgetTracker` wiring and provider-based tier detection
+
+- **Pipeline DSL** — Declarative YAML workflow engine for orchestrating multi-agent pipelines with dependency resolution, failure handling, and inter-step data flow
+  - `PipelineEngine` — main engine that loads YAML pipeline definitions, resolves execution order via topological sort, manages step lifecycle (retry, approval gates, events), and integrates with the Swarm agent backend via injectable `agentRunner` and `approvalHandler` callbacks
+  - `PipelineConfig` — YAML parsing with multi-file merge, validation (duplicate names, unknown dependencies, output references, input definitions), and default propagation (failure_strategy, timeout, max_retries)
+  - `PipelineDefinition` — immutable pipeline definition with input validation, default application, output template resolution, and trigger matching
+  - `PipelineContext` — runtime context tracking step results, inputs, custom variables, cancellation state, and template variable resolution (`{{inputs.*}}`, `{{steps.*.output/status/error}}`, `{{vars.*}}`)
+  - `PipelineResult` / `StepResult` — immutable execution results with summary statistics (completed/failed/skipped counts, duration)
+  - **6 step types**:
+    - `AgentStep` — execute a named agent with prompt templates, model override, isolation mode, read-only flag, `input_from` context injection, and `buildSpawnConfig()` for Swarm integration
+    - `ParallelStep` — fan-out multiple sub-steps for concurrent execution with configurable `wait_all` behavior
+    - `ConditionalStep` — gate execution on conditions: `step_succeeded`, `step_failed`, `input_equals`, `output_contains`, `expression` (with 7 comparison operators)
+    - `ApprovalStep` — pause pipeline for user approval with configurable message, timeout, and `required_approvers`
+    - `TransformStep` — transform/aggregate data between steps: `merge` (combine outputs), `template` (build strings), `extract` (pull fields), `map` (iterate arrays)
+  - `StepFactory` — recursive YAML-to-step parser supporting nested parallel/conditional composition and automatic `when` clause wrapping
+  - `FailureStrategy` enum — `abort` (stop pipeline), `continue` (log and proceed), `retry` (up to `max_retries`)
+  - `StepStatus` enum — PENDING, RUNNING, COMPLETED, FAILED, SKIPPED, WAITING_APPROVAL, CANCELLED
+  - `LoopStep` — repeat a body of steps until exit conditions are met or max iterations reached; supports 5 exit condition types (`output_contains`, `output_not_contains`, `all_passed` for multi-reviewer unanimous approval, `any_passed`, `expression`), iteration variable tracking (`loop.<name>.iteration`/`loop.<name>.max`), composable with parallel/conditional/agent inner steps, and `loop.iteration` events
+  - Event system with 7 events: `pipeline.start`, `pipeline.end`, `step.start`, `step.end`, `step.retry`, `step.skip`, `loop.iteration`
+  - Example configuration at `examples/pipeline.yaml` with code-review, deploy, and research pipeline templates
+- New `pipelines` configuration section in `config/superagent.php` with `enabled` and `files` settings
+- New `pipelines` experimental feature flag
+- `PipelineEngine` registered as conditional singleton in `SuperAgentServiceProvider`
+
+### Changed
+- `QueryEngine` — new optional `?CostAutopilot` constructor parameter; `run()` loop now evaluates autopilot after each provider call, applies model downgrades via `provider->setModel()`, injects system notice on downgrade, and performs cost-driven context compaction; new `applyCostAutopilotDecision()` and `compactMessagesForCost()` methods
+
+### Tests
+- 68 new AdaptiveFeedback unit tests (135 assertions):
+  - `CorrectionStoreTest` — record/increment/deduplicate, get/search/category/tool filtering, promotable/promoted tracking, delete/clear, persistence, import/export/merge, statistics, in-memory mode
+  - `CorrectionCollectorTest` — denial recording (Bash/Edit/network/repeated), bash pattern extraction (git subcommands, simple commands, empty), edit pattern extraction (sensitive files, by extension), correction/revert/unwanted/rejection recording, normalization, event listeners
+  - `AdaptiveFeedbackEngineTest` — no-promotable evaluation, tool_denied→rule promotion, behavior_correction→memory promotion, content_unwanted→memory, edit_reverted→rule, high-frequency deny escalation, no re-promotion, promoteById (success/not-found/already-promoted), suggestions, statistics, promotion events, rule/memory content structure
+  - `FeedbackManagerTest` — list (all/category/search/sorted), show (found/not-found), delete/clear, export/import (JSON/file/invalid/not-found/merge), promote/auto-promote, record correction, statistics, suggestions, sub-component access
+- 45 new CostAutopilot unit tests (128 assertions):
+  - `ModelTierTest` — blended cost, free detection, Anthropic/OpenAI preset tier hierarchies
+  - `BudgetConfigTest` — session/monthly budget parsing, default/custom thresholds, custom tiers, validation (no budget, downgrade without tiers, invalid actions), effective budget precedence
+  - `BudgetTrackerTest` — initial state, delta recording, zero/negative delta ignored, persistence, summary, date/month queries, reset, in-memory mode, pruning
+  - `CostAutopilotTest` — noop under threshold, warn at 50%, no re-trigger, compact at 70%, downgrade at 80% (opus→sonnet→haiku), downgrade at cheapest becomes warn, unknown model handling, halt at 95%, event listeners, reset, statistics, custom tiers, threshold ordering, effective budget with monthly tracker
+- 93 new Pipeline unit tests (213 assertions):
+  - `StepFactoryTest` — agent/parallel/approval/transform/loop step parsing, conditional wrapping, failure strategies, error handling
+  - `PipelineContextTest` — inputs, step result tracking, variables, cancellation, template resolution (inputs, steps, vars, nested, arrays, multiple)
+  - `PipelineConfigTest` — minimal/defaults/inputs/outputs/triggers parsing, multiple pipelines, parallel steps, validation (duplicates, dependencies, outputs, inputs, strategies), file loading
+  - `PipelineEngineTest` — simple/multi-step execution, input validation, abort/continue/retry strategies, dependency ordering, parallel steps, approval gates (approved/denied/auto), conditional steps (met/not-met/failed-trigger), transform steps (merge/template), events, statistics, reload, template resolution, input_from
+  - `LoopStepTest` — parsing (valid/missing max/empty steps), basic loop to max, exit on output_contains, multi-model parallel review with all_passed, all_passed requires every reviewer, any_passed exits on first, expression-based exit, output_not_contains, abort/continue on failure, iteration variable access, loop events, loop output, no exit condition, single iteration exit, conditional steps inside loop, describe
+
 ## [0.6.1] - 2026-04-03
 
 ### Added

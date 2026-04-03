@@ -17,6 +17,8 @@ use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
 use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\UserMessage;
+use SuperAgent\CostAutopilot\CostAutopilot;
+use SuperAgent\CostAutopilot\AutopilotDecision;
 use SuperAgent\Guardrails\Context\RuntimeContextCollector;
 use SuperAgent\TokenBudget\TokenBudgetTracker;
 use SuperAgent\Tools\ToolResult;
@@ -53,6 +55,8 @@ class QueryEngine
 
     protected ?RuntimeContextCollector $guardrailsCollector = null;
 
+    protected ?CostAutopilot $costAutopilot = null;
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -66,6 +70,7 @@ class QueryEngine
         ?HookRegistry $hookRegistry = null,
         ?int $tokenBudget = null,
         ?RuntimeContextCollector $guardrailsCollector = null,
+        ?CostAutopilot $costAutopilot = null,
     ) {
         foreach ($this->tools as $tool) {
             $this->toolMap[$tool->name()] = $tool;
@@ -85,6 +90,13 @@ class QueryEngine
         }
 
         $this->guardrailsCollector = $guardrailsCollector;
+        $this->costAutopilot = $costAutopilot;
+
+        if ($this->costAutopilot !== null) {
+            $this->costAutopilot->setCurrentModel(
+                $this->options['model'] ?? $this->provider->getModel(),
+            );
+        }
     }
 
     public function getMessages(): array
@@ -147,6 +159,20 @@ class QueryEngine
 
             // Feed guardrails runtime context collector
             $this->guardrailsCollector?->recordUsage($assistantMessage->usage, $callCost);
+
+            // --- Cost Autopilot evaluation ---
+            if ($this->costAutopilot !== null) {
+                $autopilotDecision = $this->costAutopilot->evaluate($this->totalCostUsd);
+                $this->applyCostAutopilotDecision($autopilotDecision);
+
+                if ($autopilotDecision->shouldHalt()) {
+                    $this->streamingHandler?->emitTurn($assistantMessage, $this->turnCount);
+                    yield $assistantMessage;
+                    throw new SuperAgentException(
+                        "CostAutopilot halted: {$autopilotDecision->message}"
+                    );
+                }
+            }
 
             $this->streamingHandler?->emitTurn($assistantMessage, $this->turnCount);
 
@@ -508,5 +534,66 @@ class QueryEngine
         }
 
         return true;
+    }
+
+    /**
+     * Apply a CostAutopilot decision: model downgrades and context compaction.
+     */
+    protected function applyCostAutopilotDecision(AutopilotDecision $decision): void
+    {
+        if (!$decision->requiresAction()) {
+            return;
+        }
+
+        // Apply model downgrade
+        if ($decision->hasDowngrade() && $decision->newModel !== null) {
+            $this->provider->setModel($decision->newModel);
+
+            // Inject a system-level notice so the model knows it was downgraded
+            $this->messages[] = new UserMessage(
+                "[System: CostAutopilot] Model downgraded from {$decision->previousModel} to "
+                . "{$decision->newModel} ({$decision->tierName} tier) to conserve budget. "
+                . "Budget usage: " . round($decision->budgetUsedPct, 1) . "%."
+            );
+        }
+
+        // Request context compaction (truncate old tool results)
+        if ($decision->shouldCompact()) {
+            $this->compactMessagesForCost();
+        }
+    }
+
+    /**
+     * Compact messages to reduce input tokens and save cost.
+     *
+     * Truncates old tool result content (keeps first 200 chars) and removes
+     * thinking blocks from older messages. Preserves the most recent messages.
+     */
+    protected function compactMessagesForCost(): void
+    {
+        $preserveRecent = 6; // Keep last N messages untouched
+        $total = count($this->messages);
+
+        if ($total <= $preserveRecent) {
+            return;
+        }
+
+        $boundary = $total - $preserveRecent;
+
+        for ($i = 0; $i < $boundary; $i++) {
+            $msg = $this->messages[$i];
+
+            // Truncate tool result messages
+            if ($msg instanceof ToolResultMessage) {
+                $content = $msg->contentAsString();
+                if (strlen($content) > 500) {
+                    // Replace with truncated version by creating a new message
+                    $truncated = substr($content, 0, 200) . "\n[...truncated by CostAutopilot to save tokens...]";
+                    $this->messages[$i] = ToolResultMessage::fromResults([
+                        ['tool_use_id' => 'compacted', 'content' => $truncated, 'is_error' => false],
+                    ]);
+                }
+            }
+        }
     }
 }

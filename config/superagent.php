@@ -142,6 +142,90 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Adaptive Feedback
+    |--------------------------------------------------------------------------
+    | When enabled, the system automatically learns from user corrections
+    | (permission denials, edit reverts, explicit feedback). Recurring patterns
+    | are promoted to Guardrails rules or Memory entries after reaching the
+    | promotion threshold.
+    |
+    | Manage patterns via: php artisan superagent:feedback {list|show|delete|clear|export|import|promote|stats}
+    */
+    'adaptive_feedback' => [
+        'enabled' => env('SUPERAGENT_ADAPTIVE_FEEDBACK_ENABLED', false),
+
+        // Number of occurrences before a pattern is promoted to a rule/memory
+        'promotion_threshold' => (int) env('SUPERAGENT_FEEDBACK_THRESHOLD', 3),
+
+        // Whether to auto-promote or just suggest (false = manual via feedback:promote)
+        'auto_promote' => env('SUPERAGENT_FEEDBACK_AUTO_PROMOTE', true),
+
+        // Where to persist correction patterns
+        // 'storage_path' => storage_path('superagent/corrections.json'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cost Autopilot
+    |--------------------------------------------------------------------------
+    | Intelligent cost control that automatically downgrades models, compacts
+    | context, or halts the agent when budget thresholds are crossed. Set a
+    | monthly or session budget and let the autopilot handle the rest.
+    |
+    | Thresholds are evaluated after each provider call. Actions escalate as
+    | budget consumption increases: warn → compact → downgrade → halt.
+    |
+    | Model tiers define the downgrade path (e.g., Opus → Sonnet → Haiku).
+    | When not specified, tiers are auto-detected from the default provider.
+    */
+    'cost_autopilot' => [
+        'enabled' => env('SUPERAGENT_COST_AUTOPILOT_ENABLED', false),
+
+        // Budget limits (set one or both; the more restrictive one applies)
+        'session_budget_usd' => (float) env('SUPERAGENT_SESSION_BUDGET', 0),
+        'monthly_budget_usd' => (float) env('SUPERAGENT_MONTHLY_BUDGET', 0),
+
+        // Where to persist cross-session spending data
+        // 'storage_path' => storage_path('superagent/budget_tracker.json'),
+
+        // Escalation thresholds (evaluated highest-first)
+        // 'thresholds' => [
+        //     ['at_pct' => 50, 'action' => 'warn',            'message' => 'Budget 50% consumed'],
+        //     ['at_pct' => 70, 'action' => 'compact_context',  'message' => 'Compacting context to save tokens'],
+        //     ['at_pct' => 80, 'action' => 'downgrade_model',  'message' => 'Downgrading to cheaper model'],
+        //     ['at_pct' => 95, 'action' => 'halt',             'message' => 'Budget exhausted — halting agent'],
+        // ],
+
+        // Model tier hierarchy for downgrade path (most expensive first)
+        // When omitted, auto-detected from default_provider (anthropic/openai)
+        // 'tiers' => [
+        //     ['name' => 'opus',   'model' => 'claude-opus-4-20250514',   'input_cost' => 15.0, 'output_cost' => 75.0, 'priority' => 30],
+        //     ['name' => 'sonnet', 'model' => 'claude-sonnet-4-20250514', 'input_cost' => 3.0,  'output_cost' => 15.0, 'priority' => 20],
+        //     ['name' => 'haiku',  'model' => 'claude-haiku-4-5-20251001','input_cost' => 0.80, 'output_cost' => 4.0,  'priority' => 10],
+        // ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pipeline DSL
+    |--------------------------------------------------------------------------
+    | Declarative YAML workflow engine for multi-agent pipelines. Pipelines
+    | define ordered steps (agent, parallel, conditional, approval, transform)
+    | with dependency resolution, failure strategies, and inter-step data flow.
+    |
+    | See examples/pipeline.yaml for the full DSL syntax reference.
+    */
+    'pipelines' => [
+        'enabled' => env('SUPERAGENT_PIPELINES_ENABLED', false),
+
+        // YAML files to load (merged in order, later files override same-named pipelines)
+        'files' => [
+            // base_path('pipelines.yaml'),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Experimental Features
     |--------------------------------------------------------------------------
     | Feature flags for experimental capabilities. All default to true (enabled).
@@ -201,6 +285,15 @@ return [
 
         // Bridge mode: proxy non-Anthropic models through CC optimization pipeline
         'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),
+
+        // Pipeline DSL: declarative YAML workflow engine for multi-agent pipelines
+        'pipelines' => env('SUPERAGENT_EXP_PIPELINES', false),
+
+        // Cost Autopilot: automatic model downgrade, context compaction, and budget halting
+        'cost_autopilot' => env('SUPERAGENT_EXP_COST_AUTOPILOT', false),
+
+        // Adaptive Feedback: learn from user corrections and auto-generate rules/memories
+        'adaptive_feedback' => env('SUPERAGENT_EXP_ADAPTIVE_FEEDBACK', false),
     ],
 
     /*

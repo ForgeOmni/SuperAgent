@@ -166,6 +166,19 @@ SUPERAGENT_SECURITY_GUARDRAILS=false
 SUPERAGENT_GUARDRAILS_ENABLED=false
 # SUPERAGENT_GUARDRAILS_INTEGRATION=permission_engine
 
+# Pipeline DSL (declarative YAML multi-agent workflow engine)
+SUPERAGENT_PIPELINES_ENABLED=false
+
+# Cost Autopilot (automatic model downgrade and budget control)
+SUPERAGENT_COST_AUTOPILOT_ENABLED=false
+# SUPERAGENT_SESSION_BUDGET=0
+# SUPERAGENT_MONTHLY_BUDGET=0
+
+# Adaptive Feedback (learn from user corrections)
+SUPERAGENT_ADAPTIVE_FEEDBACK_ENABLED=false
+# SUPERAGENT_FEEDBACK_THRESHOLD=3
+# SUPERAGENT_FEEDBACK_AUTO_PROMOTE=true
+
 # Experimental features (master switch — all flags on when true)
 SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_ULTRATHINK=true
@@ -181,6 +194,9 @@ SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_CACHED_MICROCOMPACT=true
 # SUPERAGENT_EXP_TEAM_MEMORY=true
 # SUPERAGENT_EXP_BASH_CLASSIFIER=true
+# SUPERAGENT_EXP_PIPELINES=false
+# SUPERAGENT_EXP_COST_AUTOPILOT=false
+# SUPERAGENT_EXP_ADAPTIVE_FEEDBACK=false
 
 # ========== Permission Configuration ==========
 
@@ -435,7 +451,7 @@ When enabled, additional safety instructions are injected into the system prompt
 
 ### Experimental Feature Flags
 
-15 granular feature flags let you enable or disable experimental capabilities. All default to `true` (enabled) when the master switch is on. Some tools, agents, and behaviors are gated by these flags:
+18 granular feature flags let you enable or disable experimental capabilities. All default to `true` (enabled) when the master switch is on. Some tools, agents, and behaviors are gated by these flags:
 
 ```php
 // config/superagent.php
@@ -456,6 +472,9 @@ When enabled, additional safety instructions are injected into the system prompt
     'team_memory' => env('SUPERAGENT_EXP_TEAM_MEMORY', true),
     'bash_classifier' => env('SUPERAGENT_EXP_BASH_CLASSIFIER', true),
     'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),  // Enhance non-Anthropic models
+    'pipelines' => env('SUPERAGENT_EXP_PIPELINES', false),     // Pipeline DSL workflow engine
+    'cost_autopilot' => env('SUPERAGENT_EXP_COST_AUTOPILOT', false), // Automatic budget control
+    'adaptive_feedback' => env('SUPERAGENT_EXP_ADAPTIVE_FEEDBACK', false), // Learn from corrections
 ],
 ```
 
@@ -476,6 +495,9 @@ When enabled, additional safety instructions are injected into the system prompt
 | `extract_memories` | Session memory extraction defaults |
 | `compaction_reminders` | Auto-compact defaults in CompressionConfig |
 | `bridge_mode` | Bridge enhancement for non-Anthropic providers |
+| `pipelines` | PipelineEngine registration and YAML loading |
+| `cost_autopilot` | CostAutopilot registration and budget tracking |
+| `adaptive_feedback` | FeedbackManager registration and correction tracking |
 
 ### Bridge Mode Configuration
 
@@ -737,9 +759,10 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
-| 0.5.7      | 10.x+   | 8.1+ | Current stable — telemetry master switch, security guardrails, experimental feature flags (452 tests) |
-| 0.5.6      | 10.x+   | 8.1+ | Full test suite passing (466 tests) |
-| 0.5.5      | 10.x+   | 8.1+ | Feature release |
+| 0.6.2      | 10.x+   | 8.1+ | Pipeline DSL (with review-fix loops), Cost Autopilot, Adaptive Feedback (776 tests) |
+| 0.6.1      | 10.x+   | 8.1+ | Guardrails DSL (644 tests) |
+| 0.6.0      | 10.x+   | 8.1+ | Bridge Mode |
+| 0.5.7      | 10.x+   | 8.1+ | Telemetry master switch, security guardrails, experimental feature flags (452 tests) |
 
 ## Production Deployment
 

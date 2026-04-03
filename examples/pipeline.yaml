@@ -1,0 +1,244 @@
+# SuperAgent Pipeline DSL - Example Configuration
+# Place this file at your project root and reference it in config/superagent.php:
+#   'pipelines' => ['enabled' => true, 'files' => [base_path('pipelines.yaml')]]
+
+version: "1.0"
+
+defaults:
+  failure_strategy: abort    # abort | continue | retry
+  timeout: 300               # seconds per step
+  max_retries: 0
+
+pipelines:
+  # ── Automated Code Review Pipeline ────────────────────────────────
+  code-review:
+    description: "Multi-agent code review with security scan, style check, and synthesis"
+
+    inputs:
+      - name: files
+        type: string
+        required: true
+        description: "Files or directories to review"
+      - name: focus
+        type: string
+        required: false
+        default: "general"
+        description: "Review focus area (security, performance, general)"
+
+    triggers:
+      - event: pr_created
+      - event: manual
+
+    steps:
+      # Step 1: Security scan (blocks pipeline if critical issues found)
+      - name: security-scan
+        agent: researcher
+        prompt: |
+          Perform a security audit of the following files: {{inputs.files}}
+          Focus on OWASP Top 10 vulnerabilities, injection risks, and auth issues.
+          Report findings as a structured list with severity levels.
+        read_only: true
+        on_failure: abort
+        timeout: 120
+
+      # Step 2: Parallel checks (style + test coverage run simultaneously)
+      - name: parallel-checks
+        parallel:
+          - name: style-check
+            agent: code-writer
+            prompt: |
+              Review code style and consistency in: {{inputs.files}}
+              Check for naming conventions, code organization, and best practices.
+            read_only: true
+            on_failure: continue
+
+          - name: test-coverage
+            agent: verification
+            prompt: |
+              Analyze test coverage for: {{inputs.files}}
+              Identify untested code paths and suggest test cases.
+            read_only: true
+            on_failure: continue
+
+      # Step 3: Aggregate results from all checks
+      - name: aggregate
+        transform:
+          type: merge
+          sources:
+            security: "{{steps.security-scan.output}}"
+            style: "{{steps.style-check.output}}"
+            tests: "{{steps.test-coverage.output}}"
+        depends_on: [security-scan, parallel-checks]
+
+      # Step 4: Final review synthesizes all findings
+      - name: final-review
+        agent: reviewer
+        prompt: |
+          Synthesize the following review findings into a cohesive code review report.
+          Focus area: {{inputs.focus}}
+        input_from:
+          security_findings: "{{steps.security-scan.output}}"
+          style_findings: "{{steps.style-check.output}}"
+          test_findings: "{{steps.test-coverage.output}}"
+        depends_on: [aggregate]
+
+    outputs:
+      report: "{{steps.final-review.output}}"
+      security_status: "{{steps.security-scan.status}}"
+
+  # ── Deploy Pipeline with Approval Gate ─────────────────────────────
+  deploy:
+    description: "Build, test, approve, and deploy pipeline"
+
+    inputs:
+      - name: environment
+        type: string
+        required: true
+        description: "Target environment (staging, production)"
+      - name: branch
+        type: string
+        required: false
+        default: "main"
+
+    steps:
+      - name: run-tests
+        agent: verification
+        prompt: |
+          Run the full test suite for branch {{inputs.branch}}.
+          Report pass/fail status and any failures.
+        on_failure: abort
+
+      - name: build-check
+        agent: code-writer
+        prompt: |
+          Verify the build artifacts are valid for deployment to {{inputs.environment}}.
+          Check for any missing dependencies or configuration issues.
+        depends_on: [run-tests]
+        on_failure: abort
+
+      # Approval gate - pauses pipeline until user approves
+      - name: deploy-approval
+        approval:
+          message: |
+            Tests passed and build verified.
+            Ready to deploy branch '{{inputs.branch}}' to {{inputs.environment}}?
+          timeout: 3600
+        depends_on: [build-check]
+
+      - name: deploy
+        agent: general-purpose
+        prompt: |
+          Deploy branch {{inputs.branch}} to {{inputs.environment}}.
+          Follow the standard deployment checklist.
+        depends_on: [deploy-approval]
+        on_failure: abort
+
+      # Conditional: only notify on failure
+      - name: notify-failure
+        when:
+          step_failed: deploy
+        agent: general-purpose
+        prompt: |
+          Deployment of {{inputs.branch}} to {{inputs.environment}} failed.
+          Error: {{steps.deploy.error}}
+          Notify the team and suggest rollback steps.
+
+    outputs:
+      deploy_status: "{{steps.deploy.status}}"
+
+  # ── Review-Fix Loop Pipeline ────────────────────────────────────
+  review-fix:
+    description: "Iterative review-fix cycle with multi-model review until all issues resolved"
+
+    inputs:
+      - name: files
+        type: string
+        required: true
+
+    steps:
+      # Step 1: Initial code generation or edit
+      - name: initial-work
+        agent: code-writer
+        prompt: "Implement changes for: {{inputs.files}}"
+
+      # Step 2: Review-Fix loop — repeats until all reviewers say LGTM or 5 iterations
+      - name: review-fix-loop
+        loop:
+          max_iterations: 5
+
+          exit_when:
+            # Exit when BOTH reviewers approve
+            all_passed:
+              - step: claude-review
+                contains: "LGTM"
+              - step: gpt-review
+                contains: "LGTM"
+
+          steps:
+            # Multi-model parallel review
+            - name: reviews
+              parallel:
+                - name: claude-review
+                  agent: reviewer
+                  model: claude-sonnet-4-20250514
+                  prompt: |
+                    Review this code for logic bugs, edge cases, and code quality.
+                    If everything looks good, respond with "LGTM".
+                    Otherwise, list all issues found.
+
+                - name: gpt-review
+                  agent: reviewer
+                  model: gpt-4o
+                  prompt: |
+                    Review this code for security vulnerabilities and performance issues.
+                    If everything looks good, respond with "LGTM".
+                    Otherwise, list all issues found.
+
+            # Fix step — only runs if either reviewer found issues
+            - name: fix
+              agent: code-writer
+              prompt: "Fix all issues found by the reviewers."
+              input_from:
+                claude_feedback: "{{steps.claude-review.output}}"
+                gpt_feedback: "{{steps.gpt-review.output}}"
+              when:
+                expression:
+                  left: "{{steps.claude-review.output}}"
+                  operator: not_contains
+                  right: "LGTM"
+
+    outputs:
+      final_code: "{{steps.fix.output}}"
+      iterations: "{{vars.loop.review-fix-loop.iteration}}"
+      claude_verdict: "{{steps.claude-review.output}}"
+      gpt_verdict: "{{steps.gpt-review.output}}"
+
+  # ── Simple Research Pipeline ───────────────────────────────────────
+  research:
+    description: "Research a topic using multiple specialized agents"
+
+    inputs:
+      - name: question
+        type: string
+        required: true
+
+    steps:
+      - name: explore
+        agent: explore
+        prompt: "Explore the codebase to answer: {{inputs.question}}"
+        read_only: true
+        timeout: 60
+
+      - name: summarize
+        transform:
+          type: template
+          template: |
+            # Research Results
+            ## Question
+            {{inputs.question}}
+            ## Findings
+            {{steps.explore.output}}
+        depends_on: [explore]
+
+    outputs:
+      answer: "{{steps.summarize.output}}"

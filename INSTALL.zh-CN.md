@@ -166,6 +166,19 @@ SUPERAGENT_SECURITY_GUARDRAILS=false
 SUPERAGENT_GUARDRAILS_ENABLED=false
 # SUPERAGENT_GUARDRAILS_INTEGRATION=permission_engine
 
+# Pipeline DSL（声明式 YAML 多 Agent 工作流引擎）
+SUPERAGENT_PIPELINES_ENABLED=false
+
+# Cost Autopilot（自动模型降级和预算控制）
+SUPERAGENT_COST_AUTOPILOT_ENABLED=false
+# SUPERAGENT_SESSION_BUDGET=0
+# SUPERAGENT_MONTHLY_BUDGET=0
+
+# 自适应反馈（从用户修正中学习）
+SUPERAGENT_ADAPTIVE_FEEDBACK_ENABLED=false
+# SUPERAGENT_FEEDBACK_THRESHOLD=3
+# SUPERAGENT_FEEDBACK_AUTO_PROMOTE=true
+
 # 实验性功能（总开关 — 为 true 时所有 flag 默认启用）
 SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_ULTRATHINK=true
@@ -181,6 +194,9 @@ SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_CACHED_MICROCOMPACT=true
 # SUPERAGENT_EXP_TEAM_MEMORY=true
 # SUPERAGENT_EXP_BASH_CLASSIFIER=true
+# SUPERAGENT_EXP_PIPELINES=false
+# SUPERAGENT_EXP_COST_AUTOPILOT=false
+# SUPERAGENT_EXP_ADAPTIVE_FEEDBACK=false
 
 # ========== 权限配置 ==========
 
@@ -434,7 +450,7 @@ $manager->create(
 
 ### 实验性 Feature Flags
 
-15 个细粒度 feature flag 独立控制实验性功能。部分工具、Agent 和行为受这些 flag 控制：
+18 个细粒度 feature flag 独立控制实验性功能。部分工具、Agent 和行为受这些 flag 控制：
 
 ```php
 // config/superagent.php
@@ -455,6 +471,9 @@ $manager->create(
     'team_memory' => env('SUPERAGENT_EXP_TEAM_MEMORY', true),
     'bash_classifier' => env('SUPERAGENT_EXP_BASH_CLASSIFIER', true),
     'bridge_mode' => env('SUPERAGENT_EXP_BRIDGE_MODE', false),  // 增强非 Anthropic 模型
+    'pipelines' => env('SUPERAGENT_EXP_PIPELINES', false),     // Pipeline DSL 工作流引擎
+    'cost_autopilot' => env('SUPERAGENT_EXP_COST_AUTOPILOT', false), // 自动预算控制
+    'adaptive_feedback' => env('SUPERAGENT_EXP_ADAPTIVE_FEEDBACK', false), // 从修正中学习
 ],
 ```
 
@@ -476,6 +495,9 @@ $manager->create(
 | `compaction_reminders` | CompressionConfig 自动压缩默认值 |
 | `cached_microcompact` | CompressionConfig 微压缩默认值 |
 | `bridge_mode` | 非 Anthropic Provider 的 Bridge 增强 |
+| `pipelines` | PipelineEngine 注册和 YAML 加载 |
+| `cost_autopilot` | CostAutopilot 注册和预算追踪 |
+| `adaptive_feedback` | FeedbackManager 注册和修正追踪 |
 
 ### Bridge 模式配置
 
@@ -736,9 +758,10 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
-| 0.5.7      | 10.x+   | 8.1+ | 当前稳定版 — 遥测主开关、安全护栏、实验性 feature flags（452 项测试） |
-| 0.5.6      | 10.x+   | 8.1+ | 全部测试通过（466 项测试） |
-| 0.5.5      | 10.x+   | 8.1+ | 功能发布版 |
+| 0.6.2      | 10.x+   | 8.1+ | Pipeline DSL（含 Review-Fix 循环）、Cost Autopilot、自适应反馈（776 项测试） |
+| 0.6.1      | 10.x+   | 8.1+ | Guardrails DSL（644 项测试） |
+| 0.6.0      | 10.x+   | 8.1+ | Bridge 模式 |
+| 0.5.7      | 10.x+   | 8.1+ | 遥测主开关、安全护栏、实验性 feature flags（452 项测试） |
 
 ## 生产环境部署
 

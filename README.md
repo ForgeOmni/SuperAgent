@@ -34,7 +34,10 @@ SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider suppo
 - **Security Prompt Guardrails** - Optional safety instructions injected into the system prompt to restrict security-related operations; configurable via `security_guardrails` flag
 - **Guardrails DSL** - Declarative YAML rule engine for security, cost, compliance, and rate-limiting policies. Supports composable conditions (`all_of`/`any_of`/`not`), 7 condition types (tool, tool_content, tool_input, session, agent, token, rate), 8 action types (deny, allow, ask, warn, log, pause, rate_limit, downgrade_model), priority-ordered rule groups, and integration with the PermissionEngine pipeline
 - **Bridge Mode** - Provider-agnostic enhancement proxy that injects CC optimization mechanisms (system prompt enhancement, context compaction, bash security, memory injection, tool schema optimization, cost tracking) into non-Anthropic models (OpenAI, Bedrock, Ollama, OpenRouter). Supports both HTTP proxy mode (for Codex CLI etc.) and SDK auto-enhance mode with 3-level priority control (`bridge_mode` param > config `auto_enhance` > feature flag)
-- **Experimental Feature Flags** - 15 granular feature flags (with master switch) to gate experimental capabilities: ultrathink, token budget, prompt cache detection, builtin agents, verification agent, plan interview, agent triggers (local/remote), memory extraction, compaction reminders, cached microcompact, team memory, bash classifier, bridge mode
+- **Pipeline DSL** - Declarative YAML workflow engine for multi-agent pipelines. Supports 6 step types (agent, parallel, conditional, approval, transform, loop), dependency-based topological execution order, 3 failure strategies (abort, continue, retry), inter-step data flow via `{{steps.name.output}}` templates, `input_from` context injection, approval gates with pluggable handlers, review-fix loops with multi-model parallel review and configurable exit conditions (`output_contains`, `all_passed`, `any_passed`, `expression`), and event listeners for observability
+- **Cost Autopilot** - Intelligent budget control that monitors cumulative spending and automatically escalates through cost-saving actions: warn → compact context → downgrade model (Opus → Sonnet → Haiku) → halt. Supports session and monthly budgets, persistent cross-session spending tracker, configurable threshold percentages, auto-detected model tier hierarchies per provider, and event listeners for cost observability
+- **Adaptive Feedback** - Learns from user corrections (permission denials, edit reverts, behavior feedback) and automatically promotes recurring patterns to Guardrails rules or Memory entries. Configurable promotion threshold, 5 correction categories, persistent JSON storage, full management CLI (`superagent:feedback list|show|delete|clear|export|import|promote|stats`), import/export for sharing across projects
+- **Experimental Feature Flags** - 18 granular feature flags (with master switch) to gate experimental capabilities: ultrathink, token budget, prompt cache detection, builtin agents, verification agent, plan interview, agent triggers (local/remote), memory extraction, compaction reminders, cached microcompact, team memory, bash classifier, bridge mode, pipelines, cost autopilot, adaptive feedback
 - **Observability** - OpenTelemetry integration with complete tracing and per-event-type analytics sampling rate control
 - **File History** - LRU cache (100 message-level snapshots) with per-message rewind, diff stats (insertions/deletions/filesChanged), and snapshot inheritance
 - **Tool Use Summaries** - Haiku-generated git-commit-subject-style summaries after tool batches
@@ -419,6 +422,9 @@ SUPERAGENT_EXP_CACHED_MICROCOMPACT=true   # Cached microcompact state
 SUPERAGENT_EXP_TEAM_MEMORY=true           # Team-memory files (shared memory)
 SUPERAGENT_EXP_BASH_CLASSIFIER=true       # Classifier-assisted bash permissions
 SUPERAGENT_EXP_BRIDGE_MODE=false          # Bridge mode: enhance non-Anthropic models with CC optimizations
+SUPERAGENT_EXP_PIPELINES=false            # Pipeline DSL: declarative YAML multi-agent workflow engine
+SUPERAGENT_EXP_COST_AUTOPILOT=false       # Cost Autopilot: automatic model downgrade, context compaction, budget control
+SUPERAGENT_EXP_ADAPTIVE_FEEDBACK=false    # Adaptive Feedback: auto-learn from user corrections, generate rules/memories
 ```
 
 The `ExperimentalFeatures` class also falls back to env vars when running outside a Laravel application (e.g. in unit tests), so feature flags work consistently across all environments.
@@ -481,6 +487,150 @@ SUPERAGENT_BRIDGE_ENH_MEMORY=false
 SUPERAGENT_BRIDGE_ENH_COST_TRACKING=true
 ```
 
+### Pipeline DSL
+
+Declarative YAML workflow engine for orchestrating multi-agent pipelines:
+
+```yaml
+# pipelines.yaml
+version: "1.0"
+pipelines:
+  code-review:
+    description: "Multi-agent code review pipeline"
+    inputs:
+      - name: files
+        required: true
+    steps:
+      - name: security-scan
+        agent: researcher
+        prompt: "Scan {{inputs.files}} for vulnerabilities"
+        on_failure: abort
+
+      - name: parallel-checks
+        parallel:
+          - name: style-check
+            agent: code-writer
+            prompt: "Check code style"
+          - name: test-coverage
+            agent: verification
+            prompt: "Analyze test coverage"
+
+      - name: approval-gate
+        approval:
+          message: "All checks passed. Proceed with review?"
+
+      - name: final-review
+        agent: reviewer
+        prompt: "Synthesize review findings"
+        input_from:
+          security: "{{steps.security-scan.output}}"
+        depends_on: [parallel-checks]
+    outputs:
+      report: "{{steps.final-review.output}}"
+```
+
+```php
+'pipelines' => [
+    'enabled' => env('SUPERAGENT_PIPELINES_ENABLED', false),
+    'files' => [base_path('pipelines.yaml')],
+],
+```
+
+**Review-fix loop** — iterative multi-model review with automatic exit:
+
+```yaml
+- name: review-fix-loop
+  loop:
+    max_iterations: 5
+    exit_when:
+      all_passed:
+        - { step: claude-review, contains: "LGTM" }
+        - { step: gpt-review, contains: "LGTM" }
+    steps:
+      - name: reviews
+        parallel:
+          - name: claude-review
+            agent: reviewer
+            model: claude-sonnet-4-20250514
+            prompt: "Review for bugs. Say LGTM if clean."
+          - name: gpt-review
+            agent: reviewer
+            model: gpt-4o
+            prompt: "Review for security. Say LGTM if clean."
+      - name: fix
+        agent: code-writer
+        prompt: "Fix all issues found"
+        input_from:
+          claude: "{{steps.claude-review.output}}"
+          gpt: "{{steps.gpt-review.output}}"
+```
+
+Loop variables: `{{vars.loop.<name>.iteration}}`, `{{vars.loop.<name>.max}}`
+
+Exit conditions: `output_contains`, `output_not_contains`, `all_passed`, `any_passed`, `expression`
+
+See `examples/pipeline.yaml` for a complete reference.
+
+### Cost Autopilot
+
+Intelligent budget control that automatically escalates cost-saving actions:
+
+```
+Budget usage →  50%  → ⚠️  Warn (log warning)
+                70%  → 📦  Compact (reduce context)
+                80%  → ⬇️  Downgrade (Opus → Sonnet → Haiku)
+                95%  → 🛑  Halt (stop agent)
+```
+
+```php
+'cost_autopilot' => [
+    'enabled' => env('SUPERAGENT_COST_AUTOPILOT_ENABLED', false),
+    'session_budget_usd' => 5.00,    // Per-session budget
+    'monthly_budget_usd' => 100.00,  // Monthly budget
+    // Custom thresholds (optional, has sensible defaults)
+    // 'thresholds' => [
+    //     ['at_pct' => 50, 'action' => 'warn'],
+    //     ['at_pct' => 80, 'action' => 'downgrade_model'],
+    //     ['at_pct' => 95, 'action' => 'halt'],
+    // ],
+],
+```
+
+Model tiers are auto-detected from the default provider (Anthropic: Opus → Sonnet → Haiku, OpenAI: GPT-4o → GPT-4o-mini → GPT-3.5) or can be manually configured.
+
+### Adaptive Feedback
+
+Learns from user corrections and automatically promotes recurring patterns to rules or memories:
+
+```
+User denials → CorrectionCollector extracts pattern → Reaches threshold (default 3x)
+                    ↓                                         ↓
+           tool_denied / edit_reverted             behavior / content corrections
+                    ↓                                         ↓
+           Guardrails Rule (warn/deny)             Memory Entry (feedback type)
+```
+
+```php
+'adaptive_feedback' => [
+    'enabled' => env('SUPERAGENT_ADAPTIVE_FEEDBACK_ENABLED', false),
+    'promotion_threshold' => 3,   // Occurrences before promotion
+    'auto_promote' => true,       // Auto-promote (false = manual via feedback:promote)
+],
+```
+
+Management commands:
+
+```bash
+php artisan superagent:feedback list [--category=tool_denied] [--search=keyword]
+php artisan superagent:feedback show <id>
+php artisan superagent:feedback delete <id>
+php artisan superagent:feedback clear
+php artisan superagent:feedback export [--output=path.json]
+php artisan superagent:feedback import <path.json>
+php artisan superagent:feedback promote <id>
+php artisan superagent:feedback stats
+```
+
 ## 🔧 CLI Commands
 
 ### Interactive Chat
@@ -505,6 +655,12 @@ php artisan superagent:tools
 
 ```bash
 php artisan superagent:make-tool MyCustomTool
+```
+
+### Manage Adaptive Feedback
+
+```bash
+php artisan superagent:feedback stats
 ```
 
 ## 🎨 Custom Extensions
