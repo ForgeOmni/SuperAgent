@@ -92,9 +92,18 @@ class SendMessageTool extends Tool
     public function execute(array $input): ToolResult
     {
         try {
-            $to = $input['to'];
-            $message = $input['message'];
+            $to = $input['to'] ?? null;
+            $message = $input['message'] ?? null;
             $summary = $input['summary'] ?? null;
+            
+            // Validate required fields
+            if ($to === null || $to === '') {
+                return ToolResult::failure('Recipient (to) is required');
+            }
+            
+            if ($message === null || $message === '') {
+                return ToolResult::failure('Message content is required');
+            }
             
             // Validate input
             if (is_string($message) && empty($summary)) {
@@ -116,7 +125,7 @@ class SendMessageTool extends Tool
             }
             
             // Handle direct message
-            return $this->handleDirectMessage($to, $message, $summary, $senderName, $senderColor);
+            return $this->handleDirectMessage($to, $message ?? '', $summary, $senderName, $senderColor);
             
         } catch (\Exception $e) {
             $this->logger->error("Failed to send message", [

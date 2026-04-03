@@ -140,6 +140,26 @@ class AgentProgressTracker
     {
         $this->completedAt = new \DateTimeImmutable();
         $this->currentActivity = null;
+        $this->status = 'completed';
+    }
+    
+    /**
+     * Set the status directly.
+     */
+    public function setStatus(string $status): void
+    {
+        $this->status = $status;
+        if ($status === 'completed') {
+            $this->completedAt = new \DateTimeImmutable();
+        }
+    }
+    
+    /**
+     * Get the current status.
+     */
+    public function getStatus(): string
+    {
+        return $this->status;
     }
     
     /**
