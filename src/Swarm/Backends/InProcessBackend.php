@@ -274,13 +274,17 @@ class InProcessBackend implements BackendInterface
                 }
                 
                 // Execute the agent with the prompt
-                $response = $agent->run($prompt);
+                $result = $agent->run($prompt);
                 
-                // Update tracker with final usage
-                if ($tracker && isset($response->usage)) {
+                // Store the result in the coordinator
+                $this->coordinator->storeAgentResult($agentId, $result);
+                
+                // Update tracker with final usage from the AgentResult
+                if ($tracker && $result instanceof \SuperAgent\AgentResult) {
+                    $usage = $result->totalUsage();
                     $tracker->updateFromResponse(
-                        $response->usage,
-                        $response->toolUses ?? null
+                        ['input_tokens' => $usage->inputTokens, 'output_tokens' => $usage->outputTokens],
+                        null
                     );
                 }
                 
@@ -293,8 +297,10 @@ class InProcessBackend implements BackendInterface
                 
                 $this->logger->info("Agent completed execution", [
                     'agent_id' => $agentId,
-                    'response_length' => strlen($response->content ?? ''),
+                    'response_text_length' => strlen($result->text()),
                     'total_tokens' => $tracker ? $tracker->getTotalTokens() : 0,
+                    'turns' => $result->turns(),
+                    'cost_usd' => $result->totalCostUsd,
                 ]);
                 
             } catch (\Exception $e) {

@@ -33,6 +33,12 @@ class ParallelAgentCoordinator
     /** @var array<string, array> Pending messages for each agent */
     private array $pendingMessages = [];
     
+    /** @var array<string, \SuperAgent\AgentResult> Completed agent results */
+    private array $agentResults = [];
+    
+    /** @var \DateTimeImmutable|null Execution start time for tracking duration */
+    private ?\DateTimeImmutable $executionStartTime = null;
+    
     private function __construct(?LoggerInterface $logger = null)
     {
         $this->logger = $logger ?? new NullLogger();
@@ -44,6 +50,14 @@ class ParallelAgentCoordinator
             self::$instance = new self($logger);
         }
         return self::$instance;
+    }
+    
+    /**
+     * Start tracking execution time.
+     */
+    public function startExecution(): void
+    {
+        $this->executionStartTime = new \DateTimeImmutable();
     }
     
     /**
@@ -251,6 +265,71 @@ class ParallelAgentCoordinator
             ];
         }
         return $summary;
+    }
+    
+    /**
+     * Collect results from all tracked agents and create an AgentTeamResult.
+     */
+    public function collectTeamResults(): \SuperAgent\AgentTeamResult
+    {
+        $agentResults = [];
+        $metadata = [
+            'agents' => [],
+            'teams' => [],
+            'execution_start' => $this->executionStartTime ?? new \DateTimeImmutable(),
+            'execution_time' => 0,
+        ];
+        
+        // Collect results from each tracker
+        foreach ($this->trackers as $agentId => $tracker) {
+            // Get the agent's result if available
+            if (isset($this->agentResults[$agentId])) {
+                $agentResults[] = $this->agentResults[$agentId];
+                
+                // Get agent metadata
+                $progress = $tracker->getProgress();
+                $agentName = $tracker->getAgentName();
+                
+                $metadata['agents'][$agentName] = [
+                    'agent_id' => $agentId,
+                    'status' => $progress['status'],
+                    'turns' => $progress['turnCount'],
+                    'tokens' => $progress['tokenCount'],
+                    'tool_uses' => $progress['toolUseCount'],
+                    'last_activity' => $progress['currentActivity'],
+                ];
+            }
+        }
+        
+        // Add team information
+        foreach ($this->teams as $teamName => $team) {
+            $metadata['teams'][$teamName] = [
+                'leader_id' => $team->getLeaderId(),
+                'member_count' => $team->getMemberCount(),
+                'active_members' => count($team->getActiveMembers()),
+            ];
+        }
+        
+        // Calculate total execution time
+        if ($this->executionStartTime) {
+            $now = new \DateTimeImmutable();
+            $metadata['execution_time'] = $now->getTimestamp() - $this->executionStartTime->getTimestamp();
+        }
+        
+        return new \SuperAgent\AgentTeamResult($agentResults, $metadata);
+    }
+    
+    /**
+     * Store a result for an agent.
+     */
+    public function storeAgentResult(string $agentId, \SuperAgent\AgentResult $result): void
+    {
+        $this->agentResults[$agentId] = $result;
+        
+        // Update tracker with final status
+        if (isset($this->trackers[$agentId])) {
+            $this->trackers[$agentId]->setStatus('completed');
+        }
     }
     
     /**
