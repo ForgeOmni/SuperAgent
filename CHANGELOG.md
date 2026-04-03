@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.6] - 2026-04-03
+
+### Added
+- **Smart Context Window** — Dynamic token allocation between thinking and context based on task complexity
+  - `SmartContextManager` — main manager that analyzes prompts, allocates budgets, supports per-task override (`options['context_strategy']` > config toggle) with strategy auto-detection or manual forcing via string/enum
+  - `TaskComplexity` — heuristic analyzer scoring prompts (0.0–1.0) based on complexity keywords (refactor, architect, debug), simplicity keywords (list, show, read), multi-step indicators, prompt length, code presence, and question detection; maps scores to ContextStrategy
+  - `ContextStrategy` enum — `deep_thinking` (60/40 split, keep 4 recent), `balanced` (40/60 split, keep 8), `broad_context` (15/85 split, keep 16); each defines thinking/context ratios and compaction aggressiveness
+  - `BudgetAllocation` — immutable result with thinking/context token budgets, compaction keep-recent count, complexity score, percentage helpers, and serialization
+  - QueryEngine integration: analyzes prompt at run() start, sets thinking budget and stores allocation for compaction decisions
+- New `smart_context` configuration section in `config/superagent.php` with `enabled`, `total_budget_tokens`, `min_thinking_budget`, and `max_thinking_budget` settings
+- New `smart_context` experimental feature flag
+- `SmartContextManager` registered as conditional singleton in `SuperAgentServiceProvider`
+
+### Changed
+- `QueryEngine` — new optional `?SmartContextManager` constructor parameter; `run()` analyzes prompt complexity at start and adjusts thinking budget; per-task override via `options['context_strategy']`
+
+### Tests
+- 23 new SmartContext unit tests (55 assertions):
+  - `SmartContextTest` — strategy ratios/compaction, complex/simple/balanced task detection, short question, long prompt effect, multi-step detection, code detection, describe, allocation percentages/describe/toArray, force strategy (enum/string/null reset), min/max thinking budget enforcement, isEnabled, total budget, allocation sums to total
+
 ## [0.6.5] - 2026-04-03
 
 ### Added
@@ -94,7 +114,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PipelineEngine` registered as conditional singleton in `SuperAgentServiceProvider`
 
 ### Changed
-- `QueryEngine` — new optional `?CheckpointManager` constructor parameter; `run()` loop now calls `maybeCheckpoint()` after each turn; per-task override via `options['checkpoint']` takes priority over config
+- `QueryEngine` — new optional `?CheckpointManager` constructor parameter; `run()` loop calls `maybeCheckpoint()` after each turn; per-task override via `options['checkpoint']`
 
 ### Tests
 - 33 new KnowledgeGraph unit tests (77 assertions):

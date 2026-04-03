@@ -18,6 +18,7 @@ use SuperAgent\Messages\Message;
 use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\UserMessage;
 use SuperAgent\Checkpoint\CheckpointManager;
+use SuperAgent\SmartContext\SmartContextManager;
 use SuperAgent\CostAutopilot\CostAutopilot;
 use SuperAgent\CostAutopilot\AutopilotDecision;
 use SuperAgent\Guardrails\Context\RuntimeContextCollector;
@@ -60,6 +61,8 @@ class QueryEngine
 
     protected ?CheckpointManager $checkpointManager = null;
 
+    protected ?SmartContextManager $smartContextManager = null;
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -75,6 +78,7 @@ class QueryEngine
         ?RuntimeContextCollector $guardrailsCollector = null,
         ?CostAutopilot $costAutopilot = null,
         ?CheckpointManager $checkpointManager = null,
+        ?SmartContextManager $smartContextManager = null,
     ) {
         foreach ($this->tools as $tool) {
             $this->toolMap[$tool->name()] = $tool;
@@ -96,6 +100,12 @@ class QueryEngine
         $this->guardrailsCollector = $guardrailsCollector;
         $this->costAutopilot = $costAutopilot;
         $this->checkpointManager = $checkpointManager;
+        $this->smartContextManager = $smartContextManager;
+
+        // Apply per-task context_strategy override from options
+        if ($this->smartContextManager !== null && isset($this->options['context_strategy'])) {
+            $this->smartContextManager->setForceStrategy($this->options['context_strategy']);
+        }
 
         // Apply per-task checkpoint override from options
         if ($this->checkpointManager !== null && array_key_exists('checkpoint', $this->options)) {
@@ -143,6 +153,20 @@ class QueryEngine
         $this->turnCount = 0;
         $this->turnOutputTokens = 0;
         $this->budgetTracker?->reset();
+
+        // --- Smart Context Window: adjust thinking budget based on task complexity ---
+        if ($this->smartContextManager !== null && $this->smartContextManager->isEnabled()) {
+            $promptText = is_string($prompt) ? $prompt : json_encode($prompt);
+            $allocation = $this->smartContextManager->allocate($promptText);
+
+            // Apply thinking budget to options (if model supports thinking)
+            if (!isset($this->options['thinking']) || $this->options['thinking'] === null) {
+                $this->options['thinking_budget_tokens'] = $allocation->thinkingBudgetTokens;
+            }
+
+            // Store allocation for compaction decisions
+            $this->options['_smart_context_allocation'] = $allocation->toArray();
+        }
 
         while ($this->turnCount < $this->maxTurns) {
             $this->turnCount++;

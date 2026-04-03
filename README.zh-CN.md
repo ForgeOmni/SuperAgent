@@ -40,7 +40,8 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **技能蒸馏** - 自动将昂贵模型（Opus）的成功执行蒸馏为可复用的分步骤 Skill 模板，让廉价模型（Haiku）可以照方执行。捕获工具调用序列，泛化文件路径为参数，自动选择最优目标模型层级，估算成本节省，跟踪使用次数。完整管理 CLI（`superagent:distill list|show|delete|clear|export|import|stats`）
 - **断点续跑** - 长时间运行的 Agent 任务周期性快照状态（消息、轮次、成本、token）到磁盘。崩溃或中断后可从任意 checkpoint 恢复。任务内指定（`options['checkpoint'] = true`）优先于配置开关。自动清理旧 checkpoint。完整管理 CLI（`superagent:checkpoint list|show|delete|clear|prune|stats`）
 - **知识图谱** - 跨 Agent 共享知识图谱，自动追踪哪些文件被哪些 Agent 读取/修改/创建，记录搜索模式、Bash 命令、决策、符号定义和文件依赖关系。后续 Agent 查询图谱而非重新探索代码库。提供热点文件排名、按 Agent/文件的关联查询，及 token 高效的摘要用于系统提示注入
-- **实验性 Feature Flags** - 21 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、Bridge 模式、Pipeline、Cost Autopilot、自适应反馈
+- **智能上下文窗口** - 根据任务复杂度动态分配 token 预算。复杂推理任务（重构、架构、调试）分配 60% 思考 + 40% 上下文并激进压缩；简单任务（列表、读取、展示）分配 15% 思考 + 85% 上下文保留完整历史。任务内指定（`options['context_strategy']`）优先于配置
+- **实验性 Feature Flags** - 22 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、Bridge 模式、Pipeline、Cost Autopilot、自适应反馈
 - **可观测性** - OpenTelemetry 集成，完整链路追踪，及按事件类型动态调整分析采样率
 - **文件版本控制** - LRU 缓存（100 个消息级快照），按消息回退，diff 统计（insertions/deletions/filesChanged），快照继承
 - **工具使用摘要** - Haiku 生成 git-commit-subject 风格的工具批次执行摘要

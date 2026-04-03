@@ -187,6 +187,12 @@ SUPERAGENT_SKILL_DISTILLATION_ENABLED=false
 # Knowledge Graph (cross-agent shared knowledge)
 SUPERAGENT_KNOWLEDGE_GRAPH_ENABLED=false
 
+# Smart Context Window (dynamic thinking/context allocation)
+SUPERAGENT_SMART_CONTEXT_ENABLED=false
+# SUPERAGENT_SMART_CONTEXT_BUDGET=100000
+# SUPERAGENT_SMART_CONTEXT_MIN_THINKING=5000
+# SUPERAGENT_SMART_CONTEXT_MAX_THINKING=128000
+
 # Checkpoint & Resume (periodic state snapshots for crash recovery)
 SUPERAGENT_CHECKPOINT_ENABLED=false
 # SUPERAGENT_CHECKPOINT_INTERVAL=5
@@ -213,6 +219,7 @@ SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_SKILL_DISTILLATION=false
 # SUPERAGENT_EXP_CHECKPOINT=false
 # SUPERAGENT_EXP_KNOWLEDGE_GRAPH=false
+# SUPERAGENT_EXP_SMART_CONTEXT=false
 
 # ========== Permission Configuration ==========
 
@@ -467,7 +474,7 @@ When enabled, additional safety instructions are injected into the system prompt
 
 ### Experimental Feature Flags
 
-21 granular feature flags let you enable or disable experimental capabilities. All default to `true` (enabled) when the master switch is on. Some tools, agents, and behaviors are gated by these flags:
+22 granular feature flags let you enable or disable experimental capabilities. All default to `true` (enabled) when the master switch is on. Some tools, agents, and behaviors are gated by these flags:
 
 ```php
 // config/superagent.php
@@ -494,6 +501,7 @@ When enabled, additional safety instructions are injected into the system prompt
     'skill_distillation' => env('SUPERAGENT_EXP_SKILL_DISTILLATION', false), // Distill skills from traces
     'checkpoint' => env('SUPERAGENT_EXP_CHECKPOINT', false),                 // State snapshots for crash recovery
     'knowledge_graph' => env('SUPERAGENT_EXP_KNOWLEDGE_GRAPH', false),       // Cross-agent knowledge graph
+    'smart_context' => env('SUPERAGENT_EXP_SMART_CONTEXT', false),           // Dynamic thinking/context allocation
 ],
 ```
 
@@ -520,6 +528,7 @@ When enabled, additional safety instructions are injected into the system prompt
 | `skill_distillation` | DistillationManager registration and skill generation |
 | `checkpoint` | CheckpointManager registration and state snapshots |
 | `knowledge_graph` | KnowledgeGraphManager registration and graph tracking |
+| `smart_context` | SmartContextManager registration and dynamic allocation |
 
 ### Bridge Mode Configuration
 
@@ -781,6 +790,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.6      | 10.x+   | 8.1+ | Smart Context Window (888 tests) |
 | 0.6.5      | 10.x+   | 8.1+ | Skill Distillation, Checkpoint & Resume, Knowledge Graph (865 tests) |
 | 0.6.2      | 10.x+   | 8.1+ | Pipeline DSL (with review-fix loops), Cost Autopilot, Adaptive Feedback (776 tests) |
 | 0.6.1      | 10.x+   | 8.1+ | Guardrails DSL (644 tests) |

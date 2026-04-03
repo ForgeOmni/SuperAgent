@@ -19,6 +19,7 @@ use SuperAgent\Checkpoint\CheckpointStore;
 use SuperAgent\KnowledgeGraph\GraphCollector;
 use SuperAgent\KnowledgeGraph\KnowledgeGraph;
 use SuperAgent\KnowledgeGraph\KnowledgeGraphManager;
+use SuperAgent\SmartContext\SmartContextManager;
 use SuperAgent\SkillDistillation\DistillationEngine;
 use SuperAgent\SkillDistillation\DistillationManager;
 use SuperAgent\SkillDistillation\DistillationStore;
@@ -127,6 +128,22 @@ class SuperAgentServiceProvider extends ServiceProvider
             $collector = new CorrectionCollector($store);
 
             return new FeedbackManager($store, $engine, $collector);
+        });
+
+        // Register SmartContextManager singleton when enabled
+        $this->app->singleton(SmartContextManager::class, function ($app) {
+            $config = $app['config']->get('superagent.smart_context', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            return new SmartContextManager(
+                totalBudgetTokens: (int) ($config['total_budget_tokens'] ?? 100_000),
+                minThinkingBudget: (int) ($config['min_thinking_budget'] ?? 5_000),
+                maxThinkingBudget: (int) ($config['max_thinking_budget'] ?? 128_000),
+                configEnabled: true,
+            );
         });
 
         // Register KnowledgeGraphManager singleton when enabled

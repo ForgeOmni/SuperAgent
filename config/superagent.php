@@ -166,6 +166,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Smart Context Window
+    |--------------------------------------------------------------------------
+    | Dynamically allocates tokens between thinking budget and context window
+    | based on task complexity. Complex tasks get more thinking budget with
+    | aggressive compaction; simple tasks preserve more conversation history.
+    |
+    | Priority control:
+    |   1. Per-task: new Agent(['context_strategy' => 'deep_thinking'])  ← highest
+    |   2. Config: SUPERAGENT_SMART_CONTEXT_ENABLED=true                ← default
+    */
+    'smart_context' => [
+        'enabled' => env('SUPERAGENT_SMART_CONTEXT_ENABLED', false),
+
+        // Total token budget to split between thinking and context
+        'total_budget_tokens' => (int) env('SUPERAGENT_SMART_CONTEXT_BUDGET', 100_000),
+
+        // Minimum thinking budget (even for simple tasks)
+        'min_thinking_budget' => (int) env('SUPERAGENT_SMART_CONTEXT_MIN_THINKING', 5_000),
+
+        // Maximum thinking budget
+        'max_thinking_budget' => (int) env('SUPERAGENT_SMART_CONTEXT_MAX_THINKING', 128_000),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Knowledge Graph
     |--------------------------------------------------------------------------
     | When enabled, tool execution events (file reads, edits, searches) are
@@ -371,6 +396,9 @@ return [
 
         // Knowledge Graph: cross-agent shared knowledge for multi-agent collaboration
         'knowledge_graph' => env('SUPERAGENT_EXP_KNOWLEDGE_GRAPH', false),
+
+        // Smart Context: dynamic token allocation between thinking and context
+        'smart_context' => env('SUPERAGENT_EXP_SMART_CONTEXT', false),
     ],
 
     /*

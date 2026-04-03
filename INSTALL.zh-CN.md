@@ -187,6 +187,12 @@ SUPERAGENT_SKILL_DISTILLATION_ENABLED=false
 # 知识图谱（跨 Agent 共享知识）
 SUPERAGENT_KNOWLEDGE_GRAPH_ENABLED=false
 
+# 智能上下文窗口（动态思考/上下文分配）
+SUPERAGENT_SMART_CONTEXT_ENABLED=false
+# SUPERAGENT_SMART_CONTEXT_BUDGET=100000
+# SUPERAGENT_SMART_CONTEXT_MIN_THINKING=5000
+# SUPERAGENT_SMART_CONTEXT_MAX_THINKING=128000
+
 # 断点续跑（周期性状态快照用于崩溃恢复）
 SUPERAGENT_CHECKPOINT_ENABLED=false
 # SUPERAGENT_CHECKPOINT_INTERVAL=5
@@ -213,6 +219,7 @@ SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_SKILL_DISTILLATION=false
 # SUPERAGENT_EXP_CHECKPOINT=false
 # SUPERAGENT_EXP_KNOWLEDGE_GRAPH=false
+# SUPERAGENT_EXP_SMART_CONTEXT=false
 
 # ========== 权限配置 ==========
 
@@ -466,7 +473,7 @@ $manager->create(
 
 ### 实验性 Feature Flags
 
-21 个细粒度 feature flag 独立控制实验性功能。部分工具、Agent 和行为受这些 flag 控制：
+22 个细粒度 feature flag 独立控制实验性功能。部分工具、Agent 和行为受这些 flag 控制：
 
 ```php
 // config/superagent.php
@@ -493,6 +500,7 @@ $manager->create(
     'skill_distillation' => env('SUPERAGENT_EXP_SKILL_DISTILLATION', false), // 技能蒸馏
     'checkpoint' => env('SUPERAGENT_EXP_CHECKPOINT', false),                 // 断点续跑
     'knowledge_graph' => env('SUPERAGENT_EXP_KNOWLEDGE_GRAPH', false),       // 跨 Agent 知识图谱
+    'smart_context' => env('SUPERAGENT_EXP_SMART_CONTEXT', false),           // 动态思考/上下文分配
 ],
 ```
 
@@ -520,6 +528,7 @@ $manager->create(
 | `skill_distillation` | DistillationManager 注册和技能生成 |
 | `checkpoint` | CheckpointManager 注册和状态快照 |
 | `knowledge_graph` | KnowledgeGraphManager 注册和图谱追踪 |
+| `smart_context` | SmartContextManager 注册和动态分配 |
 
 ### Bridge 模式配置
 
@@ -780,6 +789,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.6      | 10.x+   | 8.1+ | 智能上下文窗口（888 项测试） |
 | 0.6.5      | 10.x+   | 8.1+ | 技能蒸馏、断点续跑、知识图谱（865 项测试） |
 | 0.6.2      | 10.x+   | 8.1+ | Pipeline DSL（含 Review-Fix 循环）、Cost Autopilot、自适应反馈（776 项测试） |
 | 0.6.1      | 10.x+   | 8.1+ | Guardrails DSL（644 项测试） |
