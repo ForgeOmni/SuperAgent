@@ -3,20 +3,26 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.6-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.7-purple)](https://github.com/xiyanyang/superagent)
 
-> **🌍 语言**: [English](README.md) | [中文](README_CN.md)  
-> **📖 文档**: [安装指南](INSTALL.md) | [安装手册](INSTALL_CN.md) | [API文档](docs/)
+> **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
+> **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API文档](docs/)
 
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
 
-### 🤖 多智能体编排
-- **并行执行** - 基于PHP Fiber的并发智能体执行
-- **团队协作** - 智能体团队管理与层级显示
-- **实时追踪** - 每个智能体的独立进度监控
-- **智能通信** - 内置智能体间消息传递协议
+### 🆕 多智能体编排 (v0.6.7)
+- **并行智能体执行** - 同时运行多个智能体，实时跟踪每个智能体进度
+- **Claude Code兼容结果** - 以精确的Claude Code格式返回结果，无缝集成
+- **自动任务检测** - 分析任务复杂度，自动决定单智能体或多智能体模式
+- **智能体团队管理** - 协调具有领导者/成员关系和基于角色执行的团队
+- **智能体间通信** - SendMessage工具用于智能体间消息传递和协调
+- **持久化邮箱系统** - 可靠的消息队列，支持过滤、归档和广播
+- **进度聚合** - 实时令牌计数、活动跟踪和跨所有智能体的成本聚合
+- **WebSocket监控** - 基于浏览器的实时仪表板，监控并行智能体执行
+- **资源池化** - 智能体池化，带并发限制和依赖管理
+- **检查点与恢复** - 长时间运行的多智能体工作流的自动状态恢复
 
 ### 🎯 自动模式检测
 - **智能任务分析** - 自动判断是否需要多智能体协作
@@ -189,6 +195,45 @@ $agents = [
 $display = new ParallelAgentDisplay($output);
 $display->displayWithRefresh(500); // 每500ms刷新
 ```
+
+### 智能体间通信
+
+```php
+use SuperAgent\Tools\Builtin\SendMessageTool;
+
+$messageTool = new SendMessageTool();
+
+// 直接发送消息给特定智能体
+$messageTool->execute([
+    'to' => 'researcher-agent',
+    'message' => '请优先考虑安全最佳实践',
+    'summary' => '优先级更新',
+]);
+
+// 广播给所有智能体
+$messageTool->execute([
+    'to' => '*',
+    'message' => '团队更新：关注性能优化',
+    'summary' => '团队公告',
+]);
+```
+
+### WebSocket实时监控
+
+```bash
+# 启动WebSocket服务器
+php artisan superagent:websocket
+
+# 访问监控仪表板
+open http://localhost:8080/superagent/monitor
+```
+
+仪表板功能：
+- 🔴 实时智能体状态指示器
+- 📊 每个智能体的Token使用情况
+- 💰 成本聚合与预算追踪
+- 📈 进度可视化与ETA
+- 📬 消息队列监控
 
 ### 使用智能体模板
 

@@ -7,6 +7,7 @@
 - [System Requirements](#system-requirements)
 - [Installation Steps](#installation-steps)
 - [Configuration](#configuration)
+- [Multi-Agent Setup](#multi-agent-setup)
 - [Verification](#verification)
 - [Troubleshooting](#troubleshooting)
 - [Upgrade Guide](#upgrade-guide)
@@ -404,6 +405,224 @@ $agent = new Agent([
 ```
 
 Set via environment: `MAX_THINKING_TOKENS=20000`
+
+## Multi-Agent Setup
+
+### Auto Mode Configuration (NEW in v0.6.7)
+
+Enable automatic multi-agent orchestration:
+
+```env
+# Enable automatic multi-agent detection
+SUPERAGENT_AUTO_MODE=true
+
+# Maximum concurrent agents
+SUPERAGENT_MAX_CONCURRENT_AGENTS=10
+
+# Agent resource pooling
+SUPERAGENT_AGENT_POOL_SIZE=20
+
+# WebSocket monitoring
+SUPERAGENT_WEBSOCKET_MONITORING=true
+SUPERAGENT_WEBSOCKET_PORT=8080
+```
+
+### Basic Multi-Agent Usage
+
+```php
+use SuperAgent\Agent;
+use SuperAgent\Config\Config;
+
+// Create main agent with auto-mode
+$config = Config::fromArray([
+    'provider' => [
+        'type' => 'anthropic',
+        'api_key' => env('ANTHROPIC_API_KEY'),
+    ],
+    'multi_agent' => [
+        'auto_mode' => true,
+        'max_concurrent' => 10,
+    ],
+]);
+
+$agent = new Agent($provider, $config);
+$agent->enableAutoMode();
+
+// Agent automatically decides single vs multi-agent
+$result = $agent->run("Complex multi-step task...");
+```
+
+### Manual Agent Team Configuration
+
+```php
+use SuperAgent\Tools\Builtin\AgentTool;
+use SuperAgent\Swarm\ParallelAgentCoordinator;
+
+// Configure agent team
+$coordinator = ParallelAgentCoordinator::getInstance();
+$coordinator->configure([
+    'max_concurrent' => 10,
+    'timeout' => 300, // 5 minutes per agent
+    'checkpoint_interval' => 60, // Save state every minute
+]);
+
+// Create specialized agents
+$agentTool = new AgentTool();
+
+// Research agent
+$researcher = $agentTool->execute([
+    'description' => 'Research',
+    'prompt' => 'Research best practices',
+    'subagent_type' => 'researcher',
+    'run_in_background' => true,
+]);
+
+// Code writer agent
+$coder = $agentTool->execute([
+    'description' => 'Implementation',
+    'prompt' => 'Write implementation code',
+    'subagent_type' => 'code-writer',
+    'run_in_background' => true,
+]);
+
+// Monitor progress
+$status = $coordinator->getTeamStatus();
+foreach ($status['agents'] as $agentId => $info) {
+    echo "Agent {$agentId}: {$info['status']} - {$info['progress']}%\n";
+}
+```
+
+### Agent Mailbox System
+
+Configure persistent agent communication:
+
+```php
+// config/superagent.php
+'mailbox' => [
+    'enabled' => true,
+    'storage' => 'redis', // or 'database', 'file'
+    'ttl' => 3600, // Message TTL in seconds
+    'max_messages' => 1000, // Max messages per agent
+],
+```
+
+Usage:
+
+```php
+use SuperAgent\Tools\Builtin\SendMessageTool;
+
+$messageTool = new SendMessageTool();
+
+// Direct message
+$messageTool->execute([
+    'to' => 'agent-123',
+    'message' => 'Priority update',
+    'summary' => 'Update',
+]);
+
+// Broadcast
+$messageTool->execute([
+    'to' => '*',
+    'message' => 'Team announcement',
+    'summary' => 'Announcement',
+]);
+```
+
+### WebSocket Monitoring Dashboard
+
+Enable real-time monitoring:
+
+```bash
+# Start WebSocket server
+php artisan superagent:websocket
+
+# Access dashboard
+open http://localhost:8080/superagent/monitor
+```
+
+Dashboard features:
+- Real-time agent status
+- Token usage per agent
+- Cost aggregation
+- Progress visualization
+- Message queue monitoring
+
+### Agent Role Configuration
+
+Define specialized agent roles:
+
+```php
+// config/superagent.php
+'agent_roles' => [
+    'researcher' => [
+        'model' => 'claude-3-haiku-20240307',
+        'tools' => ['web_search', 'web_fetch'],
+        'max_tokens' => 8192,
+    ],
+    'code-writer' => [
+        'model' => 'claude-3-sonnet-20240229',
+        'tools' => ['file_read', 'file_write', 'file_edit'],
+        'max_tokens' => 16384,
+    ],
+    'reviewer' => [
+        'model' => 'claude-3-opus-20240229',
+        'tools' => ['file_read', 'grep'],
+        'max_tokens' => 4096,
+    ],
+],
+```
+
+### Checkpoint & Resume for Multi-Agent Workflows
+
+```php
+// Enable checkpointing
+$coordinator->enableCheckpoints([
+    'interval' => 60, // Save every 60 seconds
+    'storage' => 'database',
+]);
+
+// Resume from checkpoint after failure
+$coordinator->resumeFromCheckpoint($checkpointId);
+```
+
+### Resource Pooling & Concurrency Control
+
+```php
+// Configure agent pool
+use SuperAgent\Swarm\AgentPool;
+
+$pool = new AgentPool([
+    'max_agents' => 20,
+    'max_concurrent' => 10,
+    'queue_timeout' => 300,
+]);
+
+// Submit tasks to pool
+$taskIds = [];
+foreach ($tasks as $task) {
+    $taskIds[] = $pool->submit($task);
+}
+
+// Wait for completion
+$results = $pool->waitAll($taskIds);
+```
+
+### Multi-Agent Performance Optimization
+
+```env
+# Optimize for parallel execution
+SUPERAGENT_PARALLEL_CHUNK_SIZE=5
+SUPERAGENT_PARALLEL_TIMEOUT=300
+SUPERAGENT_PARALLEL_RETRY_COUNT=3
+
+# Memory optimization
+SUPERAGENT_AGENT_MEMORY_LIMIT=256M
+SUPERAGENT_SHARED_CONTEXT_CACHE=true
+
+# Network optimization
+SUPERAGENT_API_CONNECTION_POOL=50
+SUPERAGENT_API_KEEPALIVE=true
+```
 
 ### Coordinator Mode
 
