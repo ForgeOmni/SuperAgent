@@ -15,6 +15,7 @@ use SuperAgent\Swarm\Backends\BackendInterface;
 use SuperAgent\Swarm\Backends\InProcessBackend;
 use SuperAgent\Swarm\Backends\ProcessBackend;
 use SuperAgent\Swarm\IsolationMode;
+use SuperAgent\Swarm\ParallelAgentCoordinator;
 use SuperAgent\Swarm\TeamContext;
 use SuperAgent\Swarm\TeamMember;
 use SuperAgent\Tools\Tool;
@@ -205,16 +206,21 @@ class AgentTool extends Tool
                 'started_at' => new \DateTimeImmutable(),
             ];
             
-            // Prepare output
+            // If running synchronously (not in background), wait for completion
+            if (!$runInBackground && $backendType === BackendType::IN_PROCESS) {
+                return $this->waitForSynchronousCompletion($result->agentId, $name, $prompt, $subagentType);
+            }
+            
+            // Prepare async output
             $output = [
-                'success' => true,
-                'agent_id' => $result->agentId,
+                'status' => 'async_launched',
+                'agentId' => $result->agentId,
                 'task_id' => $result->taskId,
+                'description' => $params['description'] ?? "Execute agent: $name",
+                'prompt' => $prompt,
                 'name' => $name,
                 'backend' => $backendType->value,
-                'message' => $runInBackground
-                    ? "Agent '{$name}' started in background. You'll be notified when it completes."
-                    : "Agent '{$name}' started successfully.",
+                'message' => "Agent '{$name}' started in background. You'll be notified when it completes.",
             ];
             
             if ($result->worktreePath) {
@@ -304,6 +310,87 @@ class AgentTool extends Tool
         }
         
         return $statuses;
+    }
+    
+    /**
+     * Wait for synchronous agent completion and return Claude Code format result.
+     */
+    private function waitForSynchronousCompletion(
+        string $agentId,
+        string $name,
+        string $prompt,
+        string $agentType
+    ): ToolResult {
+        $startTime = microtime(true);
+        $maxWaitTime = 300; // 5 minutes max wait
+        
+        // Get the coordinator to track progress
+        $coordinator = ParallelAgentCoordinator::getInstance();
+        
+        // Wait for the agent to complete
+        while (microtime(true) - $startTime < $maxWaitTime) {
+            // Check if agent has completed
+            $tracker = $coordinator->getTracker($agentId);
+            if ($tracker && $tracker->getStatus() === 'completed') {
+                break;
+            }
+            
+            // Check backend status
+            $status = $this->activeTasks[$agentId]['backend']->getStatus($agentId);
+            if ($status === AgentStatus::COMPLETED || $status === AgentStatus::FAILED) {
+                break;
+            }
+            
+            // Allow fibers to execute
+            if (isset($this->activeTasks[$agentId]['backend']) && 
+                $this->activeTasks[$agentId]['backend'] instanceof InProcessBackend) {
+                $coordinator->executeFibers();
+            }
+            
+            // Small delay to avoid busy waiting
+            usleep(10000); // 10ms
+        }
+        
+        // Get the result from the coordinator
+        $agentResult = $coordinator->getAgentResult($agentId);
+        
+        if (!$agentResult) {
+            return ToolResult::failure("Agent execution timed out or failed");
+        }
+        
+        // Calculate metrics
+        $duration = (microtime(true) - $startTime) * 1000; // Convert to ms
+        $usage = $agentResult->totalUsage();
+        $totalTokens = $usage->inputTokens + $usage->outputTokens;
+        
+        // Format content blocks like Claude Code
+        $content = [];
+        $text = $agentResult->text();
+        if (!empty($text)) {
+            $content[] = ['type' => 'text', 'text' => $text];
+        }
+        
+        // Count tool uses (simplified for now)
+        $toolUseCount = count($agentResult->allResponses);
+        
+        // Return in Claude Code AgentToolResult format
+        return ToolResult::success([
+            'status' => 'completed',
+            'agentId' => $agentId,
+            'agentType' => $agentType,
+            'content' => $content,
+            'totalDurationMs' => (int)$duration,
+            'totalTokens' => $totalTokens,
+            'totalToolUseCount' => $toolUseCount,
+            'usage' => [
+                'input_tokens' => $usage->inputTokens,
+                'output_tokens' => $usage->outputTokens,
+                'cache_creation_input_tokens' => null,
+                'cache_read_input_tokens' => null,
+                'server_tool_use' => null,
+            ],
+            'prompt' => $prompt,
+        ]);
     }
     
     /**

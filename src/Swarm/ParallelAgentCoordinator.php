@@ -333,6 +333,14 @@ class ParallelAgentCoordinator
     }
     
     /**
+     * Get the result for a specific agent.
+     */
+    public function getAgentResult(string $agentId): ?\SuperAgent\AgentResult
+    {
+        return $this->agentResults[$agentId] ?? null;
+    }
+    
+    /**
      * Get hierarchical display data similar to Claude Code's TeammateSpinnerTree.
      */
     public function getHierarchicalDisplay(): array
