@@ -32,6 +32,7 @@ SuperAgent is a powerful Laravel AI Agent SDK that provides multi-provider suppo
 - **Prompt Cache Optimization** - Dynamic system prompt assembly with static/dynamic boundary for prompt caching
 - **Telemetry Master Switch** - Hierarchical telemetry control: master `telemetry.enabled` gate plus per-subsystem toggles (logging, metrics, events, cost_tracking) — when master is off, no data is collected regardless of individual settings
 - **Security Prompt Guardrails** - Optional safety instructions injected into the system prompt to restrict security-related operations; configurable via `security_guardrails` flag
+- **Guardrails DSL** - Declarative YAML rule engine for security, cost, compliance, and rate-limiting policies. Supports composable conditions (`all_of`/`any_of`/`not`), 7 condition types (tool, tool_content, tool_input, session, agent, token, rate), 8 action types (deny, allow, ask, warn, log, pause, rate_limit, downgrade_model), priority-ordered rule groups, and integration with the PermissionEngine pipeline
 - **Bridge Mode** - Provider-agnostic enhancement proxy that injects CC optimization mechanisms (system prompt enhancement, context compaction, bash security, memory injection, tool schema optimization, cost tracking) into non-Anthropic models (OpenAI, Bedrock, Ollama, OpenRouter). Supports both HTTP proxy mode (for Codex CLI etc.) and SDK auto-enhance mode with 3-level priority control (`bridge_mode` param > config `auto_enhance` > feature flag)
 - **Experimental Feature Flags** - 15 granular feature flags (with master switch) to gate experimental capabilities: ultrathink, token budget, prompt cache detection, builtin agents, verification agent, plan interview, agent triggers (local/remote), memory extraction, compaction reminders, cached microcompact, team memory, bash classifier, bridge mode
 - **Observability** - OpenTelemetry integration with complete tracing and per-event-type analytics sampling rate control
@@ -327,6 +328,73 @@ When enabled, additional safety instructions are injected into the system prompt
 ```env
 SUPERAGENT_SECURITY_GUARDRAILS=false
 ```
+
+### Guardrails DSL
+
+Declarative YAML rule engine for security, cost, compliance, and rate-limiting policies. Rules are evaluated on every tool call within the PermissionEngine pipeline.
+
+```env
+SUPERAGENT_GUARDRAILS_ENABLED=true
+```
+
+```yaml
+# guardrails.yaml
+version: "1.0"
+
+groups:
+  security:
+    priority: 100
+    rules:
+      - name: block_sensitive_paths
+        conditions:
+          any_of:
+            - tool_content: { contains: ".git/" }
+            - tool_content: { contains: ".env" }
+            - tool_content: { contains: ".ssh/" }
+        action: deny
+        message: "Access to sensitive path blocked"
+
+      - name: block_destructive_bash
+        conditions:
+          all_of:
+            - tool: { name: Bash }
+            - tool_input: { field: command, matches: "rm -rf *" }
+        action: deny
+        message: "Destructive command blocked"
+
+  cost:
+    priority: 90
+    rules:
+      - name: session_cost_limit
+        conditions:
+          session: { cost_usd: { gt: 5.00 } }
+        action: deny
+        message: "Session cost exceeded $5.00"
+
+      - name: auto_downgrade
+        conditions:
+          session: { budget_pct: { gt: 80 } }
+        action: downgrade_model
+        params: { target_model: "claude-haiku-4-5-20251001" }
+```
+
+Configure in `config/superagent.php`:
+
+```php
+'guardrails' => [
+    'enabled' => env('SUPERAGENT_GUARDRAILS_ENABLED', false),
+    'files' => [
+        base_path('guardrails.yaml'),
+    ],
+    'integration' => 'permission_engine',
+],
+```
+
+**Supported conditions**: `tool`, `tool_content`, `tool_input`, `session`, `agent`, `token`, `rate`, with `all_of`/`any_of`/`not` combinators.
+
+**Supported actions**: `deny`, `allow`, `ask`, `warn`, `log`, `pause`, `rate_limit`, `downgrade_model`.
+
+See `examples/guardrails.yaml` for a complete reference.
 
 ### Experimental Feature Flags
 

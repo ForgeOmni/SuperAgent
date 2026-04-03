@@ -32,6 +32,7 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Prompt 缓存优化** - 动态 System Prompt 组装，静态/动态边界分离实现 Prompt 缓存
 - **遥测主开关** - 分层遥测控制：`telemetry.enabled` 总开关加子系统独立开关（logging、metrics、events、cost_tracking）— 总开关关闭时，无论子系统设置如何，均不采集数据
 - **安全 Prompt 护栏** - 可选的安全指令注入 System Prompt，限制安全相关操作；通过 `security_guardrails` 开关控制
+- **Guardrails DSL** - 声明式 YAML 规则引擎，用于安全、费用、合规和速率限制策略。支持组合条件（`all_of`/`any_of`/`not`）、7 种条件类型（tool、tool_content、tool_input、session、agent、token、rate）、8 种动作类型（deny、allow、ask、warn、log、pause、rate_limit、downgrade_model）、优先级排序的规则组，集成到 PermissionEngine pipeline
 - **Bridge 模式** - Provider 无关的增强代理，将 CC 优化机制（系统提示词增强、上下文压缩、Bash 安全验证、记忆注入、工具 Schema 优化、成本追踪）注入到非 Anthropic 模型（OpenAI、Bedrock、Ollama、OpenRouter）。支持 HTTP 代理模式（供 Codex CLI 等工具使用）和 SDK 自动增强模式，三级优先级控制（`bridge_mode` 参数 > 配置文件 `auto_enhance` > feature flag）
 - **实验性 Feature Flags** - 15 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、Bridge 模式
 - **可观测性** - OpenTelemetry 集成，完整链路追踪，及按事件类型动态调整分析采样率
@@ -667,6 +668,73 @@ SUPERAGENT_TELEMETRY_COST_TRACKING=false
 ```env
 SUPERAGENT_SECURITY_GUARDRAILS=false
 ```
+
+### Guardrails DSL
+
+声明式 YAML 规则引擎，用于安全、费用、合规和速率限制策略。规则在每次工具调用时通过 PermissionEngine pipeline 评估。
+
+```env
+SUPERAGENT_GUARDRAILS_ENABLED=true
+```
+
+```yaml
+# guardrails.yaml
+version: "1.0"
+
+groups:
+  security:
+    priority: 100
+    rules:
+      - name: block_sensitive_paths
+        conditions:
+          any_of:
+            - tool_content: { contains: ".git/" }
+            - tool_content: { contains: ".env" }
+            - tool_content: { contains: ".ssh/" }
+        action: deny
+        message: "敏感路径访问被拦截"
+
+      - name: block_destructive_bash
+        conditions:
+          all_of:
+            - tool: { name: Bash }
+            - tool_input: { field: command, matches: "rm -rf *" }
+        action: deny
+        message: "危险命令被拦截"
+
+  cost:
+    priority: 90
+    rules:
+      - name: session_cost_limit
+        conditions:
+          session: { cost_usd: { gt: 5.00 } }
+        action: deny
+        message: "会话费用超过 $5.00 限制"
+
+      - name: auto_downgrade
+        conditions:
+          session: { budget_pct: { gt: 80 } }
+        action: downgrade_model
+        params: { target_model: "claude-haiku-4-5-20251001" }
+```
+
+在 `config/superagent.php` 中配置：
+
+```php
+'guardrails' => [
+    'enabled' => env('SUPERAGENT_GUARDRAILS_ENABLED', false),
+    'files' => [
+        base_path('guardrails.yaml'),
+    ],
+    'integration' => 'permission_engine',
+],
+```
+
+**支持的条件类型**: `tool`、`tool_content`、`tool_input`、`session`、`agent`、`token`、`rate`，可用 `all_of`/`any_of`/`not` 组合。
+
+**支持的动作类型**: `deny`、`allow`、`ask`、`warn`、`log`、`pause`、`rate_limit`、`downgrade_model`。
+
+完整示例请参考 `examples/guardrails.yaml`。
 
 ### 实验性 Feature Flags
 

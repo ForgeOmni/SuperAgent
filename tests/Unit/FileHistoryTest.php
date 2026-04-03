@@ -143,13 +143,17 @@ class FileHistoryTest extends TestCase
         $this->assertInstanceOf(\Illuminate\Support\Collection::class, $files);
     }
 
-    public function testGitAttributionCreatesCommit()
+    public function testGitAttributionCreatesCommitReturnsFalseWhenDisabled()
     {
         $attribution = GitAttribution::getInstance();
 
-        // In test environment without staged changes, this should return false
+        // When disabled, createCommit should always return false
+        $attribution->setEnabled(false);
         $result = $attribution->createCommit('Test commit');
         $this->assertFalse($result);
+
+        // Restore enabled state
+        $attribution->setEnabled(true);
     }
 
     public function testSensitiveFileProtectionDetectsSensitiveFiles()

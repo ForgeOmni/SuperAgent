@@ -65,7 +65,7 @@ return [
     'agent' => [
         'max_turns' => (int) env('SUPERAGENT_MAX_TURNS', 50),
         'max_budget_usd' => (float) env('SUPERAGENT_MAX_BUDGET', 0),
-        'working_directory' => env('SUPERAGENT_CWD', null),
+        'working_directory' => env('SUPERAGENT_CWD'),
     ],
 
     /*
@@ -118,6 +118,27 @@ return [
     | removed — the model's own safety training still applies.
     */
     'security_guardrails' => env('SUPERAGENT_SECURITY_GUARDRAILS', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Guardrails DSL
+    |--------------------------------------------------------------------------
+    | Declarative rule engine for security, cost, compliance, and rate-limiting
+    | policies. Rules are defined in YAML files and evaluated on every tool call.
+    |
+    | See docs/guardrails.md for the full DSL syntax reference.
+    */
+    'guardrails' => [
+        'enabled' => env('SUPERAGENT_GUARDRAILS_ENABLED', false),
+
+        // YAML files to load (merged in order, later files override same-named groups)
+        'files' => [
+            // base_path('guardrails.yaml'),
+        ],
+
+        // Integration point: 'permission_engine' (recommended) or 'hook'
+        'integration' => env('SUPERAGENT_GUARDRAILS_INTEGRATION', 'permission_engine'),
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -206,7 +227,7 @@ return [
         //   new Agent(['provider' => 'openai', 'bridge_mode' => false])  // force off
         //   new Agent(['provider' => 'openai', 'bridge_mode' => true])   // force on
         // When null, falls back to the bridge_mode experimental feature flag.
-        'auto_enhance' => env('SUPERAGENT_BRIDGE_AUTO_ENHANCE', null),
+        'auto_enhance' => env('SUPERAGENT_BRIDGE_AUTO_ENHANCE'),
 
         // Backend provider: 'openai', 'openrouter', 'bedrock', 'ollama'
         // NOT 'anthropic' — Claude already has these optimizations natively

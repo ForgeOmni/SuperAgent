@@ -3,6 +3,8 @@
 namespace SuperAgent;
 
 use Illuminate\Support\ServiceProvider;
+use SuperAgent\Guardrails\GuardrailsConfig;
+use SuperAgent\Guardrails\GuardrailsEngine;
 
 class SuperAgentServiceProvider extends ServiceProvider
 {
@@ -15,6 +17,29 @@ class SuperAgentServiceProvider extends ServiceProvider
         });
 
         $this->app->alias(Agent::class, 'superagent');
+
+        // Register GuardrailsEngine singleton when enabled
+        $this->app->singleton(GuardrailsEngine::class, function ($app) {
+            $config = $app['config']->get('superagent.guardrails', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $files = $config['files'] ?? [];
+            if (empty($files)) {
+                return null;
+            }
+
+            $guardrailsConfig = GuardrailsConfig::fromYamlFiles($files);
+            $errors = $guardrailsConfig->validate();
+
+            if (!empty($errors)) {
+                logger()->warning('Guardrails config validation errors', ['errors' => $errors]);
+            }
+
+            return new GuardrailsEngine($guardrailsConfig);
+        });
     }
 
     public function boot(): void

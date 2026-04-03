@@ -7,9 +7,7 @@ namespace SuperAgent\Guardrails;
 use SuperAgent\Guardrails\Rules\Rule;
 use SuperAgent\Guardrails\Rules\RuleAction;
 use SuperAgent\Hooks\HookResult;
-use SuperAgent\Permissions\PermissionBehavior;
 use SuperAgent\Permissions\PermissionDecision;
-use SuperAgent\Permissions\PermissionDecisionReason;
 
 class GuardrailsResult
 {
@@ -53,12 +51,18 @@ class GuardrailsResult
             return null;
         }
 
-        $reason = new PermissionDecisionReason(
+        $message = $this->message ?? "Guardrail rule: {$this->matchedRule?->name}";
+
+        // PermissionDecisionReason is co-located in PermissionDecision.php;
+        // ensure that file is loaded before instantiating the reason class.
+        if (!class_exists(\SuperAgent\Permissions\PermissionDecisionReason::class, false)) {
+            class_exists(PermissionDecision::class);
+        }
+
+        $reason = new \SuperAgent\Permissions\PermissionDecisionReason(
             'guardrail',
             $this->matchedRule?->name,
         );
-
-        $message = $this->message ?? "Guardrail rule: {$this->matchedRule?->name}";
 
         return match ($this->action) {
             RuleAction::DENY => PermissionDecision::deny($message, $reason),

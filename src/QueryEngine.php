@@ -17,6 +17,7 @@ use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
 use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\UserMessage;
+use SuperAgent\Guardrails\Context\RuntimeContextCollector;
 use SuperAgent\TokenBudget\TokenBudgetTracker;
 use SuperAgent\Tools\ToolResult;
 
@@ -50,6 +51,8 @@ class QueryEngine
     /** Total output tokens consumed in current turn */
     protected int $turnOutputTokens = 0;
 
+    protected ?RuntimeContextCollector $guardrailsCollector = null;
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -62,6 +65,7 @@ class QueryEngine
         protected readonly float $maxBudgetUsd = 0.0,
         ?HookRegistry $hookRegistry = null,
         ?int $tokenBudget = null,
+        ?RuntimeContextCollector $guardrailsCollector = null,
     ) {
         foreach ($this->tools as $tool) {
             $this->toolMap[$tool->name()] = $tool;
@@ -79,6 +83,8 @@ class QueryEngine
         if ($this->hookRegistry !== null) {
             $this->stopHooksPipeline = new StopHooksPipeline($this->hookRegistry);
         }
+
+        $this->guardrailsCollector = $guardrailsCollector;
     }
 
     public function getMessages(): array
@@ -116,6 +122,7 @@ class QueryEngine
 
         while ($this->turnCount < $this->maxTurns) {
             $this->turnCount++;
+            $this->guardrailsCollector?->recordTurn();
 
             // USD budget check
             if ($this->maxBudgetUsd > 0 && $this->totalCostUsd >= $this->maxBudgetUsd) {
@@ -128,13 +135,18 @@ class QueryEngine
             $this->messages[] = $assistantMessage;
 
             // Track cost and output tokens
+            $callCost = 0.0;
             if ($assistantMessage->usage) {
-                $this->totalCostUsd += CostCalculator::calculate(
+                $callCost = CostCalculator::calculate(
                     $this->options['model'] ?? $this->provider->getModel(),
                     $assistantMessage->usage,
                 );
+                $this->totalCostUsd += $callCost;
                 $this->turnOutputTokens += $assistantMessage->usage->outputTokens ?? 0;
             }
+
+            // Feed guardrails runtime context collector
+            $this->guardrailsCollector?->recordUsage($assistantMessage->usage, $callCost);
 
             $this->streamingHandler?->emitTurn($assistantMessage, $this->turnCount);
 

@@ -1,0 +1,139 @@
+# SuperAgent Guardrails DSL - Example Configuration
+# Place this file at your project root and reference it in config/superagent.php:
+#   'guardrails' => ['enabled' => true, 'files' => [base_path('guardrails.yaml')]]
+
+version: "1.0"
+
+defaults:
+  evaluation: first_match    # first_match | all_matching
+  default_action: ask
+
+groups:
+  # ── Security Policies ─────────────────────────────────────────────
+  security:
+    description: "Prevent access to sensitive files and destructive commands"
+    enabled: true
+    priority: 100
+
+    rules:
+      - name: block_sensitive_paths
+        description: "Block access to secrets, credentials, and system dirs"
+        conditions:
+          any_of:
+            - tool_content: { contains: ".git/" }
+            - tool_content: { contains: ".env" }
+            - tool_content: { contains: ".ssh/" }
+            - tool_content: { contains: "credentials" }
+            - tool_content: { contains: "/etc/" }
+        action: deny
+        message: "Access to sensitive path blocked by guardrail"
+
+      - name: block_destructive_bash
+        description: "Block rm -rf and similar destructive commands"
+        conditions:
+          all_of:
+            - tool: { name: Bash }
+            - tool_input: { field: command, matches: "rm -rf *" }
+        action: deny
+        message: "Destructive bash command blocked"
+
+      - name: require_approval_for_network
+        description: "Network commands need explicit approval"
+        conditions:
+          all_of:
+            - tool: { name: Bash }
+            - any_of:
+                - tool_input: { field: command, starts_with: "curl" }
+                - tool_input: { field: command, starts_with: "wget" }
+                - tool_input: { field: command, starts_with: "ssh" }
+        action: ask
+        message: "Network command requires approval"
+
+  # ── Cost Control ───────────────────────────────────────────────────
+  cost:
+    description: "Prevent runaway costs"
+    enabled: true
+    priority: 90
+
+    rules:
+      - name: session_cost_hard_limit
+        conditions:
+          session: { cost_usd: { gt: 10.00 } }
+        action: deny
+        message: "Session cost exceeded $10.00 hard limit"
+
+      - name: warn_high_cost
+        conditions:
+          session: { cost_usd: { gt: 3.00 } }
+        action: warn
+        message: "Session cost is above $3.00"
+
+      - name: auto_downgrade_on_budget
+        description: "Switch to cheaper model when budget is 80% consumed"
+        conditions:
+          session: { budget_pct: { gt: 80 } }
+        action: downgrade_model
+        params:
+          target_model: "claude-haiku-4-5-20251001"
+        message: "Switching to Haiku to conserve budget"
+
+  # ── Rate Limiting ──────────────────────────────────────────────────
+  rate_limiting:
+    description: "Prevent excessive tool calls"
+    enabled: true
+    priority: 80
+
+    rules:
+      - name: bash_rate_limit
+        description: "Max 30 Bash calls per minute"
+        conditions:
+          all_of:
+            - tool: { name: Bash }
+            - rate: { window_seconds: 60, max_calls: 30 }
+        action: deny
+        message: "Rate limit: too many Bash calls (max 30/min)"
+
+  # ── Compliance ─────────────────────────────────────────────────────
+  compliance:
+    description: "Enforce project boundaries and audit logging"
+    enabled: false           # Enable when needed
+    priority: 70
+
+    rules:
+      - name: no_write_outside_project
+        description: "Prevent writing files outside the project directory"
+        conditions:
+          all_of:
+            - tool: { name: { any_of: [Write, Edit, MultiEdit] } }
+            - not:
+                tool_input: { field: file_path, starts_with: "{{cwd}}" }
+        action: deny
+        message: "Writing outside project directory is not allowed"
+
+      - name: log_all_file_writes
+        description: "Log every file write operation for audit"
+        conditions:
+          tool: { name: { any_of: [Write, Edit, MultiEdit] } }
+        action: log
+        params:
+          level: info
+          channel: audit
+
+  # ── Agent Guardrails ───────────────────────────────────────────────
+  agent:
+    description: "Prevent agent loop runaway"
+    enabled: true
+    priority: 60
+
+    rules:
+      - name: warn_many_turns
+        conditions:
+          agent: { turn_count: { gt: 40 } }
+        action: warn
+        message: "Agent has been running for 40+ turns"
+
+      - name: token_budget_warning
+        conditions:
+          token: { total_session: { gt: 500000 } }
+        action: warn
+        message: "Session has consumed 500K+ tokens"

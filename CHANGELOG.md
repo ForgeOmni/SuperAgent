@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-04-03
+
+### Added
+- **Guardrails DSL** — Declarative YAML rule engine for security, cost, compliance, and rate-limiting policies, evaluated on every tool call within the PermissionEngine pipeline
+  - `GuardrailsEngine` — main engine that loads YAML rule files, evaluates priority-ordered rule groups against runtime context, supports `first_match` and `all_matching` evaluation modes
+  - `GuardrailsConfig` — YAML parsing with multi-file merge, validation (duplicate names, missing params), and `{{cwd}}` template variable resolution
+  - `GuardrailsResult` — evaluation result with conversion to `PermissionDecision` and `HookResult` for seamless integration
+  - `RuntimeContext` — immutable snapshot of all runtime state (tool info, session cost, token counts, budget percentage, turn count, elapsed time, working directory)
+  - `RuntimeContextCollector` — stateful collector wired into `QueryEngine` loop, accumulates cost/token/turn data and builds context snapshots per tool call
+  - `RateTracker` — in-memory sliding window counter for rate-limiting conditions
+  - **7 condition types**: `tool` (name matching), `tool_content` (extracted content), `tool_input` (specific input fields), `session` (cost/budget/elapsed), `agent` (turn count/model), `token` (session/current totals), `rate` (sliding window)
+  - **3 logical combinators**: `all_of` (AND), `any_of` (OR), `not` (negation) — composable into arbitrary depth condition trees
+  - **8 action types**: `deny`, `allow`, `ask`, `warn`, `log`, `pause`, `rate_limit`, `downgrade_model`
+  - `ConditionFactory` — recursive parser that converts YAML condition arrays into `ConditionInterface` trees
+  - `Comparator` — generic comparison utility supporting 9 operators: `gt`, `gte`, `lt`, `lte`, `eq`, `contains`, `starts_with`, `matches` (glob), `any_of`
+  - Example configuration at `examples/guardrails.yaml` with security, cost, rate-limiting, compliance, and agent guardrail groups
+- New `guardrails` configuration section in `config/superagent.php` with `enabled`, `files`, and `integration` settings
+- `GuardrailsEngine` registered as conditional singleton in `SuperAgentServiceProvider`
+
+### Changed
+- `PermissionEngine` — new Step 1.5 (Guardrails DSL evaluation) inserted between existing rule-based checks (Step 1) and bash-specific checks (Step 2); accepts optional `?GuardrailsEngine` constructor parameter; new `setRuntimeContextCollector()` method for runtime state injection
+- `QueryEngine` — new optional `?RuntimeContextCollector` constructor parameter; `run()` loop now feeds cost/token/turn data to the collector after each provider call
+- `AnthropicProvider::formatTools()` — strips `category` field from tool definitions before sending to API, fixing `tools.0.custom.category: Extra inputs are not permitted` error
+
+### Fixed
+- **Anthropic API compatibility** — `AnthropicProvider::formatTools()` no longer sends the internal `category` field to the Anthropic API, which rejected it as an unknown field
+- **FileHistoryTest flakiness** — `testGitAttributionCreatesCommit` no longer depends on the real git staging area state; test now verifies the disabled-path behavior via `setEnabled(false)` for deterministic results
+
+### Tests
+- 53 new Guardrails unit tests (114 assertions):
+  - `ComparatorTest` — all 9 operators, edge cases (non-numeric, non-string inputs)
+  - `ConditionFactoryTest` — YAML-to-condition-tree parsing for all condition types, logical combinators, error handling
+  - `GuardrailsEngineTest` — first_match/all_matching modes, priority ordering, disabled groups, cost-based rules, composite conditions, reload, statistics, result-to-PermissionDecision conversion
+  - `GuardrailsConfigTest` — minimal config, defaults parsing, priority sorting, validation errors (duplicate names, missing params, invalid actions), template vars, file-not-found
+  - `RateTrackerTest` — empty state, recording, rate detection, key isolation, reset
+
 ## [0.6.0] - 2026-04-02
 
 ### Added

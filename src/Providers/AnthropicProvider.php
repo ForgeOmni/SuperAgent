@@ -108,7 +108,13 @@ class AnthropicProvider implements LLMProvider
 
     public function formatTools(array $tools): array
     {
-        return array_map(fn (Tool $t) => $t->toDefinition(), $tools);
+        return array_map(function (Tool $t) {
+            $def = $t->toDefinition();
+            // Anthropic API does not accept extra fields like 'category'
+            unset($def['category']);
+
+            return $def;
+        }, $tools);
     }
 
     public function getModel(): string

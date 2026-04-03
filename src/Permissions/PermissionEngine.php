@@ -4,19 +4,26 @@ declare(strict_types=1);
 
 namespace SuperAgent\Permissions;
 
+use SuperAgent\Guardrails\Context\RuntimeContext;
+use SuperAgent\Guardrails\Context\RuntimeContextCollector;
+use SuperAgent\Guardrails\GuardrailsEngine;
 use SuperAgent\Tools\Tool;
 
 class PermissionEngine
 {
     private BashCommandClassifier $bashClassifier;
     private PermissionDenialTracker $denialTracker;
-    
+    private ?GuardrailsEngine $guardrailsEngine = null;
+    private ?RuntimeContextCollector $contextCollector = null;
+
     public function __construct(
         private PermissionCallbackInterface $callback,
         private PermissionContext $context,
+        ?GuardrailsEngine $guardrailsEngine = null,
     ) {
         $this->bashClassifier = new BashCommandClassifier();
         $this->denialTracker = new PermissionDenialTracker();
+        $this->guardrailsEngine = $guardrailsEngine;
     }
     
     public function checkPermission(
@@ -31,7 +38,15 @@ class PermissionEngine
         if ($ruleDecision !== null) {
             return $this->applyModeTransformations($ruleDecision);
         }
-        
+
+        // Step 1.5: Guardrails DSL evaluation
+        if ($this->guardrailsEngine !== null) {
+            $guardrailsDecision = $this->evaluateGuardrails($tool, $input, $content);
+            if ($guardrailsDecision !== null) {
+                return $this->applyModeTransformations($guardrailsDecision);
+            }
+        }
+
         // Step 2: Tool-specific checks
         if ($tool->getName() === 'Bash') {
             $bashDecision = $this->checkBashPermissions($input['command'] ?? '');
@@ -321,5 +336,40 @@ class PermissionEngine
     public function setContext(PermissionContext $context): void
     {
         $this->context = $context;
+    }
+
+    public function setGuardrailsEngine(?GuardrailsEngine $engine): void
+    {
+        $this->guardrailsEngine = $engine;
+    }
+
+    public function setRuntimeContextCollector(?RuntimeContextCollector $collector): void
+    {
+        $this->contextCollector = $collector;
+    }
+
+    /**
+     * Evaluate guardrails DSL rules and convert to a PermissionDecision.
+     * Returns null if no guardrail rule matched or the action is non-permission.
+     */
+    private function evaluateGuardrails(Tool $tool, array $input, ?string $content): ?PermissionDecision
+    {
+        if ($this->contextCollector === null) {
+            return null;
+        }
+
+        $runtimeContext = $this->contextCollector->buildContext(
+            toolName: $tool->getName(),
+            toolInput: $input,
+            toolContent: $content,
+        );
+
+        $result = $this->guardrailsEngine->evaluate($runtimeContext);
+
+        if (!$result->matched) {
+            return null;
+        }
+
+        return $result->toPermissionDecision();
     }
 }

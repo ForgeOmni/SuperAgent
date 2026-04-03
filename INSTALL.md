@@ -162,6 +162,10 @@ SUPERAGENT_TELEMETRY_COST_TRACKING=false
 # Security prompt guardrails
 SUPERAGENT_SECURITY_GUARDRAILS=false
 
+# Guardrails DSL (declarative YAML rule engine)
+SUPERAGENT_GUARDRAILS_ENABLED=false
+# SUPERAGENT_GUARDRAILS_INTEGRATION=permission_engine
+
 # Experimental features (master switch — all flags on when true)
 SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_ULTRATHINK=true
