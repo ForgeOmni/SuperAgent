@@ -14,6 +14,14 @@ use SuperAgent\AdaptiveFeedback\CorrectionStore;
 use SuperAgent\AdaptiveFeedback\FeedbackManager;
 use SuperAgent\Pipeline\PipelineConfig;
 use SuperAgent\Pipeline\PipelineEngine;
+use SuperAgent\Checkpoint\CheckpointManager;
+use SuperAgent\Checkpoint\CheckpointStore;
+use SuperAgent\KnowledgeGraph\GraphCollector;
+use SuperAgent\KnowledgeGraph\KnowledgeGraph;
+use SuperAgent\KnowledgeGraph\KnowledgeGraphManager;
+use SuperAgent\SkillDistillation\DistillationEngine;
+use SuperAgent\SkillDistillation\DistillationManager;
+use SuperAgent\SkillDistillation\DistillationStore;
 
 class SuperAgentServiceProvider extends ServiceProvider
 {
@@ -121,6 +129,63 @@ class SuperAgentServiceProvider extends ServiceProvider
             return new FeedbackManager($store, $engine, $collector);
         });
 
+        // Register KnowledgeGraphManager singleton when enabled
+        $this->app->singleton(KnowledgeGraphManager::class, function ($app) {
+            $config = $app['config']->get('superagent.knowledge_graph', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $storagePath = $config['storage_path']
+                ?? storage_path('superagent/knowledge_graph.json');
+
+            $graph = new KnowledgeGraph($storagePath);
+            $collector = new GraphCollector($graph);
+
+            return new KnowledgeGraphManager($graph, $collector);
+        });
+
+        // Register CheckpointManager singleton when enabled
+        $this->app->singleton(CheckpointManager::class, function ($app) {
+            $config = $app['config']->get('superagent.checkpoint', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $storagePath = $config['storage_path']
+                ?? storage_path('superagent/checkpoints');
+
+            return new CheckpointManager(
+                store: new CheckpointStore($storagePath),
+                interval: (int) ($config['interval'] ?? 5),
+                maxPerSession: (int) ($config['max_per_session'] ?? 5),
+                configEnabled: true,
+            );
+        });
+
+        // Register DistillationManager singleton when enabled
+        $this->app->singleton(DistillationManager::class, function ($app) {
+            $config = $app['config']->get('superagent.skill_distillation', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $storagePath = $config['storage_path']
+                ?? storage_path('superagent/distilled_skills.json');
+
+            $store = new DistillationStore($storagePath);
+            $engine = new DistillationEngine(
+                store: $store,
+                minSteps: (int) ($config['min_steps'] ?? 3),
+                minCostUsd: (float) ($config['min_cost_usd'] ?? 0.01),
+            );
+
+            return new DistillationManager($store, $engine);
+        });
+
         // Register PipelineEngine singleton when enabled
         $this->app->singleton(PipelineEngine::class, function ($app) {
             $config = $app['config']->get('superagent.pipelines', []);
@@ -154,6 +219,8 @@ class SuperAgentServiceProvider extends ServiceProvider
 
             $this->commands([
                 \SuperAgent\Console\Commands\FeedbackCommand::class,
+                \SuperAgent\Console\Commands\DistillCommand::class,
+                \SuperAgent\Console\Commands\CheckpointCommand::class,
             ]);
         }
 

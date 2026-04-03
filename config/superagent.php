@@ -166,6 +166,74 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Knowledge Graph
+    |--------------------------------------------------------------------------
+    | When enabled, tool execution events (file reads, edits, searches) are
+    | automatically captured into a shared knowledge graph. Subsequent agents
+    | can query the graph to see which files were modified, by whom, and what
+    | decisions were made — avoiding redundant codebase exploration.
+    */
+    'knowledge_graph' => [
+        'enabled' => env('SUPERAGENT_KNOWLEDGE_GRAPH_ENABLED', false),
+
+        // Where to persist the graph
+        // 'storage_path' => storage_path('superagent/knowledge_graph.json'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Checkpoint & Resume
+    |--------------------------------------------------------------------------
+    | When enabled, agent state is periodically checkpointed to disk during
+    | long-running tasks. If the process crashes or is interrupted, the agent
+    | can resume from the latest checkpoint instead of starting over.
+    |
+    | Priority control:
+    |   1. Per-task: new Agent(['checkpoint' => true])   ← highest priority
+    |   2. Config: SUPERAGENT_CHECKPOINT_ENABLED=true    ← default toggle
+    |
+    | Manage checkpoints via: php artisan superagent:checkpoint {list|show|delete|clear|prune|stats}
+    */
+    'checkpoint' => [
+        'enabled' => env('SUPERAGENT_CHECKPOINT_ENABLED', false),
+
+        // Checkpoint every N turns (lower = more frequent, higher = less I/O)
+        'interval' => (int) env('SUPERAGENT_CHECKPOINT_INTERVAL', 5),
+
+        // Maximum checkpoints to keep per session (older ones auto-pruned)
+        'max_per_session' => (int) env('SUPERAGENT_CHECKPOINT_MAX', 5),
+
+        // Where to store checkpoint files (one JSON file per checkpoint)
+        // 'storage_path' => storage_path('superagent/checkpoints'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Skill Distillation
+    |--------------------------------------------------------------------------
+    | When enabled, successful agent executions are automatically analyzed
+    | and distilled into reusable skill templates. Complex tasks solved by
+    | expensive models (Opus) produce step-by-step recipes that cheaper
+    | models (Haiku) can follow, dramatically reducing cost for similar
+    | future tasks.
+    |
+    | Manage distilled skills via: php artisan superagent:distill {list|show|delete|clear|export|import|stats}
+    */
+    'skill_distillation' => [
+        'enabled' => env('SUPERAGENT_SKILL_DISTILLATION_ENABLED', false),
+
+        // Minimum tool calls for a trace to be worth distilling
+        'min_steps' => (int) env('SUPERAGENT_DISTILL_MIN_STEPS', 3),
+
+        // Minimum cost (USD) for a trace to be worth distilling
+        'min_cost_usd' => (float) env('SUPERAGENT_DISTILL_MIN_COST', 0.01),
+
+        // Where to persist distilled skills
+        // 'storage_path' => storage_path('superagent/distilled_skills.json'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Cost Autopilot
     |--------------------------------------------------------------------------
     | Intelligent cost control that automatically downgrades models, compacts
@@ -294,6 +362,15 @@ return [
 
         // Adaptive Feedback: learn from user corrections and auto-generate rules/memories
         'adaptive_feedback' => env('SUPERAGENT_EXP_ADAPTIVE_FEEDBACK', false),
+
+        // Skill Distillation: auto-distill successful executions into reusable skill templates
+        'skill_distillation' => env('SUPERAGENT_EXP_SKILL_DISTILLATION', false),
+
+        // Checkpoint & Resume: periodic state snapshots for crash recovery
+        'checkpoint' => env('SUPERAGENT_EXP_CHECKPOINT', false),
+
+        // Knowledge Graph: cross-agent shared knowledge for multi-agent collaboration
+        'knowledge_graph' => env('SUPERAGENT_EXP_KNOWLEDGE_GRAPH', false),
     ],
 
     /*

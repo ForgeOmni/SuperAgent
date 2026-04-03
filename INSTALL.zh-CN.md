@@ -179,6 +179,19 @@ SUPERAGENT_ADAPTIVE_FEEDBACK_ENABLED=false
 # SUPERAGENT_FEEDBACK_THRESHOLD=3
 # SUPERAGENT_FEEDBACK_AUTO_PROMOTE=true
 
+# 技能蒸馏（将昂贵执行自动蒸馏为可复用技能）
+SUPERAGENT_SKILL_DISTILLATION_ENABLED=false
+# SUPERAGENT_DISTILL_MIN_STEPS=3
+# SUPERAGENT_DISTILL_MIN_COST=0.01
+
+# 知识图谱（跨 Agent 共享知识）
+SUPERAGENT_KNOWLEDGE_GRAPH_ENABLED=false
+
+# 断点续跑（周期性状态快照用于崩溃恢复）
+SUPERAGENT_CHECKPOINT_ENABLED=false
+# SUPERAGENT_CHECKPOINT_INTERVAL=5
+# SUPERAGENT_CHECKPOINT_MAX=5
+
 # 实验性功能（总开关 — 为 true 时所有 flag 默认启用）
 SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_ULTRATHINK=true
@@ -197,6 +210,9 @@ SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_PIPELINES=false
 # SUPERAGENT_EXP_COST_AUTOPILOT=false
 # SUPERAGENT_EXP_ADAPTIVE_FEEDBACK=false
+# SUPERAGENT_EXP_SKILL_DISTILLATION=false
+# SUPERAGENT_EXP_CHECKPOINT=false
+# SUPERAGENT_EXP_KNOWLEDGE_GRAPH=false
 
 # ========== 权限配置 ==========
 
@@ -450,7 +466,7 @@ $manager->create(
 
 ### 实验性 Feature Flags
 
-18 个细粒度 feature flag 独立控制实验性功能。部分工具、Agent 和行为受这些 flag 控制：
+21 个细粒度 feature flag 独立控制实验性功能。部分工具、Agent 和行为受这些 flag 控制：
 
 ```php
 // config/superagent.php
@@ -474,6 +490,9 @@ $manager->create(
     'pipelines' => env('SUPERAGENT_EXP_PIPELINES', false),     // Pipeline DSL 工作流引擎
     'cost_autopilot' => env('SUPERAGENT_EXP_COST_AUTOPILOT', false), // 自动预算控制
     'adaptive_feedback' => env('SUPERAGENT_EXP_ADAPTIVE_FEEDBACK', false), // 从修正中学习
+    'skill_distillation' => env('SUPERAGENT_EXP_SKILL_DISTILLATION', false), // 技能蒸馏
+    'checkpoint' => env('SUPERAGENT_EXP_CHECKPOINT', false),                 // 断点续跑
+    'knowledge_graph' => env('SUPERAGENT_EXP_KNOWLEDGE_GRAPH', false),       // 跨 Agent 知识图谱
 ],
 ```
 
@@ -498,6 +517,9 @@ $manager->create(
 | `pipelines` | PipelineEngine 注册和 YAML 加载 |
 | `cost_autopilot` | CostAutopilot 注册和预算追踪 |
 | `adaptive_feedback` | FeedbackManager 注册和修正追踪 |
+| `skill_distillation` | DistillationManager 注册和技能生成 |
+| `checkpoint` | CheckpointManager 注册和状态快照 |
+| `knowledge_graph` | KnowledgeGraphManager 注册和图谱追踪 |
 
 ### Bridge 模式配置
 
@@ -758,6 +780,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.5      | 10.x+   | 8.1+ | 技能蒸馏、断点续跑、知识图谱（865 项测试） |
 | 0.6.2      | 10.x+   | 8.1+ | Pipeline DSL（含 Review-Fix 循环）、Cost Autopilot、自适应反馈（776 项测试） |
 | 0.6.1      | 10.x+   | 8.1+ | Guardrails DSL（644 项测试） |
 | 0.6.0      | 10.x+   | 8.1+ | Bridge 模式 |

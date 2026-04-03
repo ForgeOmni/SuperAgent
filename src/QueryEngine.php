@@ -17,6 +17,7 @@ use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
 use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\UserMessage;
+use SuperAgent\Checkpoint\CheckpointManager;
 use SuperAgent\CostAutopilot\CostAutopilot;
 use SuperAgent\CostAutopilot\AutopilotDecision;
 use SuperAgent\Guardrails\Context\RuntimeContextCollector;
@@ -57,6 +58,8 @@ class QueryEngine
 
     protected ?CostAutopilot $costAutopilot = null;
 
+    protected ?CheckpointManager $checkpointManager = null;
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -71,6 +74,7 @@ class QueryEngine
         ?int $tokenBudget = null,
         ?RuntimeContextCollector $guardrailsCollector = null,
         ?CostAutopilot $costAutopilot = null,
+        ?CheckpointManager $checkpointManager = null,
     ) {
         foreach ($this->tools as $tool) {
             $this->toolMap[$tool->name()] = $tool;
@@ -91,6 +95,14 @@ class QueryEngine
 
         $this->guardrailsCollector = $guardrailsCollector;
         $this->costAutopilot = $costAutopilot;
+        $this->checkpointManager = $checkpointManager;
+
+        // Apply per-task checkpoint override from options
+        if ($this->checkpointManager !== null && array_key_exists('checkpoint', $this->options)) {
+            $this->checkpointManager->setForceEnabled(
+                $this->options['checkpoint'] === true || $this->options['checkpoint'] === 'true',
+            );
+        }
 
         if ($this->costAutopilot !== null) {
             $this->costAutopilot->setCurrentModel(
@@ -159,6 +171,17 @@ class QueryEngine
 
             // Feed guardrails runtime context collector
             $this->guardrailsCollector?->recordUsage($assistantMessage->usage, $callCost);
+
+            // --- Checkpoint ---
+            $this->checkpointManager?->maybeCheckpoint(
+                sessionId: $this->options['session_id'] ?? 'default',
+                messages: $this->messages,
+                turnCount: $this->turnCount,
+                totalCostUsd: $this->totalCostUsd,
+                turnOutputTokens: $this->turnOutputTokens,
+                model: $this->options['model'] ?? $this->provider->getModel(),
+                prompt: is_string($prompt) ? $prompt : json_encode($prompt),
+            );
 
             // --- Cost Autopilot evaluation ---
             if ($this->costAutopilot !== null) {

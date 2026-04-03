@@ -179,6 +179,19 @@ SUPERAGENT_ADAPTIVE_FEEDBACK_ENABLED=false
 # SUPERAGENT_FEEDBACK_THRESHOLD=3
 # SUPERAGENT_FEEDBACK_AUTO_PROMOTE=true
 
+# Skill Distillation (auto-distill expensive executions into reusable skills)
+SUPERAGENT_SKILL_DISTILLATION_ENABLED=false
+# SUPERAGENT_DISTILL_MIN_STEPS=3
+# SUPERAGENT_DISTILL_MIN_COST=0.01
+
+# Knowledge Graph (cross-agent shared knowledge)
+SUPERAGENT_KNOWLEDGE_GRAPH_ENABLED=false
+
+# Checkpoint & Resume (periodic state snapshots for crash recovery)
+SUPERAGENT_CHECKPOINT_ENABLED=false
+# SUPERAGENT_CHECKPOINT_INTERVAL=5
+# SUPERAGENT_CHECKPOINT_MAX=5
+
 # Experimental features (master switch — all flags on when true)
 SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_ULTRATHINK=true
@@ -197,6 +210,9 @@ SUPERAGENT_EXPERIMENTAL=true
 # SUPERAGENT_EXP_PIPELINES=false
 # SUPERAGENT_EXP_COST_AUTOPILOT=false
 # SUPERAGENT_EXP_ADAPTIVE_FEEDBACK=false
+# SUPERAGENT_EXP_SKILL_DISTILLATION=false
+# SUPERAGENT_EXP_CHECKPOINT=false
+# SUPERAGENT_EXP_KNOWLEDGE_GRAPH=false
 
 # ========== Permission Configuration ==========
 
@@ -451,7 +467,7 @@ When enabled, additional safety instructions are injected into the system prompt
 
 ### Experimental Feature Flags
 
-18 granular feature flags let you enable or disable experimental capabilities. All default to `true` (enabled) when the master switch is on. Some tools, agents, and behaviors are gated by these flags:
+21 granular feature flags let you enable or disable experimental capabilities. All default to `true` (enabled) when the master switch is on. Some tools, agents, and behaviors are gated by these flags:
 
 ```php
 // config/superagent.php
@@ -475,6 +491,9 @@ When enabled, additional safety instructions are injected into the system prompt
     'pipelines' => env('SUPERAGENT_EXP_PIPELINES', false),     // Pipeline DSL workflow engine
     'cost_autopilot' => env('SUPERAGENT_EXP_COST_AUTOPILOT', false), // Automatic budget control
     'adaptive_feedback' => env('SUPERAGENT_EXP_ADAPTIVE_FEEDBACK', false), // Learn from corrections
+    'skill_distillation' => env('SUPERAGENT_EXP_SKILL_DISTILLATION', false), // Distill skills from traces
+    'checkpoint' => env('SUPERAGENT_EXP_CHECKPOINT', false),                 // State snapshots for crash recovery
+    'knowledge_graph' => env('SUPERAGENT_EXP_KNOWLEDGE_GRAPH', false),       // Cross-agent knowledge graph
 ],
 ```
 
@@ -498,6 +517,9 @@ When enabled, additional safety instructions are injected into the system prompt
 | `pipelines` | PipelineEngine registration and YAML loading |
 | `cost_autopilot` | CostAutopilot registration and budget tracking |
 | `adaptive_feedback` | FeedbackManager registration and correction tracking |
+| `skill_distillation` | DistillationManager registration and skill generation |
+| `checkpoint` | CheckpointManager registration and state snapshots |
+| `knowledge_graph` | KnowledgeGraphManager registration and graph tracking |
 
 ### Bridge Mode Configuration
 
@@ -759,6 +781,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.5      | 10.x+   | 8.1+ | Skill Distillation, Checkpoint & Resume, Knowledge Graph (865 tests) |
 | 0.6.2      | 10.x+   | 8.1+ | Pipeline DSL (with review-fix loops), Cost Autopilot, Adaptive Feedback (776 tests) |
 | 0.6.1      | 10.x+   | 8.1+ | Guardrails DSL (644 tests) |
 | 0.6.0      | 10.x+   | 8.1+ | Bridge Mode |

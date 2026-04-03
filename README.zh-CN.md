@@ -37,7 +37,10 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Pipeline DSL** - 声明式 YAML 工作流引擎，用于多 Agent 管道编排。支持 6 种步骤类型（agent、parallel、conditional、approval、transform、loop），基于依赖的拓扑排序执行顺序，3 种失败策略（abort、continue、retry），通过 `{{steps.name.output}}` 模板的步骤间数据流，`input_from` 上下文注入，可插拔审批门控，Review-Fix 循环（多模型并行 review + 可配置退出条件 `output_contains`/`all_passed`/`any_passed`/`expression`），及事件监听器
 - **Cost Autopilot** - 智能预算控制，监控累计支出并自动升级成本节省措施：warn → 压缩上下文 → 降级模型（Opus → Sonnet → Haiku） → halt。支持会话和月度预算，持久化跨会话支出追踪，可配置阈值百分比，按 Provider 自动检测模型层级，及成本可观测事件监听
 - **自适应反馈** - 从用户修正中学习（权限拒绝、编辑回退、行为反馈），自动将重复模式提升为 Guardrails 规则或 Memory 条目。可配置提升阈值，5 种修正类别，持久化 JSON 存储，完整管理 CLI（`superagent:feedback list|show|delete|clear|export|import|promote|stats`），支持跨项目导入导出
-- **实验性 Feature Flags** - 18 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、Bridge 模式、Pipeline、Cost Autopilot、自适应反馈
+- **技能蒸馏** - 自动将昂贵模型（Opus）的成功执行蒸馏为可复用的分步骤 Skill 模板，让廉价模型（Haiku）可以照方执行。捕获工具调用序列，泛化文件路径为参数，自动选择最优目标模型层级，估算成本节省，跟踪使用次数。完整管理 CLI（`superagent:distill list|show|delete|clear|export|import|stats`）
+- **断点续跑** - 长时间运行的 Agent 任务周期性快照状态（消息、轮次、成本、token）到磁盘。崩溃或中断后可从任意 checkpoint 恢复。任务内指定（`options['checkpoint'] = true`）优先于配置开关。自动清理旧 checkpoint。完整管理 CLI（`superagent:checkpoint list|show|delete|clear|prune|stats`）
+- **知识图谱** - 跨 Agent 共享知识图谱，自动追踪哪些文件被哪些 Agent 读取/修改/创建，记录搜索模式、Bash 命令、决策、符号定义和文件依赖关系。后续 Agent 查询图谱而非重新探索代码库。提供热点文件排名、按 Agent/文件的关联查询，及 token 高效的摘要用于系统提示注入
+- **实验性 Feature Flags** - 21 个细粒度 feature flag（含总开关），独立控制实验性功能：ultrathink、token budget、prompt 缓存检测、内置 agents、验证 agent、plan 面试、agent 触发器（本地/远程）、记忆提取、压缩提醒、缓存微压缩、团队记忆、bash 分类器、Bridge 模式、Pipeline、Cost Autopilot、自适应反馈
 - **可观测性** - OpenTelemetry 集成，完整链路追踪，及按事件类型动态调整分析采样率
 - **文件版本控制** - LRU 缓存（100 个消息级快照），按消息回退，diff 统计（insertions/deletions/filesChanged），快照继承
 - **工具使用摘要** - Haiku 生成 git-commit-subject 风格的工具批次执行摘要
