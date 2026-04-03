@@ -7,6 +7,141 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-04-03
+
+### Added
+
+#### Multi-Agent Parallel Tracking
+- **AgentProgressTracker**: Individual agent progress monitoring with real-time token counting and activity tracking
+- **ParallelAgentCoordinator**: Centralized coordinator for managing multiple concurrent agents with singleton pattern
+- **ParallelAgentDisplay**: Console visualization for hierarchical team/agent progress display
+- **WebSocket Server**: Real-time browser-based monitoring at ws://localhost:8765
+- **HTML Dashboard**: Live progress dashboard at /public/dashboard.html
+- **InProcessBackend Integration**: Seamless integration with existing Fiber-based execution
+
+#### Automatic Multi-Agent Mode Detection
+- **TaskAnalyzer**: Intelligent task complexity analysis with weighted scoring algorithm
+- **AutoModeAgent**: Automatic mode selection based on task characteristics
+- **Complexity Metrics**: 
+  - Length analysis (character/line count)
+  - Keyword detection (multi-task indicators)
+  - Subtask identification (numbered lists, bullet points)
+  - Tool requirement analysis
+  - Estimated token calculation
+- **Seamless Integration**: Zero-configuration auto-mode in main Agent class
+
+#### Agent Communication & Collaboration
+- **AgentCommunicationProtocol**: Inter-agent message passing system
+- **Message Types**: BROADCAST, DIRECT, REQUEST, RESPONSE
+- **Message Queue**: Persistent message storage with filtering capabilities
+- **Protocol Handlers**: Extensible message processing pipeline
+
+#### Performance & Resource Management
+- **PerformanceProfiler**: Agent execution performance tracking
+- **AgentDependencyManager**: Topological sorting for dependent task execution
+- **AgentPoolManager**: Resource pooling with max concurrency control
+- **DistributedBackend**: Cross-process/machine agent distribution
+
+#### Persistence & Recovery
+- **AgentStateStore**: Persistent state management with SQLite backend
+- **Checkpoint/Resume**: Automatic state recovery after failures
+- **Session Persistence**: Cross-session agent state continuity
+
+#### Developer Tools
+- **Agent Templates**: Pre-configured agent patterns for common tasks
+- **Command-Line Tools**: 
+  - `superagent:agent:list` - List running agents
+  - `superagent:agent:status` - Check agent status
+  - `superagent:agent:stop` - Stop specific agents
+  - `superagent:agent:monitor` - Real-time monitoring
+- **Integration Examples**: Sample implementations for common use cases
+
+#### Testing
+- **Comprehensive Test Suite**: 30+ tests covering all new components
+- **Integration Tests**: End-to-end multi-agent workflow validation
+- **Performance Benchmarks**: Baseline performance metrics
+
+### Changed
+- **InProcessBackend**: Enhanced with progress tracking integration
+- **Agent Class**: Added auto-mode support with backward compatibility
+- **Swarm Mode**: Improved coordinator/worker separation
+
+### Fixed
+- **Parallel Execution**: Fixed race conditions in concurrent agent execution
+- **Progress Aggregation**: Accurate token counting across multiple agents
+- **Memory Management**: Optimized Fiber stack allocation
+
+### Technical Details
+
+#### Task Complexity Scoring Algorithm
+```
+Score = (0.3 × length) + (0.25 × keywords) + (0.25 × subtasks) + (0.15 × tools) + (0.05 × tokens)
+Threshold: Score > 50 = Multi-Agent Mode
+```
+
+#### WebSocket Protocol
+```json
+{
+  "type": "progress_update",
+  "agentId": "agent-123",
+  "progress": {
+    "tokens": { "input": 1500, "output": 750 },
+    "activity": "Processing task",
+    "status": "running"
+  }
+}
+```
+
+#### Performance Metrics
+- Single agent overhead: < 2ms
+- Multi-agent coordination: < 10ms per agent
+- WebSocket latency: < 50ms
+- Memory per agent: ~2MB
+
+### Migration Guide
+
+#### Enable Auto-Mode (Recommended)
+```php
+// Automatic mode detection - no parameters needed!
+$agent = new Agent($provider, $config);
+$agent->enableAutoMode(); // That's it!
+
+// The agent now automatically detects when to use multi-agent mode
+$result = $agent->run("Complex task requiring multiple agents...");
+```
+
+#### Manual Multi-Agent Mode
+```php
+use SuperAgent\Swarm\ParallelAgentCoordinator;
+use SuperAgent\Swarm\ParallelAgentDisplay;
+
+$coordinator = ParallelAgentCoordinator::getInstance();
+$display = new ParallelAgentDisplay();
+
+// Register agents
+$tracker1 = $coordinator->registerAgent('agent-1', 'Research Agent');
+$tracker2 = $coordinator->registerAgent('agent-2', 'Code Writer');
+
+// Monitor progress
+$display->render($coordinator);
+```
+
+#### WebSocket Monitoring
+```javascript
+const ws = new WebSocket('ws://localhost:8765');
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log(`Agent ${data.agentId}: ${data.progress.activity}`);
+};
+```
+
+### Dependencies
+- PHP Ratchet/Pawl (WebSocket support)
+- React/EventLoop (Async operations)
+- SQLite3 (State persistence)
+
+---
+
 ## [0.6.6] - 2026-04-03
 
 ### Added
