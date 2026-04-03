@@ -3,10 +3,10 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.6-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.7-purple)](https://github.com/xiyanyang/superagent)
 
-> **🌍 Language**: [English](README.md) | [中文](README_CN.md)  
-> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [API Docs](docs/)
+> **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
+> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API Docs](docs/)
 
 SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Claude-level capabilities with multi-agent orchestration, real-time monitoring, and distributed scaling. Build and deploy AI agent teams that work in parallel with automatic task detection and intelligent resource management.
 
@@ -27,7 +27,18 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Memory System** - Cross-session persistence with real-time session memory extraction (3-gate trigger: 10K init, 5K growth, 3 tool calls), KAIROS append-only daily logs, and auto-dream nightly consolidation into MEMORY.md
 - **Extended Thinking** - Adaptive/enabled/disabled modes, ultrathink keyword trigger, model capability detection (Claude 4+), budget token management
 - **Coordinator Mode** - Dual-mode architecture: Coordinator (pure synthesis/delegation with Agent/SendMessage/TaskStop) vs Worker (full execution tools), with 4-phase workflow and session mode persistence
-- **Multi-Agent Collaboration** - Swarm mode with specialized agents (Explore, Plan, Verification, Code-Writer, Researcher, Reviewer, Coordinator) and fork semantics for context-sharing sub-agents
+
+### 🆕 Multi-Agent Orchestration (v0.6.7)
+- **Parallel Agent Execution** - Run multiple agents simultaneously with real-time progress tracking for each agent
+- **Claude Code-Compatible Results** - Returns results in exact Claude Code format for seamless integration
+- **Automatic Task Detection** - Analyzes task complexity and automatically decides single vs multi-agent mode
+- **Agent Team Management** - Coordinate teams with leader/member relationships and role-based execution
+- **Inter-Agent Communication** - SendMessage tool for agent-to-agent messaging and coordination
+- **Persistent Mailbox System** - Reliable message queues with filtering, archiving, and broadcast
+- **Progress Aggregation** - Real-time token counting, activity tracking, and cost aggregation across all agents
+- **WebSocket Monitoring** - Live browser-based dashboard for monitoring parallel agent execution
+- **Resource Pooling** - Intelligent agent pooling with concurrency limits and dependency management
+- **Checkpoint & Resume** - Automatic state recovery for long-running multi-agent workflows
 - **Batch Skill** - `/batch` command for parallel large-scale changes across 5–30 isolated worktree agents, each opening a PR
 - **MCP Protocol** - Integration with Model Context Protocol ecosystem, with server instruction injection into system prompt
 - **Prompt Cache Optimization** - Dynamic system prompt assembly with static/dynamic boundary for prompt caching
@@ -147,6 +158,84 @@ $agent->registerTool(new BashTool());
 
 // Agent will automatically use tools to complete tasks
 $response = $agent->query("Read config.php file, analyze configuration and provide optimization suggestions");
+```
+
+### 🤖 Multi-Agent Orchestration (NEW in v0.6.7)
+
+#### Automatic Multi-Agent Mode
+```php
+use SuperAgent\Agent;
+
+// Enable auto-mode - no configuration needed!
+$agent = new Agent($provider, $config);
+$agent->enableAutoMode();
+
+// Agent automatically detects when to use multiple agents
+$result = $agent->run("
+1. Research best practices for API design
+2. Write a REST API with authentication
+3. Create comprehensive tests
+4. Document the API endpoints
+");
+
+// Result contains aggregated outputs from all agents
+echo $result->text();
+echo "Total cost: $" . $result->totalCostUsd();
+```
+
+#### Manual Agent Team Creation
+```php
+use SuperAgent\Tools\Builtin\AgentTool;
+use SuperAgent\Swarm\ParallelAgentCoordinator;
+
+// Create agent tool
+$agentTool = new AgentTool();
+
+// Spawn multiple specialized agents
+$researcher = $agentTool->execute([
+    'description' => 'Research task',
+    'prompt' => 'Research best practices for REST API design',
+    'subagent_type' => 'researcher',
+    'run_in_background' => true,
+]);
+
+$coder = $agentTool->execute([
+    'description' => 'Code implementation',
+    'prompt' => 'Implement a REST API with JWT authentication',
+    'subagent_type' => 'code-writer',
+    'run_in_background' => true,
+]);
+
+// Monitor progress
+$coordinator = ParallelAgentCoordinator::getInstance();
+$teamResult = $coordinator->collectTeamResults();
+
+// Get individual agent results
+foreach ($teamResult->getResultsByAgent() as $agentName => $result) {
+    echo "Agent: $agentName\n";
+    echo $result->text() . "\n";
+}
+```
+
+#### Inter-Agent Communication
+```php
+use SuperAgent\Tools\Builtin\SendMessageTool;
+
+$messageTool = new SendMessageTool();
+
+// Send direct message to specific agent
+$messageTool->execute([
+    'to' => 'researcher-agent',
+    'message' => 'Please prioritize security best practices',
+    'summary' => 'Priority update',
+]);
+
+// Broadcast to all agents
+$messageTool->execute([
+    'to' => '*',
+    'message' => 'Team update: Focus on performance optimization',
+    'summary' => 'Team announcement',
+]);
 ```
 
 ### Multiple Provider Instances
