@@ -122,13 +122,13 @@ SUPERAGENT_PROVIDER=anthropic
 
 # Configuration Anthropic Claude
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
-ANTHROPIC_MODEL=claude-3-haiku-20240307
+ANTHROPIC_MODEL=claude-4.6-haiku-latest
 ANTHROPIC_MAX_TOKENS=4096
 ANTHROPIC_TEMPERATURE=0.7
 
 # Configuration OpenAI (optionnel)
 OPENAI_API_KEY=sk-xxxxxxxxxxxxx
-OPENAI_MODEL=gpt-4
+OPENAI_MODEL=gpt-5.4
 OPENAI_ORG_ID=org-xxxxxxxxxxxxx
 
 # Configuration AWS Bedrock (optionnel)
@@ -222,7 +222,7 @@ return [
     'providers' => [
         'anthropic' => [
             'api_key' => env('ANTHROPIC_API_KEY'),
-            'model' => env('ANTHROPIC_MODEL', 'claude-3-haiku-20240307'),
+            'model' => env('ANTHROPIC_MODEL', 'claude-4.6-haiku-latest'),
             'max_tokens' => env('ANTHROPIC_MAX_TOKENS', 4096),
             'temperature' => env('ANTHROPIC_TEMPERATURE', 0.7),
             'timeout' => 60,
@@ -230,7 +230,7 @@ return [
         
         'openai' => [
             'api_key' => env('OPENAI_API_KEY'),
-            'model' => env('OPENAI_MODEL', 'gpt-4'),
+            'model' => env('OPENAI_MODEL', 'gpt-5.4'),
             'organization' => env('OPENAI_ORG_ID'),
             'max_tokens' => 4096,
             'temperature' => 0.7,

@@ -122,13 +122,13 @@ SUPERAGENT_PROVIDER=anthropic
 
 # Anthropic Claude Configuration
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
-ANTHROPIC_MODEL=claude-3-haiku-20240307
+ANTHROPIC_MODEL=claude-4.6-haiku-latest
 ANTHROPIC_MAX_TOKENS=4096
 ANTHROPIC_TEMPERATURE=0.7
 
 # OpenAI Configuration (optional)
 OPENAI_API_KEY=sk-xxxxxxxxxxxxx
-OPENAI_MODEL=gpt-4
+OPENAI_MODEL=gpt-5.4
 OPENAI_ORG_ID=org-xxxxxxxxxxxxx
 
 # AWS Bedrock Configuration (optional)
@@ -278,7 +278,7 @@ return [
     'providers' => [
         'anthropic' => [
             'api_key' => env('ANTHROPIC_API_KEY'),
-            'model' => env('ANTHROPIC_MODEL', 'claude-3-haiku-20240307'),
+            'model' => env('ANTHROPIC_MODEL', 'claude-4.6-haiku-latest'),
             'max_tokens' => env('ANTHROPIC_MAX_TOKENS', 4096),
             'temperature' => env('ANTHROPIC_TEMPERATURE', 0.7),
             'timeout' => 60,
@@ -286,7 +286,7 @@ return [
         
         'openai' => [
             'api_key' => env('OPENAI_API_KEY'),
-            'model' => env('OPENAI_MODEL', 'gpt-4'),
+            'model' => env('OPENAI_MODEL', 'gpt-5.4'),
             'organization' => env('OPENAI_ORG_ID'),
             'max_tokens' => 4096,
             'temperature' => 0.7,
@@ -555,17 +555,17 @@ Define specialized agent roles:
 // config/superagent.php
 'agent_roles' => [
     'researcher' => [
-        'model' => 'claude-3-haiku-20240307',
+        'model' => 'claude-4.6-haiku-latest',
         'tools' => ['web_search', 'web_fetch'],
         'max_tokens' => 8192,
     ],
     'code-writer' => [
-        'model' => 'claude-3-sonnet-20240229',
+        'model' => 'claude-4.6-sonnet-latest',
         'tools' => ['file_read', 'file_write', 'file_edit'],
         'max_tokens' => 16384,
     ],
     'reviewer' => [
-        'model' => 'claude-3-opus-20240229',
+        'model' => 'claude-4.6-opus-latest',
         'tools' => ['file_read', 'grep'],
         'max_tokens' => 4096,
     ],
@@ -873,7 +873,7 @@ $config = Config::fromArray([
     'provider' => [
         'type' => 'anthropic',
         'api_key' => env('ANTHROPIC_API_KEY'),
-        'model' => 'claude-3-haiku-20240307',
+        'model' => 'claude-4.6-haiku-latest',
     ],
 ]);
 

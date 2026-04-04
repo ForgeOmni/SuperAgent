@@ -45,10 +45,10 @@ SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre d
 - **Contrôle du Budget de Tokens** - Gestion dynamique du budget, contrôle intelligent des coûts
 
 ### 🌍 Support Multi-Fournisseurs
-- **Claude (Anthropic)** - Tous les modèles Claude 3
-- **OpenAI** - GPT-4, GPT-4 Turbo, GPT-3.5
-- **AWS Bedrock** - Claude via AWS
-- **Ollama** - Modèles locaux
+- **Claude (Anthropic)** - Dernière version Claude 4.6 incluant Opus, Sonnet et Haiku
+- **OpenAI** - GPT-5.4, GPT-5, GPT-4 Turbo et modèles hérités
+- **AWS Bedrock** - Claude via AWS avec support des derniers modèles
+- **Ollama** - Modèles locaux incluant Llama 3, Mistral et plus
 - **OpenRouter** - API unifiée pour 100+ modèles
 
 ## 📦 Installation
@@ -80,11 +80,11 @@ Ajoutez à votre fichier `.env`:
 ```env
 # Configuration Anthropic Claude
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
-ANTHROPIC_MODEL=claude-3-opus-20240229
+ANTHROPIC_MODEL=claude-4.6-opus-latest
 
 # Configuration OpenAI (optionnel)
 OPENAI_API_KEY=sk-xxxxxxxxxxxxx
-OPENAI_MODEL=gpt-4
+OPENAI_MODEL=gpt-5.4
 ```
 
 ## 🚀 Démarrage Rapide
@@ -96,7 +96,7 @@ use SuperAgent\Agent;
 
 $agent = new Agent([
     'provider' => 'anthropic',
-    'model' => 'claude-3-opus-20240229',
+    'model' => 'claude-4.6-opus-latest',
 ]);
 
 $result = $agent->run("Analysez ce code et suggérez des améliorations");

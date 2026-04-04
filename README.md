@@ -13,7 +13,7 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 ## 🚀 Features
 
 ### Core Features
-- **Multi-Provider Support** - Anthropic, OpenAI, Bedrock, OpenRouter and more
+- **Multi-Provider Support** - Anthropic (Claude 4.6), OpenAI (GPT-5.4), Bedrock, OpenRouter and more
 - **59+ Built-in Tools** - File operations, code editing, web search, task management, tool search and more (core tools always available; experimental tools gated by feature flags)
 - **Streaming Output** - Real-time responses for better user experience
 - **Cost Tracking** - Accurate token usage and cost statistics
@@ -117,7 +117,7 @@ $config = Config::fromArray([
     'provider' => [
         'type' => 'anthropic',
         'api_key' => env('ANTHROPIC_API_KEY'),
-        'model' => 'claude-3-haiku-20240307',
+        'model' => 'claude-4.6-haiku-latest',
     ],
     'streaming' => true,
 ]);
@@ -260,7 +260,7 @@ You can register multiple Anthropic-compatible APIs (or any provider) with diffe
         'driver' => 'anthropic',
         'api_key' => env('ANOTHER_API_KEY'),
         'base_url' => 'https://another.example.com',
-        'model' => 'claude-3-haiku-20240307',
+        'model' => 'claude-4.6-haiku-latest',
     ],
 ],
 ```
@@ -649,7 +649,7 @@ pipelines:
             prompt: "Review for bugs. Say LGTM if clean."
           - name: gpt-review
             agent: reviewer
-            model: gpt-4o
+            model: gpt-5.4
             prompt: "Review for security. Say LGTM if clean."
       - name: fix
         agent: code-writer
@@ -690,7 +690,7 @@ Budget usage →  50%  → ⚠️  Warn (log warning)
 ],
 ```
 
-Model tiers are auto-detected from the default provider (Anthropic: Opus → Sonnet → Haiku, OpenAI: GPT-4o → GPT-4o-mini → GPT-3.5) or can be manually configured.
+Model tiers are auto-detected from the default provider (Anthropic: Claude 4.6 Opus → Claude 4.6 Sonnet → Claude 4.6 Haiku, OpenAI: GPT-5.4 → GPT-5 → GPT-4 Turbo) or can be manually configured.
 
 ### Adaptive Feedback
 
@@ -1136,7 +1136,7 @@ $logger->setSessionId('session-123');
 
 // Log LLM requests
 $logger->logLLMRequest(
-    model: 'claude-3-haiku-20240307',
+    model: 'claude-4.6-haiku-latest',
     inputTokens: 500,
     outputTokens: 200,
     duration: $duration,

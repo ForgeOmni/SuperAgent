@@ -45,10 +45,10 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 - **Token预算控制** - 动态预算管理，智能成本控制
 
 ### 🌍 多供应商支持
-- **Claude (Anthropic)** - 所有Claude 3模型
-- **OpenAI** - GPT-4、GPT-4 Turbo、GPT-3.5
-- **AWS Bedrock** - 通过AWS使用Claude
-- **Ollama** - 本地模型
+- **Claude (Anthropic)** - 最新Claude 4.6，包括Opus、Sonnet和Haiku变体
+- **OpenAI** - GPT-5.4、GPT-5、GPT-4 Turbo及旧版模型
+- **AWS Bedrock** - 通过AWS使用Claude，支持最新模型
+- **Ollama** - 本地模型，包括Llama 3、Mistral等
 - **OpenRouter** - 100+模型统一API
 
 ## 📦 安装
@@ -122,7 +122,7 @@ use SuperAgent\Agent;
 
 $agent = new Agent([
     'provider' => 'anthropic',
-    'model' => 'claude-3-opus-20240229',
+    'model' => 'claude-4.6-opus-latest',
 ]);
 
 $result = $agent->run("分析这个代码库并提出改进建议");
