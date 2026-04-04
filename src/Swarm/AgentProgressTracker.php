@@ -16,6 +16,7 @@ class AgentProgressTracker
     private int $cumulativeOutputTokens = 0;
     private array $recentActivities = [];
     private ?string $currentActivity = null;
+    private string $status = 'running';
     private ?\DateTimeInterface $startedAt;
     private ?\DateTimeInterface $completedAt = null;
     

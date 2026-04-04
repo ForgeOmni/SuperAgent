@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.10 升级说明
+
+v0.6.10 是纯 Bug 修复版本，无需修改配置。如果你正在使用同步进程内智能体（`run_in_background: false` 搭配 `in-process` 后端），此更新修复了一个关键死锁问题——智能体 Fiber 从未启动，导致每次调用都会超时 5 分钟。
+
+**仅影响测试代码的破坏性变更**：同步模式下 `AgentTool::execute()` 的返回结果现在使用 `'agentId'`（驼峰命名）和 `'status' => 'completed'`，而非此前永远无法到达的异步格式。如有相关测试断言，请相应更新。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.9 功能配置
 
 ### 带路径前缀的自定义 Base URL
@@ -804,6 +814,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.10     | 10.x+   | 8.1+  | 多智能体同步执行修复（Fiber 死锁、后端类型不匹配、进度追踪器） |
 | 0.6.9      | 10.x+   | 8.1+  | Guzzle Base URL 路径修复（OpenAI / OpenRouter / Ollama Provider） |
 | 0.6.8      | 10.x+   | 8.1+  | 增量上下文、懒加载上下文与工具、子智能体 Provider 继承、WebSearch 无 Key 降级、WebFetch 加固 |
 | 0.6.7      | 10.x+   | 8.1+  | 多智能体并行追踪与自动模式 |

@@ -214,6 +214,7 @@ class AgentTool extends Tool
                 'task_id' => $result->taskId,
                 'name' => $name,
                 'backend' => $backendType,
+                'backend_instance' => $backend,
                 'started_at' => new \DateTimeImmutable(),
             ];
             
@@ -347,15 +348,14 @@ class AgentTool extends Tool
             }
             
             // Check backend status
-            $status = $this->activeTasks[$agentId]['backend']->getStatus($agentId);
+            $status = $this->activeTasks[$agentId]['backend_instance']->getStatus($agentId);
             if ($status === AgentStatus::COMPLETED || $status === AgentStatus::FAILED) {
                 break;
             }
-            
+
             // Allow fibers to execute
-            if (isset($this->activeTasks[$agentId]['backend']) && 
-                $this->activeTasks[$agentId]['backend'] instanceof InProcessBackend) {
-                $coordinator->executeFibers();
+            if ($this->activeTasks[$agentId]['backend_instance'] instanceof InProcessBackend) {
+                $coordinator->processAllFibers();
             }
             
             // Small delay to avoid busy waiting

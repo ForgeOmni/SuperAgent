@@ -200,12 +200,22 @@ class ParallelAgentCoordinator
     public function processAllFibers(): void
     {
         foreach ($this->fibers as $agentId => $fiber) {
-            if ($fiber->isSuspended()) {
+            if (!$fiber->isStarted()) {
+                // Start fibers that were prepared but not yet started
+                try {
+                    $fiber->start();
+                } catch (\FiberError $e) {
+                    $this->logger->error("Failed to start fiber", [
+                        'agent_id' => $agentId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            } elseif ($fiber->isSuspended()) {
                 // Check for pending messages
                 if (!empty($this->pendingMessages[$agentId])) {
                     $messages = $this->pendingMessages[$agentId];
                     $this->pendingMessages[$agentId] = [];
-                    
+
                     // Resume with messages
                     try {
                         $fiber->resume($messages);

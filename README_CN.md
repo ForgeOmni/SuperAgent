@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.9-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.10-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API文档](docs/)
@@ -11,6 +11,11 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.6.10 — 多智能体同步执行修复
+- **同步智能体死锁修复** — `InProcessBackend::spawn()` 现在无论 `runInBackground` 设置如何都会创建执行 Fiber。此前同步模式从未创建 Fiber，导致 `waitForSynchronousCompletion()` 无限轮询（5 分钟超时死锁）
+- **后端类型不匹配修复** — `AgentTool::$activeTasks` 现在在 `BackendType` 枚举旁额外存储实际后端实例。同步等待循环此前在枚举值上调用 `->getStatus()` 和 `instanceof InProcessBackend`，结果始终错误
+- **Fiber 生命周期修复** — `ParallelAgentCoordinator::processAllFibers()` 现在可处理未启动的 Fiber（`!$fiber->isStarted()` → `start()`）。修复了 `AgentProgressTracker` 缺失的 `$status` 属性，以及 stub 智能体中的 null usage 类型错误
 
 ### 🆕 v0.6.9 — Guzzle Base URL 路径修复
 - **多 Provider Base URL 修复** — `OpenAIProvider`、`OpenRouterProvider` 和 `OllamaProvider` 现在正确地在 `base_uri` 末尾追加斜杠，并使用相对请求路径。此前，任何带路径前缀的自定义 `base_url`（如 `https://gateway.example.com/openai`）都会因 Guzzle 的 RFC 3986 解析器在使用绝对路径（如 `/v1/chat/completions`）时将路径前缀静默丢弃。四个 Provider（`AnthropicProvider` 已在 v0.6.8 修复）现均采用正确模式

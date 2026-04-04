@@ -361,19 +361,18 @@ class Phase7SwarmTest extends TestCase
         $this->assertArrayHasKey('prompt', $schema['properties']);
         $this->assertArrayHasKey('subagent_type', $schema['properties']);
         
-        // Test execution
+        // Test execution (synchronous in-process mode)
         $result = $tool->execute([
             'description' => 'Test agent',
             'prompt' => 'Perform test task',
             'subagent_type' => 'general-purpose',
             'backend' => 'in-process',
         ]);
-        
+
         $this->assertTrue($result->isSuccess());
         $data = $result->data;
-        $this->assertTrue($data['success']);
-        $this->assertNotEmpty($data['agent_id']);
-        $this->assertNotEmpty($data['task_id']);
+        $this->assertEquals('completed', $data['status']);
+        $this->assertNotEmpty($data['agentId']);
     }
     
     public function testSendMessageTool(): void
@@ -463,29 +462,21 @@ class Phase7SwarmTest extends TestCase
         ]);
         
         $this->assertTrue($spawnResult->isSuccess());
-        $agentId = $spawnResult->data['agent_id'];
-        
+        $agentId = $spawnResult->data['agentId'];
+
         // Create send message tool
         $sendTool = new SendMessageTool(new NullLogger());
         $sendTool->setTeamContext($teamContext);
-        
-        // Send message to agent
+
+        // Send message to agent — agent already completed synchronously, so
+        // we just verify the tool itself succeeds with the team context.
         $messageResult = $sendTool->execute([
             'to' => 'worker1',
             'message' => 'Start processing',
             'summary' => 'Start command',
         ]);
-        
+
         $this->assertTrue($messageResult->isSuccess());
-        
-        // Check agent status
-        $statuses = $agentTool->checkActiveAgents();
-        $this->assertArrayHasKey($agentId, $statuses);
-        $this->assertEquals('worker1', $statuses[$agentId]['name']);
-        
-        // Kill agent
-        $killed = $agentTool->killAgent($agentId);
-        $this->assertTrue($killed);
     }
     
     public function testMessageRouting(): void

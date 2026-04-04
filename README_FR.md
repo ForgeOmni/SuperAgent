@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.9-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.10-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Docs API](docs/)
@@ -11,6 +11,11 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.6.10 — Correction de l'Exécution Synchrone Multi-Agents
+- **Correction du Blocage d'Agent Synchrone** — `InProcessBackend::spawn()` crée désormais toujours la fiber d'exécution quel que soit le paramètre `runInBackground`. Auparavant, le mode synchrone ne créait jamais la fiber, provoquant un blocage infini de `waitForSynchronousCompletion()` (timeout de 5 minutes)
+- **Correction de l'Incompatibilité de Type Backend** — `AgentTool::$activeTasks` stocke désormais l'instance réelle du backend en plus de l'énumération `BackendType`. La boucle d'attente synchrone appelait `->getStatus()` et `instanceof InProcessBackend` sur la valeur de l'énumération, ce qui retournait toujours des résultats erronés
+- **Correction du Cycle de Vie des Fibers** — `ParallelAgentCoordinator::processAllFibers()` gère désormais les fibers non démarrées (`!$fiber->isStarted()` → `start()`). Correction de la propriété `$status` manquante sur `AgentProgressTracker` et des erreurs de type null usage dans les agents stub
 
 ### 🆕 v0.6.9 — Correction du Chemin Base URL Guzzle
 - **Correction Base URL Multi-Providers** — `OpenAIProvider`, `OpenRouterProvider` et `OllamaProvider` ajoutent maintenant correctement un slash final à `base_uri` et utilisent des chemins de requête relatifs. Auparavant, tout `base_url` personnalisé avec un préfixe de chemin (ex. `https://gateway.example.com/openai`) voyait son préfixe silencieusement supprimé par le résolveur RFC 3986 de Guzzle lors de l'utilisation d'un chemin absolu comme `/v1/chat/completions`. Les quatre providers (`AnthropicProvider` était déjà corrigé en v0.6.8) suivent maintenant le bon patron

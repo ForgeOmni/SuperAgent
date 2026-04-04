@@ -79,15 +79,15 @@ class Agent
         if ($this->context->getMetadata('cancelled')) {
             return new Response(
                 content: "Agent execution cancelled",
-                usage: null,
+                usage: [],
             );
         }
-        
+
         // Simulated response for testing
         // In a real implementation, this would call the LLM provider
         return new Response(
             content: "Agent processed: " . $prompt,
-            usage: null,
+            usage: [],
         );
     }
 }

@@ -818,6 +818,16 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.10 Upgrade Notes
+
+v0.6.10 is a bug-fix release with no configuration changes. If you are using synchronous in-process agents (`run_in_background: false` with the `in-process` backend), this update resolves a critical deadlock where the agent fiber was never started, causing a 5-minute timeout on every call.
+
+**Breaking change for test code only**: The synchronous `AgentTool::execute()` result now returns `'agentId'` (camelCase) and `'status' => 'completed'` instead of the previously unreachable async format. If you have test assertions on these keys, update them accordingly.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.9 Feature Configuration
 
 ### Custom Base URL with Path Prefix
@@ -1150,6 +1160,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.10     | 10.x+   | 8.1+ | Multi-agent synchronous execution fix (fiber deadlock, backend type mismatch, progress tracker) |
 | 0.6.9      | 10.x+   | 8.1+ | Guzzle base URL path fix for OpenAI / OpenRouter / Ollama providers |
 | 0.6.8      | 10.x+   | 8.1+ | Incremental Context, Lazy Context & Tool Loading, sub-agent provider inheritance, WebSearch no-key fallback, WebFetch hardening |
 | 0.6.7      | 10.x+   | 8.1+ | Multi-Agent Orchestration (parallel execution, auto-mode detection, team management) |

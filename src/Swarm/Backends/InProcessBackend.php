@@ -140,9 +140,12 @@ class InProcessBackend implements BackendInterface
                 $task
             );
             
-            // Start agent execution in background if requested
+            // Create the fiber for agent execution. For background mode we start
+            // it immediately; for synchronous mode the caller drives it via
+            // executeFibers() / processMessages().
+            $this->prepareAgentFiber($agentId, $config->prompt);
             if ($config->runInBackground) {
-                $this->startAgentExecution($agentId, $config->prompt);
+                $this->fibers[$agentId]->start();
             }
             
             return new AgentSpawnResult(
@@ -265,9 +268,11 @@ class InProcessBackend implements BackendInterface
     }
     
     /**
-     * Start agent execution in a fiber.
+     * Prepare (but do not start) a fiber for agent execution.
+     * The fiber is registered and can be driven via executeFibers() or
+     * started explicitly by the caller.
      */
-    private function startAgentExecution(string $agentId, string $prompt): void
+    private function prepareAgentFiber(string $agentId, string $prompt): void
     {
         if (!isset($this->agents[$agentId])) {
             return;
@@ -275,12 +280,11 @@ class InProcessBackend implements BackendInterface
         
         $agent = $this->agents[$agentId];
         
-        // Update task status
-        $this->updateTaskStatus($agentId, AgentStatus::RUNNING);
-        
         // Create a fiber for concurrent execution
         $fiber = new \Fiber(function() use ($agent, $agentId, $prompt) {
             try {
+                $this->updateTaskStatus($agentId, AgentStatus::RUNNING);
+
                 // Get progress tracker
                 $tracker = $this->coordinator->getTracker($agentId);
                 
@@ -291,7 +295,17 @@ class InProcessBackend implements BackendInterface
                 
                 // Execute the agent with the prompt
                 $result = $agent->run($prompt);
-                
+
+                // Wrap non-AgentResult responses (e.g. stub Agent returns LLM\Response)
+                if (!$result instanceof \SuperAgent\AgentResult) {
+                    $text = $result->content ?? (string) $result;
+                    $message = new \SuperAgent\Messages\AssistantMessage($text);
+                    $result = new \SuperAgent\AgentResult(
+                        message: $message,
+                        allResponses: [$message],
+                    );
+                }
+
                 // Store the result in the coordinator
                 $this->coordinator->storeAgentResult($agentId, $result);
                 
@@ -338,7 +352,6 @@ class InProcessBackend implements BackendInterface
         
         $this->fibers[$agentId] = $fiber;
         $this->coordinator->registerFiber($agentId, $fiber);
-        $fiber->start();
     }
     
     /**

@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.6.10
+
+v0.6.10 est une version de correction de bugs sans modification de configuration. Si vous utilisez des agents synchrones en processus (`run_in_background: false` avec le backend `in-process`), cette mise à jour résout un blocage critique où la fiber de l'agent n'était jamais démarrée, provoquant un timeout de 5 minutes à chaque appel.
+
+**Changement incompatible pour le code de test uniquement** : Le résultat synchrone de `AgentTool::execute()` retourne maintenant `'agentId'` (camelCase) et `'status' => 'completed'` au lieu de l'ancien format asynchrone inaccessible. Mettez à jour vos assertions de test en conséquence.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Configuration des Fonctionnalités v0.6.9
 
 ### URL de Base Personnalisée avec Préfixe de Chemin
@@ -794,6 +804,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.10     | 10.x+   | 8.1+  | Correction de l'exécution synchrone multi-agents (blocage fiber, incompatibilité type backend, tracker de progression) |
 | 0.6.9      | 10.x+   | 8.1+  | Correction du chemin base URL Guzzle (providers OpenAI / OpenRouter / Ollama) |
 | 0.6.8      | 10.x+   | 8.1+  | Contexte incrémental, chargement paresseux contexte/outils, héritage provider sous-agent, repli WebSearch sans clé, renforcement WebFetch |
 | 0.6.7      | 10.x+   | 8.1+  | Suivi d'Agents Parallèles Multi & Mode Auto |

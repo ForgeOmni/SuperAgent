@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.10] - 2026-04-03
+
+### 🚀 Summary
+
+This release fixes critical concurrency bugs in the multi-agent subsystem that caused synchronous in-process agents to hang indefinitely (5-minute timeout), and corrects several type errors that prevented agent fibers from completing successfully.
+
+### Fixed
+
+#### Synchronous Agent Fiber Never Started (Critical)
+- **Root cause**: `InProcessBackend::spawn()` only called `startAgentExecution()` when `runInBackground=true`. In synchronous mode (`runInBackground=false`), the fiber was never created, so `AgentTool::waitForSynchronousCompletion()` polled forever and timed out after 5 minutes
+- **Fix**: `spawn()` now always calls the new `prepareAgentFiber()` method which creates and registers the fiber without starting it. Background mode starts the fiber immediately; synchronous mode lets the caller drive it via `processAllFibers()`
+
+#### AgentTool Backend Type Mismatch (Critical)
+- **Root cause**: `AgentTool::$activeTasks` stored the `BackendType` enum in the `'backend'` key, but `waitForSynchronousCompletion()` called `->getStatus()` on it (line 351) and checked `instanceof InProcessBackend` (line 357) — both always failed because a `BackendType` enum is neither a backend instance nor an `InProcessBackend`
+- **Fix**: `activeTasks` now stores the actual backend object under a new `'backend_instance'` key alongside the existing `'backend'` enum key. `waitForSynchronousCompletion()` uses `'backend_instance'` for status checks and `instanceof` guards
+
+#### Missing `executeFibers()` Method Call
+- `AgentTool::waitForSynchronousCompletion()` called `$coordinator->executeFibers()` which does not exist on `ParallelAgentCoordinator`. Changed to `$coordinator->processAllFibers()`
+
+#### Fibers Not Started by `processAllFibers()`
+- `ParallelAgentCoordinator::processAllFibers()` only handled `isSuspended()` and `isTerminated()` fibers. Added a `!$fiber->isStarted()` branch that calls `$fiber->start()`, enabling the synchronous wait loop to drive freshly-prepared fibers
+
+#### Missing `$status` Property on `AgentProgressTracker`
+- `AgentProgressTracker::getStatus()` returned `$this->status` but the property was never declared → PHP returned `null` which violated the `string` return type. Added `private string $status = 'running'` to the class
+
+#### Stub Agent `usage: null` Type Error
+- `Agent\Agent::run()` (test stub) passed `usage: null` to `Response::__construct()` which requires `array`. Changed to `usage: []`
+
+#### Non-`AgentResult` Return from Stub Agent
+- `InProcessBackend::startAgentExecution()` passed the fiber result directly to `ParallelAgentCoordinator::storeAgentResult()` which requires an `AgentResult`. When using the stub `Agent\Agent` (which returns `LLM\Response`), this caused a `TypeError`. Added a wrapper that converts non-`AgentResult` responses into a proper `AgentResult` with an `AssistantMessage`
+
+### Changed
+- `InProcessBackend::startAgentExecution()` renamed to `prepareAgentFiber()` — fiber creation is now separated from fiber start. The `RUNNING` status is set inside the fiber body rather than before fiber creation, so agents correctly report `PENDING` until actually executing
+- Tests updated to match new synchronous completion result format (`'agentId'` key, `'status' => 'completed'`)
+
 ## [0.6.9] - 2026-04-03
 
 ### 🚀 Summary
