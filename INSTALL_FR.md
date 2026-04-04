@@ -512,6 +512,39 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Configuration des Fonctionnalités v0.6.9
+
+### URL de Base Personnalisée avec Préfixe de Chemin
+
+Les providers gèrent maintenant correctement les valeurs `base_url` incluant un préfixe de chemin (passerelles API, proxies inverses) :
+
+```php
+// Passerelle compatible Anthropic avec chemin personnalisé
+$agent = new Agent([
+    'provider'  => 'anthropic',
+    'api_key'   => env('ANTHROPIC_API_KEY'),
+    'base_url'  => 'https://gateway.example.com/anthropic', // préfixe de chemin préservé
+    'model'     => 'claude-sonnet-4-6',
+]);
+
+// Proxy compatible OpenAI
+$agent = new Agent([
+    'provider'  => 'openai',
+    'api_key'   => env('OPENAI_API_KEY'),
+    'base_url'  => 'https://proxy.example.com/openai',      // préfixe de chemin préservé
+    'model'     => 'gpt-4o',
+]);
+
+// Ollama local derrière un proxy inverse à sous-chemin
+$agent = new Agent([
+    'provider'  => 'ollama',
+    'base_url'  => 'http://localhost:8080/ollama',          // préfixe de chemin préservé
+    'model'     => 'llama3',
+]);
+```
+
+> **Note** : Dans les versions v0.6.8 et antérieures, les valeurs `base_url` avec préfixe de chemin échouaient silencieusement pour OpenAI, OpenRouter et Ollama — le résolveur RFC 3986 de Guzzle supprimait le chemin lors de l'utilisation d'un chemin de requête absolu. Les quatre providers sont maintenant corrigés.
+
 ## Configuration des Fonctionnalités v0.6.8
 
 ### Contexte Incrémental
@@ -761,6 +794,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.9      | 10.x+   | 8.1+  | Correction du chemin base URL Guzzle (providers OpenAI / OpenRouter / Ollama) |
 | 0.6.8      | 10.x+   | 8.1+  | Contexte incrémental, chargement paresseux contexte/outils, héritage provider sous-agent, repli WebSearch sans clé, renforcement WebFetch |
 | 0.6.7      | 10.x+   | 8.1+  | Suivi d'Agents Parallèles Multi & Mode Auto |
 | 0.6.6      | 10.x+   | 8.1+  | Fenêtre de Contexte Intelligent (888 tests) |

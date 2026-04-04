@@ -28,7 +28,10 @@ class OllamaProvider implements LLMProvider
 
     public function __construct(array $config)
     {
-        $baseUrl = rtrim($config['base_url'] ?? 'http://localhost:11434', '/');
+        // Trailing slash required so Guzzle treats the request path as relative (RFC 3986).
+        // Without it, absolute paths like 'api/chat' would replace the entire path component
+        // of base_uri, silently dropping any custom path prefix.
+        $baseUrl = rtrim($config['base_url'] ?? 'http://localhost:11434', '/') . '/';
         $this->model = $config['model'] ?? 'llama2';
         $this->maxTokens = $config['max_tokens'] ?? 2048;
         $this->maxRetries = $config['max_retries'] ?? 3;
@@ -73,7 +76,7 @@ class OllamaProvider implements LLMProvider
         $attempt = 0;
         while (true) {
             try {
-                $response = $this->client->post('/api/chat', [
+                $response = $this->client->post('api/chat', [
                     'json' => $body,
                     'stream' => true,
                 ]);
@@ -252,7 +255,7 @@ class OllamaProvider implements LLMProvider
         $attempt = 0;
         while (true) {
             try {
-                $response = $this->client->post('/api/chat', [
+                $response = $this->client->post('api/chat', [
                     'json' => $body,
                     'stream' => true,
                 ]);
@@ -374,7 +377,7 @@ class OllamaProvider implements LLMProvider
     public function pullModel(string $model): void
     {
         try {
-            $this->client->post('/api/pull', [
+            $this->client->post('api/pull', [
                 'json' => ['name' => $model],
             ]);
         } catch (\Exception $e) {
@@ -411,7 +414,7 @@ class OllamaProvider implements LLMProvider
     public function embed(string $text, ?string $model = null): array
     {
         try {
-            $response = $this->client->post('/api/embeddings', [
+            $response = $this->client->post('api/embeddings', [
                 'json' => [
                     'model' => $model ?? $this->model,
                     'prompt' => $text,

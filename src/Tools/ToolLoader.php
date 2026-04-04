@@ -3,6 +3,7 @@
 namespace SuperAgent\Tools;
 
 use SuperAgent\Contracts\ToolInterface;
+use SuperAgent\Tools\BuiltinToolRegistry;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -263,116 +264,27 @@ class ToolLoader
     }
     
     /**
-     * 注册内置工具
+     * Register all builtin tools from BuiltinToolRegistry::classMap().
+     * This keeps ToolLoader perfectly in sync with BuiltinToolRegistry.
      */
     private function registerBuiltinTools(): void
     {
-        // 文件操作工具
-        $this->register('read_file', \SuperAgent\Tools\Builtin\ReadFileTool::class, [
-            'category' => 'file',
-            'cacheable' => true,
-            'description' => 'Read file contents',
-        ]);
-        
-        $this->register('write_file', \SuperAgent\Tools\Builtin\WriteFileTool::class, [
-            'category' => 'file',
-            'safe' => false,
-            'description' => 'Write content to file',
-        ]);
-        
-        $this->register('edit_file', \SuperAgent\Tools\Builtin\EditFileTool::class, [
-            'category' => 'file',
-            'safe' => false,
-            'description' => 'Edit file content',
-        ]);
-        
-        $this->register('multi_edit', \SuperAgent\Tools\Builtin\MultiEditTool::class, [
-            'category' => 'file',
-            'safe' => false,
-            'description' => 'Multiple edits in one operation',
-        ]);
-        
-        // 搜索工具
-        $this->register('grep', \SuperAgent\Tools\Builtin\GrepTool::class, [
-            'category' => 'search',
-            'cacheable' => true,
-            'description' => 'Search text in files',
-        ]);
-        
-        $this->register('glob', \SuperAgent\Tools\Builtin\GlobTool::class, [
-            'category' => 'search',
-            'cacheable' => true,
-            'description' => 'Find files by pattern',
-        ]);
-        
-        $this->register('search', \SuperAgent\Tools\Builtin\SearchTool::class, [
-            'category' => 'search',
-            'cacheable' => true,
-            'description' => 'Advanced code search',
-        ]);
-        
-        // 系统工具
-        $this->register('bash', \SuperAgent\Tools\Builtin\BashTool::class, [
-            'category' => 'system',
-            'safe' => false,
-            'description' => 'Execute shell commands',
-        ]);
-        
-        $this->register('phpunit', \SuperAgent\Tools\Builtin\PhpUnitTool::class, [
-            'category' => 'testing',
-            'description' => 'Run PHPUnit tests',
-        ]);
-        
-        // Web工具
-        $this->register('web_fetch', \SuperAgent\Tools\Builtin\WebFetchTool::class, [
-            'category' => 'web',
-            'cacheable' => true,
-            'description' => 'Fetch web content',
-        ]);
-        
-        $this->register('web_search', \SuperAgent\Tools\Builtin\WebSearchTool::class, [
-            'category' => 'web',
-            'cacheable' => true,
-            'description' => 'Search the web',
-        ]);
-        
-        // Git工具
-        $this->register('git', \SuperAgent\Tools\Builtin\GitTool::class, [
-            'category' => 'vcs',
-            'description' => 'Git version control',
-        ]);
-        
-        $this->register('github', \SuperAgent\Tools\Builtin\GitHubTool::class, [
-            'category' => 'vcs',
-            'description' => 'GitHub operations',
-        ]);
-        
-        // 任务管理工具
-        $this->register('todo', \SuperAgent\Tools\Builtin\TodoTool::class, [
-            'category' => 'task',
-            'description' => 'Manage todo list',
-        ]);
-        
-        $this->register('task_create', \SuperAgent\Tools\Builtin\TaskCreateTool::class, [
-            'category' => 'task',
-            'description' => 'Create new task',
-        ]);
-        
-        $this->register('task_update', \SuperAgent\Tools\Builtin\TaskUpdateTool::class, [
-            'category' => 'task',
-            'description' => 'Update task status',
-        ]);
-        
-        // 计划模式工具
-        $this->register('enter_plan_mode', \SuperAgent\Tools\Builtin\EnterPlanModeTool::class, [
-            'category' => 'planning',
-            'description' => 'Enter planning mode',
-        ]);
-        
-        $this->register('exit_plan_mode', \SuperAgent\Tools\Builtin\ExitPlanModeTool::class, [
-            'category' => 'planning',
-            'description' => 'Exit planning mode',
-        ]);
+        foreach (BuiltinToolRegistry::classMap() as $name => $class) {
+            // Instantiate a throw-away instance just to read category/description,
+            // then discard it — the real instance is created lazily in load().
+            try {
+                $probe = new $class();
+                $this->register($name, $class, [
+                    'category'    => $probe->category(),
+                    'description' => $probe->description(),
+                    'safe'        => $probe->isReadOnly(),
+                    'cacheable'   => $probe->isReadOnly(),
+                ]);
+            } catch (\Throwable) {
+                // Fallback for tools whose constructor has required args
+                $this->register($name, $class);
+            }
+        }
     }
     
     /**

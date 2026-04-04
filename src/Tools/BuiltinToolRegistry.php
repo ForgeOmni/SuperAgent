@@ -83,6 +83,111 @@ use SuperAgent\Tools\Builtin\PushNotificationTool;
 class BuiltinToolRegistry
 {
     /**
+     * Return the canonical name → FQCN mapping for every builtin tool.
+     *
+     * This is the single source of truth consumed by ToolLoader for lazy
+     * registration. No instantiation happens here.
+     *
+     * Experimental tools (gated by feature flags) are included in the map
+     * so that ToolLoader can register them; the flag check is deferred to
+     * ToolLoader::load() time or left to the caller.
+     *
+     * @return array<string, class-string<Tool>>
+     */
+    public static function classMap(): array
+    {
+        return [
+            // Execution
+            'bash'                  => BashTool::class,
+            'repl'                  => REPLTool::class,
+            'sleep'                 => SleepTool::class,
+            'powershell'            => PowerShellTool::class,
+
+            // File
+            'read_file'             => ReadFileTool::class,
+            'write_file'            => WriteFileTool::class,
+            'file_edit'             => FileEditTool::class,
+            'multi_edit'            => MultiEditTool::class,
+            'notebook_edit'         => NotebookEditTool::class,
+            'send_user_file'        => SendUserFileTool::class,
+
+            // Search
+            'glob'                  => GlobTool::class,
+            'grep'                  => GrepTool::class,
+            'tool_search'           => ToolSearchTool::class,
+
+            // Network
+            'http_request'          => HttpRequestTool::class,
+            'web_search'            => WebSearchTool::class,
+            'web_fetch'             => WebFetchTool::class,
+            'web_browser'           => WebBrowserTool::class,
+
+            // Task management
+            'task_create'           => TaskCreateTool::class,
+            'task_get'              => TaskGetTool::class,
+            'task_list'             => TaskListTool::class,
+            'task_update'           => TaskUpdateTool::class,
+            'task_stop'             => TaskStopTool::class,
+            'task_output'           => TaskOutputTool::class,
+            'todo_write'            => TodoWriteTool::class,
+
+            // Planning
+            'enter_plan_mode'       => EnterPlanModeTool::class,
+            'exit_plan_mode'        => ExitPlanModeTool::class,
+            'verify_plan_execution' => VerifyPlanExecutionTool::class,
+
+            // Automation
+            'workflow'              => WorkflowTool::class,
+            'skill'                 => SkillTool::class,
+            'discover_skills'       => DiscoverSkillsTool::class,
+            'schedule_cron'         => ScheduleCronTool::class,   // exp: agent_triggers
+            'remote_trigger'        => RemoteTriggerTool::class,  // exp: agent_triggers_remote
+
+            // Code / snippet
+            'snip'                  => SnipTool::class,
+            'lsp'                   => LSPTool::class,
+
+            // Monitoring / debug
+            'monitor'               => MonitorTool::class,
+            'terminal_capture'      => TerminalCaptureTool::class,
+            'ctx_inspect'           => CtxInspectTool::class,
+            'overflow_test'         => OverflowTestTool::class,
+
+            // Agent & team
+            'agent'                 => AgentTool::class,
+            'send_message'          => SendMessageTool::class,
+            'list_peers'            => ListPeersTool::class,
+            'team_create'           => TeamCreateTool::class,     // exp: team_memory
+            'team_delete'           => TeamDeleteTool::class,     // exp: team_memory
+
+            // MCP
+            'mcp'                   => MCPTool::class,
+            'list_mcp_resources'    => ListMcpResourcesTool::class,
+            'read_mcp_resource'     => ReadMcpResourceTool::class,
+            'mcp_auth'              => McpAuthTool::class,
+
+            // Git & review
+            'enter_worktree'        => EnterWorktreeTool::class,
+            'exit_worktree'         => ExitWorktreeTool::class,
+            'subscribe_pr'          => SubscribePRTool::class,
+            'suggest_background_pr' => SuggestBackgroundPRTool::class,
+            'review_artifact'       => ReviewArtifactTool::class,
+
+            // System / control
+            'config'                => ConfigTool::class,
+            'brief'                 => BriefTool::class,
+
+            // Interaction & notification
+            'ask_user'              => AskUserQuestionTool::class,
+            'push_notification'     => PushNotificationTool::class,
+            'synthetic_output'      => SyntheticOutputTool::class,
+
+            // Special
+            'tungsten'              => TungstenTool::class,
+        ];
+    }
+
+    /**
      * Get all built-in tools, respecting experimental feature flags.
      *
      * Core tools are always available. Experimental tools require their

@@ -85,25 +85,25 @@ trait CachedToolExecutionTrait
             return new class implements CacheInterface {
                 public function get($key, $default = null): mixed
                 {
-                    return \\Illuminate\\Support\\Facades\\Cache::get($key, $default);
+                    return \Illuminate\Support\Facades\Cache::get($key, $default);
                 }
                 
                 public function set($key, $value, $ttl = null): bool
                 {
                     if ($ttl !== null) {
-                        return \\Illuminate\\Support\\Facades\\Cache::put($key, $value, $ttl);
+                        return \Illuminate\Support\Facades\Cache::put($key, $value, $ttl);
                     }
-                    return \\Illuminate\\Support\\Facades\\Cache::forever($key, $value);
+                    return \Illuminate\Support\Facades\Cache::forever($key, $value);
                 }
                 
                 public function delete($key): bool
                 {
-                    return \\Illuminate\\Support\\Facades\\Cache::forget($key);
+                    return \Illuminate\Support\Facades\Cache::forget($key);
                 }
                 
                 public function clear(): bool
                 {
-                    return \\Illuminate\\Support\\Facades\\Cache::flush();
+                    return \Illuminate\Support\Facades\Cache::flush();
                 }
                 
                 public function getMultiple($keys, $default = null): iterable
@@ -135,7 +135,7 @@ trait CachedToolExecutionTrait
                 
                 public function has($key): bool
                 {
-                    return \\Illuminate\\Support\\Facades\\Cache::has($key);
+                    return \Illuminate\Support\Facades\Cache::has($key);
                 }
             };
         }

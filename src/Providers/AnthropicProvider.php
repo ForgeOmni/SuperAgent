@@ -33,7 +33,13 @@ class AnthropicProvider implements LLMProvider
     public function __construct(array $config)
     {
         $apiKey = $config['api_key'] ?? throw new ProviderException('API key is required', 'anthropic');
-        $baseUrl = rtrim($config['base_url'] ?? 'https://api.anthropic.com', '/');
+        // Guzzle follows RFC 3986 when resolving request paths against base_uri.
+        // Without a trailing slash, an absolute path like '/v1/messages' replaces
+        // the entire path component: 'https://host/prefix' + '/v1/messages' =>
+        // 'https://host/v1/messages' (the '/prefix' is lost).
+        // With a trailing slash, 'v1/messages' is treated as relative and appended:
+        // 'https://host/prefix/' + 'v1/messages' => 'https://host/prefix/v1/messages'.
+        $baseUrl = rtrim($config['base_url'] ?? 'https://api.anthropic.com', '/') . '/';
         $this->apiVersion = $config['api_version'] ?? '2023-06-01';
         $this->model = $config['model'] ?? 'claude-sonnet-4-20250514';
         $this->maxTokens = $config['max_tokens'] ?? 8192;
@@ -64,7 +70,7 @@ class AnthropicProvider implements LLMProvider
         $attempt = 0;
         while (true) {
             try {
-                $response = $this->client->post('/v1/messages', [
+                $response = $this->client->post('v1/messages', [
                     'json' => $body,
                     'stream' => true,
                 ]);

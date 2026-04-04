@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-04-03
+
+### 🚀 Summary
+
+This release fixes a silent URL-path-stripping bug that affected every provider except Anthropic when a custom `base_url` with a path prefix was configured (e.g. API gateways or reverse proxies). No new features are introduced.
+
+### Fixed
+
+#### Guzzle RFC 3986 Base URL Path Truncation (OpenAI / OpenRouter / Ollama)
+- **Root cause**: Guzzle resolves request paths against `base_uri` per RFC 3986. When the request path starts with `/` (absolute), it replaces the entire path component of `base_uri`, silently discarding any path prefix the caller put there. The pattern `rtrim($url, '/')` without a trailing slash + `->post('/v1/...')` triggered this for every provider that had a path prefix in its `base_url`
+- **`OpenAIProvider`**: `base_uri` now ends with `/`; request path changed from `'/v1/chat/completions'` to `'v1/chat/completions'`
+- **`OpenRouterProvider`**: `base_uri` now ends with `/`; request path changed from `'/api/v1/chat/completions'` to `'api/v1/chat/completions'`
+- **`OllamaProvider`**: `base_uri` now ends with `/`; all four request paths changed to relative: `'api/chat'` (×2), `'api/pull'`, `'api/embeddings'`
+- `AnthropicProvider` received the same fix in v0.6.8. All four providers now follow the same correct pattern: trailing slash on `base_uri` + relative (no leading `/`) request paths
+
+### Changed
+- Added explanatory comment in each provider constructor describing the RFC 3986 Guzzle behavior and why the trailing slash + relative path pattern is required
+
 ## [0.6.8] - 2026-04-03
 
 ### 🚀 Summary

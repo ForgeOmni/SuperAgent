@@ -50,6 +50,9 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Plan V2 面试阶段** - 迭代式结对规划，结构化计划文件，周期性提醒，执行前用户审批
 - **Claude Code 兼容** - 自动载入 Claude Code 目录下的 skills、agents 和 MCP 配置
 
+### 🆕 v0.6.9 — Guzzle Base URL 路径修复
+- **多 Provider Base URL 修复** — `OpenAIProvider`、`OpenRouterProvider` 和 `OllamaProvider` 现在正确地在 `base_uri` 末尾追加斜杠，并使用相对请求路径。此前带路径前缀的自定义 `base_url` 会被 Guzzle RFC 3986 解析器静默丢弃路径前缀。四个 Provider（`AnthropicProvider` 已在 v0.6.8 修复）现均修复
+
 ### 🆕 v0.6.8 — 增量上下文与工具按需加载
 - **增量上下文** (`IncrementalContextManager`) — 基于 Delta 的上下文同步，只传输差异而非完整历史；自动检查点、一步还原、可配置 Token 阈值触发压缩
 - **懒加载上下文** (`LazyContextManager`) — 注册上下文片段无需立即加载；按任务关键词/标签/优先级评分按需加载；TTL 缓存、LRU 淘汰

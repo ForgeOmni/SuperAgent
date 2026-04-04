@@ -27,7 +27,10 @@ class OpenAIProvider implements LLMProvider
     public function __construct(array $config)
     {
         $apiKey = $config['api_key'] ?? throw new ProviderException('API key is required', 'openai');
-        $baseUrl = rtrim($config['base_url'] ?? 'https://api.openai.com', '/');
+        // Trailing slash required so Guzzle treats the request path as relative (RFC 3986).
+        // Without it, an absolute path like 'v1/chat/completions' would replace the entire
+        // path component of base_uri, silently dropping any custom path prefix.
+        $baseUrl = rtrim($config['base_url'] ?? 'https://api.openai.com', '/') . '/';
         $this->organization = $config['organization'] ?? null;
         $this->model = $config['model'] ?? 'gpt-4o';
         $this->maxTokens = $config['max_tokens'] ?? 4096;
@@ -63,7 +66,7 @@ class OpenAIProvider implements LLMProvider
         $attempt = 0;
         while (true) {
             try {
-                $response = $this->client->post('/v1/chat/completions', [
+                $response = $this->client->post('v1/chat/completions', [
                     'json' => $body,
                     'stream' => true,
                 ]);

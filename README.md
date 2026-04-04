@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.8-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.9-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API Docs](docs/)
@@ -61,6 +61,9 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.6.9 — Guzzle Base URL Path Fix
+- **Multi-Provider Base URL Fix** — `OpenAIProvider`, `OpenRouterProvider`, and `OllamaProvider` now correctly append a trailing slash to `base_uri` and use relative request paths. Previously, any custom `base_url` with a path prefix (e.g. `https://gateway.example.com/openai`) would have its path silently stripped by Guzzle's RFC 3986 resolver when an absolute path like `/v1/chat/completions` was used. All four providers (`AnthropicProvider` was fixed in v0.6.8) now follow the correct pattern
 
 ### 🆕 v0.6.8 — Incremental Context & Tool Lazy Loading
 - **Incremental Context** (`IncrementalContextManager`) — Delta-based context synchronization: only the diff (added/modified/removed messages) is transmitted instead of the full history. Automatic checkpoints, one-step restore, configurable auto-compress on token thresholds, and a `getSmartWindow(maxTokens)` API for token-budgeted context retrieval

@@ -512,6 +512,39 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.9 功能配置
+
+### 带路径前缀的自定义 Base URL
+
+各 Provider 现在可以正确处理带路径前缀的 `base_url`（如 API 网关、反向代理）：
+
+```php
+// 带自定义路径的 Anthropic 兼容网关
+$agent = new Agent([
+    'provider'  => 'anthropic',
+    'api_key'   => env('ANTHROPIC_API_KEY'),
+    'base_url'  => 'https://gateway.example.com/anthropic', // 路径前缀将被保留
+    'model'     => 'claude-sonnet-4-6',
+]);
+
+// OpenAI 兼容代理
+$agent = new Agent([
+    'provider'  => 'openai',
+    'api_key'   => env('OPENAI_API_KEY'),
+    'base_url'  => 'https://proxy.example.com/openai',      // 路径前缀将被保留
+    'model'     => 'gpt-4o',
+]);
+
+// 在子路径后运行的本地 Ollama
+$agent = new Agent([
+    'provider'  => 'ollama',
+    'base_url'  => 'http://localhost:8080/ollama',          // 路径前缀将被保留
+    'model'     => 'llama3',
+]);
+```
+
+> **说明**：v0.6.8 及更早版本中，带路径前缀的 `base_url` 对 OpenAI、OpenRouter 和 Ollama Provider 是静默失效的 —— Guzzle 的 RFC 3986 解析器会在使用绝对请求路径（如 `/v1/chat/completions`）时丢弃路径前缀。四个 Provider 现已全部修复。
+
 ## v0.6.8 功能配置
 
 ### 增量上下文
@@ -771,6 +804,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.9      | 10.x+   | 8.1+  | Guzzle Base URL 路径修复（OpenAI / OpenRouter / Ollama Provider） |
 | 0.6.8      | 10.x+   | 8.1+  | 增量上下文、懒加载上下文与工具、子智能体 Provider 继承、WebSearch 无 Key 降级、WebFetch 加固 |
 | 0.6.7      | 10.x+   | 8.1+  | 多智能体并行追踪与自动模式 |
 | 0.6.6      | 10.x+   | 8.1+  | 智能上下文窗口（888个测试） |

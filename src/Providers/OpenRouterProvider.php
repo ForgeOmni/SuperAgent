@@ -28,7 +28,10 @@ class OpenRouterProvider implements LLMProvider
     public function __construct(array $config)
     {
         $apiKey = $config['api_key'] ?? throw new ProviderException('API key is required', 'openrouter');
-        $baseUrl = rtrim($config['base_url'] ?? 'https://openrouter.ai', '/');
+        // Trailing slash required so Guzzle treats the request path as relative (RFC 3986).
+        // Without it, an absolute path like 'api/v1/chat/completions' would replace the entire
+        // path component of base_uri, silently dropping any custom path prefix.
+        $baseUrl = rtrim($config['base_url'] ?? 'https://openrouter.ai', '/') . '/';
         $this->appName = $config['app_name'] ?? 'SuperAgent';
         $this->siteUrl = $config['site_url'] ?? null;
         $this->model = $config['model'] ?? 'anthropic/claude-3-5-sonnet';
@@ -63,7 +66,7 @@ class OpenRouterProvider implements LLMProvider
         $attempt = 0;
         while (true) {
             try {
-                $response = $this->client->post('/api/v1/chat/completions', [
+                $response = $this->client->post('api/v1/chat/completions', [
                     'json' => $body,
                     'stream' => true,
                 ]);

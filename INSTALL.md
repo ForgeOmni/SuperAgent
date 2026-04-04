@@ -818,6 +818,39 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.9 Feature Configuration
+
+### Custom Base URL with Path Prefix
+
+Providers now correctly handle `base_url` values that include a path prefix (e.g. API gateways, reverse proxies):
+
+```php
+// Anthropic-compatible gateway at a custom path
+$agent = new Agent([
+    'provider'  => 'anthropic',
+    'api_key'   => env('ANTHROPIC_API_KEY'),
+    'base_url'  => 'https://gateway.example.com/anthropic', // path prefix preserved
+    'model'     => 'claude-sonnet-4-6',
+]);
+
+// OpenAI-compatible proxy
+$agent = new Agent([
+    'provider'  => 'openai',
+    'api_key'   => env('OPENAI_API_KEY'),
+    'base_url'  => 'https://proxy.example.com/openai',      // path prefix preserved
+    'model'     => 'gpt-4o',
+]);
+
+// Local Ollama behind a sub-path reverse proxy
+$agent = new Agent([
+    'provider'  => 'ollama',
+    'base_url'  => 'http://localhost:8080/ollama',          // path prefix preserved
+    'model'     => 'llama3',
+]);
+```
+
+> **Note**: In v0.6.8 and earlier, `base_url` values with a path prefix were silently broken for OpenAI, OpenRouter, and Ollama providers — Guzzle's RFC 3986 resolver would strip the path when an absolute request path (e.g. `/v1/chat/completions`) was used. All four providers are now fixed.
+
 ## v0.6.8 Feature Configuration
 
 ### Incremental Context
@@ -1117,6 +1150,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.9      | 10.x+   | 8.1+ | Guzzle base URL path fix for OpenAI / OpenRouter / Ollama providers |
 | 0.6.8      | 10.x+   | 8.1+ | Incremental Context, Lazy Context & Tool Loading, sub-agent provider inheritance, WebSearch no-key fallback, WebFetch hardening |
 | 0.6.7      | 10.x+   | 8.1+ | Multi-Agent Orchestration (parallel execution, auto-mode detection, team management) |
 | 0.6.6      | 10.x+   | 8.1+ | Smart Context Window (888 tests) |
