@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.16 升级说明
+
+v0.6.16 确保子 agent 进程可访问父进程的所有 agent 定义和 MCP server 配置。**无需修改配置。**
+
+此前子进程依赖 Laravel bootstrap 加载 `.claude/agents/` 自定义 agent 定义和 config 中的 MCP server。现在父进程直接序列化这些注册数据通过 stdin JSON 传递——子进程无论 Laravel 是否可用都能正常工作。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.15 升级说明
 
 v0.6.15 添加了自动 MCP server 共享。**无需修改配置。**
@@ -848,6 +858,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.16     | 10.x+   | 8.1+  | 父进程 agent/MCP 注册数据透传子进程（stdin 序列化） |
 | 0.6.15     | 10.x+   | 8.1+  | MCP Server TCP 桥接共享 — N 个子 agent 共享 1 个 MCP server 进程 |
 | 0.6.12     | 10.x+   | 8.1+  | 子进程 Laravel 引导、Provider 序列化修复、子 agent 完整工具集 |
 | 0.6.11     | 10.x+   | 8.1+  | 真正的进程级并行子智能体（proc_open 替代 Fiber），4.6x 加速 |

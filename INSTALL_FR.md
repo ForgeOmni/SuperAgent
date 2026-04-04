@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.6.16
+
+v0.6.16 garantit que les processus enfants des sous-agents ont accès à toutes les définitions d'agents et configs MCP du parent. **Aucune modification de configuration requise.**
+
+Le parent sérialise désormais ces enregistrements et les transmet via JSON stdin — les processus enfants fonctionnent de manière identique avec ou sans Laravel.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.6.15
 
 v0.6.15 ajoute le partage automatique des serveurs MCP. **Aucune modification de configuration requise.**
@@ -838,6 +848,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.16     | 10.x+   | 8.1+  | Propagation des enregistrements agent/MCP parent vers enfant via sérialisation stdin |
 | 0.6.15     | 10.x+   | 8.1+  | Partage de serveurs MCP via pont TCP — N agents enfants partagent 1 processus MCP |
 | 0.6.12     | 10.x+   | 8.1+  | Bootstrap Laravel dans processus enfants, correction sérialisation provider, ensemble complet d'outils |
 | 0.6.11     | 10.x+   | 8.1+  | Vrais sous-agents parallèles au niveau processus (proc_open remplace Fiber), accélération 4.6x |

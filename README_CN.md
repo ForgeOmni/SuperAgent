@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.15-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.16-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API文档](docs/)
@@ -11,6 +11,11 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.6.16 — 父进程注册数据透传子进程
+- **Agent 定义透传** — 父进程通过 `AgentManager::exportDefinitions()` 序列化所有已注册 agent 定义（内置 + `.claude/agents/` 自定义），经 stdin JSON 传给子进程。子进程通过 `importDefinitions()` 导入——无需 Laravel bootstrap 或文件系统访问
+- **MCP Server 配置透传** — 父进程序列化所有已注册 MCP server 配置（`ServerConfig::toArray()`）传给子进程。子进程通过 `MCPManager::registerServer()` 注册，无需重新读取配置文件或 `.mcp.json`
+- **已验证** — 子进程收到 9 个 agent 类型（7 内置 + 2 自定义含完整 system prompt）、2 个 MCP server（stdio + http）、6 个内置 skill、58 个工具
 
 ### 🆕 v0.6.15 — MCP Server TCP 桥接共享
 - **MCP TCP 桥接** (`MCPBridge`) — 父进程连接 stdio MCP server 后，自动在随机端口启动轻量 TCP 代理。子进程通过注册文件发现桥接，用 `HttpTransport` 连接而非各自启动 MCP server。N 个子 agent 共享 1 个 MCP server 进程

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.16] - 2026-04-04
+
+### 🚀 Summary
+
+Sub-agent child processes could not resolve custom agent definitions or MCP server configs because they relied on Laravel bootstrap (which may fail or be unavailable). This release serializes the parent's registrations and passes them to children via stdin JSON, making child processes self-sufficient.
+
+### Added
+
+#### AgentManager Registration Export/Import
+- **`AgentManager::exportDefinitions()`**: serializes all registered agent definitions (builtin + custom) as `{frontmatter, body}` arrays suitable for JSON transport
+- **`AgentManager::importDefinitions(array)`**: reconstructs agents from serialized data as `MarkdownAgentDefinition` instances. Skips names already registered (e.g. built-in agents loaded by the child's own constructor)
+
+#### ProcessBackend Registration Propagation
+- **`ProcessBackend::spawn()`**: now exports parent's `AgentManager::exportDefinitions()` and `MCPManager::getServers()->toArray()` into the stdin JSON as `agent_definitions` and `mcp_servers` keys
+- **`agent-runner.php`**: before creating the Agent, imports `agent_definitions` via `AgentManager::importDefinitions()` and registers `mcp_servers` via `MCPManager::registerServer()`. This runs before and independent of Laravel bootstrap
+
+### Fixed
+- Custom agent types from `.claude/agents/` (e.g. `logistics-planner`) now resolve correctly in child processes without filesystem access
+- MCP server configs (stdio, http, sse) are available in child processes without re-reading `.mcp.json` or Laravel config
+- Verified: child receives 9 agent types (7 builtin + 2 custom with full system prompts), 2 MCP servers, 6 built-in skills, 58 tools
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.6.16; added v0.6.16 feature section
+- **INSTALL** (EN/CN/FR): added v0.6.16 upgrade notes and compatibility matrix row
+
 ## [0.6.15] - 2026-04-04
 
 ### 🚀 Summary

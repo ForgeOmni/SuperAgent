@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.15-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.16-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Docs API](docs/)
@@ -11,6 +11,11 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.6.16 — Propagation des Enregistrements Parent vers Enfant
+- **Propagation des Définitions d'Agents** — Le processus parent sérialise toutes les définitions d'agents enregistrées (intégrés + personnalisés de `.claude/agents/`) via `AgentManager::exportDefinitions()` et les transmet dans le JSON stdin. Les processus enfants les importent via `importDefinitions()` — sans bootstrap Laravel ni accès au système de fichiers
+- **Propagation des Configs MCP** — Le parent sérialise toutes les configs de serveurs MCP (`ServerConfig::toArray()`) et les transmet aux enfants. Les processus enfants les enregistrent via `MCPManager::registerServer()`, rendant les outils MCP disponibles sans relire les fichiers de config
+- **Vérifié** — Le processus enfant reçoit 9 types d'agents (7 intégrés + 2 personnalisés avec prompts système complets), 2 serveurs MCP (stdio + http), 6 skills intégrés et 58 outils
 
 ### 🆕 v0.6.15 — Partage de Serveurs MCP via Pont TCP
 - **Pont TCP MCP** (`MCPBridge`) — Quand le parent se connecte à un serveur MCP stdio, un proxy TCP léger est démarré automatiquement sur un port aléatoire. Les enfants découvrent le pont via un fichier registre et se connectent via `HttpTransport`. N agents enfants partagent 1 processus MCP

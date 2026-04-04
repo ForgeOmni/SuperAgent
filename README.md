@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.15-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.16-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API Docs](docs/)
@@ -61,6 +61,11 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.6.16 — Parent-to-Child Registration Propagation
+- **Agent Definition Propagation** — Parent process serializes all registered agent definitions (builtin + custom from `.claude/agents/`) via `AgentManager::exportDefinitions()` and passes them in the stdin JSON. Child processes import them via `importDefinitions()` before creating their Agent — no Laravel bootstrap or filesystem access required
+- **MCP Server Config Propagation** — Parent serializes all registered MCP server configs (`ServerConfig::toArray()`) and passes them to children. Child processes register them via `MCPManager::registerServer()`, making MCP tools available without re-reading config files or `.mcp.json`
+- **Verified** — Child process receives 9 agent types (7 builtin + 2 custom with full system prompts), 2 MCP servers (stdio + http), 6 built-in skills, and 58 tools
 
 ### 🆕 v0.6.15 — MCP Server Sharing via TCP Bridge
 - **MCP TCP Bridge** (`MCPBridge`) — When the parent process connects to a stdio MCP server, a lightweight TCP proxy is automatically started on a random port (`127.0.0.1`). Child processes discover the bridge via a registry file and connect via `HttpTransport` instead of spawning their own MCP server. N child agents share 1 MCP server process
