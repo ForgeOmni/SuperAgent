@@ -5,32 +5,20 @@
  * SuperAgent Process Runner
  *
  * Runs a single agent in a separate OS process. The parent sends a JSON
- * config blob on stdin (one line), then closes stdin. This script creates
- * a real Agent with full LLM provider, executes the prompt, and writes
- * the serialized AgentResult as a single JSON line on stdout.
+ * config blob on stdin (one line), then closes stdin. This script:
+ *
+ *   1. Bootstraps Laravel (if base_path is provided) so that config(),
+ *      AgentManager, SkillManager, MCPManager, ExperimentalFeatures,
+ *      and .claude/ directory loading all work identically to the parent.
+ *   2. Creates a real SuperAgent\Agent with full LLM provider and tools.
+ *   3. Executes the prompt and writes a JSON result line to stdout.
  *
  * Exit codes:
  *   0 — success (result on stdout)
  *   1 — runtime error (message on stderr)
  */
 
-// Ensure we can find the autoloader whether this script lives in
-// the package's own bin/ or inside vendor/forgeomni/superagent/bin/.
-$autoloaders = [
-    __DIR__ . '/../vendor/autoload.php',
-    __DIR__ . '/../../../../vendor/autoload.php',
-];
-foreach ($autoloaders as $autoloader) {
-    if (file_exists($autoloader)) {
-        require_once $autoloader;
-        break;
-    }
-}
-
-use SuperAgent\Agent;
-use SuperAgent\AgentResult;
-
-// ── Read config from stdin (single JSON line) ──────────────────────
+// ── Read config from stdin (single JSON blob) ─────────────────────
 $stdinData = '';
 while (!feof(STDIN)) {
     $chunk = fread(STDIN, 65536);
@@ -46,22 +34,63 @@ if (!$config || !isset($config['prompt'])) {
     exit(1);
 }
 
+// ── Bootstrap: Laravel app OR plain Composer autoloader ───────────
+$laravelBootstrapped = false;
+$basePath = $config['base_path'] ?? null;
+
+if ($basePath && file_exists($basePath . '/bootstrap/app.php')) {
+    // Laravel project — full bootstrap gives us config(), base_path(),
+    // service providers, AgentManager, SkillManager, MCPManager, etc.
+    try {
+        // The autoloader is loaded as part of the Laravel bootstrap
+        require_once $basePath . '/vendor/autoload.php';
+
+        $app = require_once $basePath . '/bootstrap/app.php';
+
+        // Bootstrap the console kernel (loads config, service providers, etc.)
+        $kernel = $app->make(\Illuminate\Contracts\Console\Kernel::class);
+        $kernel->bootstrap();
+
+        $laravelBootstrapped = true;
+    } catch (\Throwable $e) {
+        fwrite(STDERR, "[agent-runner] Laravel bootstrap failed: {$e->getMessage()}, falling back to autoloader\n");
+    }
+}
+
+if (!$laravelBootstrapped) {
+    // Fallback: plain Composer autoloader (no config(), no .claude/ loading)
+    $autoloaders = [
+        ($basePath ?? __DIR__ . '/..') . '/vendor/autoload.php',
+        __DIR__ . '/../vendor/autoload.php',
+        __DIR__ . '/../../../../vendor/autoload.php',
+    ];
+    foreach ($autoloaders as $autoloader) {
+        if (file_exists($autoloader)) {
+            require_once $autoloader;
+            break;
+        }
+    }
+}
+
+use SuperAgent\Agent;
+
 $prompt = $config['prompt'];
 $agentConfig = $config['agent_config'] ?? [];
 
-// Log startup
+// Propagate working directory so .claude/ relative paths resolve correctly
+if ($basePath && !isset($agentConfig['working_directory'])) {
+    $agentConfig['working_directory'] = $basePath;
+}
+
 $agentId = $config['agent_id'] ?? 'unknown';
 $agentName = $config['agent_name'] ?? 'agent';
-fwrite(STDERR, "[agent-runner] Starting agent {$agentId} ({$agentName})\n");
+fwrite(STDERR, "[agent-runner] Starting agent {$agentId} ({$agentName})"
+    . ($laravelBootstrapped ? ' [Laravel]' : ' [standalone]') . "\n");
 
 try {
-    // Create a real Agent with full provider + tools
     $agent = new Agent($agentConfig);
-
-    // Run the prompt (blocking — this process exists solely for this)
     $result = $agent->run($prompt);
 
-    // Serialize result to stdout
     $output = [
         'success' => true,
         'agent_id' => $agentId,

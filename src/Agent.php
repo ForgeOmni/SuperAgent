@@ -86,10 +86,40 @@ class Agent
      */
     protected function injectProviderConfigIntoAgentTools(array $config): void
     {
-        // Strip tool/message state; keep only what's needed to reconstruct a provider
+        // Collect only the scalar keys needed to reconstruct a provider in
+        // a child process.  The 'provider' key might be an LLMProvider object
+        // (not JSON-serializable) — replace it with the provider's string name.
         $providerConfig = array_intersect_key($config, array_flip([
-            'provider', 'api_key', 'model', 'base_url', 'max_tokens',
+            'provider', 'driver', 'api_key', 'model', 'base_url', 'max_tokens',
+            'api_version', 'organization', 'app_name', 'site_url',
         ]));
+
+        // Ensure 'provider' is a serializable string, not an object
+        if (isset($providerConfig['provider']) && $providerConfig['provider'] instanceof LLMProvider) {
+            $providerConfig['provider'] = $providerConfig['provider']->name();
+        }
+
+        // If api_key was not in $config (e.g. it came from Laravel config()),
+        // try to read it from the resolved provider so the child can authenticate.
+        if (!isset($providerConfig['api_key']) && isset($this->provider)) {
+            // The provider stores the key internally. We can't read private
+            // fields, but we can pull it from the Laravel config if available.
+            $name = $this->provider->name();
+            $configKey = static::config("superagent.providers.{$name}.api_key");
+            if ($configKey) {
+                $providerConfig['api_key'] = $configKey;
+            }
+        }
+
+        // Ensure provider name is always set
+        if (!isset($providerConfig['provider']) || !is_string($providerConfig['provider'])) {
+            $providerConfig['provider'] = $this->provider->name();
+        }
+
+        // Propagate model from the resolved provider if not already set
+        if (!isset($providerConfig['model'])) {
+            $providerConfig['model'] = $this->provider->getModel();
+        }
 
         foreach ($this->tools as $tool) {
             if ($tool instanceof AgentTool) {

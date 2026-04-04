@@ -100,8 +100,19 @@ class ProcessBackend implements BackendInterface
             if ($config->systemPrompt !== null) {
                 $agentConfig['system_prompt'] = $config->systemPrompt;
             }
+
+            // Tool loading: if the spawn config specifies allowed tools, pass
+            // them explicitly; otherwise load all tools so the child agent has
+            // the same capabilities as the parent (agent, skill, mcp, etc.).
             if ($config->allowedTools !== null) {
-                $agentConfig['allowed_tools'] = $config->allowedTools;
+                $agentConfig['load_tools'] = $config->allowedTools;
+            } elseif (!isset($agentConfig['load_tools'])) {
+                $agentConfig['load_tools'] = 'all';
+            }
+
+            // Denied tools
+            if ($config->deniedTools !== null) {
+                $agentConfig['denied_tools'] = $config->deniedTools;
             }
 
             $stdinPayload = json_encode([
@@ -109,6 +120,9 @@ class ProcessBackend implements BackendInterface
                 'agent_name' => $config->name,
                 'prompt' => $config->prompt,
                 'agent_config' => $agentConfig,
+                // Pass Laravel base path so the child can bootstrap the full
+                // app (config, AgentManager, SkillManager, MCPManager, etc.)
+                'base_path' => $this->resolveLaravelBasePath(),
             ], JSON_UNESCAPED_UNICODE);
 
             // Write config then close stdin so the child can start
@@ -391,6 +405,40 @@ class ProcessBackend implements BackendInterface
         }
 
         throw new \RuntimeException('Agent runner script not found');
+    }
+
+    /**
+     * Resolve the Laravel application base path so the child process can
+     * bootstrap the full app (config, service providers, AgentManager,
+     * SkillManager, MCPManager, .claude/ directory loading, etc.).
+     *
+     * Returns null when running outside Laravel.
+     */
+    private function resolveLaravelBasePath(): ?string
+    {
+        // If Laravel is booted, base_path() is authoritative
+        try {
+            if (function_exists('base_path') && function_exists('app') && app()->bound('config')) {
+                return base_path();
+            }
+        } catch (\Throwable) {
+            // Not in Laravel context
+        }
+
+        // Heuristic: walk up from cwd looking for artisan + bootstrap/app.php
+        $dir = getcwd();
+        for ($i = 0; $i < 5; $i++) {
+            if (file_exists($dir . '/artisan') && file_exists($dir . '/bootstrap/app.php')) {
+                return $dir;
+            }
+            $parent = dirname($dir);
+            if ($parent === $dir) {
+                break;
+            }
+            $dir = $parent;
+        }
+
+        return null;
     }
 
     private function createWorktree(string $agentId, ?string $baseDir = null): string
