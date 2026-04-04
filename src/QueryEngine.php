@@ -24,9 +24,14 @@ use SuperAgent\CostAutopilot\AutopilotDecision;
 use SuperAgent\Guardrails\Context\RuntimeContextCollector;
 use SuperAgent\TokenBudget\TokenBudgetTracker;
 use SuperAgent\Tools\ToolResult;
+use SuperAgent\ErrorRecovery\ErrorRecoveryManager;
+use SuperAgent\ErrorRecovery\ErrorClassifier;
+use SuperAgent\Traits\ErrorRecoveryTrait;
 
 class QueryEngine
 {
+    use ErrorRecoveryTrait;
+    
     /** @var Message[] */
     protected array $messages = [];
 
