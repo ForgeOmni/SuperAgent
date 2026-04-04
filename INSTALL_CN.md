@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.15 升级说明
+
+v0.6.15 添加了自动 MCP server 共享。**无需修改配置。**
+
+当父 agent 连接 stdio MCP server（如 Valhalla）时，会自动启动 TCP 桥接。子 agent 通过桥接连接而非各自启动 MCP server 进程，消除 N 个子进程各自启动相同 Node.js/Python MCP server 的开销。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.12 升级说明
 
 v0.6.12 修复了子 agent 进程无法访问 Laravel 服务、API 凭证和完整工具集的三个问题。**无需修改配置。**
@@ -838,6 +848,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.15     | 10.x+   | 8.1+  | MCP Server TCP 桥接共享 — N 个子 agent 共享 1 个 MCP server 进程 |
 | 0.6.12     | 10.x+   | 8.1+  | 子进程 Laravel 引导、Provider 序列化修复、子 agent 完整工具集 |
 | 0.6.11     | 10.x+   | 8.1+  | 真正的进程级并行子智能体（proc_open 替代 Fiber），4.6x 加速 |
 | 0.6.10     | 10.x+   | 8.1+  | 多智能体同步执行修复（Fiber 死锁、后端类型不匹配、进度追踪器） |

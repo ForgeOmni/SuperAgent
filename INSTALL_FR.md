@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.6.15
+
+v0.6.15 ajoute le partage automatique des serveurs MCP. **Aucune modification de configuration requise.**
+
+Quand l'agent parent se connecte à un serveur MCP stdio (ex. Valhalla), un pont TCP est démarré automatiquement. Les agents enfants se connectent au pont au lieu de démarrer leur propre processus MCP.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.6.12
 
 v0.6.12 corrige trois problèmes où les processus enfants des sous-agents ne pouvaient pas accéder aux services Laravel, aux identifiants API ou à l'ensemble complet des outils. **Aucune modification de configuration requise.**
@@ -828,6 +838,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.15     | 10.x+   | 8.1+  | Partage de serveurs MCP via pont TCP — N agents enfants partagent 1 processus MCP |
 | 0.6.12     | 10.x+   | 8.1+  | Bootstrap Laravel dans processus enfants, correction sérialisation provider, ensemble complet d'outils |
 | 0.6.11     | 10.x+   | 8.1+  | Vrais sous-agents parallèles au niveau processus (proc_open remplace Fiber), accélération 4.6x |
 | 0.6.10     | 10.x+   | 8.1+  | Correction de l'exécution synchrone multi-agents (blocage fiber, incompatibilité type backend, tracker de progression) |

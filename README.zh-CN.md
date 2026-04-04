@@ -50,6 +50,10 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Plan V2 面试阶段** - 迭代式结对规划，结构化计划文件，周期性提醒，执行前用户审批
 - **Claude Code 兼容** - 自动载入 Claude Code 目录下的 skills、agents 和 MCP 配置
 
+### 🆕 v0.6.15 — MCP Server TCP 桥接共享
+- **MCP TCP 桥接** — 父进程 stdio MCP server 通过 TCP 代理共享给子进程，N 个子 agent 共享 1 个 MCP server
+- **自动检测** — MCPManager 自动发现父进程桥接，透明切换 HttpTransport
+
 ### 🆕 v0.6.12 — 子进程 Laravel 引导与 Provider 修复
 - **子进程 Laravel 引导** — 子进程执行完整 Laravel bootstrap，可访问 config()、AgentManager、SkillManager、MCPManager 及 `.claude/` 目录
 - **Provider 序列化修复** — LLMProvider 对象替换为字符串名称，api_key 从 config 回填，子进程可正确重建 LLM 连接

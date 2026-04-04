@@ -818,6 +818,16 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.15 Upgrade Notes
+
+v0.6.15 adds automatic MCP server sharing. **No configuration changes are required.**
+
+When your parent agent connects to a stdio MCP server (e.g. Valhalla), a TCP bridge is started automatically. Child agents spawned via `AgentTool` will connect to the bridge instead of starting their own MCP server processes. This eliminates the overhead of N child processes each spawning an identical Node.js/Python MCP server.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.12 Upgrade Notes
 
 v0.6.12 fixes three issues where sub-agent child processes could not access Laravel services, API credentials, or the full tool set. **No configuration changes are required.**
@@ -1184,6 +1194,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.15     | 10.x+   | 8.1+ | MCP server sharing via TCP bridge — N child agents share 1 MCP server process |
 | 0.6.12     | 10.x+   | 8.1+ | Child process Laravel bootstrap, provider config serialization fix, full tool set in sub-agents |
 | 0.6.11     | 10.x+   | 8.1+ | True process-level parallel agents (proc_open replaces Fiber), 4.6x speedup |
 | 0.6.10     | 10.x+   | 8.1+ | Multi-agent synchronous execution fix (fiber deadlock, backend type mismatch, progress tracker) |

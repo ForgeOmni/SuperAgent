@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.12-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.15-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API Docs](docs/)
@@ -61,6 +61,11 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.6.15 — MCP Server Sharing via TCP Bridge
+- **MCP TCP Bridge** (`MCPBridge`) — When the parent process connects to a stdio MCP server, a lightweight TCP proxy is automatically started on a random port (`127.0.0.1`). Child processes discover the bridge via a registry file and connect via `HttpTransport` instead of spawning their own MCP server. N child agents share 1 MCP server process
+- **MCPManager Auto-Detection** — `createTransport()` checks for parent bridges before creating `StdioTransport`. If found, uses `HttpTransport` to `localhost:{port}` transparently
+- **ProcessBackend Bridge Polling** — `poll()` now also calls `MCPBridge::poll()` to service incoming TCP requests from child processes
 
 ### 🆕 v0.6.12 — Child Process Laravel Bootstrap & Provider Fix
 - **Laravel Bootstrap in Child Processes** — `agent-runner.php` now performs full Laravel bootstrap (`$app->make(Kernel)->bootstrap()`) when a `base_path` is provided. This gives child processes access to `config()`, `AgentManager`, `SkillManager`, `MCPManager`, `.claude/agents/` directories, and all service providers — identical to the parent process

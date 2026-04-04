@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.12-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.15-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Docs API](docs/)
@@ -11,6 +11,11 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.6.15 — Partage de Serveurs MCP via Pont TCP
+- **Pont TCP MCP** (`MCPBridge`) — Quand le parent se connecte à un serveur MCP stdio, un proxy TCP léger est démarré automatiquement sur un port aléatoire. Les enfants découvrent le pont via un fichier registre et se connectent via `HttpTransport`. N agents enfants partagent 1 processus MCP
+- **Détection Automatique MCPManager** — `createTransport()` vérifie `MCPBridge::readRegistry()` avant de créer un `StdioTransport`. Si un pont parent existe, `HttpTransport` vers `localhost:{port}` est utilisé de façon transparente
+- **Polling du Pont ProcessBackend** — `poll()` appelle aussi `MCPBridge::poll()` pour traiter les requêtes TCP des processus enfants
 
 ### 🆕 v0.6.12 — Bootstrap Laravel dans les Processus Enfants & Correction Provider
 - **Bootstrap Laravel dans les Processus Enfants** — `agent-runner.php` effectue désormais un bootstrap Laravel complet (`$app->make(Kernel)->bootstrap()`) lorsqu'un `base_path` est fourni. Les processus enfants accèdent à `config()`, `AgentManager`, `SkillManager`, `MCPManager`, répertoires `.claude/agents/` et tous les service providers — identique au processus parent

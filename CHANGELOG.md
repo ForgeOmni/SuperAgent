@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.15] - 2026-04-04
+
+### 🚀 Summary
+
+Adds MCP server sharing across child processes. Previously, each sub-agent spawned via `ProcessBackend` would start its own MCP server (e.g. a Node.js Valhalla process), causing N children to run N identical server processes — heavy on resources and slow to start. Now the parent's MCP server is shared with all children via a lightweight TCP bridge.
+
+### Added
+
+#### MCP Server Sharing via TCP Bridge
+- **`MCPBridge`** (`src/MCP/MCPBridge.php`): new class that proxies JSON-RPC messages between TCP clients and a stdio MCP server. When the parent process connects to a stdio MCP server, `MCPManager::connect()` automatically calls `MCPBridge::startBridge()` to start a TCP listener on `127.0.0.1:{random_port}`. The bridge accepts HTTP POST requests from child processes, forwards them to the MCP client (which holds the stdio connection), and returns the JSON-RPC response
+- **Bridge Registry**: bridge ports are written to `/tmp/superagent_mcp_bridges_{pid}.json` so child processes can discover them via `MCPBridge::readRegistry()` without any IPC mechanism
+- **MCPManager bridge auto-detection**: `createTransport()` now checks `MCPBridge::readRegistry()` before creating a `StdioTransport`. If a parent bridge is found for the requested server, an `HttpTransport` to `localhost:{port}` is created instead — completely transparent to the rest of the system
+- **ProcessBackend bridge polling**: `poll()` now calls `MCPBridge::poll()` on each iteration so the parent process can service incoming TCP requests from child processes while waiting for agent completion
+
+### Changed
+- **`MCPManager::connect()`**: after successfully connecting a stdio server, starts a TCP bridge for it via `MCPBridge::getInstance()->startBridge()`. Bridge failure is non-fatal (logged as warning)
+- **`ProcessBackend::poll()`**: added `MCPBridge::getInstance()->poll()` call at the start of each poll cycle
+
+### Documentation
+- **README** (EN/CN/FR/ZH-CN): version badge → 0.6.15; added v0.6.15 feature section
+- **INSTALL** (EN/CN/FR/ZH-CN): added v0.6.15 upgrade notes and compatibility matrix row
+
 ## [0.6.12] - 2026-04-04
 
 ### 🚀 Summary

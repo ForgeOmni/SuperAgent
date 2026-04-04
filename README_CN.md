@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.12-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.15-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API文档](docs/)
@@ -11,6 +11,11 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.6.15 — MCP Server TCP 桥接共享
+- **MCP TCP 桥接** (`MCPBridge`) — 父进程连接 stdio MCP server 后，自动在随机端口启动轻量 TCP 代理。子进程通过注册文件发现桥接，用 `HttpTransport` 连接而非各自启动 MCP server。N 个子 agent 共享 1 个 MCP server 进程
+- **MCPManager 自动检测** — `createTransport()` 在创建 `StdioTransport` 前检查父进程桥接，若存在则透明使用 `HttpTransport`
+- **ProcessBackend 桥接轮询** — `poll()` 同时调用 `MCPBridge::poll()` 处理子进程的 TCP 请求
 
 ### 🆕 v0.6.12 — 子进程 Laravel 引导与 Provider 修复
 - **子进程 Laravel 引导** — `agent-runner.php` 现在在收到 `base_path` 时执行完整 Laravel 引导（`$app->make(Kernel)->bootstrap()`）。子进程可访问 `config()`、`AgentManager`、`SkillManager`、`MCPManager`、`.claude/agents/` 目录及所有 service provider——与父进程完全一致
