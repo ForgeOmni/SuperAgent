@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.7] - 2026-04-03
+## [0.6.7] - 2026-04-04
+
+### 🚀 Summary
+
+This release introduces **Multi-Agent Orchestration**, enabling SuperAgent to automatically detect task complexity and spawn multiple specialized agents working in parallel. Key highlights:
+
+- **Automatic Mode Detection**: Zero-configuration multi-agent activation based on task analysis
+- **Parallel Execution**: Run up to 10+ agents simultaneously with real-time progress tracking
+- **Claude Code Compatibility**: Seamless integration with exact Claude Code result format
+- **Agent Communication**: Built-in mailbox system for inter-agent messaging
+- **WebSocket Monitoring**: Live browser-based dashboard for multi-agent visualization
+- **Multi-Language Docs**: Full documentation in English, Chinese, and French
 
 ### Added
 
@@ -31,10 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Seamless Integration**: Zero-configuration auto-mode in main Agent class
 
 #### Agent Communication & Collaboration
+- **AgentMailbox System**: Persistent agent-to-agent messaging with filtering, archiving, and broadcast capabilities
+- **SendMessage Tool**: Direct and broadcast messaging between agents with summary and priority support
 - **AgentCommunicationProtocol**: Inter-agent message passing system
 - **Message Types**: BROADCAST, DIRECT, REQUEST, RESPONSE
 - **Message Queue**: Persistent message storage with filtering capabilities
 - **Protocol Handlers**: Extensible message processing pipeline
+
+#### Claude Code Compatibility
+- **AgentToolResult**: Exact Claude Code-compatible result format for seamless integration
+- **AgentTeamResult**: Aggregated multi-agent results with individual agent tracking
+- **Result Aggregation**: Combined token counting, cost calculation, and message collection across all agents
+- **Backward Compatibility**: Full support for existing single-agent workflows
 
 #### Performance & Resource Management
 - **PerformanceProfiler**: Agent execution performance tracking
@@ -56,8 +75,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `superagent:agent:monitor` - Real-time monitoring
 - **Integration Examples**: Sample implementations for common use cases
 
+#### Documentation
+- **Multi-Language Support**: Added French documentation (README_FR.md, INSTALL_FR.md)
+- **Chinese Documentation**: Created INSTALL_CN.md, updated README_CN.md with v0.6.7 features
+- **Installation Guide**: Comprehensive multi-agent setup section in INSTALL.md
+- **Code Examples**: Added examples for auto-mode, manual teams, agent communication, and WebSocket monitoring
+- **Configuration Guide**: Detailed environment variables and configuration options for multi-agent features
+
 #### Testing
-- **Comprehensive Test Suite**: 30+ tests covering all new components
+- **Smoke Tests**: Added comprehensive smoke tests for multi-agent functionality
+- **Mailbox Tests**: Agent communication and message queue testing
+- **Result Aggregation Tests**: Validation of Claude Code-compatible result formats
+- **Comprehensive Test Suite**: 50+ tests covering all new components
 - **Integration Tests**: End-to-end multi-agent workflow validation
 - **Performance Benchmarks**: Baseline performance metrics
 
