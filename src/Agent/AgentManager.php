@@ -77,6 +77,47 @@ class AgentManager
     }
 
     /**
+     * Export all agent definitions as a serializable array.
+     * Used to pass parent's registrations to child processes.
+     *
+     * @return array<string, array{frontmatter: array, body: string}>
+     */
+    public function exportDefinitions(): array
+    {
+        $export = [];
+        foreach ($this->agents as $name => $agent) {
+            $export[$name] = [
+                'frontmatter' => [
+                    'name' => $agent->name(),
+                    'description' => $agent->description(),
+                    'category' => $agent->category(),
+                    'read_only' => $agent->readOnly(),
+                    'model' => $agent->model(),
+                    'allowed_tools' => $agent->allowedTools(),
+                    'disallowed_tools' => $agent->disallowedTools(),
+                ],
+                'body' => $agent->systemPrompt() ?? '',
+            ];
+        }
+        return $export;
+    }
+
+    /**
+     * Import agent definitions from a serialized array.
+     * Registers any definitions not already present (does not overwrite).
+     */
+    public function importDefinitions(array $definitions): void
+    {
+        foreach ($definitions as $name => $data) {
+            if ($this->has($name)) {
+                continue; // Built-in already loaded
+            }
+            $agent = new MarkdownAgentDefinition($data['frontmatter'], $data['body']);
+            $this->agents[$name] = $agent;
+        }
+    }
+
+    /**
      * Get agents by category.
      */
     public function getByCategory(string $category): array

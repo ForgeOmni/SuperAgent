@@ -82,10 +82,46 @@ if ($basePath && !isset($agentConfig['working_directory'])) {
     $agentConfig['working_directory'] = $basePath;
 }
 
+// ── Import parent's registrations ────────────────────────────────
+// These allow the child process to access all agent definitions,
+// skills, and MCP servers the parent had — without needing Laravel
+// config or filesystem access to .claude/ directories.
+
+// Agent definitions (builtin + custom from .claude/agents/)
+if (!empty($config['agent_definitions'])) {
+    try {
+        \SuperAgent\Agent\AgentManager::getInstance()
+            ->importDefinitions($config['agent_definitions']);
+    } catch (\Throwable $e) {
+        fwrite(STDERR, "[agent-runner] Failed to import agent definitions: {$e->getMessage()}\n");
+    }
+}
+
+// MCP server configurations
+if (!empty($config['mcp_servers'])) {
+    try {
+        $mcpManager = \SuperAgent\MCP\MCPManager::getInstance();
+        foreach ($config['mcp_servers'] as $name => $serverData) {
+            $serverConfig = new \SuperAgent\MCP\Types\ServerConfig(
+                name: $serverData['name'],
+                type: $serverData['type'],
+                config: $serverData['config'],
+                enabled: $serverData['enabled'] ?? true,
+            );
+            $mcpManager->registerServer($serverConfig);
+        }
+    } catch (\Throwable $e) {
+        fwrite(STDERR, "[agent-runner] Failed to import MCP servers: {$e->getMessage()}\n");
+    }
+}
+
 $agentId = $config['agent_id'] ?? 'unknown';
 $agentName = $config['agent_name'] ?? 'agent';
+$defCount = count($config['agent_definitions'] ?? []);
+$mcpCount = count($config['mcp_servers'] ?? []);
 fwrite(STDERR, "[agent-runner] Starting agent {$agentId} ({$agentName})"
-    . ($laravelBootstrapped ? ' [Laravel]' : ' [standalone]') . "\n");
+    . ($laravelBootstrapped ? ' [Laravel]' : ' [standalone]')
+    . " agents={$defCount} mcp={$mcpCount}\n");
 
 try {
     $agent = new Agent($agentConfig);

@@ -115,14 +115,38 @@ class ProcessBackend implements BackendInterface
                 $agentConfig['denied_tools'] = $config->deniedTools;
             }
 
+            // Export parent's agent definitions so child process has access
+            // to all registered types (builtin + custom from .claude/agents/)
+            // without needing Laravel config or filesystem access.
+            $agentDefinitions = [];
+            try {
+                $agentDefinitions = \SuperAgent\Agent\AgentManager::getInstance()->exportDefinitions();
+            } catch (\Throwable) {
+                // AgentManager may not be initialized
+            }
+
+            // Export parent's MCP server configs so child can register
+            // them without re-reading config files.
+            $mcpServers = [];
+            try {
+                $mgr = \SuperAgent\MCP\MCPManager::getInstance();
+                foreach ($mgr->getServers() as $name => $serverConfig) {
+                    $mcpServers[$name] = $serverConfig->toArray();
+                }
+            } catch (\Throwable) {
+                // MCPManager may not be initialized
+            }
+
             $stdinPayload = json_encode([
                 'agent_id' => $agentId,
                 'agent_name' => $config->name,
                 'prompt' => $config->prompt,
                 'agent_config' => $agentConfig,
-                // Pass Laravel base path so the child can bootstrap the full
-                // app (config, AgentManager, SkillManager, MCPManager, etc.)
                 'base_path' => $this->resolveLaravelBasePath(),
+                // Serialized parent registrations — child imports these
+                // so it has the same agent/MCP data without Laravel.
+                'agent_definitions' => $agentDefinitions,
+                'mcp_servers' => $mcpServers,
             ], JSON_UNESCAPED_UNICODE);
 
             // Write config then close stdin so the child can start
