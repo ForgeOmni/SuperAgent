@@ -30,12 +30,22 @@ class AgentTool extends Tool
     private ?TeamContext $teamContext = null;
     private LoggerInterface $logger;
     private array $activeTasks = [];
-    
+    private array $providerConfig = [];
+
     public function __construct(
         ?LoggerInterface $logger = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
         $this->initializeBackends();
+    }
+
+    /**
+     * Inject the parent agent's provider config so that spawned sub-agents
+     * can authenticate against the same LLM endpoint.
+     */
+    public function setProviderConfig(array $config): void
+    {
+        $this->providerConfig = $config;
     }
     
     public function name(): string
@@ -173,6 +183,7 @@ class AgentTool extends Tool
                 deniedTools: $definition?->disallowedTools(),
                 planModeRequired: $mode === PermissionMode::PLAN,
                 readOnly: $definition?->readOnly() ?? false,
+                providerConfig: $this->providerConfig,
             );
             
             // Spawn the agent
@@ -216,7 +227,7 @@ class AgentTool extends Tool
                 'status' => 'async_launched',
                 'agentId' => $result->agentId,
                 'task_id' => $result->taskId,
-                'description' => $params['description'] ?? "Execute agent: $name",
+                'description' => $description,
                 'prompt' => $prompt,
                 'name' => $name,
                 'backend' => $backendType->value,

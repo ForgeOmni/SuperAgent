@@ -50,6 +50,14 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Plan V2 面试阶段** - 迭代式结对规划，结构化计划文件，周期性提醒，执行前用户审批
 - **Claude Code 兼容** - 自动载入 Claude Code 目录下的 skills、agents 和 MCP 配置
 
+### 🆕 v0.6.8 — 增量上下文与工具按需加载
+- **增量上下文** (`IncrementalContextManager`) — 基于 Delta 的上下文同步，只传输差异而非完整历史；自动检查点、一步还原、可配置 Token 阈值触发压缩
+- **懒加载上下文** (`LazyContextManager`) — 注册上下文片段无需立即加载；按任务关键词/标签/优先级评分按需加载；TTL 缓存、LRU 淘汰
+- **工具按需加载** (`ToolLoader` / `LazyToolResolver`) — 工具在模型实际调用时才被加载；`predictAndPreload(task)` 预热；`loadForTask(task)` 返回最小工具集
+- **子 Agent Provider 继承** — `AgentTool` 现在将父 Agent 的 API Key / 模型等配置注入子 Agent，生成真实 LLM 连接而非空操作 stub
+- **WebSearch 无 Key 降级** — 未配置 `SEARCH_API_KEY` 时自动通过 `WebFetchTool` 降级到 DuckDuckGo HTML 搜索
+- **WebFetch 加固** — 优先 cURL；检查 HTTP 状态码（4xx/5xx 报错）；提供清晰错误信息
+
 ## 📦 快速安装
 
 ### 系统要求

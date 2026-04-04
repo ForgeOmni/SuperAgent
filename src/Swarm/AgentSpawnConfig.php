@@ -30,6 +30,8 @@ class AgentSpawnConfig
         public readonly bool $planModeRequired = false,
         public readonly bool $readOnly = false,
         public readonly ?ForkContext $forkContext = null,
+        /** Parent agent's provider config so sub-agents share the same LLM credentials. */
+        public readonly array $providerConfig = [],
     ) {}
 
     /**

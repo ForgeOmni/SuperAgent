@@ -96,26 +96,94 @@ class WebFetchTool extends Tool
 
     private function fetchUrl(string $url, int $timeout, bool $followRedirects): string
     {
-        $options = [
-            'http' => [
-                'header' => [
-                    "User-Agent: SuperAgent/1.0\r\n",
-                    "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n",
-                    "Accept-Language: en-US,en;q=0.5\r\n",
-                ],
-                'method' => 'GET',
-                'timeout' => $timeout,
-                'follow_location' => $followRedirects ? 1 : 0,
-                'max_redirects' => 5,
-            ],
-        ];
+        // Prefer cURL – it handles SSL, redirects, and status codes reliably.
+        if (function_exists('curl_init')) {
+            return $this->fetchWithCurl($url, $timeout, $followRedirects);
+        }
 
-        $context = stream_context_create($options);
+        return $this->fetchWithStreamContext($url, $timeout, $followRedirects);
+    }
+
+    private function fetchWithCurl(string $url, int $timeout, bool $followRedirects): string
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => $timeout,
+            CURLOPT_CONNECTTIMEOUT => min($timeout, 5),
+            CURLOPT_FOLLOWLOCATION => $followRedirects,
+            CURLOPT_MAXREDIRS      => 5,
+            CURLOPT_ENCODING       => '', // accept any encoding, auto-decode
+            CURLOPT_USERAGENT      =>
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' .
+                'AppleWebKit/537.36 (KHTML, like Gecko) ' .
+                'Chrome/124.0.0.0 Safari/537.36',
+            CURLOPT_HTTPHEADER     => [
+                'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language: en-US,en;q=0.5',
+            ],
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+
+        $content  = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error    = curl_error($ch);
+        curl_close($ch);
+
+        if ($content === false || $error !== '') {
+            throw new \Exception("cURL error: {$error}");
+        }
+
+        if ($httpCode >= 400) {
+            throw new \Exception("HTTP {$httpCode} returned for {$url}");
+        }
+
+        return (string) $content;
+    }
+
+    private function fetchWithStreamContext(string $url, int $timeout, bool $followRedirects): string
+    {
+        if (!ini_get('allow_url_fopen')) {
+            throw new \Exception(
+                'Cannot fetch URL: both cURL extension and allow_url_fopen are unavailable. ' .
+                'Enable one of them in your PHP configuration.'
+            );
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'header'          =>
+                    "User-Agent: Mozilla/5.0 (compatible; SuperAgent/1.0)\r\n" .
+                    "Accept: text/html,application/xhtml+xml,*/*;q=0.8\r\n" .
+                    "Accept-Language: en-US,en;q=0.5\r\n",
+                'method'          => 'GET',
+                'timeout'         => $timeout,
+                'follow_location' => $followRedirects ? 1 : 0,
+                'max_redirects'   => 5,
+                'ignore_errors'   => true, // get body even on 4xx/5xx
+            ],
+            'ssl' => [
+                'verify_peer'      => true,
+                'verify_peer_name' => true,
+            ],
+        ]);
+
         $content = @file_get_contents($url, false, $context);
 
         if ($content === false) {
-            $error = error_get_last();
-            throw new \Exception($error['message'] ?? 'Unknown error');
+            $err = error_get_last();
+            throw new \Exception($err['message'] ?? 'Failed to fetch URL');
+        }
+
+        // Check HTTP status from response headers
+        if (!empty($http_response_header)) {
+            if (preg_match('#HTTP/\S+\s+(\d+)#', $http_response_header[0], $m)) {
+                $code = (int) $m[1];
+                if ($code >= 400) {
+                    throw new \Exception("HTTP {$code} returned for {$url}");
+                }
+            }
         }
 
         return $content;

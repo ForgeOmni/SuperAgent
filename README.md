@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.7-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.8-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API Docs](docs/)
@@ -61,6 +61,14 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.6.8 — Incremental Context & Tool Lazy Loading
+- **Incremental Context** (`IncrementalContextManager`) — Delta-based context synchronization: only the diff (added/modified/removed messages) is transmitted instead of the full history. Automatic checkpoints, one-step restore, configurable auto-compress on token thresholds, and a `getSmartWindow(maxTokens)` API for token-budgeted context retrieval
+- **Lazy Context Loading** (`LazyContextManager`) — Register context fragments with metadata (type, priority, tags, size) without loading their content. Fragments are fetched on demand when a task requests them, scored by keyword/tag relevance. TTL cache, LRU eviction, `preloadPriority()`, `loadByTags()`, and `getSmartWindow(maxTokens, focusArea)` for fine-grained memory management
+- **Tool Lazy Loading** (`ToolLoader` / `LazyToolResolver`) — Register tool classes without instantiating them; tools are loaded the moment the model calls them. `predictAndPreload(task)` pre-warms tools based on task keywords. `loadForTask(task)` returns the minimal tool set. Unload unused tools to free memory between tasks
+- **Sub-Agent Provider Inheritance** — `AgentTool` now receives the parent agent's provider config (API key, model, base URL) and injects it into every spawned sub-agent via `AgentSpawnConfig::$providerConfig`. Sub-agents created by `InProcessBackend` are real `SuperAgent\Agent` instances with a live LLM connection instead of the no-op stub
+- **WebSearch No-Key Fallback** — `WebSearchTool` no longer hard-errors when `SEARCH_API_KEY` is unset. It falls back to DuckDuckGo HTML search via `WebFetchTool`, which uses cURL (preferred) or `file_get_contents` with a browser-grade User-Agent
+- **WebFetch Hardening** — `WebFetchTool` now prefers cURL over `file_get_contents`; checks HTTP status codes (4xx/5xx → error instead of silent body return); provides a clear error when both cURL and `allow_url_fopen` are unavailable
 
 ## 📦 Installation
 

@@ -65,22 +65,24 @@ class WebSearchTool extends Tool
         $apiKey = $_ENV['SEARCH_API_KEY'] ?? getenv('SEARCH_API_KEY') ?: null;
         $searchEngine = $_ENV['SEARCH_ENGINE'] ?? getenv('SEARCH_ENGINE') ?: 'serper';
 
-        if (empty($apiKey)) {
-            return ToolResult::error('Search API key not configured. Please set SEARCH_API_KEY in your environment.');
-        }
-
         try {
-            $results = match ($searchEngine) {
-                'serper' => $this->searchWithSerper($query, $limit, $apiKey),
-                'google' => $this->searchWithGoogle($query, $limit, $apiKey),
-                'bing' => $this->searchWithBing($query, $limit, $apiKey),
-                default => throw new \Exception("Unsupported search engine: {$searchEngine}"),
-            };
+            if (empty($apiKey)) {
+                // No API key – fall back to WebFetchTool + DuckDuckGo HTML parsing.
+                $results = $this->searchWithWebFetch($query, $limit);
+            } else {
+                $results = match ($searchEngine) {
+                    'serper' => $this->searchWithSerper($query, $limit, $apiKey),
+                    'google' => $this->searchWithGoogle($query, $limit, $apiKey),
+                    'bing' => $this->searchWithBing($query, $limit, $apiKey),
+                    default => throw new \Exception("Unsupported search engine: {$searchEngine}"),
+                };
+            }
 
             // Filter results based on domain rules
             if (!empty($allowedDomains) || !empty($blockedDomains)) {
                 $results = $this->filterResultsByDomain($results, $allowedDomains, $blockedDomains);
             }
+
 
             // Format output
             if (empty($results)) {
@@ -93,6 +95,126 @@ class WebSearchTool extends Tool
         } catch (\Exception $e) {
             return ToolResult::error('Search failed: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Fallback: fetch DuckDuckGo HTML via WebFetchTool (no API key required).
+     * Reuses WebFetchTool's cURL/stream stack and UA handling.
+     */
+    private function searchWithWebFetch(string $query, int $limit): array
+    {
+        $url = 'https://html.duckduckgo.com/html/?q=' . urlencode($query);
+
+        $fetchTool = new WebFetchTool();
+        $fetchResult = $fetchTool->execute(['url' => $url, 'timeout' => 10]);
+
+        if ($fetchResult->isError) {
+            throw new \Exception(
+                'WebFetch fallback failed: ' . (is_string($fetchResult->content) ? $fetchResult->content : json_encode($fetchResult->content)) .
+                '. Set SEARCH_API_KEY (Serper/Google/Bing) for reliable search.'
+            );
+        }
+
+        // WebFetchTool already strips HTML; we need the raw HTML to parse links.
+        // Re-fetch the raw HTML for link extraction.
+        $html = $this->fetchRawHtml($url);
+
+        return $this->parseDuckDuckGoResults($html, $limit);
+    }
+
+    /**
+     * Fetch raw HTML without converting to text, using cURL when available.
+     */
+    private function fetchRawHtml(string $url): string
+    {
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 10,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS      => 5,
+                CURLOPT_USERAGENT      =>
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' .
+                    'AppleWebKit/537.36 (KHTML, like Gecko) ' .
+                    'Chrome/124.0.0.0 Safari/537.36',
+                CURLOPT_HTTPHEADER     => ['Accept-Language: en-US,en;q=0.5'],
+            ]);
+            $html  = curl_exec($ch);
+            $error = curl_error($ch);
+            curl_close($ch);
+
+            if ($html === false || $error !== '') {
+                throw new \Exception("cURL error: {$error}");
+            }
+
+            return (string) $html;
+        }
+
+        $ctx = stream_context_create(['http' => [
+            'header'          => "User-Agent: Mozilla/5.0 (compatible; SuperAgent/1.0)\r\n",
+            'timeout'         => 10,
+            'follow_location' => 1,
+        ]]);
+        $html = @file_get_contents($url, false, $ctx);
+
+        if ($html === false) {
+            $err = error_get_last();
+            throw new \Exception($err['message'] ?? 'Failed to fetch search page');
+        }
+
+        return $html;
+    }
+
+    /**
+     * Parse result links out of a DuckDuckGo HTML response.
+     */
+    private function parseDuckDuckGoResults(string $html, int $limit): array
+    {
+        $results = [];
+
+        // DDG HTML: <a class="result__a" href="...">title</a>
+        if (preg_match_all(
+            '/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/si',
+            $html,
+            $matches,
+            PREG_SET_ORDER
+        )) {
+            foreach (array_slice($matches, 0, $limit) as $match) {
+                $href  = html_entity_decode($match[1]);
+                $title = strip_tags($match[2]);
+
+                // DDG wraps links as //duckduckgo.com/l/?uddg=<encoded-url>
+                if (str_starts_with($href, '//duckduckgo.com/l/?')) {
+                    parse_str(parse_url($href, PHP_URL_QUERY) ?? '', $qs);
+                    $href = urldecode($qs['uddg'] ?? $href);
+                }
+
+                // Skip non-HTTP links (DDG internal pages, etc.)
+                if (!str_starts_with($href, 'http')) {
+                    continue;
+                }
+
+                // Try to grab snippet from the next .result__snippet element
+                $results[] = [
+                    'title'  => trim($title),
+                    'url'    => $href,
+                    'snippet' => '',
+                    'domain' => parse_url($href, PHP_URL_HOST) ?? '',
+                    'source' => 'webfetch_fallback',
+                ];
+            }
+        }
+
+        if (empty($results)) {
+            throw new \Exception(
+                'No parseable results from DuckDuckGo. ' .
+                'Set SEARCH_API_KEY (Serper/Google/Bing) for reliable search.'
+            );
+        }
+
+        return $results;
     }
 
     private function searchWithSerper(string $query, int $limit, string $apiKey): array

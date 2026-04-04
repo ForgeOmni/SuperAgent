@@ -16,6 +16,8 @@ use SuperAgent\Providers\OpenAIProvider;
 use SuperAgent\Providers\OpenRouterProvider;
 use SuperAgent\AutoMode\TaskAnalyzer;
 use SuperAgent\AutoMode\AutoModeAgent;
+use SuperAgent\Tools\ToolLoader;
+use SuperAgent\Tools\Builtin\AgentTool;
 
 class Agent
 {
@@ -46,6 +48,8 @@ class Agent
     protected bool $autoMode = false;
     
     protected array $autoModeConfig = [];
+    
+    protected ?ToolLoader $toolLoader = null;
 
     public function __construct(array $config = [])
     {
@@ -59,9 +63,12 @@ class Agent
         $this->autoMode = $config['auto_mode'] ?? static::config('superagent.auto_mode.enabled', false);
         $this->autoModeConfig = $config['auto_mode_config'] ?? static::config('superagent.auto_mode', []);
 
-        if (isset($config['tools'])) {
-            $this->tools = $config['tools'];
-        }
+        // Tool loading configuration
+        $this->initializeTools($config);
+
+        // Inject provider config into AgentTool so sub-agents share the same LLM credentials
+        $this->injectProviderConfigIntoAgentTools($config);
+
         if (isset($config['allowed_tools'])) {
             $this->allowedTools = $config['allowed_tools'];
         }
@@ -70,6 +77,62 @@ class Agent
         }
         if (isset($config['streaming_handler'])) {
             $this->streamingHandler = $config['streaming_handler'];
+        }
+    }
+    
+    /**
+     * Inject the parent provider config into any AgentTool instances so that
+     * spawned sub-agents can create a real LLM connection.
+     */
+    protected function injectProviderConfigIntoAgentTools(array $config): void
+    {
+        // Strip tool/message state; keep only what's needed to reconstruct a provider
+        $providerConfig = array_intersect_key($config, array_flip([
+            'provider', 'api_key', 'model', 'base_url', 'max_tokens',
+        ]));
+
+        foreach ($this->tools as $tool) {
+            if ($tool instanceof AgentTool) {
+                $tool->setProviderConfig($providerConfig);
+            }
+        }
+    }
+
+    /**
+     * Initialize tools with lazy loading support
+     */
+    protected function initializeTools(array $config): void
+    {
+        // If tools are explicitly provided, use them
+        if (isset($config['tools'])) {
+            $this->tools = $config['tools'];
+            return;
+        }
+        
+        // Initialize tool loader
+        $this->toolLoader = new ToolLoader($config['tool_loader'] ?? []);
+        
+        // Determine which tools to load
+        if (isset($config['load_tools'])) {
+            if ($config['load_tools'] === true) {
+                // Load default tools
+                $this->tools = $this->toolLoader->getDefaultTools();
+            } elseif (is_array($config['load_tools'])) {
+                // Load specific tools
+                $this->tools = $this->toolLoader->loadMany($config['load_tools']);
+            } elseif ($config['load_tools'] === 'all') {
+                // Load all available tools
+                $this->tools = $this->toolLoader->getAllTools();
+            } elseif ($config['load_tools'] === 'none' || $config['load_tools'] === false) {
+                // No tools
+                $this->tools = [];
+            }
+        } else {
+            // Default behavior: load default tools if auto_load is enabled
+            $autoLoad = $config['tool_loader']['auto_load'] ?? true;
+            if ($autoLoad) {
+                $this->tools = $this->toolLoader->getDefaultTools();
+            }
         }
     }
 
@@ -142,6 +205,34 @@ class Agent
         if (!empty($config)) {
             $this->autoModeConfig = array_merge($this->autoModeConfig, $config);
         }
+        
+        return $this;
+    }
+    
+    /**
+     * Load tools based on task content
+     */
+    public function loadToolsForTask(string $task): static
+    {
+        if ($this->toolLoader === null) {
+            $this->toolLoader = new ToolLoader();
+        }
+        
+        $this->tools = $this->toolLoader->loadForTask($task);
+        
+        return $this;
+    }
+    
+    /**
+     * Manually load specific tools
+     */
+    public function loadTools(array $toolNames): static
+    {
+        if ($this->toolLoader === null) {
+            $this->toolLoader = new ToolLoader();
+        }
+        
+        $this->tools = $this->toolLoader->loadMany($toolNames);
         
         return $this;
     }

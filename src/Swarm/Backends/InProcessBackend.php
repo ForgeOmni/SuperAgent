@@ -6,7 +6,8 @@ namespace SuperAgent\Swarm\Backends;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
-use SuperAgent\Agent\Agent;
+use SuperAgent\Agent\Agent as StubAgent;
+use SuperAgent\Agent as RealAgent;
 use SuperAgent\Context\Context;
 use SuperAgent\Swarm\AgentMessage;
 use SuperAgent\Swarm\AgentSpawnConfig;
@@ -84,23 +85,38 @@ class InProcessBackend implements BackendInterface
                 $context->setMetadata('permission_mode', $config->permissionMode->value);
             }
             
-            // Create the agent
-            $agent = new Agent(
-                context: $context,
-                logger: $this->logger,
-            );
-            
-            // Configure agent based on spawn config
-            if ($config->model !== null) {
-                $agent->setModel($config->model);
-            }
-            
-            if ($config->systemPrompt !== null) {
-                $agent->setSystemPrompt($config->systemPrompt);
-            }
-            
-            if ($config->allowedTools !== null) {
-                $agent->setAllowedTools($config->allowedTools);
+            // Create the agent – use the real Agent with LLM provider when
+            // provider config is available; fall back to the stub only for tests.
+            if (!empty($config->providerConfig)) {
+                $agentConfig = $config->providerConfig;
+
+                if ($config->model !== null) {
+                    $agentConfig['model'] = $config->model;
+                }
+                if ($config->systemPrompt !== null) {
+                    $agentConfig['system_prompt'] = $config->systemPrompt;
+                }
+                if ($config->allowedTools !== null) {
+                    $agentConfig['allowed_tools'] = $config->allowedTools;
+                }
+
+                $agent = new RealAgent($agentConfig);
+            } else {
+                // No provider config – use stub (useful in unit tests)
+                $agent = new StubAgent(
+                    context: $context,
+                    logger: $this->logger,
+                );
+
+                if ($config->model !== null) {
+                    $agent->setModel($config->model);
+                }
+                if ($config->systemPrompt !== null) {
+                    $agent->setSystemPrompt($config->systemPrompt);
+                }
+                if ($config->allowedTools !== null) {
+                    $agent->setAllowedTools($config->allowedTools);
+                }
             }
             
             // Store agent and task info

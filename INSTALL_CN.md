@@ -512,6 +512,74 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.8 功能配置
+
+### 增量上下文
+
+```php
+use SuperAgent\IncrementalContext\IncrementalContextManager;
+
+$manager = new IncrementalContextManager([
+    'auto_compress'       => true,
+    'compress_threshold'  => 4000,   // 超过 N token 时压缩
+    'auto_checkpoint'     => true,
+    'checkpoint_interval' => 10,     // 每 N 条消息创建检查点
+    'max_checkpoints'     => 10,
+    'compression_level'   => 'balanced', // minimal | balanced | aggressive
+]);
+
+$manager->initialize($messages);
+$delta  = $manager->getDelta();                     // 只获取变化
+$full   = $manager->applyDelta($delta, $base);      // 重建完整上下文
+$manager->restoreCheckpoint($checkpointId);         // 回滚到检查点
+$window = $manager->getSmartWindow(maxTokens: 8000); // Token 预算窗口
+```
+
+### 懒加载上下文
+
+```php
+use SuperAgent\LazyContext\LazyContextManager;
+
+$lazy = new LazyContextManager(['cache_ttl' => 600]);
+
+// 注册片段（不加载内容）
+$lazy->registerContext('system-rules', [
+    'type' => 'system', 'priority' => 9,
+    'tags' => ['rules'], 'size' => 200,
+    'source' => '/path/to/rules.json', // 或可调用
+]);
+
+// 按任务按需加载
+$context = $lazy->getContextForTask('重构 PHP 服务层');
+$window  = $lazy->getSmartWindow(maxTokens: 12000, focusArea: 'php');
+```
+
+### 工具按需加载
+
+```php
+use SuperAgent\Tools\ToolLoader;
+
+$loader = new ToolLoader(['lazy_load' => true]);
+$tools  = $loader->loadForTask('搜索并编辑 PHP 文件');
+$agent  = new Agent(['provider' => 'anthropic', 'tools' => $tools]);
+```
+
+### 无 Key 的 Web 搜索
+
+`WebSearchTool` 在未设置 `SEARCH_API_KEY` 时自动降级到 DuckDuckGo HTML 搜索。
+如需生产级搜索，配置任意一个：
+
+```env
+SEARCH_API_KEY=your_serper_key   # Serper（推荐）
+SEARCH_ENGINE=serper
+
+SEARCH_API_KEY=your_google_key   # Google Custom Search
+SEARCH_ENGINE=google
+
+SEARCH_API_KEY=your_bing_key     # Bing
+SEARCH_ENGINE=bing
+```
+
 ## 验证
 
 ### 1️⃣ 运行健康检查
@@ -703,6 +771,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.8      | 10.x+   | 8.1+  | 增量上下文、懒加载上下文与工具、子智能体 Provider 继承、WebSearch 无 Key 降级、WebFetch 加固 |
 | 0.6.7      | 10.x+   | 8.1+  | 多智能体并行追踪与自动模式 |
 | 0.6.6      | 10.x+   | 8.1+  | 智能上下文窗口（888个测试） |
 | 0.6.5      | 10.x+   | 8.1+  | 技能蒸馏、检查点与恢复、知识图谱（865个测试） |

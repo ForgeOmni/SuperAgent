@@ -818,6 +818,114 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.8 Feature Configuration
+
+### Incremental Context
+
+```php
+use SuperAgent\IncrementalContext\IncrementalContextManager;
+
+$manager = new IncrementalContextManager([
+    'auto_compress'       => true,
+    'compress_threshold'  => 4000,   // compress when context exceeds N tokens
+    'compress_delta'      => true,   // compress deltas before transmission
+    'auto_checkpoint'     => true,
+    'checkpoint_interval' => 10,     // create checkpoint every N messages
+    'max_checkpoints'     => 10,
+    'compression_level'   => 'balanced', // minimal | balanced | aggressive
+]);
+
+// Initialize with existing messages
+$manager->initialize($messages);
+
+// Get only what changed since the last checkpoint
+$delta = $manager->getDelta();
+
+// Reconstruct full context from a base + delta
+$full = $manager->applyDelta($delta, $baseMessages);
+
+// Restore to a previous checkpoint
+$manager->restoreCheckpoint($checkpointId);
+
+// Retrieve a token-budgeted window (recent messages first)
+$window = $manager->getSmartWindow(maxTokens: 8000);
+```
+
+### Lazy Context Loading
+
+```php
+use SuperAgent\LazyContext\LazyContextManager;
+
+$lazy = new LazyContextManager([
+    'max_memory' => 50 * 1024 * 1024, // 50 MB cap
+    'cache_ttl'  => 600,               // seconds
+]);
+
+// Register fragments – content is NOT loaded yet
+$lazy->registerContext('system-rules', [
+    'type'     => 'system',
+    'priority' => 9,
+    'tags'     => ['rules', 'permissions'],
+    'size'     => 200,   // estimated tokens
+    'source'   => '/path/to/rules.json', // or a callable
+]);
+
+$lazy->registerContext('codebase-overview', [
+    'type'     => 'code',
+    'priority' => 6,
+    'tags'     => ['php', 'architecture'],
+    'size'     => 1500,
+    'data'     => $inlineMessages, // inline data, loaded immediately on first access
+]);
+
+// Load only what's relevant to the current task
+$context = $lazy->getContextForTask('refactor PHP service layer');
+
+// Or stay within a token budget
+$window = $lazy->getSmartWindow(maxTokens: 12000, focusArea: 'php');
+
+// Preload high-priority fragments in advance
+$lazy->preloadPriority(minPriority: 8);
+```
+
+### Tool Lazy Loading
+
+```php
+use SuperAgent\Tools\ToolLoader;
+use SuperAgent\Tools\LazyToolResolver;
+
+// ToolLoader – register & load on demand
+$loader = new ToolLoader(['lazy_load' => true]);
+
+// Load only tools relevant to a task description
+$tools = $loader->loadForTask('search and edit PHP files');
+
+// Or use the resolver for call-time loading
+$resolver = new LazyToolResolver($loader);
+$resolver->predictAndPreload('migrate database schema');
+
+// Pass tools to the agent
+$agent = new Agent(['provider' => 'anthropic', 'tools' => $tools]);
+```
+
+### Web Search Without API Key
+
+`WebSearchTool` automatically falls back to DuckDuckGo HTML search when `SEARCH_API_KEY` is not set. No configuration needed — the fallback is transparent. For production use, set one of:
+
+```env
+# Serper (recommended, ~2 500 free queries/month)
+SEARCH_API_KEY=your_serper_key
+SEARCH_ENGINE=serper
+
+# Google Custom Search
+SEARCH_API_KEY=your_google_key
+SEARCH_ENGINE=google
+
+# Bing
+SEARCH_API_KEY=your_bing_key
+SEARCH_ENGINE=bing
+```
+
 ## Verification
 
 ### 1️⃣ Run Health Check
@@ -1009,6 +1117,8 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.8      | 10.x+   | 8.1+ | Incremental Context, Lazy Context & Tool Loading, sub-agent provider inheritance, WebSearch no-key fallback, WebFetch hardening |
+| 0.6.7      | 10.x+   | 8.1+ | Multi-Agent Orchestration (parallel execution, auto-mode detection, team management) |
 | 0.6.6      | 10.x+   | 8.1+ | Smart Context Window (888 tests) |
 | 0.6.5      | 10.x+   | 8.1+ | Skill Distillation, Checkpoint & Resume, Knowledge Graph (865 tests) |
 | 0.6.2      | 10.x+   | 8.1+ | Pipeline DSL (with review-fix loops), Cost Autopilot, Adaptive Feedback (776 tests) |

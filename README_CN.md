@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.7-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.8-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API文档](docs/)
@@ -11,6 +11,14 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.6.8 — 增量上下文与工具按需加载
+- **增量上下文** (`IncrementalContextManager`) — 基于 Delta 的上下文同步：只传输差异（新增/修改/删除的消息）而非完整历史。自动检查点、一步还原、可配置 Token 阈值触发自动压缩，以及 `getSmartWindow(maxTokens)` API 用于 Token 预算内的上下文检索
+- **懒加载上下文** (`LazyContextManager`) — 注册上下文片段（含类型、优先级、标签、大小元数据）无需立即加载内容。片段在任务请求时按需获取，通过关键词/标签相关性评分选择。支持 TTL 缓存、LRU 淘汰、`preloadPriority()`、`loadByTags()` 和 `getSmartWindow(maxTokens, focusArea)` 精细化内存管理
+- **工具按需加载** (`ToolLoader` / `LazyToolResolver`) — 注册工具类而无需实例化；工具在模型调用时才被加载。`predictAndPreload(task)` 根据任务关键词预热工具。`loadForTask(task)` 返回最小工具集。任务间可卸载闲置工具释放内存
+- **子智能体 Provider 继承** — `AgentTool` 现在接收父智能体的 provider 配置（API Key、模型、Base URL），并通过 `AgentSpawnConfig::$providerConfig` 注入每个生成的子智能体。`InProcessBackend` 创建的子智能体是真实的 `SuperAgent\Agent` 实例，具备真正的 LLM 连接，而非空操作 stub
+- **WebSearch 无 Key 降级** — `WebSearchTool` 在未设置 `SEARCH_API_KEY` 时不再直接报错，而是通过 `WebFetchTool` 自动降级到 DuckDuckGo HTML 搜索（使用 cURL 或 `file_get_contents`，浏览器级 User-Agent）
+- **WebFetch 加固** — `WebFetchTool` 现在优先使用 cURL；检查 HTTP 状态码（4xx/5xx → 报错而非静默返回错误页内容）；在 cURL 和 `allow_url_fopen` 均不可用时给出明确错误信息
 
 ### 🆕 多智能体编排 (v0.6.7)
 - **并行智能体执行** - 同时运行多个智能体，实时跟踪每个智能体进度

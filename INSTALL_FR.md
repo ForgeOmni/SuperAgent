@@ -512,6 +512,64 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Configuration des Fonctionnalités v0.6.8
+
+### Contexte Incrémental
+
+```php
+use SuperAgent\IncrementalContext\IncrementalContextManager;
+
+$manager = new IncrementalContextManager([
+    'auto_compress'       => true,
+    'compress_threshold'  => 4000,
+    'auto_checkpoint'     => true,
+    'checkpoint_interval' => 10,
+    'compression_level'   => 'balanced',
+]);
+
+$manager->initialize($messages);
+$delta  = $manager->getDelta();
+$full   = $manager->applyDelta($delta, $base);
+$manager->restoreCheckpoint($checkpointId);
+$window = $manager->getSmartWindow(maxTokens: 8000);
+```
+
+### Chargement Paresseux du Contexte
+
+```php
+use SuperAgent\LazyContext\LazyContextManager;
+
+$lazy = new LazyContextManager(['cache_ttl' => 600]);
+
+$lazy->registerContext('system-rules', [
+    'type' => 'system', 'priority' => 9,
+    'tags' => ['rules'], 'size' => 200,
+    'source' => '/path/to/rules.json',
+]);
+
+$context = $lazy->getContextForTask('refactoriser le service PHP');
+$window  = $lazy->getSmartWindow(maxTokens: 12000, focusArea: 'php');
+```
+
+### Chargement Différé des Outils
+
+```php
+use SuperAgent\Tools\ToolLoader;
+
+$loader = new ToolLoader(['lazy_load' => true]);
+$tools  = $loader->loadForTask('rechercher et éditer des fichiers PHP');
+$agent  = new Agent(['provider' => 'anthropic', 'tools' => $tools]);
+```
+
+### Recherche Web Sans Clé API
+
+`WebSearchTool` se replie automatiquement sur DuckDuckGo quand `SEARCH_API_KEY` n'est pas définie. Pour la production :
+
+```env
+SEARCH_API_KEY=votre_cle_serper
+SEARCH_ENGINE=serper
+```
+
 ## Vérification
 
 ### 1️⃣ Exécuter la Vérification de Santé
@@ -703,6 +761,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.8      | 10.x+   | 8.1+  | Contexte incrémental, chargement paresseux contexte/outils, héritage provider sous-agent, repli WebSearch sans clé, renforcement WebFetch |
 | 0.6.7      | 10.x+   | 8.1+  | Suivi d'Agents Parallèles Multi & Mode Auto |
 | 0.6.6      | 10.x+   | 8.1+  | Fenêtre de Contexte Intelligent (888 tests) |
 | 0.6.5      | 10.x+   | 8.1+  | Distillation de Compétences, Point de Contrôle & Reprise (865 tests) |

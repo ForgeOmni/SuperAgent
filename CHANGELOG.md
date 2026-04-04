@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-04-03
+
+### 🚀 Summary
+
+This release delivers **Incremental Context**, **Lazy Context Loading**, and **Tool Lazy Loading** — three complementary systems that reduce memory usage and token overhead when running long or complex agent sessions. It also fixes a critical bug where spawned sub-agents had no LLM provider, hardens `WebFetchTool` with proper cURL/status-code handling, and adds a no-configuration `WebSearchTool` fallback so search works without an API key.
+
+Key highlights:
+- **Incremental Context**: transmit only context diffs (added/modified/removed messages) instead of full history on every turn
+- **Lazy Context Loading**: register context fragments with metadata; load content only when a task actually needs it
+- **Tool Lazy Loading**: register tool classes without instantiating them; load and unload on demand per task
+- **Sub-Agent Fix**: spawned agents now inherit the parent's LLM provider and make real API calls
+- **WebSearch No-Key Fallback**: automatic DuckDuckGo fallback via `WebFetchTool` when `SEARCH_API_KEY` is absent
+- **WebFetch Hardening**: cURL preferred over `file_get_contents`; HTTP 4xx/5xx treated as errors
+
+### Added
+
+#### Incremental Context (`src/IncrementalContext/`)
+- **`IncrementalContextManager`**: delta-based context synchronization. Tracks a base snapshot and a current context; `getDelta()` returns only what changed since the last checkpoint. `applyDelta()` reconstructs the full context from a base plus a delta. `getSmartWindow(maxTokens)` returns a token-budgeted recent-first slice
+- **`ContextDelta`**: value object holding `added`, `modified` (index-keyed), and `removed` (index list) arrays. Carries the checkpoint id that produced it
+- **`ContextDiffer`**: compares two message arrays by serialised equality; produces a `ContextDelta` with O(n) complexity
+- **`ContextCompressor`**: compresses full context by summarising the middle section while preserving the first message and the most recent N messages. Compression level is configurable (`minimal` / `balanced` / `aggressive`). Also exposes `compressMessage()` and `compressDelta()` for targeted compression
+- **`CheckpointManager`**: creates, retrieves, and prunes `Checkpoint` instances. Keeps at most `max_checkpoints` entries sorted by timestamp
+- **`Checkpoint`**: immutable snapshot (id, context array, type, timestamp, statistics)
+- **`ContextSummary`**: read-only DTO returned by `IncrementalContextManager::getSummary()` — message count, total tokens, checkpoint list, compression ratio, tokens saved
+- Auto-compress on token threshold, auto-checkpoint on message interval, both configurable and independently toggleable
+
+#### Lazy Context Loading (`src/LazyContext/`)
+- **`LazyContextManager`**: central registry for context fragments. `registerContext(id, metadata)` stores metadata (type, priority, tags, size, source, inline `data`) without loading content. `getContextForTask(task)` scores all registered fragments by keyword/tag relevance and loads only the selected ones. `getSmartWindow(maxTokens, focusArea)` fills a token budget in priority order
+- **`ContextLoader`**: resolves fragment content from three source types — inline `data` array, PHP `callable` (receives id + metadata, returns message array), or JSON file path. Returns `null` with a log warning on failure
+- **`ContextSelector`**: scores fragments against a task string and optional `hints` (type, tags). Resolves dependencies recursively. `selectByTokenLimit()` packs fragments into a token budget greedily by priority score
+- **`ContextCache`**: simple TTL-based in-memory cache keyed by fragment id. `get()` returns `null` on miss or expiry. `set()`, `delete()`, `clear()`, `has()`
+- `preloadPriority(minPriority)`, `loadByTags(tags)`, `unloadStale(maxAge)`, LRU cleanup on memory threshold, 5% random stale-eviction on every load
+
+#### Tool Lazy Loading (`src/Tools/`)
+- **`ToolLoader`**: replaces direct tool instantiation. `register(name, class|callable, metadata)` stores a class name or factory without instantiating. `load(name)` instantiates on first call and caches. `loadMany()`, `loadByCategory()`, `loadForTask(task)` (keyword-based subset), `getDefaultTools()`, `getAllTools()`, `unload()`, `unloadAll()`. All 18 builtin tools pre-registered
+- **`LazyToolResolver`**: wraps a `ToolLoader`; exposes `resolve(name)` (auto-loads if `autoLoad=true`), `predictAndPreload(task)` (keyword heuristics), `getToolDefinitions(onlyLoaded)` (returns lightweight stubs for unloaded tools so the model can still reference them), `unloadUnused(keepTools)`
+- New builtin tool stubs (registered in `ToolLoader`): **`EditFileTool`** (delegates to `FileEditTool`), **`SearchTool`** (grep-based multi-file search), **`PhpUnitTool`** (runs PHPUnit with optional filter/testsuite/coverage), **`GitTool`** (git subcommand wrapper with force-push-to-main guard), **`GitHubTool`** (gh CLI wrapper), **`TodoTool`** (delegates to `TodoWriteTool`)
+
+#### Incremental Context Helper Classes
+All six companion classes for `IncrementalContextManager` are now concrete implementations (previously the manager referenced them but they did not exist): `ContextDelta`, `Checkpoint`, `ContextSummary`, `CheckpointManager`, `ContextDiffer`, `ContextCompressor`
+
+#### Lazy Context Helper Classes
+All three companion classes for `LazyContextManager` are now concrete implementations: `ContextLoader`, `ContextSelector`, `ContextCache`
+
+### Fixed
+
+#### Sub-Agent Provider Inheritance (Critical)
+- **`AgentSpawnConfig`**: added `providerConfig` field (array, default `[]`) to carry the parent agent's LLM credentials to the backend
+- **`InProcessBackend::spawn()`**: when `providerConfig` is non-empty, creates a real `SuperAgent\Agent` instance (with live LLM connection) instead of the no-op `Agent\Agent` stub. Falls back to the stub only when no config is present (e.g. unit tests). Import aliases disambiguate `StubAgent` vs `RealAgent`
+- **`AgentTool`**: added `setProviderConfig(array $config)` method. Added `$providerConfig` property. Passes config into `AgentSpawnConfig` on every `execute()` call. Fixed undefined `$params` variable in async output block (replaced with `$description`)
+- **`Agent::__construct()`**: calls new `injectProviderConfigIntoAgentTools()` after tool initialisation. Iterates `$this->tools` and calls `setProviderConfig()` on any `AgentTool` instance, injecting the subset of config keys relevant to provider construction (`provider`, `api_key`, `model`, `base_url`, `max_tokens`)
+
+#### WebFetchTool
+- Added `fetchWithCurl()`: uses `curl_init` with `CURLOPT_RETURNTRANSFER`, auto-encoding, 5-redirect follow, browser-grade User-Agent (`Chrome/124`), and SSL peer verification. Throws on cURL error or HTTP ≥ 400
+- Added `fetchWithStreamContext()`: used only when cURL is unavailable. Checks `allow_url_fopen`; throws a clear error if both mechanisms are absent. Uses `ignore_errors => true` to capture body on 4xx/5xx, then reads `$http_response_header[0]` to detect and throw on error status codes
+- `fetchUrl()` now dispatches to `fetchWithCurl()` first, falling back to `fetchWithStreamContext()`
+- Previously: silently returned error-page HTML for 4xx/5xx; failed with an opaque PHP warning when `allow_url_fopen` was off
+
+#### WebSearchTool
+- Replaced hard `ToolResult::error()` on missing `SEARCH_API_KEY` with automatic fallback
+- Added `searchWithWebFetch(query, limit)`: fetches `https://html.duckduckgo.com/html/?q=…` via the new `fetchRawHtml()` helper (cURL or stream context), then calls `parseDuckDuckGoResults()` to extract `<a class="result__a">` links. Decodes DDG redirect wrappers (`//duckduckgo.com/l/?uddg=…`). Skips non-HTTP links
+- Added `fetchRawHtml(url)`: standalone raw-HTML fetcher (cURL preferred) reused by the fallback path
+- Added `parseDuckDuckGoResults(html, limit)`: regex-based parser; throws a descriptive error if DDG returns no parseable results, prompting the user to configure a proper API key
+- Results from the fallback carry `source: webfetch_fallback` for observability
+
+#### IncrementalContextManager
+- Fixed `TypeError` in `estimateTokens()`: `AssistantMessage::$content` may be an array (tool use blocks); now JSON-encodes arrays before calling `strlen()`
+
+### Changed
+- **`Agent.php`**: added `use SuperAgent\Tools\Builtin\AgentTool` import; added `injectProviderConfigIntoAgentTools(array $config)` protected method called from constructor
+- **`InProcessBackend.php`**: import `SuperAgent\Agent\Agent` aliased as `StubAgent`; import `SuperAgent\Agent` aliased as `RealAgent`
+- **`AgentSpawnConfig`**: `providerConfig` is a named constructor parameter with default `[]`; fully backward compatible (no existing call sites need changes)
+- **`LazyContextManager::registerContext()`**: now persists the `data` key from caller-supplied metadata into the registry entry so `ContextLoader` can find inline data
+
+### Documentation
+- **`README.md`**, **`README_CN.md`**, **`README_FR.md`**, **`README.zh-CN.md`**: version badge bumped to `0.6.8`; added v0.6.8 feature section
+- **`INSTALL.md`**, **`INSTALL_CN.md`**, **`INSTALL_FR.md`**, **`INSTALL.zh-CN.md`**: version compatibility matrix updated; added "v0.6.8 Feature Configuration" section with code examples for `IncrementalContextManager`, `LazyContextManager`, `ToolLoader`, and WebSearch fallback
+
 ## [0.6.7] - 2026-04-04
 
 ### 🚀 Summary
