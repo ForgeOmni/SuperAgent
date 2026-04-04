@@ -225,8 +225,8 @@ All three companion classes for `LazyContextManager` are now concrete implementa
 - **`LazyContextManager::registerContext()`**: now persists the `data` key from caller-supplied metadata into the registry entry so `ContextLoader` can find inline data
 
 ### Documentation
-- **`README.md`**, **`README_CN.md`**, **`README_FR.md`**, **`README.zh-CN.md`**: version badge bumped to `0.6.8`; added v0.6.8 feature section
-- **`INSTALL.md`**, **`INSTALL_CN.md`**, **`INSTALL_FR.md`**, **`INSTALL.zh-CN.md`**: version compatibility matrix updated; added "v0.6.8 Feature Configuration" section with code examples for `IncrementalContextManager`, `LazyContextManager`, `ToolLoader`, and WebSearch fallback
+- **`README.md`**, **`README_CN.md`**, **`README_FR.md`**, **`README_CN.md`**: version badge bumped to `0.6.8`; added v0.6.8 feature section
+- **`INSTALL.md`**, **`INSTALL_CN.md`**, **`INSTALL_FR.md`**, **`INSTALL_CN.md`**: version compatibility matrix updated; added "v0.6.8 Feature Configuration" section with code examples for `IncrementalContextManager`, `LazyContextManager`, `ToolLoader`, and WebSearch fallback
 
 ## [0.6.7] - 2026-04-04
 
@@ -893,8 +893,8 @@ ws.onmessage = (event) => {
 - [Homepage](https://github.com/forgeomni/superagent)
 - [Documentation](README.md)
 - [Installation Guide](INSTALL.md)
-- [中文文档](README.zh-CN.md)
-- [中文安装手册](INSTALL.zh-CN.md)
+- [中文文档](README_CN.md)
+- [中文安装手册](INSTALL_CN.md)
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

@@ -1,7 +1,7 @@
 # SuperAgent Installation Guide
 
-> **🌍 Language**: [English](INSTALL.md) | [中文](INSTALL.zh-CN.md)  
-> **📖 Documentation**: [README](README.md) | [README 中文](README.zh-CN.md)
+> **🌍 Language**: [English](INSTALL.md) | [中文](INSTALL_CN.md)  
+> **📖 Documentation**: [README](README.md) | [README 中文](README_CN.md)
 
 ## Table of Contents
 - [System Requirements](#system-requirements)
@@ -1307,11 +1307,11 @@ php artisan tinker
 
 ### Language Versions
 - 🇺🇸 [English Installation Guide](INSTALL.md)
-- 🇨🇳 [中文安装手册](INSTALL.zh-CN.md)
+- 🇨🇳 [中文安装手册](INSTALL_CN.md)
 
 ### Main Documentation
 - 📖 [English README](README.md)
-- 📖 [中文 README](README.zh-CN.md)
+- 📖 [中文 README](README_CN.md)
 
 ### Additional Resources
 - 🤝 [Contributing Guide](CONTRIBUTING.md)

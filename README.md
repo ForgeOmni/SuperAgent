@@ -133,7 +133,7 @@ AWS_DEFAULT_REGION=us-east-1
 OPENROUTER_API_KEY=your_openrouter_api_key
 ```
 
-📋 **Quick Links**: [Installation Guide](INSTALL.md) | [中文安装手册](INSTALL.zh-CN.md) | [中文版本](README.zh-CN.md)
+📋 **Quick Links**: [Installation Guide](INSTALL.md) | [中文安装手册](INSTALL_CN.md) | [中文版本](README_CN.md)
 
 ## 🎯 Quick Start
 
@@ -1216,11 +1216,11 @@ MIT License - See [LICENSE](LICENSE) file for details
 
 ### Language Versions
 - 🇺🇸 [English README](README.md)
-- 🇨🇳 [中文 README](README.zh-CN.md)
+- 🇨🇳 [中文 README](README_CN.md)
 
 ### Installation Guides
 - 📖 [English Installation Guide](INSTALL.md)
-- 📖 [中文安装手册](INSTALL.zh-CN.md)
+- 📖 [中文安装手册](INSTALL_CN.md)
 
 ### Additional Resources
 - 🤝 [Contributing Guide](CONTRIBUTING.md)
