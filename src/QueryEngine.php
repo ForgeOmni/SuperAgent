@@ -27,10 +27,12 @@ use SuperAgent\Tools\ToolResult;
 use SuperAgent\ErrorRecovery\ErrorRecoveryManager;
 use SuperAgent\ErrorRecovery\ErrorClassifier;
 use SuperAgent\Traits\ErrorRecoveryTrait;
+use SuperAgent\Traits\CachedToolExecutionTrait;
 
 class QueryEngine
 {
     use ErrorRecoveryTrait;
+    use CachedToolExecutionTrait;
     
     /** @var Message[] */
     protected array $messages = [];
@@ -406,9 +408,18 @@ class QueryEngine
                 continue;
             }
 
-            // --- Step 6: Execute tool ---
+            // --- Step 6: Execute tool (with caching) ---
             try {
-                $result = $tool->execute($toolInput);
+                // Use cached execution if available
+                if (method_exists($this, 'executeToolWithCache')) {
+                    $result = $this->executeToolWithCache(
+                        $toolName,
+                        $toolInput,
+                        fn() => $tool->execute($toolInput)
+                    );
+                } else {
+                    $result = $tool->execute($toolInput);
+                }
                 $content = $result->contentAsString();
                 $isError = $result->isError;
 
