@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-04-04
+
+### 🚀 Summary
+
+Fixes three critical issues that prevented sub-agent child processes (introduced in v0.6.11) from functioning correctly: missing Laravel bootstrap, non-serializable provider config, and incomplete tool set.
+
+### Fixed
+
+#### Child Process Laravel Bootstrap
+- **`bin/agent-runner.php`**: now attempts full Laravel bootstrap when `base_path` is provided in the stdin JSON. Calls `require bootstrap/app.php` → `$app->make(Kernel::class)->bootstrap()`. On success, child processes have access to `config()`, `base_path()`, all service providers, `AgentManager` (loads `.claude/agents/`), `SkillManager` (loads `.claude/commands/`, `.claude/skills/`), `MCPManager` (loads MCP servers from config), and `ExperimentalFeatures` (reads config instead of falling back to env vars). Falls back gracefully to plain Composer autoloader if Laravel isn't available
+- **`ProcessBackend::resolveLaravelBasePath()`**: new method that detects the Laravel project root via `base_path()` (if Laravel is booted) or a heuristic walk-up searching for `artisan` + `bootstrap/app.php`. The resolved path is included in the stdin JSON as `base_path`
+
+#### Provider Config Serialization
+- **`Agent::injectProviderConfigIntoAgentTools()`**: when the `provider` key in the constructor config is an `LLMProvider` object instance (not a string), it is now replaced with `$provider->name()` (e.g. `"anthropic"`) before being passed to `AgentTool`. Previously the object was JSON-serialized as `{}`, leaving child processes with `{"provider": {}}` — unable to reconstruct the LLM connection
+- If `api_key` is not present in the constructor `$config` (because it came from `config('superagent.providers.anthropic.api_key')`), the method now pulls it from Laravel config so child processes can authenticate
+- `provider` name and `model` are always set from the resolved provider instance, even if the caller omitted them
+- Extended the forwarded key set to include `driver`, `api_version`, `organization`, `app_name`, `site_url` for full provider reconstruction
+
+#### Full Tool Set in Child Processes
+- **`ProcessBackend::spawn()`**: now sets `load_tools='all'` in the agent config unless the spawn config specifies `allowedTools` explicitly. Previously the child Agent loaded only 5 default tools (read_file, write_file, bash, grep, glob), missing agent, skill, mcp, web_search, and 48 others
+- Also passes `denied_tools` through to the child config
+
+### Documentation
+- **README** (EN/CN/FR/ZH-CN): version badge → 0.6.12; added v0.6.12 feature section
+- **INSTALL** (EN/CN/FR/ZH-CN): added v0.6.12 upgrade notes and compatibility matrix row
+
 ## [0.6.11] - 2026-04-03
 
 ### 🚀 Summary

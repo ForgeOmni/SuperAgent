@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.11-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.12-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API Docs](docs/)
@@ -61,6 +61,11 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.6.12 — Child Process Laravel Bootstrap & Provider Fix
+- **Laravel Bootstrap in Child Processes** — `agent-runner.php` now performs full Laravel bootstrap (`$app->make(Kernel)->bootstrap()`) when a `base_path` is provided. This gives child processes access to `config()`, `AgentManager`, `SkillManager`, `MCPManager`, `.claude/agents/` directories, and all service providers — identical to the parent process
+- **Provider Config Serialization Fix** — When `Agent` was constructed with a `LLMProvider` object (not a string), the object was JSON-serialized as `{}`, leaving child processes without API credentials. `injectProviderConfigIntoAgentTools()` now replaces provider objects with `$provider->name()`, pulls `api_key` from Laravel config if not in constructor args, and always sets provider name and model from the resolved provider
+- **Full Tool Set in Child Processes** — `ProcessBackend` now sets `load_tools='all'` (58 tools) by default instead of the 5-tool default set. Child agents have access to `agent`, `skill`, `mcp`, `web_search`, and all other tools
 
 ### 🆕 v0.6.11 — True Process-Level Parallel Agents
 - **Process-Based Sub-Agents** — `AgentTool` now defaults to `ProcessBackend` (`proc_open`) instead of `InProcessBackend` (Fiber). Each sub-agent runs in its own OS process with its own Guzzle connection, achieving true parallelism. PHP Fibers are cooperative — blocking I/O (HTTP calls, bash commands) inside a fiber blocks the entire process, making the old approach sequential in practice

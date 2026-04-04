@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.6.12
+
+v0.6.12 corrige trois problèmes où les processus enfants des sous-agents ne pouvaient pas accéder aux services Laravel, aux identifiants API ou à l'ensemble complet des outils. **Aucune modification de configuration requise.**
+
+Si vous utilisez des définitions d'agents personnalisées dans `.claude/agents/`, des skills dans `.claude/commands/` ou des serveurs MCP configurés via `config('superagent.mcp')`, ceux-ci fonctionnent désormais correctement dans les processus sous-agents.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.6.11
 
 v0.6.11 remplace le backend d'exécution par défaut des sous-agents. **Aucune modification de configuration requise** — le nouveau comportement est automatique.
@@ -818,6 +828,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.12     | 10.x+   | 8.1+  | Bootstrap Laravel dans processus enfants, correction sérialisation provider, ensemble complet d'outils |
 | 0.6.11     | 10.x+   | 8.1+  | Vrais sous-agents parallèles au niveau processus (proc_open remplace Fiber), accélération 4.6x |
 | 0.6.10     | 10.x+   | 8.1+  | Correction de l'exécution synchrone multi-agents (blocage fiber, incompatibilité type backend, tracker de progression) |
 | 0.6.9      | 10.x+   | 8.1+  | Correction du chemin base URL Guzzle (providers OpenAI / OpenRouter / Ollama) |

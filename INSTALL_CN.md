@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.12 升级说明
+
+v0.6.12 修复了子 agent 进程无法访问 Laravel 服务、API 凭证和完整工具集的三个问题。**无需修改配置。**
+
+如果你使用 `.claude/agents/` 中的自定义 agent 定义、`.claude/commands/` 中的自定义 skill 或通过 `config('superagent.mcp')` 配置的 MCP 服务器，这些现在在子 agent 进程中均可正常工作。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.11 升级说明
 
 v0.6.11 替换了默认的子智能体执行后端。**无需修改配置** — 新行为自动生效。
@@ -828,6 +838,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.12     | 10.x+   | 8.1+  | 子进程 Laravel 引导、Provider 序列化修复、子 agent 完整工具集 |
 | 0.6.11     | 10.x+   | 8.1+  | 真正的进程级并行子智能体（proc_open 替代 Fiber），4.6x 加速 |
 | 0.6.10     | 10.x+   | 8.1+  | 多智能体同步执行修复（Fiber 死锁、后端类型不匹配、进度追踪器） |
 | 0.6.9      | 10.x+   | 8.1+  | Guzzle Base URL 路径修复（OpenAI / OpenRouter / Ollama Provider） |

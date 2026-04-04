@@ -818,6 +818,16 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.12 Upgrade Notes
+
+v0.6.12 fixes three issues where sub-agent child processes could not access Laravel services, API credentials, or the full tool set. **No configuration changes are required.**
+
+If you use custom agent definitions in `.claude/agents/`, custom skills in `.claude/commands/`, or MCP servers configured via `config('superagent.mcp')`, these now work correctly in sub-agent processes.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.11 Upgrade Notes
 
 v0.6.11 replaces the default sub-agent execution backend. **No configuration changes are required** — the new behavior is automatic.
@@ -1174,6 +1184,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.12     | 10.x+   | 8.1+ | Child process Laravel bootstrap, provider config serialization fix, full tool set in sub-agents |
 | 0.6.11     | 10.x+   | 8.1+ | True process-level parallel agents (proc_open replaces Fiber), 4.6x speedup |
 | 0.6.10     | 10.x+   | 8.1+ | Multi-agent synchronous execution fix (fiber deadlock, backend type mismatch, progress tracker) |
 | 0.6.9      | 10.x+   | 8.1+ | Guzzle base URL path fix for OpenAI / OpenRouter / Ollama providers |

@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.11-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.12-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Docs API](docs/)
@@ -11,6 +11,11 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.6.12 — Bootstrap Laravel dans les Processus Enfants & Correction Provider
+- **Bootstrap Laravel dans les Processus Enfants** — `agent-runner.php` effectue désormais un bootstrap Laravel complet (`$app->make(Kernel)->bootstrap()`) lorsqu'un `base_path` est fourni. Les processus enfants accèdent à `config()`, `AgentManager`, `SkillManager`, `MCPManager`, répertoires `.claude/agents/` et tous les service providers — identique au processus parent
+- **Correction de la Sérialisation Provider** — Quand `Agent` était construit avec un objet `LLMProvider` (pas une chaîne), l'objet était sérialisé en JSON comme `{}`, privant les processus enfants d'identifiants API. `injectProviderConfigIntoAgentTools()` remplace désormais les objets par `$provider->name()`, récupère `api_key` depuis la config Laravel si absent, et définit toujours le nom du provider et le modèle
+- **Ensemble Complet d'Outils dans les Processus Enfants** — `ProcessBackend` définit `load_tools='all'` (58 outils) par défaut. Les agents enfants accèdent à agent, skill, mcp, web_search et tous les autres outils
 
 ### 🆕 v0.6.11 — Vrais Sous-Agents Parallèles au Niveau Processus
 - **Sous-Agents Basés sur les Processus** — `AgentTool` utilise désormais `ProcessBackend` (`proc_open`) par défaut au lieu de `InProcessBackend` (Fiber). Chaque sous-agent s'exécute dans son propre processus OS avec sa propre connexion Guzzle, assurant un vrai parallélisme. Les Fibers PHP sont coopératives — les I/O bloquantes (appels HTTP, commandes bash) dans une fiber bloquent tout le processus, rendant l'ancienne approche séquentielle en pratique

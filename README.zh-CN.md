@@ -50,6 +50,11 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Plan V2 面试阶段** - 迭代式结对规划，结构化计划文件，周期性提醒，执行前用户审批
 - **Claude Code 兼容** - 自动载入 Claude Code 目录下的 skills、agents 和 MCP 配置
 
+### 🆕 v0.6.12 — 子进程 Laravel 引导与 Provider 修复
+- **子进程 Laravel 引导** — 子进程执行完整 Laravel bootstrap，可访问 config()、AgentManager、SkillManager、MCPManager 及 `.claude/` 目录
+- **Provider 序列化修复** — LLMProvider 对象替换为字符串名称，api_key 从 config 回填，子进程可正确重建 LLM 连接
+- **完整工具集** — 子进程默认加载全部 58 个工具
+
 ### 🆕 v0.6.11 — 真正的进程级并行子智能体
 - **基于进程的子智能体** — `AgentTool` 默认使用 `ProcessBackend`（`proc_open`），每个子智能体独立 OS 进程，独立 Guzzle 连接，真正并行。实测 5 个 500ms 智能体总计 544ms 完成（4.6x 加速）
 - **重写 `bin/agent-runner.php`** — 一次性运行器，stdin JSON 配置 → 真实 Agent 执行 → stdout JSON 结果

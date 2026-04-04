@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.11-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.12-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API文档](docs/)
@@ -11,6 +11,11 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.6.12 — 子进程 Laravel 引导与 Provider 修复
+- **子进程 Laravel 引导** — `agent-runner.php` 现在在收到 `base_path` 时执行完整 Laravel 引导（`$app->make(Kernel)->bootstrap()`）。子进程可访问 `config()`、`AgentManager`、`SkillManager`、`MCPManager`、`.claude/agents/` 目录及所有 service provider——与父进程完全一致
+- **Provider 配置序列化修复** — 当 `Agent` 以 `LLMProvider` 对象（非字符串）构造时，对象被 JSON 序列化为 `{}`，子进程无法获取 API 凭证。`injectProviderConfigIntoAgentTools()` 现在将对象替换为 `$provider->name()` 字符串，从 Laravel config 回填 `api_key`，并始终设置 provider 名称和 model
+- **子进程完整工具集** — `ProcessBackend` 默认设置 `load_tools='all'`（58 个工具），子 agent 可访问 agent、skill、mcp、web_search 等全部工具
 
 ### 🆕 v0.6.11 — 真正的进程级并行子智能体
 - **基于进程的子智能体** — `AgentTool` 现在默认使用 `ProcessBackend`（`proc_open`）而非 `InProcessBackend`（Fiber）。每个子智能体在独立 OS 进程中运行，拥有独立的 Guzzle 连接，实现真正并行。PHP Fiber 是协作式的——Fiber 内的阻塞 I/O（HTTP 调用、bash 命令）会阻塞整个进程，导致旧方案实际上是串行的
