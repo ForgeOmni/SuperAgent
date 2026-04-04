@@ -161,6 +161,19 @@ class MCPManager
             // Register resources from this server
             $this->registerResourcesFromServer($serverName, $client);
 
+            // For stdio servers, start a TCP bridge so child processes can
+            // share this MCP connection instead of spawning their own.
+            if ($config->type === 'stdio') {
+                try {
+                    $bridge = MCPBridge::getInstance();
+                    $port = $bridge->startBridge($serverName, $client);
+                    logger()->info("MCP bridge started for '{$serverName}' on port {$port}");
+                } catch (\Throwable $e) {
+                    // Bridge is optional — log and continue
+                    logger()->warning("Failed to start MCP bridge for '{$serverName}': " . $e->getMessage());
+                }
+            }
+
             return $client;
 
         } catch (Exception $e) {
@@ -242,9 +255,22 @@ class MCPManager
 
     /**
      * Create transport based on server config.
+     *
+     * For stdio servers, first checks if a parent process has an MCPBridge
+     * running. If so, the child process connects via HTTP transport to the
+     * bridge instead of spawning a new MCP server process.
      */
     private function createTransport(ServerConfig $config): Transport
     {
+        if ($config->type === 'stdio') {
+            // Check if a parent bridge is available for this server
+            $bridges = MCPBridge::readRegistry();
+            if (isset($bridges[$config->name])) {
+                $url = $bridges[$config->name]['url'];
+                return new HttpTransport($url);
+            }
+        }
+
         return match ($config->type) {
             'stdio' => new StdioTransport(
                 $config->config['command'],

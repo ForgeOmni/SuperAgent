@@ -185,6 +185,13 @@ class ProcessBackend implements BackendInterface
      */
     public function poll(): array
     {
+        // Also poll MCP bridge so child processes can talk to shared MCP servers
+        try {
+            \SuperAgent\MCP\MCPBridge::getInstance()->poll();
+        } catch (\Throwable) {
+            // Bridge may not be initialized — ignore
+        }
+
         foreach ($this->processes as $agentId => &$info) {
             if ($this->statuses[$agentId] !== AgentStatus::RUNNING) {
                 continue;
