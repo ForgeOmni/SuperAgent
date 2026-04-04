@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.10-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.11-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Docs API](docs/)
@@ -11,6 +11,12 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.6.11 — Vrais Sous-Agents Parallèles au Niveau Processus
+- **Sous-Agents Basés sur les Processus** — `AgentTool` utilise désormais `ProcessBackend` (`proc_open`) par défaut au lieu de `InProcessBackend` (Fiber). Chaque sous-agent s'exécute dans son propre processus OS avec sa propre connexion Guzzle, assurant un vrai parallélisme. Les Fibers PHP sont coopératives — les I/O bloquantes (appels HTTP, commandes bash) dans une fiber bloquent tout le processus, rendant l'ancienne approche séquentielle en pratique
+- **Réécriture de `bin/agent-runner.php`** — Exécuteur à usage unique : lit la config JSON depuis stdin, crée un vrai `SuperAgent\Agent` avec provider LLM complet et outils, exécute le prompt, écrit le résultat JSON sur stdout
+- **Refonte de `ProcessBackend`** — `spawn()` écrit la config via stdin puis le ferme ; `poll()` draine stdout/stderr de manière non-bloquante ; `waitAll()` attend la fin de tous les agents suivis. Vérifié : 5 agents dormant chacun 500ms terminent en 544ms au total (accélération 4.6x)
+- **Repli InProcessBackend** — Le backend basé sur les Fibers est conservé en repli quand `proc_open` n'est pas disponible
 
 ### 🆕 v0.6.10 — Correction de l'Exécution Synchrone Multi-Agents
 - **Correction du Blocage d'Agent Synchrone** — `InProcessBackend::spawn()` crée désormais toujours la fiber d'exécution quel que soit le paramètre `runInBackground`. Auparavant, le mode synchrone ne créait jamais la fiber, provoquant un blocage infini de `waitForSynchronousCompletion()` (timeout de 5 minutes)

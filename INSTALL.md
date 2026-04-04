@@ -818,6 +818,20 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.11 Upgrade Notes
+
+v0.6.11 replaces the default sub-agent execution backend. **No configuration changes are required** — the new behavior is automatic.
+
+**What changed:** `AgentTool` now spawns each sub-agent in a separate OS process via `proc_open()` instead of using PHP Fibers in the same process. This provides true parallelism — 5 concurrent agents complete in ~544ms vs ~2500ms sequential.
+
+**Breaking change for test code only:** If your tests mock `InProcessBackend` or rely on Fiber-based execution, they may need updating. Production code that simply calls `AgentTool` is unaffected.
+
+**Requirement:** `proc_open()` must be available (it is on standard PHP installations). If disabled (e.g. shared hosting with `disable_functions`), `AgentTool` falls back to `InProcessBackend` automatically.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.10 Upgrade Notes
 
 v0.6.10 is a bug-fix release with no configuration changes. If you are using synchronous in-process agents (`run_in_background: false` with the `in-process` backend), this update resolves a critical deadlock where the agent fiber was never started, causing a 5-minute timeout on every call.
@@ -1160,6 +1174,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.11     | 10.x+   | 8.1+ | True process-level parallel agents (proc_open replaces Fiber), 4.6x speedup |
 | 0.6.10     | 10.x+   | 8.1+ | Multi-agent synchronous execution fix (fiber deadlock, backend type mismatch, progress tracker) |
 | 0.6.9      | 10.x+   | 8.1+ | Guzzle base URL path fix for OpenAI / OpenRouter / Ollama providers |
 | 0.6.8      | 10.x+   | 8.1+ | Incremental Context, Lazy Context & Tool Loading, sub-agent provider inheritance, WebSearch no-key fallback, WebFetch hardening |

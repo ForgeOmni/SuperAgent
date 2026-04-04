@@ -512,6 +512,20 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.11 升级说明
+
+v0.6.11 替换了默认的子智能体执行后端。**无需修改配置** — 新行为自动生效。
+
+**变更内容：** `AgentTool` 现在通过 `proc_open()` 在独立 OS 进程中执行每个子智能体，而非在同一进程中使用 PHP Fiber。实现真正并行 — 5 个并发智能体从 ~2500ms 降至 ~544ms。
+
+**仅影响测试代码的破坏性变更：** 如果你的测试 mock 了 `InProcessBackend` 或依赖 Fiber 执行，可能需要更新。直接调用 `AgentTool` 的生产代码不受影响。
+
+**前置条件：** `proc_open()` 必须可用（标准 PHP 安装默认可用）。如被禁用，`AgentTool` 自动降级到 `InProcessBackend`。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.10 升级说明
 
 v0.6.10 是纯 Bug 修复版本，无需修改配置。如果你正在使用同步进程内智能体（`run_in_background: false` 搭配 `in-process` 后端），此更新修复了一个关键死锁问题——智能体 Fiber 从未启动，导致每次调用都会超时 5 分钟。
@@ -814,6 +828,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.11     | 10.x+   | 8.1+  | 真正的进程级并行子智能体（proc_open 替代 Fiber），4.6x 加速 |
 | 0.6.10     | 10.x+   | 8.1+  | 多智能体同步执行修复（Fiber 死锁、后端类型不匹配、进度追踪器） |
 | 0.6.9      | 10.x+   | 8.1+  | Guzzle Base URL 路径修复（OpenAI / OpenRouter / Ollama Provider） |
 | 0.6.8      | 10.x+   | 8.1+  | 增量上下文、懒加载上下文与工具、子智能体 Provider 继承、WebSearch 无 Key 降级、WebFetch 加固 |

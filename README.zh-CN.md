@@ -50,6 +50,15 @@ SuperAgent 是一个功能强大的 Laravel AI Agent SDK，提供多模型支持
 - **Plan V2 面试阶段** - 迭代式结对规划，结构化计划文件，周期性提醒，执行前用户审批
 - **Claude Code 兼容** - 自动载入 Claude Code 目录下的 skills、agents 和 MCP 配置
 
+### 🆕 v0.6.11 — 真正的进程级并行子智能体
+- **基于进程的子智能体** — `AgentTool` 默认使用 `ProcessBackend`（`proc_open`），每个子智能体独立 OS 进程，独立 Guzzle 连接，真正并行。实测 5 个 500ms 智能体总计 544ms 完成（4.6x 加速）
+- **重写 `bin/agent-runner.php`** — 一次性运行器，stdin JSON 配置 → 真实 Agent 执行 → stdout JSON 结果
+- **InProcessBackend 降级** — Fiber 后端仅在 `proc_open` 不可用时使用
+
+### 🆕 v0.6.10 — 多智能体同步执行修复
+- **同步智能体死锁修复** — Fiber 生命周期和后端类型不匹配修复
+- **进度追踪器修复** — `AgentProgressTracker` 缺失属性和 null usage 类型错误修复
+
 ### 🆕 v0.6.9 — Guzzle Base URL 路径修复
 - **多 Provider Base URL 修复** — `OpenAIProvider`、`OpenRouterProvider` 和 `OllamaProvider` 现在正确地在 `base_uri` 末尾追加斜杠，并使用相对请求路径。此前带路径前缀的自定义 `base_url` 会被 Guzzle RFC 3986 解析器静默丢弃路径前缀。四个 Provider（`AnthropicProvider` 已在 v0.6.8 修复）现均修复
 

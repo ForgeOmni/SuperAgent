@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.10-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.11-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API文档](docs/)
@@ -11,6 +11,12 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.6.11 — 真正的进程级并行子智能体
+- **基于进程的子智能体** — `AgentTool` 现在默认使用 `ProcessBackend`（`proc_open`）而非 `InProcessBackend`（Fiber）。每个子智能体在独立 OS 进程中运行，拥有独立的 Guzzle 连接，实现真正并行。PHP Fiber 是协作式的——Fiber 内的阻塞 I/O（HTTP 调用、bash 命令）会阻塞整个进程，导致旧方案实际上是串行的
+- **重写 `bin/agent-runner.php`** — 一次性运行器：从 stdin 读取 JSON 配置，创建带完整 LLM Provider 和工具的 `SuperAgent\Agent`，执行 prompt，将 JSON 结果写入 stdout
+- **`ProcessBackend` 重构** — `spawn()` 通过 stdin 传递配置后关闭；`poll()` 非阻塞轮询 stdout/stderr；`waitAll()` 等待所有追踪中的智能体完成。实测：5 个各 sleep 500ms 的智能体总计 544ms 完成（4.6x 加速）
+- **InProcessBackend 降级** — Fiber 后端作为 `proc_open` 不可用时的降级方案保留
 
 ### 🆕 v0.6.10 — 多智能体同步执行修复
 - **同步智能体死锁修复** — `InProcessBackend::spawn()` 现在无论 `runInBackground` 设置如何都会创建执行 Fiber。此前同步模式从未创建 Fiber，导致 `waitForSynchronousCompletion()` 无限轮询（5 分钟超时死锁）

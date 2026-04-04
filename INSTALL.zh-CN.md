@@ -789,6 +789,8 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.11     | 10.x+   | 8.1+ | 真正的进程级并行子智能体（proc_open 替代 Fiber），4.6x 加速 |
+| 0.6.10     | 10.x+   | 8.1+ | 多智能体同步执行修复（Fiber 死锁、后端类型不匹配） |
 | 0.6.9      | 10.x+   | 8.1+ | Guzzle Base URL 路径修复（OpenAI / OpenRouter / Ollama Provider） |
 | 0.6.8      | 10.x+   | 8.1+ | 增量上下文、懒加载上下文与工具、子智能体 Provider 继承、WebSearch 无 Key 降级、WebFetch 加固 |
 | 0.6.7      | 10.x+   | 8.1+ | 多智能体并行追踪与自动模式 |

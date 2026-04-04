@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.10-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.11-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API Docs](docs/)
@@ -61,6 +61,12 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.6.11 — True Process-Level Parallel Agents
+- **Process-Based Sub-Agents** — `AgentTool` now defaults to `ProcessBackend` (`proc_open`) instead of `InProcessBackend` (Fiber). Each sub-agent runs in its own OS process with its own Guzzle connection, achieving true parallelism. PHP Fibers are cooperative — blocking I/O (HTTP calls, bash commands) inside a fiber blocks the entire process, making the old approach sequential in practice
+- **Rewritten `bin/agent-runner.php`** — One-shot runner: reads JSON config from stdin, creates a real `SuperAgent\Agent` with full LLM provider and tools, executes the prompt, writes JSON result to stdout. No interactive message loop
+- **`ProcessBackend` Overhaul** — `spawn()` writes config via stdin then closes it; `poll()` non-blocking drains stdout/stderr; `waitAll()` blocks until all tracked agents finish. Verified: 5 agents each sleeping 500ms complete in 544ms total (4.6x speedup vs sequential)
+- **InProcessBackend Fallback** — Fiber-based backend is kept as fallback when `proc_open` is unavailable (e.g. restricted hosting)
 
 ### 🆕 v0.6.10 — Multi-Agent Synchronous Execution Fix
 - **Synchronous Agent Deadlock Fix** — `InProcessBackend::spawn()` now always prepares the execution fiber regardless of `runInBackground`. Previously, synchronous mode never created the fiber, causing `waitForSynchronousCompletion()` to poll forever (5-minute timeout deadlock)

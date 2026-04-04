@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.11] - 2026-04-03
+
+### 🚀 Summary
+
+This release replaces the Fiber-based sub-agent execution with true OS-process-level parallelism. PHP Fibers are cooperative — blocking I/O (Guzzle HTTP calls, bash commands) inside a fiber blocks the entire process, making the old `InProcessBackend` approach sequential in practice. `AgentTool` now defaults to `ProcessBackend` (`proc_open`), where each sub-agent runs in its own PHP process. Verified: 5 agents each sleeping 500ms complete in 544ms total (4.6x speedup vs 2500ms sequential).
+
+### Changed
+
+#### AgentTool — Default Backend Switch
+- `AgentTool::execute()` now uses `ProcessBackend` by default for all agent spawns
+- Falls back to `InProcessBackend` (Fiber) only when `proc_open` is unavailable
+- Removed the `backend` input parameter — callers no longer choose the backend explicitly
+- `waitForProcessCompletion()`: polls `ProcessBackend::poll()` in a 50ms loop until the child process exits, then parses the JSON result from stdout
+- `waitForFiberCompletion()`: retained as legacy fallback for `InProcessBackend`
+
+#### ProcessBackend — Complete Rewrite
+- **`spawn()`**: builds a JSON config blob (agent_config + prompt + agent_id + agent_name), writes it to the child's stdin via `fwrite()`, then closes stdin. The child starts executing immediately
+- **`poll()`**: non-blocking drain of all children's stdout/stderr via `fread()` on non-blocking pipes; calls `proc_get_status()` to detect exit; parses the JSON result line on completion
+- **`waitAll(int $timeoutSeconds = 300)`**: convenience method that calls `poll()` in a 50ms loop until all tracked agents finish or timeout
+- **`getResult(string $agentId)`**: returns the parsed JSON result for a completed agent
+- Provider config, model, system prompt, and allowed tools are all passed via the stdin JSON blob instead of environment variables
+- `sendMessage()` logs a warning and returns (stdin is closed after spawn — one-shot model)
+
+#### bin/agent-runner.php — Complete Rewrite
+- Reads a single JSON blob from stdin (not env vars): `{ agent_id, agent_name, prompt, agent_config }`
+- Creates a real `SuperAgent\Agent` with `agent_config` (includes provider, api_key, model, etc.)
+- Calls `$agent->run($prompt)` — full agentic loop with tools, streaming, multi-turn
+- Writes a single JSON result line to stdout: `{ success, agent_id, text, turns, cost_usd, usage, responses }`
+- On error: writes `{ success: false, error, file, line }` and exits with code 1
+- Autoloader resolution supports both package-local and vendor-installed paths
+
+### Added
+- `ProcessBackendTest` — 6 tests verifying:
+  - `testParallelExecution`: 3 agents × 500ms = 836ms total (proves true parallelism)
+  - `testSpawnAndCollectResult`: JSON stdin→stdout lifecycle
+  - `testFailedProcess`: exit(1) → `AgentStatus::FAILED`
+  - `testKillAgent`: SIGKILL terminates long-running process
+
+### Documentation
+- **README** (EN/CN/FR/ZH-CN): version badge → 0.6.11; added v0.6.11 feature section
+- **INSTALL** (EN/CN/FR/ZH-CN): added v0.6.11 upgrade notes and compatibility matrix row
+
 ## [0.6.10] - 2026-04-03
 
 ### 🚀 Summary

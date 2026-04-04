@@ -512,6 +512,20 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.6.11
+
+v0.6.11 remplace le backend d'exécution par défaut des sous-agents. **Aucune modification de configuration requise** — le nouveau comportement est automatique.
+
+**Ce qui change :** `AgentTool` lance désormais chaque sous-agent dans un processus OS séparé via `proc_open()` au lieu d'utiliser les Fibers PHP dans le même processus. Cela fournit un vrai parallélisme — 5 agents concurrents terminent en ~544ms vs ~2500ms en séquentiel.
+
+**Changement incompatible pour le code de test uniquement :** Si vos tests mockent `InProcessBackend` ou reposent sur l'exécution par Fiber, ils peuvent nécessiter une mise à jour. Le code de production qui appelle simplement `AgentTool` n'est pas affecté.
+
+**Prérequis :** `proc_open()` doit être disponible (c'est le cas sur les installations PHP standard). Si désactivé, `AgentTool` se replie automatiquement sur `InProcessBackend`.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.6.10
 
 v0.6.10 est une version de correction de bugs sans modification de configuration. Si vous utilisez des agents synchrones en processus (`run_in_background: false` avec le backend `in-process`), cette mise à jour résout un blocage critique où la fiber de l'agent n'était jamais démarrée, provoquant un timeout de 5 minutes à chaque appel.
@@ -804,6 +818,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.11     | 10.x+   | 8.1+  | Vrais sous-agents parallèles au niveau processus (proc_open remplace Fiber), accélération 4.6x |
 | 0.6.10     | 10.x+   | 8.1+  | Correction de l'exécution synchrone multi-agents (blocage fiber, incompatibilité type backend, tracker de progression) |
 | 0.6.9      | 10.x+   | 8.1+  | Correction du chemin base URL Guzzle (providers OpenAI / OpenRouter / Ollama) |
 | 0.6.8      | 10.x+   | 8.1+  | Contexte incrémental, chargement paresseux contexte/outils, héritage provider sous-agent, repli WebSearch sans clé, renforcement WebFetch |
