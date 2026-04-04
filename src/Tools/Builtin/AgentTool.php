@@ -23,6 +23,10 @@ use SuperAgent\Tools\ToolResult;
 
 /**
  * Tool for spawning and managing sub-agents.
+ *
+ * Default execution model uses ProcessBackend (true OS-level parallelism).
+ * Each sub-agent runs in its own PHP process with its own Guzzle connection,
+ * so blocking HTTP I/O and tool execution never block the parent or siblings.
  */
 class AgentTool extends Tool
 {
@@ -47,18 +51,18 @@ class AgentTool extends Tool
     {
         $this->providerConfig = $config;
     }
-    
+
     public function name(): string
     {
         return 'agent';
     }
-    
+
     public function description(): string
     {
         return 'Launch a new agent to handle complex, multi-step tasks autonomously. ' .
                'The agent runs independently and can use tools to complete its task.';
     }
-    
+
     public function inputSchema(): array
     {
         return [
@@ -104,25 +108,19 @@ class AgentTool extends Tool
                     'type' => 'boolean',
                     'description' => 'Set to true to run this agent in the background',
                 ],
-                'backend' => [
-                    'type' => 'string',
-                    'description' => 'Backend to use for execution',
-                    'enum' => ['in-process', 'process', 'docker'],
-                ],
             ],
             'required' => ['description', 'prompt'],
         ];
     }
-    
+
     public function category(): string
     {
         return 'execution';
     }
-    
+
     public function execute(array $input): ToolResult
     {
         try {
-            // Extract input parameters
             $description = $input['description'];
             $prompt = $input['prompt'];
             $subagentType = $input['subagent_type'] ?? 'general-purpose';
@@ -132,43 +130,37 @@ class AgentTool extends Tool
             $mode = isset($input['mode']) ? PermissionMode::from($input['mode']) : null;
             $isolation = isset($input['isolation']) ? IsolationMode::from($input['isolation']) : IsolationMode::NONE;
             $runInBackground = $input['run_in_background'] ?? false;
-            $backendType = isset($input['backend']) ? BackendType::from($input['backend']) : BackendType::IN_PROCESS;
-            
-            $this->logger->info("Spawning agent", [
+
+            $this->logger->info('Spawning agent', [
                 'name' => $name,
                 'type' => $subagentType,
-                'backend' => $backendType->value,
+                'background' => $runInBackground,
                 'team' => $teamName,
             ]);
-            
-            // Get or create team context
+
+            // Team context setup
             if ($teamName && !$this->teamContext) {
                 $this->teamContext = TeamContext::load($teamName);
                 if (!$this->teamContext) {
-                    // Create new team with current agent as leader
                     $leaderId = 'leader_' . uniqid();
                     $this->teamContext = new TeamContext($teamName, $leaderId);
                     $this->teamContext->save();
                 }
             }
-            
-            // Get appropriate backend
-            $backend = $this->getBackend($backendType);
+
+            // Always use ProcessBackend for real execution (true parallelism).
+            // InProcessBackend (fiber) is only kept for unit tests without proc_open.
+            $backend = $this->getProcessBackend();
+
             if (!$backend->isAvailable()) {
-                return ToolResult::failure(
-                    "Backend '{$backendType->value}' is not available on this system"
-                );
+                // Fallback to in-process if proc_open is disabled
+                $backend = $this->getBackend(BackendType::IN_PROCESS);
+                $this->logger->warning('proc_open unavailable, falling back to in-process backend');
             }
-            
-            // Set team context for in-process backend
-            if ($backend instanceof InProcessBackend && $this->teamContext) {
-                $backend->setTeamContext($this->teamContext);
-            }
-            
-            // Resolve agent definition
+
+            // Resolve agent definition for system prompt / allowed tools
             $definition = AgentManager::getInstance()->get($subagentType);
 
-            // Prepare spawn configuration from agent definition
             $config = new AgentSpawnConfig(
                 name: $name,
                 prompt: $prompt,
@@ -176,7 +168,7 @@ class AgentTool extends Tool
                 model: $model,
                 systemPrompt: $definition?->systemPrompt(),
                 permissionMode: $mode,
-                backend: $backendType,
+                backend: BackendType::PROCESS,
                 isolation: $isolation,
                 runInBackground: $runInBackground,
                 allowedTools: $definition?->allowedTools(),
@@ -185,22 +177,21 @@ class AgentTool extends Tool
                 readOnly: $definition?->readOnly() ?? false,
                 providerConfig: $this->providerConfig,
             );
-            
-            // Spawn the agent
+
             $result = $backend->spawn($config);
-            
+
             if (!$result->success) {
                 return ToolResult::failure(
-                    "Failed to spawn agent: " . ($result->error ?? 'Unknown error')
+                    'Failed to spawn agent: ' . ($result->error ?? 'Unknown error')
                 );
             }
-            
-            // Register with team if applicable
+
+            // Register with team
             if ($this->teamContext) {
                 $member = new TeamMember(
                     agentId: $result->agentId,
                     name: $name,
-                    backend: $backendType,
+                    backend: BackendType::PROCESS,
                     taskId: $result->taskId,
                     pid: $result->pid,
                     status: AgentStatus::RUNNING,
@@ -208,22 +199,26 @@ class AgentTool extends Tool
                 $this->teamContext->addMember($member);
                 $this->teamContext->save();
             }
-            
-            // Track active task
+
             $this->activeTasks[$result->agentId] = [
                 'task_id' => $result->taskId,
                 'name' => $name,
-                'backend' => $backendType,
                 'backend_instance' => $backend,
                 'started_at' => new \DateTimeImmutable(),
             ];
-            
-            // If running synchronously (not in background), wait for completion
-            if (!$runInBackground && $backendType === BackendType::IN_PROCESS) {
-                return $this->waitForSynchronousCompletion($result->agentId, $name, $prompt, $subagentType);
+
+            // Synchronous (foreground) mode: wait for the process to finish
+            if (!$runInBackground) {
+                return $this->waitForProcessCompletion(
+                    $backend,
+                    $result->agentId,
+                    $name,
+                    $prompt,
+                    $subagentType,
+                );
             }
-            
-            // Prepare async output
+
+            // Background mode: return immediately
             $output = [
                 'status' => 'async_launched',
                 'agentId' => $result->agentId,
@@ -231,168 +226,154 @@ class AgentTool extends Tool
                 'description' => $description,
                 'prompt' => $prompt,
                 'name' => $name,
-                'backend' => $backendType->value,
+                'backend' => 'process',
                 'message' => "Agent '{$name}' started in background. You'll be notified when it completes.",
             ];
-            
+
             if ($result->worktreePath) {
                 $output['worktree'] = $result->worktreePath;
             }
-            
             if ($result->pid) {
                 $output['pid'] = $result->pid;
             }
-            
+
             return ToolResult::success($output);
-            
+
         } catch (\Exception $e) {
-            $this->logger->error("Failed to spawn agent", [
+            $this->logger->error('Failed to spawn agent', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
-            
-            return ToolResult::failure(
-                "Failed to spawn agent: " . $e->getMessage()
-            );
+
+            return ToolResult::failure('Failed to spawn agent: ' . $e->getMessage());
         }
     }
-    
+
     /**
-     * Set the team context for this tool.
+     * Wait for a process-based agent to complete and return its result.
      */
-    public function setTeamContext(TeamContext $context): void
-    {
-        $this->teamContext = $context;
-    }
-    
-    /**
-     * Initialize available backends.
-     */
-    private function initializeBackends(): void
-    {
-        $this->backends[BackendType::IN_PROCESS->value] = new InProcessBackend($this->logger);
-        $this->backends[BackendType::PROCESS->value] = new ProcessBackend(null, $this->logger);
-    }
-    
-    /**
-     * Get a backend by type.
-     */
-    private function getBackend(BackendType $type): BackendInterface
-    {
-        if (!isset($this->backends[$type->value])) {
-            throw new \RuntimeException("Backend '{$type->value}' not initialized");
-        }
-        
-        return $this->backends[$type->value];
-    }
-    
-    /**
-     * Generate a unique agent name.
-     */
-    private function generateAgentName(string $type): string
-    {
-        $prefix = match ($type) {
-            'code-writer' => 'coder',
-            'researcher' => 'researcher',
-            'reviewer' => 'reviewer',
-            default => 'agent',
-        };
-        
-        return $prefix . '_' . substr(uniqid(), -6);
-    }
-    
-    
-    /**
-     * Check status of active agents.
-     */
-    public function checkActiveAgents(): array
-    {
-        $statuses = [];
-        
-        foreach ($this->activeTasks as $agentId => $info) {
-            $backend = $this->getBackend($info['backend']);
-            $status = $backend->getStatus($agentId);
-            
-            $statuses[$agentId] = [
-                'name' => $info['name'],
-                'status' => $status?->value ?? 'unknown',
-                'backend' => $info['backend']->value,
-                'started_at' => $info['started_at']->format(\DateTimeInterface::ATOM),
-            ];
-        }
-        
-        return $statuses;
-    }
-    
-    /**
-     * Wait for synchronous agent completion and return Claude Code format result.
-     */
-    private function waitForSynchronousCompletion(
+    private function waitForProcessCompletion(
+        ProcessBackend|BackendInterface $backend,
         string $agentId,
         string $name,
         string $prompt,
-        string $agentType
+        string $agentType,
     ): ToolResult {
         $startTime = microtime(true);
-        $maxWaitTime = 300; // 5 minutes max wait
-        
-        // Get the coordinator to track progress
+        $maxWaitTime = 300; // 5 minutes
+
+        // If it's a ProcessBackend, use its poll/waitAll mechanism
+        if ($backend instanceof ProcessBackend) {
+            while (microtime(true) - $startTime < $maxWaitTime) {
+                $statuses = $backend->poll();
+
+                $status = $statuses[$agentId] ?? null;
+                if ($status === AgentStatus::COMPLETED || $status === AgentStatus::FAILED) {
+                    break;
+                }
+
+                usleep(50_000); // 50ms
+            }
+
+            $result = $backend->getResult($agentId);
+
+            if (!$result) {
+                return ToolResult::failure('Agent execution timed out');
+            }
+
+            if (!($result['success'] ?? false)) {
+                return ToolResult::failure(
+                    'Agent failed: ' . ($result['error'] ?? 'Unknown error')
+                );
+            }
+
+            $duration = (microtime(true) - $startTime) * 1000;
+            $usage = $result['usage'] ?? [];
+
+            $content = [];
+            $text = $result['text'] ?? '';
+            if (!empty($text)) {
+                $content[] = ['type' => 'text', 'text' => $text];
+            }
+
+            return ToolResult::success([
+                'status' => 'completed',
+                'agentId' => $agentId,
+                'agentType' => $agentType,
+                'content' => $content,
+                'totalDurationMs' => (int) $duration,
+                'totalTokens' => ($usage['input_tokens'] ?? 0) + ($usage['output_tokens'] ?? 0),
+                'totalToolUseCount' => $result['turns'] ?? 0,
+                'usage' => [
+                    'input_tokens' => $usage['input_tokens'] ?? 0,
+                    'output_tokens' => $usage['output_tokens'] ?? 0,
+                    'cache_creation_input_tokens' => null,
+                    'cache_read_input_tokens' => null,
+                    'server_tool_use' => null,
+                ],
+                'prompt' => $prompt,
+            ]);
+        }
+
+        // Fallback for InProcessBackend (fiber-based, not truly parallel)
+        return $this->waitForFiberCompletion($agentId, $name, $prompt, $agentType);
+    }
+
+    /**
+     * Legacy fiber-based wait (InProcessBackend fallback).
+     */
+    private function waitForFiberCompletion(
+        string $agentId,
+        string $name,
+        string $prompt,
+        string $agentType,
+    ): ToolResult {
+        $startTime = microtime(true);
+        $maxWaitTime = 300;
         $coordinator = ParallelAgentCoordinator::getInstance();
-        
-        // Wait for the agent to complete
+
         while (microtime(true) - $startTime < $maxWaitTime) {
-            // Check if agent has completed
             $tracker = $coordinator->getTracker($agentId);
             if ($tracker && $tracker->getStatus() === 'completed') {
                 break;
             }
-            
-            // Check backend status
-            $status = $this->activeTasks[$agentId]['backend_instance']->getStatus($agentId);
-            if ($status === AgentStatus::COMPLETED || $status === AgentStatus::FAILED) {
-                break;
+
+            $backend = $this->activeTasks[$agentId]['backend_instance'] ?? null;
+            if ($backend) {
+                $status = $backend->getStatus($agentId);
+                if ($status === AgentStatus::COMPLETED || $status === AgentStatus::FAILED) {
+                    break;
+                }
+                if ($backend instanceof InProcessBackend) {
+                    $coordinator->processAllFibers();
+                }
             }
 
-            // Allow fibers to execute
-            if ($this->activeTasks[$agentId]['backend_instance'] instanceof InProcessBackend) {
-                $coordinator->processAllFibers();
-            }
-            
-            // Small delay to avoid busy waiting
-            usleep(10000); // 10ms
+            usleep(10_000);
         }
-        
-        // Get the result from the coordinator
+
         $agentResult = $coordinator->getAgentResult($agentId);
-        
         if (!$agentResult) {
-            return ToolResult::failure("Agent execution timed out or failed");
+            return ToolResult::failure('Agent execution timed out or failed');
         }
-        
-        // Calculate metrics
-        $duration = (microtime(true) - $startTime) * 1000; // Convert to ms
+
+        $duration = (microtime(true) - $startTime) * 1000;
         $usage = $agentResult->totalUsage();
-        $totalTokens = $usage->inputTokens + $usage->outputTokens;
-        
-        // Format content blocks like Claude Code
+
         $content = [];
         $text = $agentResult->text();
         if (!empty($text)) {
             $content[] = ['type' => 'text', 'text' => $text];
         }
-        
-        // Count tool uses (simplified for now)
-        $toolUseCount = count($agentResult->allResponses);
-        
-        // Return in Claude Code AgentToolResult format
+
         return ToolResult::success([
             'status' => 'completed',
             'agentId' => $agentId,
             'agentType' => $agentType,
             'content' => $content,
-            'totalDurationMs' => (int)$duration,
-            'totalTokens' => $totalTokens,
-            'totalToolUseCount' => $toolUseCount,
+            'totalDurationMs' => (int) $duration,
+            'totalTokens' => $usage->inputTokens + $usage->outputTokens,
+            'totalToolUseCount' => count($agentResult->allResponses),
             'usage' => [
                 'input_tokens' => $usage->inputTokens,
                 'output_tokens' => $usage->outputTokens,
@@ -403,7 +384,60 @@ class AgentTool extends Tool
             'prompt' => $prompt,
         ]);
     }
-    
+
+    public function setTeamContext(TeamContext $context): void
+    {
+        $this->teamContext = $context;
+    }
+
+    private function initializeBackends(): void
+    {
+        $this->backends[BackendType::PROCESS->value] = new ProcessBackend(null, $this->logger);
+        $this->backends[BackendType::IN_PROCESS->value] = new InProcessBackend($this->logger);
+    }
+
+    private function getProcessBackend(): ProcessBackend
+    {
+        return $this->backends[BackendType::PROCESS->value];
+    }
+
+    private function getBackend(BackendType $type): BackendInterface
+    {
+        if (!isset($this->backends[$type->value])) {
+            throw new \RuntimeException("Backend '{$type->value}' not initialized");
+        }
+        return $this->backends[$type->value];
+    }
+
+    private function generateAgentName(string $type): string
+    {
+        $prefix = match ($type) {
+            'code-writer' => 'coder',
+            'researcher' => 'researcher',
+            'reviewer' => 'reviewer',
+            default => 'agent',
+        };
+        return $prefix . '_' . substr(uniqid(), -6);
+    }
+
+    /**
+     * Check status of active agents.
+     */
+    public function checkActiveAgents(): array
+    {
+        $statuses = [];
+        foreach ($this->activeTasks as $agentId => $info) {
+            $backend = $info['backend_instance'];
+            $status = $backend->getStatus($agentId);
+            $statuses[$agentId] = [
+                'name' => $info['name'],
+                'status' => $status?->value ?? 'unknown',
+                'started_at' => $info['started_at']->format(\DateTimeInterface::ATOM),
+            ];
+        }
+        return $statuses;
+    }
+
     /**
      * Kill an agent.
      */
@@ -412,20 +446,16 @@ class AgentTool extends Tool
         if (!isset($this->activeTasks[$agentId])) {
             return false;
         }
-        
+
         $info = $this->activeTasks[$agentId];
-        $backend = $this->getBackend($info['backend']);
-        
-        $backend->kill($agentId);
-        
-        // Remove from team context
+        $info['backend_instance']->kill($agentId);
+
         if ($this->teamContext) {
             $this->teamContext->removeMember($agentId);
             $this->teamContext->save();
         }
-        
+
         unset($this->activeTasks[$agentId]);
-        
         return true;
     }
 }

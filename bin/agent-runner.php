@@ -3,131 +3,101 @@
 
 /**
  * SuperAgent Process Runner
- * 
- * This script is used by the ProcessBackend to run agents in separate processes.
- * It receives configuration via environment variables and executes the agent.
+ *
+ * Runs a single agent in a separate OS process. The parent sends a JSON
+ * config blob on stdin (one line), then closes stdin. This script creates
+ * a real Agent with full LLM provider, executes the prompt, and writes
+ * the serialized AgentResult as a single JSON line on stdout.
+ *
+ * Exit codes:
+ *   0 — success (result on stdout)
+ *   1 — runtime error (message on stderr)
  */
 
-require_once __DIR__ . '/../vendor/autoload.php';
+// Ensure we can find the autoloader whether this script lives in
+// the package's own bin/ or inside vendor/forgeomni/superagent/bin/.
+$autoloaders = [
+    __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/../../../../vendor/autoload.php',
+];
+foreach ($autoloaders as $autoloader) {
+    if (file_exists($autoloader)) {
+        require_once $autoloader;
+        break;
+    }
+}
 
-use SuperAgent\Agent\Agent;
-use SuperAgent\Context\Context;
-use Psr\Log\NullLogger;
+use SuperAgent\Agent;
+use SuperAgent\AgentResult;
 
-// Get configuration from environment
-$agentId = $_ENV['SUPERAGENT_AGENT_ID'] ?? 'unknown';
-$agentName = $_ENV['SUPERAGENT_AGENT_NAME'] ?? 'agent';
-$teamName = $_ENV['SUPERAGENT_TEAM_NAME'] ?? null;
-$prompt = $_ENV['SUPERAGENT_PROMPT'] ?? '';
-$model = $_ENV['SUPERAGENT_MODEL'] ?? null;
-$systemPrompt = $_ENV['SUPERAGENT_SYSTEM_PROMPT'] ?? null;
-$permissionMode = $_ENV['SUPERAGENT_PERMISSION_MODE'] ?? null;
-$allowedTools = $_ENV['SUPERAGENT_ALLOWED_TOOLS'] ?? null;
-$planMode = $_ENV['SUPERAGENT_PLAN_MODE'] ?? '0';
+// ── Read config from stdin (single JSON line) ──────────────────────
+$stdinData = '';
+while (!feof(STDIN)) {
+    $chunk = fread(STDIN, 65536);
+    if ($chunk === false) {
+        break;
+    }
+    $stdinData .= $chunk;
+}
 
-// Parse command line arguments
-$options = getopt('', ['agent-id:', 'task-id:']);
-$agentId = $options['agent-id'] ?? $agentId;
-$taskId = $options['task-id'] ?? uniqid('task_');
+$config = json_decode(trim($stdinData), true);
+if (!$config || !isset($config['prompt'])) {
+    fwrite(STDERR, "[agent-runner] Invalid or missing config on stdin\n");
+    exit(1);
+}
+
+$prompt = $config['prompt'];
+$agentConfig = $config['agent_config'] ?? [];
 
 // Log startup
-fwrite(STDERR, "[Agent Runner] Starting agent $agentId ($agentName)\n");
+$agentId = $config['agent_id'] ?? 'unknown';
+$agentName = $config['agent_name'] ?? 'agent';
+fwrite(STDERR, "[agent-runner] Starting agent {$agentId} ({$agentName})\n");
 
 try {
-    // Create context
-    $context = new Context();
-    
-    // Set metadata
-    $context->setMetadata('agent_id', $agentId);
-    $context->setMetadata('agent_name', $agentName);
-    $context->setMetadata('task_id', $taskId);
-    
-    if ($teamName) {
-        $context->setMetadata('team_name', $teamName);
-    }
-    
-    if ($permissionMode) {
-        $context->setMetadata('permission_mode', $permissionMode);
-    }
-    
-    // Create agent
-    $agent = new Agent(
-        context: $context,
-        logger: new NullLogger(),
-    );
-    
-    // Configure agent
-    if ($model) {
-        $agent->setModel($model);
-    }
-    
-    if ($systemPrompt) {
-        $agent->setSystemPrompt($systemPrompt);
-    }
-    
-    if ($allowedTools) {
-        $tools = explode(',', $allowedTools);
-        $agent->setAllowedTools($tools);
-    }
-    
-    // Set up message handling
-    $stdinOpen = true;
-    stream_set_blocking(STDIN, false);
-    
-    // Main loop
-    while ($stdinOpen) {
-        // Check for messages from parent
-        $input = fgets(STDIN);
-        if ($input !== false) {
-            $message = json_decode(trim($input), true);
-            if ($message) {
-                fwrite(STDERR, "[Agent Runner] Received message: " . json_encode($message) . "\n");
-                
-                // Handle shutdown request
-                if (isset($message['content'])) {
-                    $content = json_decode($message['content'], true);
-                    if (isset($content['type']) && $content['type'] === 'shutdown_request') {
-                        fwrite(STDERR, "[Agent Runner] Shutdown requested\n");
-                        break;
-                    }
-                }
-                
-                // Process message with agent
-                if (isset($message['content']) && is_string($message['content'])) {
-                    $response = $agent->run($message['content']);
-                    fwrite(STDOUT, json_encode([
-                        'agent_id' => $agentId,
-                        'response' => $response->content,
-                        'timestamp' => date('c'),
-                    ]) . "\n");
-                }
-            }
-        }
-        
-        // Check if stdin is closed
-        if (feof(STDIN)) {
-            $stdinOpen = false;
-        }
-        
-        // Small sleep to avoid busy waiting
-        usleep(100000); // 100ms
-    }
-    
-    // Execute initial prompt if no interactive mode
-    if ($prompt && !$stdinOpen) {
-        fwrite(STDERR, "[Agent Runner] Executing prompt: $prompt\n");
-        $response = $agent->run($prompt);
-        fwrite(STDOUT, json_encode([
-            'agent_id' => $agentId,
-            'response' => $response->content,
-            'timestamp' => date('c'),
-        ]) . "\n");
-    }
-    
-    fwrite(STDERR, "[Agent Runner] Agent $agentId completed\n");
+    // Create a real Agent with full provider + tools
+    $agent = new Agent($agentConfig);
+
+    // Run the prompt (blocking — this process exists solely for this)
+    $result = $agent->run($prompt);
+
+    // Serialize result to stdout
+    $output = [
+        'success' => true,
+        'agent_id' => $agentId,
+        'text' => $result->text(),
+        'turns' => $result->turns(),
+        'cost_usd' => $result->totalCostUsd,
+        'usage' => [
+            'input_tokens' => $result->totalUsage()->inputTokens,
+            'output_tokens' => $result->totalUsage()->outputTokens,
+        ],
+        'responses' => array_map(function ($msg) {
+            return [
+                'text' => $msg->text(),
+                'usage' => $msg->usage ? [
+                    'input_tokens' => $msg->usage->inputTokens,
+                    'output_tokens' => $msg->usage->outputTokens,
+                ] : null,
+                'stop_reason' => $msg->stopReason?->value,
+            ];
+        }, $result->allResponses),
+    ];
+
+    fwrite(STDOUT, json_encode($output, JSON_UNESCAPED_UNICODE) . "\n");
+    fwrite(STDERR, "[agent-runner] Agent {$agentId} completed ({$result->turns()} turns)\n");
     exit(0);
-    
-} catch (\Exception $e) {
-    fwrite(STDERR, "[Agent Runner] Error: " . $e->getMessage() . "\n");
+
+} catch (\Throwable $e) {
+    $error = [
+        'success' => false,
+        'agent_id' => $agentId,
+        'error' => $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+    ];
+
+    fwrite(STDOUT, json_encode($error, JSON_UNESCAPED_UNICODE) . "\n");
+    fwrite(STDERR, "[agent-runner] Error: {$e->getMessage()}\n");
     exit(1);
 }
