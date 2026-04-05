@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.7.2-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.7.5-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,12 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.7.5 — Claude Code 工具名兼容
+- **`ToolNameResolver`** (`src/Tools/ToolNameResolver.php`) — Claude Code PascalCase 工具名（`Read`、`Write`、`Edit`、`Bash`、`Glob`、`Grep`、`Agent`、`WebSearch` 等）与 SuperAgent snake_case 工具名（`read_file`、`write_file`、`edit_file`、`bash`、`glob`、`grep`、`agent`、`web_search` 等）的双向映射。40+ 工具映射，包括 CC 旧名称（`Task` → `agent`）
+- **Agent 定义自动解析** — `MarkdownAgentDefinition::allowedTools()` 和 `disallowedTools()` 通过 `ToolNameResolver::resolveAll()` 自动解析 CC 工具名。`.claude/agents/` 中的定义可使用任一格式：`allowed_tools: [Read, Grep, Glob]` 或 `allowed_tools: [read_file, grep, glob]` 均可
+- **权限系统兼容** — `QueryEngine::isToolAllowed()` 同时检查原始名称和解析后名称，CC 或 SA 格式的权限列表都能正确工作
+- **向后兼容** — 现有 SuperAgent 工具名继续正常工作，解析器是增量添加不破坏现有功能
 
 ### 🆕 v0.7.0 — 性能优化套件（13 项策略，全部可配置）
 - **工具结果压缩** — 自动将旧的工具结果（超过最近 N 轮）压缩为简洁摘要，减少 30-50% input tokens。保留错误结果和近期上下文不变。配置：`optimization.tool_result_compaction`（`enabled`、`preserve_recent_turns`、`max_result_length`）

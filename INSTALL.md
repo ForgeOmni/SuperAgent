@@ -1253,6 +1253,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.7.5      | 10.x+   | 8.1+ | Claude Code tool name compatibility: bidirectional ToolNameResolver, auto-resolve in agent definitions and permission system |
 | 0.7.2      | 10.x+   | 8.1+ | Fix .claude/ path resolution: use project root instead of cwd for AgentManager, SkillManager, MCPManager |
 | 0.7.1      | 10.x+   | 8.1+ | Fix AgentTool PermissionMode 'bypass' enum mismatch |
 | 0.7.0      | 10.x+   | 8.1+ | 13 performance optimizations: token compaction, selective tools, model routing, prefill, cache pinning + parallel tools, streaming dispatch, connection pool, prefetch, adaptive tokens, batch API, zero-copy: tool result compaction, selective tool schema, model routing, response prefill, prompt cache pinning |

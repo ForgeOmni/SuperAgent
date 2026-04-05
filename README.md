@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.2-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.5-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -61,6 +61,12 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.7.5 — Claude Code Tool Name Compatibility
+- **`ToolNameResolver`** (`src/Tools/ToolNameResolver.php`) — Bidirectional mapping between Claude Code PascalCase tool names (`Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Agent`, `WebSearch`, etc.) and SuperAgent snake_case names (`read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`, `agent`, `web_search`, etc.). 40+ tool mappings including legacy CC names (`Task` → `agent`)
+- **Auto-resolve in Agent Definitions** — `MarkdownAgentDefinition::allowedTools()` and `disallowedTools()` automatically resolve CC tool names via `ToolNameResolver::resolveAll()`. Agent definitions from `.claude/agents/` can use either format: `allowed_tools: [Read, Grep, Glob]` or `allowed_tools: [read_file, grep, glob]` — both work
+- **Permission System Compatibility** — `QueryEngine::isToolAllowed()` checks both original and resolved names. Permission lists in either CC or SA format work correctly
+- **Backward Compatible** — Existing SuperAgent tool names continue to work unchanged. The resolver is additive, not breaking
 
 ### 🆕 v0.7.0 — Performance Optimization Suite (13 strategies, all configurable)
 - **Tool Result Compaction** — Automatically compacts old tool results (beyond recent N turns) into concise summaries, reducing input tokens by 30-50%. Preserves error results and recent context intact. Config: `optimization.tool_result_compaction` (`enabled`, `preserve_recent_turns`, `max_result_length`)

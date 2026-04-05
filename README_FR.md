@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.2-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.5-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,12 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.7.5 — Compatibilité des Noms d'Outils Claude Code
+- **`ToolNameResolver`** (`src/Tools/ToolNameResolver.php`) — Mappage bidirectionnel entre les noms PascalCase de Claude Code (`Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Agent`, `WebSearch`, etc.) et les noms snake_case de SuperAgent (`read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`, `agent`, `web_search`, etc.). 40+ mappages incluant les noms hérités CC (`Task` → `agent`)
+- **Résolution Automatique dans les Définitions d'Agents** — `MarkdownAgentDefinition::allowedTools()` et `disallowedTools()` résolvent automatiquement les noms CC via `ToolNameResolver::resolveAll()`. Les définitions de `.claude/agents/` acceptent les deux formats : `allowed_tools: [Read, Grep, Glob]` ou `allowed_tools: [read_file, grep, glob]`
+- **Compatibilité du Système de Permissions** — `QueryEngine::isToolAllowed()` vérifie les noms originaux et résolus. Les listes de permissions en format CC ou SA fonctionnent correctement
+- **Rétrocompatible** — Les noms d'outils SuperAgent existants continuent de fonctionner sans changement
 
 ### 🆕 v0.7.0 — Suite d'Optimisation des Performances (13 stratégies, toutes configurables)
 - **Compaction des Résultats d'Outils** — Compacte automatiquement les anciens résultats d'outils (au-delà des N derniers tours) en résumés concis, réduisant les tokens d'entrée de 30-50%. Préserve les résultats d'erreur et le contexte récent. Config : `optimization.tool_result_compaction` (`enabled`, `preserve_recent_turns`, `max_result_length`)

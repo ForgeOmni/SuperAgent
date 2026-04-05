@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-04-05
+
+### 🚀 Summary
+
+Claude Code tool name compatibility. Agent definitions from `.claude/agents/` use PascalCase tool names (`Read`, `Edit`, `Bash`) while SuperAgent uses snake_case (`read_file`, `edit_file`, `bash`). This caused `allowed_tools`/`disallowed_tools` in CC-format agent definitions to silently fail — tools were never matched. Now a bidirectional `ToolNameResolver` automatically maps between formats at every integration point.
+
+### Added
+
+#### ToolNameResolver (`src/Tools/ToolNameResolver.php`)
+- **40+ bidirectional mappings** between Claude Code PascalCase and SuperAgent snake_case: `Read`↔`read_file`, `Write`↔`write_file`, `Edit`↔`edit_file`, `Bash`↔`bash`, `Glob`↔`glob`, `Grep`↔`grep`, `Agent`↔`agent`, `WebSearch`↔`web_search`, `WebFetch`��`web_fetch`, `TaskCreate`↔`task_create`, `EnterPlanMode`↔`enter_plan_mode`, etc.
+- Includes legacy CC name: `Task` → `agent`
+- Static methods: `toSuperAgent(name)`, `toClaudeCode(name)`, `resolveAll(names[])`, `isClaudeCodeName(name)`, `getMapping()`
+
+### Changed
+- **`MarkdownAgentDefinition::allowedTools()`**: auto-resolves CC names via `ToolNameResolver::resolveAll()` before returning. `.claude/agents/` files with `allowed_tools: [Read, Grep, Glob]` now correctly map to `[read_file, grep, glob]`
+- **`MarkdownAgentDefinition::disallowedTools()`**: same auto-resolution
+- **`QueryEngine::isToolAllowed()`**: checks both original name and `ToolNameResolver::toSuperAgent()` resolved name against allowed/denied lists. Permission lists in either CC or SA format work
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.7.5; added v0.7.5 feature section
+- **INSTALL** (EN/CN/FR): added v0.7.5 compatibility matrix row
+
 ## [0.7.2] - 2026-04-05
 
 ### Fixed

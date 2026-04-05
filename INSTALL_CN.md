@@ -907,6 +907,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.7.5      | 10.x+   | 8.1+  | Claude Code 工具名兼容：双向 ToolNameResolver，agent 定义和权限系统自动解析 |
 | 0.7.2      | 10.x+   | 8.1+  | 修复 .claude/ 路径解析：AgentManager/SkillManager/MCPManager 使用项目根目录而非 cwd |
 | 0.7.1      | 10.x+   | 8.1+  | 修复 AgentTool PermissionMode 'bypass' 枚举不匹配 |
 | 0.7.0      | 10.x+   | 8.1+  | 13 项性能优化：token 压缩、按需工具、模型路由、预填充、缓存固定 + 并行工具、流式分发、连接池、预读、自适应 tokens、批量 API、零拷贝：工具结果压缩、按需工具 Schema、模型路由、响应预填充、提示缓存固定 |
