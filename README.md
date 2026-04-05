@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.18-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.19-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -61,6 +61,12 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.6.19 — In-Process NDJSON Logging for Process Monitor
+- **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — Factory class for creating a `StreamingHandler` that writes CC-compatible NDJSON to any log file or stream. One-liner integration for in-process agent execution (`$agent->prompt()` calls that don't go through `agent-runner.php`/`ProcessBackend`)
+- **`create(logTarget, agentId)`** — Returns a `StreamingHandler` with `onToolUse`, `onToolResult`, and `onTurn` callbacks wired to `NdjsonWriter`. Accepts file path (auto-creates directories) or writable stream resource
+- **`createWithWriter(logTarget, agentId)`** — Returns `{handler, writer}` pair so callers can also emit `writeResult()`/`writeError()` after execution completes. The writer and handler share the same NDJSON stream
+- **Process Monitor Compatible** — Log files contain the same NDJSON format as child process stderr, enabling `parseStreamJsonIfNeeded()` to display tool activity (🔧 Read, Edit, Grep, etc.), token counts, and execution status for in-process agents
 
 ### 🆕 v0.6.18 — Claude Code-Compatible NDJSON Structured Logging
 - **`NdjsonWriter`** (`src/Logging/NdjsonWriter.php`) — New class that writes Claude Code-compatible NDJSON (Newline Delimited JSON) events to any writable stream. Supports 5 event methods: `writeAssistant()` (LLM turn with text/tool_use content blocks + per-turn usage), `writeToolUse()` (single tool call), `writeToolResult()` (tool execution result as `type:user` with `parent_tool_use_id`), `writeResult()` (success with usage/cost/duration), `writeError()` (error with subtype). Escapes U+2028/U+2029 line separators matching CC's `ndjsonSafeStringify`

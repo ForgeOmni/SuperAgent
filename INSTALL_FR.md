@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.6.19
+
+v0.6.19 ajoute `NdjsonStreamingHandler` pour la journalisation des agents exécutés in-process. **Aucune modification de configuration requise.**
+
+Auparavant, seuls les processus enfants (via `agent-runner.php`) émettaient des logs NDJSON. Désormais les appels `$agent->prompt()` in-process peuvent aussi écrire du NDJSON compatible CC vers des fichiers de log via `NdjsonStreamingHandler::create()` ou `createWithWriter()`, les rendant visibles dans le moniteur de processus.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.6.18
 
 v0.6.18 met à niveau la journalisation des agents enfants du protocole personnalisé vers le NDJSON compatible Claude Code. **Aucune modification de configuration requise.**
@@ -868,6 +878,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.19     | 10.x+   | 8.1+  | Journalisation NDJSON in-process via `NdjsonStreamingHandler` pour visibilité moniteur |
 | 0.6.18     | 10.x+   | 8.1+  | Journalisation structurée NDJSON compatible Claude Code remplace le protocole `__PROGRESS__:` |
 | 0.6.17     | 10.x+   | 8.1+  | Surveillance en temps réel de la progression des agents enfants via protocole stderr `__PROGRESS__:` |
 | 0.6.16     | 10.x+   | 8.1+  | Propagation des enregistrements agent/MCP parent vers enfant via sérialisation stdin |

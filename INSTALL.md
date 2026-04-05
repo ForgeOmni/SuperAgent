@@ -818,6 +818,16 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.19 Upgrade Notes
+
+v0.6.19 adds `NdjsonStreamingHandler` for in-process agent execution logging. **No configuration changes required.**
+
+Previously, only child processes (via `agent-runner.php`) emitted NDJSON logs. Now in-process `$agent->prompt()` calls can also write CC-compatible NDJSON to log files via `NdjsonStreamingHandler::create()` or `createWithWriter()`, making them visible in the process monitor.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.18 Upgrade Notes
 
 v0.6.18 upgrades child agent logging from a custom protocol to Claude Code-compatible NDJSON. **No configuration changes required.**
@@ -1224,6 +1234,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.19     | 10.x+   | 8.1+ | In-process NDJSON logging via `NdjsonStreamingHandler` for process monitor visibility |
 | 0.6.18     | 10.x+   | 8.1+ | Claude Code-compatible NDJSON structured logging replaces `__PROGRESS__:` protocol |
 | 0.6.17     | 10.x+   | 8.1+ | Real-time child agent progress monitoring via `__PROGRESS__:` stderr protocol |
 | 0.6.16     | 10.x+   | 8.1+ | Parent-to-child agent/MCP registration propagation via stdin serialization |

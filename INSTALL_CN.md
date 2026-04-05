@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.19 升级说明
+
+v0.6.19 新增 `NdjsonStreamingHandler`，为 in-process agent 执行提供日志支持。**无需修改配置。**
+
+此前仅子进程（通过 `agent-runner.php`）输出 NDJSON 日志。现在 in-process 的 `$agent->prompt()` 调用也可通过 `NdjsonStreamingHandler::create()` 或 `createWithWriter()` 写 CC 兼容 NDJSON 到日志文件，使其在进程监控中可见。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.18 升级说明
 
 v0.6.18 将子 agent 日志从自定义协议升级为 Claude Code 兼容的 NDJSON 格式。**无需修改配置。**
@@ -878,6 +888,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.19     | 10.x+   | 8.1+  | In-process NDJSON 日志（`NdjsonStreamingHandler`）支持进程监控 |
 | 0.6.18     | 10.x+   | 8.1+  | Claude Code 兼容 NDJSON 结构化日志替代 `__PROGRESS__:` 协议 |
 | 0.6.17     | 10.x+   | 8.1+  | 子 agent 进程实时进度监控（`__PROGRESS__:` stderr 协议） |
 | 0.6.16     | 10.x+   | 8.1+  | 父进程 agent/MCP 注册数据透传子进程（stdin 序列化） |

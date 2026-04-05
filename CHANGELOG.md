@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.19] - 2026-04-05
+
+### 🚀 Summary
+
+Adds `NdjsonStreamingHandler` — a factory for creating `StreamingHandler` instances that write CC-compatible NDJSON to log files. This closes the gap for in-process agent execution: previously only child processes (via `agent-runner.php`/`ProcessBackend`) emitted structured logs; now direct `$agent->prompt()` calls can produce the same NDJSON output for process monitor parsing.
+
+### Added
+
+#### NdjsonStreamingHandler (`src/Logging/NdjsonStreamingHandler.php`)
+- **`create(logTarget, agentId, append)`**: static factory that returns a `StreamingHandler` with `onToolUse`, `onToolResult`, and `onTurn` callbacks wired to `NdjsonWriter`. Accepts a file path (auto-creates parent directories) or a writable stream resource
+- **`createWithWriter(logTarget, agentId, append)`**: returns `{handler, writer}` object pair so callers can emit `writeResult()`/`writeError()` after execution. The handler and writer share the same underlying NDJSON stream
+- Log files contain identical NDJSON format to child process stderr — parseable by CC's `extractActivities()` and SuperAgent's `ProcessBackend::poll()`
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.6.19; added v0.6.19 feature section
+- **INSTALL** (EN/CN/FR): added v0.6.19 upgrade notes and compatibility matrix row
+
 ## [0.6.18] - 2026-04-05
 
 ### 🚀 Summary

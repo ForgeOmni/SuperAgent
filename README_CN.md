@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.18-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.19-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,12 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.6.19 — In-Process NDJSON 日志支持进程监控
+- **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — 工厂类，一行代码创建写 CC 兼容 NDJSON 到日志文件的 `StreamingHandler`。用于 in-process agent 执行（直接调用 `$agent->prompt()` 而不经过 `agent-runner.php`/`ProcessBackend` 的场景）
+- **`create(logTarget, agentId)`** — 返回带 `onToolUse`、`onToolResult`、`onTurn` 回调的 `StreamingHandler`，自动写入 `NdjsonWriter`。接受文件路径（自动创建目录）或可写流资源
+- **`createWithWriter(logTarget, agentId)`** — 返回 `{handler, writer}` 对，调用方可在执行完成后发出 `writeResult()`/`writeError()`。writer 和 handler 共享同一 NDJSON 流
+- **进程监控兼容** — 日志文件与子进程 stderr 格式完全一致，`parseStreamJsonIfNeeded()` 可直接解析并显示工具调用活动（🔧 Read、Edit、Grep 等）、token 计数和执行状态
 
 ### 🆕 v0.6.18 — Claude Code 兼容 NDJSON 结构化日志
 - **`NdjsonWriter`** (`src/Logging/NdjsonWriter.php`) — 新增 Claude Code 兼容的 NDJSON（换行符分隔 JSON）事件写入器。支持 5 种事件方法：`writeAssistant()`（含 text/tool_use 内容块 + 每轮 usage 的 LLM 回复）、`writeToolUse()`（单个工具调用）、`writeToolResult()`（工具执行结果，`type:user` + `parent_tool_use_id`）、`writeResult()`（成功结果含 usage/cost/duration）、`writeError()`（错误含 subtype）。转义 U+2028/U+2029 行分隔符，与 CC 的 `ndjsonSafeStringify` 一致
