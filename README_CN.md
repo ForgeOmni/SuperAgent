@@ -24,7 +24,7 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 - **ProcessBackend NDJSON 解析** — `ProcessBackend::poll()` 升级为检测 NDJSON 行（以 `{` 开头的 JSON 对象），同时兼容旧 `__PROGRESS__:` 格式。非 JSON stderr 行（如 `[agent-runner]` 日志）继续转发到 PSR-3 logger
 - **AgentTool CC 格式支持** — `applyProgressEvents()` 现在同时处理 CC NDJSON 格式（`assistant` → 提取 tool_use 块 + usage，`user` → tool_result，`result` → 最终 usage）和旧格式，实现无缝进程监控集成
 
-### 🆕 v0.6.17 — �� Agent 进程实时进度监控
+### 🆕 v0.6.17 — 子Agent 进程实时进度监控
 - **结构化进度事件** — 子 agent 进程现在通过 stderr 发送 `__PROGRESS__:` 协议的结构化 JSON 进度事件。事件包括 `tool_use`（工具名、输入参数）、`tool_result`（成功/失败、结果大小）和 `turn`（每轮 LLM 调用的 token 用量）
 - **子进程 StreamingHandler** — `agent-runner.php` 创建带有 `onToolUse`、`onToolResult` 和 `onTurn` 回调的 `StreamingHandler`，将执行事件序列化回传给父进程。从 `Agent::run()` 改为 `Agent::prompt()` 以传递 handler
 - **ProcessBackend 事件解析** — `ProcessBackend::poll()` 现在识别 stderr 中 `__PROGRESS__:` 前缀的行，解析为 JSON 并按 agent 排队。新增 `consumeProgressEvents(agentId)` 方法返回并清空排队事件。普通日志行仍照常转发给 logger
