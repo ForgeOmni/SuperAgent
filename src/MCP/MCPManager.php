@@ -489,7 +489,8 @@ class MCPManager
     }
 
     /**
-     * Get base path, using Laravel's base_path() if available, otherwise cwd.
+     * Get base path, using Laravel's base_path() if available,
+     * otherwise walk up from cwd to find the project root.
      */
     private function resolveBasePath(string $relative): string
     {
@@ -500,7 +501,35 @@ class MCPManager
         } catch (\Throwable) {
         }
 
-        return getcwd() . ($relative !== '' ? '/' . $relative : '');
+        $root = self::findProjectRoot();
+        return $root . ($relative !== '' ? '/' . $relative : '');
+    }
+
+    /**
+     * Find the project root by walking up from cwd.
+     */
+    private static function findProjectRoot(): string
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $dir = getcwd();
+        for ($i = 0; $i < 20; $i++) {
+            if (file_exists($dir . '/composer.json') || file_exists($dir . '/artisan') || is_dir($dir . '/.git')) {
+                $cached = $dir;
+                return $dir;
+            }
+            $parent = dirname($dir);
+            if ($parent === $dir) {
+                break;
+            }
+            $dir = $parent;
+        }
+
+        $cached = getcwd();
+        return $cached;
     }
 
     /**

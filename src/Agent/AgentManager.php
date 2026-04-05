@@ -293,7 +293,8 @@ class AgentManager
     }
 
     /**
-     * Get base path, using Laravel's base_path() if available, otherwise cwd.
+     * Get base path, using Laravel's base_path() if available,
+     * otherwise walk up from cwd to find the project root.
      */
     private function resolveBasePath(string $relative): string
     {
@@ -301,7 +302,37 @@ class AgentManager
             return base_path($relative);
         }
 
-        return getcwd() . '/' . $relative;
+        return self::findProjectRoot() . '/' . $relative;
+    }
+
+    /**
+     * Find the project root by walking up from cwd looking for
+     * composer.json, .git, or artisan. This prevents wrong resolution
+     * when cwd is a subdirectory (e.g. docs/test/).
+     */
+    private static function findProjectRoot(): string
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        $dir = getcwd();
+        for ($i = 0; $i < 20; $i++) {
+            if (file_exists($dir . '/composer.json') || file_exists($dir . '/artisan') || is_dir($dir . '/.git')) {
+                $cached = $dir;
+                return $dir;
+            }
+            $parent = dirname($dir);
+            if ($parent === $dir) {
+                break;
+            }
+            $dir = $parent;
+        }
+
+        // Fallback to cwd if no project root found
+        $cached = getcwd();
+        return $cached;
     }
 
     /**
