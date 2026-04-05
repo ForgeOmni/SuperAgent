@@ -794,12 +794,19 @@ class QueryEngine
 
     protected function isToolAllowed(string $toolName): bool
     {
-        if (in_array($toolName, $this->deniedTools, true)) {
+        // Check both the original name and its CC/SA alias
+        $resolved = \SuperAgent\Tools\ToolNameResolver::toSuperAgent($toolName);
+
+        if (in_array($toolName, $this->deniedTools, true)
+            || in_array($resolved, $this->deniedTools, true)) {
             return false;
         }
 
-        if ($this->allowedTools !== null && ! in_array($toolName, $this->allowedTools, true)) {
-            return false;
+        if ($this->allowedTools !== null) {
+            if (!in_array($toolName, $this->allowedTools, true)
+                && !in_array($resolved, $this->allowedTools, true)) {
+                return false;
+            }
         }
 
         return true;

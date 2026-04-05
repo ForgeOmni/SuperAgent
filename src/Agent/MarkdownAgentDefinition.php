@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Agent;
 
+use SuperAgent\Tools\ToolNameResolver;
+
 /**
  * An AgentDefinition loaded from a Markdown file.
  *
@@ -46,12 +48,14 @@ class MarkdownAgentDefinition extends AgentDefinition
 
     public function allowedTools(): ?array
     {
-        return $this->frontmatter['allowed_tools'] ?? null;
+        $tools = $this->frontmatter['allowed_tools'] ?? null;
+        return $tools !== null ? ToolNameResolver::resolveAll($tools) : null;
     }
 
     public function disallowedTools(): ?array
     {
-        return $this->frontmatter['disallowed_tools'] ?? null;
+        $tools = $this->frontmatter['disallowed_tools'] ?? null;
+        return $tools !== null ? ToolNameResolver::resolveAll($tools) : null;
     }
 
     public function readOnly(): bool
