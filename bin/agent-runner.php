@@ -73,6 +73,9 @@ if (!$laravelBootstrapped) {
 }
 
 use SuperAgent\Agent;
+use SuperAgent\StreamingHandler;
+use SuperAgent\Messages\ContentBlock;
+use SuperAgent\Messages\AssistantMessage;
 
 $prompt = $config['prompt'];
 $agentConfig = $config['agent_config'] ?? [];
@@ -123,9 +126,53 @@ fwrite(STDERR, "[agent-runner] Starting agent {$agentId} ({$agentName})"
     . ($laravelBootstrapped ? ' [Laravel]' : ' [standalone]')
     . " agents={$defCount} mcp={$mcpCount}\n");
 
+// ── Progress event emitter ──────────────────────────────────────
+// Emit structured JSON progress events on stderr so the parent
+// process can parse them and update the process monitor in real time.
+// Protocol: lines prefixed with __PROGRESS__: followed by JSON.
+$emitProgress = function (string $type, array $data) use ($agentId): void {
+    $event = json_encode([
+        'type' => $type,
+        'agent_id' => $agentId,
+        'timestamp' => microtime(true),
+        'data' => $data,
+    ], JSON_UNESCAPED_UNICODE);
+    fwrite(STDERR, "__PROGRESS__:{$event}\n");
+};
+
+// StreamingHandler that forwards execution events to the parent
+$streamingHandler = new StreamingHandler(
+    onToolUse: function (ContentBlock $block) use ($emitProgress) {
+        $emitProgress('tool_use', [
+            'tool_name' => $block->toolName ?? 'unknown',
+            'tool_use_id' => $block->toolUseId ?? '',
+            'input' => $block->toolInput ?? [],
+        ]);
+    },
+    onToolResult: function (string $toolUseId, string $toolName, string $result, bool $isError) use ($emitProgress) {
+        $emitProgress('tool_result', [
+            'tool_name' => $toolName,
+            'tool_use_id' => $toolUseId,
+            'is_error' => $isError,
+            'result_length' => strlen($result),
+        ]);
+    },
+    onTurn: function (AssistantMessage $message, int $turnNumber) use ($emitProgress) {
+        $usage = $message->usage;
+        $emitProgress('turn', [
+            'turn_number' => $turnNumber,
+            'input_tokens' => $usage?->inputTokens ?? 0,
+            'output_tokens' => $usage?->outputTokens ?? 0,
+            'cache_creation_input_tokens' => $usage?->cacheCreationInputTokens ?? 0,
+            'cache_read_input_tokens' => $usage?->cacheReadInputTokens ?? 0,
+            'tool_use_count' => count($message->toolUseBlocks()),
+        ]);
+    },
+);
+
 try {
     $agent = new Agent($agentConfig);
-    $result = $agent->run($prompt);
+    $result = $agent->prompt($prompt, $streamingHandler);
 
     $output = [
         'success' => true,

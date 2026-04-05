@@ -3,10 +3,10 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.16-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.17-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
-> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API Docs](docs/)
+> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
 
 SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Claude-level capabilities with multi-agent orchestration, real-time monitoring, and distributed scaling. Build and deploy AI agent teams that work in parallel with automatic task detection and intelligent resource management.
 
@@ -61,6 +61,13 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.6.17 — Real-Time Child Agent Progress Monitoring
+- **Structured Progress Events** — Child agent processes now emit structured JSON progress events on stderr using the `__PROGRESS__:` protocol. Events include `tool_use` (tool name, input), `tool_result` (success/error, result size), and `turn` (token usage per LLM turn)
+- **StreamingHandler in Child Processes** — `agent-runner.php` creates a `StreamingHandler` with `onToolUse`, `onToolResult`, and `onTurn` callbacks that serialize execution events to the parent. Changed from `Agent::run()` to `Agent::prompt()` to pass the handler
+- **ProcessBackend Event Parsing** — `ProcessBackend::poll()` now detects `__PROGRESS__:` prefixed lines in stderr, parses them as JSON, and queues them per agent. New `consumeProgressEvents(agentId)` method returns and clears queued events. Regular log lines are still forwarded to the logger as before
+- **AgentTool Coordinator Integration** — `waitForProcessCompletion()` registers child agents with `ParallelAgentCoordinator` and feeds progress events into `AgentProgressTracker` on each poll cycle. The tracker updates tool use count, current activity description (e.g. "Editing /src/Agent.php"), token counts, and recent activity list in real time
+- **Process Monitor Visibility** — `ParallelAgentDisplay` now shows live child agent progress (current tool, token count, tool use count) without any display code changes — the existing UI reads from the coordinator's trackers which are now populated for process-based agents
 
 ### 🆕 v0.6.16 — Parent-to-Child Registration Propagation
 - **Agent Definition Propagation** — Parent process serializes all registered agent definitions (builtin + custom from `.claude/agents/`) via `AgentManager::exportDefinitions()` and passes them in the stdin JSON. Child processes import them via `importDefinitions()` before creating their Agent — no Laravel bootstrap or filesystem access required

@@ -32,6 +32,8 @@ class ProcessBackend implements BackendInterface
     private array $statuses = [];
     /** @var array<string, array> Parsed JSON result from completed agents */
     private array $results = [];
+    /** @var array<string, array[]> Queued progress events parsed from child stderr */
+    private array $progressEvents = [];
     private LoggerInterface $logger;
     private string $agentScript;
 
@@ -231,10 +233,20 @@ class ProcessBackend implements BackendInterface
             $chunk = fread($info['pipes'][2], 65536);
             if ($chunk !== false && $chunk !== '') {
                 $info['stderr_buffer'] .= $chunk;
-                // Forward agent stderr to our logger
+                // Forward agent stderr to our logger, parsing progress events
                 foreach (explode("\n", $chunk) as $line) {
                     $line = trim($line);
-                    if ($line !== '') {
+                    if ($line === '') {
+                        continue;
+                    }
+                    // Structured progress events from child StreamingHandler
+                    if (str_starts_with($line, '__PROGRESS__:')) {
+                        $json = substr($line, strlen('__PROGRESS__:'));
+                        $event = json_decode($json, true);
+                        if ($event) {
+                            $this->progressEvents[$agentId][] = $event;
+                        }
+                    } else {
                         $this->logger->debug("[{$agentId}] {$line}");
                     }
                 }
@@ -313,6 +325,23 @@ class ProcessBackend implements BackendInterface
     public function getResult(string $agentId): ?array
     {
         return $this->results[$agentId] ?? null;
+    }
+
+    /**
+     * Consume queued progress events for an agent.
+     *
+     * Returns all events since last call and clears the queue.
+     * Events are structured JSON from the child's StreamingHandler:
+     *   - type: 'tool_use' | 'tool_result' | 'turn'
+     *   - agent_id, timestamp, data (type-specific payload)
+     *
+     * @return array[] Progress events
+     */
+    public function consumeProgressEvents(string $agentId): array
+    {
+        $events = $this->progressEvents[$agentId] ?? [];
+        $this->progressEvents[$agentId] = [];
+        return $events;
     }
 
     // ── BackendInterface methods ───────────────────────────────────
@@ -407,6 +436,7 @@ class ProcessBackend implements BackendInterface
         unset($this->processes[$agentId]);
         unset($this->statuses[$agentId]);
         unset($this->results[$agentId]);
+        unset($this->progressEvents[$agentId]);
     }
 
     // ── Helpers ────────────────────────────────────────────────────

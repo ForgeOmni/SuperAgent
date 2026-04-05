@@ -818,6 +818,16 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.17 Upgrade Notes
+
+v0.6.17 adds real-time progress monitoring for child agent processes. **No configuration changes required.**
+
+Previously, when sub-agents ran in separate OS processes via `ProcessBackend`, the process monitor could not display their work progress (tools being used, token counts, etc.). Now child processes emit structured progress events via stderr using the `__PROGRESS__:` protocol, and the parent parses these into `AgentProgressTracker` — making child agent activity visible in `ParallelAgentDisplay` and WebSocket dashboards.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.16 Upgrade Notes
 
 v0.6.16 ensures sub-agent child processes have access to all parent's agent definitions and MCP server configs. **No configuration changes required.**
@@ -1204,6 +1214,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.17     | 10.x+   | 8.1+ | Real-time child agent progress monitoring via `__PROGRESS__:` stderr protocol |
 | 0.6.16     | 10.x+   | 8.1+ | Parent-to-child agent/MCP registration propagation via stdin serialization |
 | 0.6.15     | 10.x+   | 8.1+ | MCP server sharing via TCP bridge — N child agents share 1 MCP server process |
 | 0.6.12     | 10.x+   | 8.1+ | Child process Laravel bootstrap, provider config serialization fix, full tool set in sub-agents |

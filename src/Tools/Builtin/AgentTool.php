@@ -262,13 +262,21 @@ class AgentTool extends Tool
         $startTime = microtime(true);
         $maxWaitTime = 300; // 5 minutes
 
+        // Register with coordinator so the process monitor can display progress
+        $coordinator = ParallelAgentCoordinator::getInstance();
+        $tracker = $coordinator->registerAgent($agentId, $name);
+
         // If it's a ProcessBackend, use its poll/waitAll mechanism
         if ($backend instanceof ProcessBackend) {
             while (microtime(true) - $startTime < $maxWaitTime) {
                 $statuses = $backend->poll();
 
+                // Feed progress events from child stderr into the tracker
+                $this->applyProgressEvents($backend, $agentId, $tracker);
+
                 $status = $statuses[$agentId] ?? null;
                 if ($status === AgentStatus::COMPLETED || $status === AgentStatus::FAILED) {
+                    $tracker->setStatus($status === AgentStatus::COMPLETED ? 'completed' : 'failed');
                     break;
                 }
 
@@ -383,6 +391,38 @@ class AgentTool extends Tool
             ],
             'prompt' => $prompt,
         ]);
+    }
+
+    /**
+     * Apply progress events from child process stderr to the tracker.
+     */
+    private function applyProgressEvents(
+        ProcessBackend $backend,
+        string $agentId,
+        \SuperAgent\Swarm\AgentProgressTracker $tracker,
+    ): void {
+        foreach ($backend->consumeProgressEvents($agentId) as $event) {
+            $type = $event['type'] ?? '';
+            $data = $event['data'] ?? [];
+
+            switch ($type) {
+                case 'tool_use':
+                    $tracker->addToolActivity([
+                        'name' => $data['tool_name'] ?? 'unknown',
+                        'input' => $data['input'] ?? [],
+                    ]);
+                    break;
+
+                case 'turn':
+                    $tracker->updateFromResponse([
+                        'input_tokens' => $data['input_tokens'] ?? 0,
+                        'output_tokens' => $data['output_tokens'] ?? 0,
+                        'cache_creation_input_tokens' => $data['cache_creation_input_tokens'] ?? 0,
+                        'cache_read_input_tokens' => $data['cache_read_input_tokens'] ?? 0,
+                    ]);
+                    break;
+            }
+        }
     }
 
     public function setTeamContext(TeamContext $context): void

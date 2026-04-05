@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.17 升级说明
+
+v0.6.17 为子 agent 进程添加实时进度监控。**无需修改配置。**
+
+此前子 agent 通过 `ProcessBackend` 在独立 OS 进程中运行时，进程监控无法显示其工作进度（使用的工具、token 计数等）。现在子进程通过 stderr 使用 `__PROGRESS__:` 协议发送结构化进度事件，父进程解析后注入 `AgentProgressTracker`——使子 agent 的活动在 `ParallelAgentDisplay` 和 WebSocket 仪表板中可见。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.16 升级说明
 
 v0.6.16 确保子 agent 进程可访问父进程的所有 agent 定义和 MCP server 配置。**无需修改配置。**
@@ -858,6 +868,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.17     | 10.x+   | 8.1+  | 子 agent 进程实时进度监控（`__PROGRESS__:` stderr 协议） |
 | 0.6.16     | 10.x+   | 8.1+  | 父进程 agent/MCP 注册数据透传子进程（stdin 序列化） |
 | 0.6.15     | 10.x+   | 8.1+  | MCP Server TCP 桥接共享 — N 个子 agent 共享 1 个 MCP server 进程 |
 | 0.6.12     | 10.x+   | 8.1+  | 子进程 Laravel 引导、Provider 序列化修复、子 agent 完整工具集 |

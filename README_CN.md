@@ -3,14 +3,21 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.16-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.17-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
-> **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [API文档](docs/)
+> **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
 
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.6.17 — 子 Agent 进程实时进度监控
+- **结构化进度事件** — 子 agent 进程现在通过 stderr 发送 `__PROGRESS__:` 协议的结构化 JSON 进度事件。事件包括 `tool_use`（工具名、输入参数）、`tool_result`（成功/失败、结果大小）和 `turn`（每轮 LLM 调用的 token 用量）
+- **子进程 StreamingHandler** — `agent-runner.php` 创建带有 `onToolUse`、`onToolResult` 和 `onTurn` 回调的 `StreamingHandler`，将执行事件序列化回传给父进程。从 `Agent::run()` 改为 `Agent::prompt()` 以传递 handler
+- **ProcessBackend 事件解析** — `ProcessBackend::poll()` 现在识别 stderr 中 `__PROGRESS__:` 前缀的行，解析为 JSON 并按 agent 排队。新增 `consumeProgressEvents(agentId)` 方法返回并清空排队事件。普通日志行仍照常转发给 logger
+- **AgentTool 协调器集成** — `waitForProcessCompletion()` 将子 agent 注册到 `ParallelAgentCoordinator`，每次轮询时将进度事件注入 `AgentProgressTracker`。跟踪器实时更新工具使用计数、当前活动描述（如"Editing /src/Agent.php"）、token 计数和最近活动列表
+- **进程监控可见性** — `ParallelAgentDisplay` 现在可显示子 agent 实时进度（当前工具、token 计数、工具使用次数），无需修改显示代码——现有 UI 直接读取协调器的 tracker，而 tracker 现已对进程级 agent 填充数据
 
 ### 🆕 v0.6.16 — 父进程注册数据透传子进程
 - **Agent 定义透传** — 父进程通过 `AgentManager::exportDefinitions()` 序列化所有已注册 agent 定义（内置 + `.claude/agents/` 自定义），经 stdin JSON 传给子进程。子进程通过 `importDefinitions()` 导入——无需 Laravel bootstrap 或文件系统访问

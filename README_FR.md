@@ -3,14 +3,21 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.16-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.17-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
-> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Docs API](docs/)
+> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
 
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.6.17 — Surveillance en Temps Réel de la Progression des Agents Enfants
+- **Événements de Progression Structurés** — Les processus agents enfants émettent désormais des événements de progression JSON structurés sur stderr via le protocole `__PROGRESS__:`. Les événements incluent `tool_use` (nom de l'outil, entrée), `tool_result` (succès/erreur, taille du résultat) et `turn` (utilisation de tokens par tour LLM)
+- **StreamingHandler dans les Processus Enfants** — `agent-runner.php` crée un `StreamingHandler` avec des callbacks `onToolUse`, `onToolResult` et `onTurn` qui sérialisent les événements d'exécution vers le parent. Passage de `Agent::run()` à `Agent::prompt()` pour transmettre le handler
+- **Parsing d'Événements ProcessBackend** — `ProcessBackend::poll()` détecte désormais les lignes préfixées `__PROGRESS__:` dans stderr, les parse en JSON et les met en file d'attente par agent. Nouvelle méthode `consumeProgressEvents(agentId)` qui retourne et vide les événements en attente. Les lignes de log normales sont toujours transmises au logger
+- **Intégration AgentTool avec le Coordinateur** — `waitForProcessCompletion()` enregistre les agents enfants auprès de `ParallelAgentCoordinator` et injecte les événements de progression dans `AgentProgressTracker` à chaque cycle de polling. Le tracker met à jour en temps réel le nombre d'utilisations d'outils, la description de l'activité courante (ex. "Editing /src/Agent.php"), les compteurs de tokens et la liste des activités récentes
+- **Visibilité dans le Moniteur de Processus** — `ParallelAgentDisplay` affiche désormais la progression en direct des agents enfants (outil courant, compteur de tokens, nombre d'utilisations d'outils) sans modification du code d'affichage — l'UI existante lit les trackers du coordinateur qui sont maintenant alimentés pour les agents basés sur les processus
 
 ### 🆕 v0.6.16 — Propagation des Enregistrements Parent vers Enfant
 - **Propagation des Définitions d'Agents** — Le processus parent sérialise toutes les définitions d'agents enregistrées (intégrés + personnalisés de `.claude/agents/`) via `AgentManager::exportDefinitions()` et les transmet dans le JSON stdin. Les processus enfants les importent via `importDefinitions()` — sans bootstrap Laravel ni accès au système de fichiers

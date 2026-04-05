@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.6.17
+
+v0.6.17 ajoute la surveillance en temps réel de la progression des agents enfants. **Aucune modification de configuration requise.**
+
+Auparavant, lorsque les sous-agents s'exécutaient dans des processus OS séparés via `ProcessBackend`, le moniteur de processus ne pouvait pas afficher leur progression (outils utilisés, compteurs de tokens, etc.). Désormais les processus enfants émettent des événements de progression structurés via stderr en utilisant le protocole `__PROGRESS__:`, et le parent les parse dans `AgentProgressTracker` — rendant l'activité des agents enfants visible dans `ParallelAgentDisplay` et les tableaux de bord WebSocket.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.6.16
 
 v0.6.16 garantit que les processus enfants des sous-agents ont accès à toutes les définitions d'agents et configs MCP du parent. **Aucune modification de configuration requise.**
@@ -848,6 +858,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.17     | 10.x+   | 8.1+  | Surveillance en temps réel de la progression des agents enfants via protocole stderr `__PROGRESS__:` |
 | 0.6.16     | 10.x+   | 8.1+  | Propagation des enregistrements agent/MCP parent vers enfant via sérialisation stdin |
 | 0.6.15     | 10.x+   | 8.1+  | Partage de serveurs MCP via pont TCP — N agents enfants partagent 1 processus MCP |
 | 0.6.12     | 10.x+   | 8.1+  | Bootstrap Laravel dans processus enfants, correction sérialisation provider, ensemble complet d'outils |

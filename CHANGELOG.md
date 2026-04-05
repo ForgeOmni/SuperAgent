@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.17] - 2026-04-05
+
+### 🚀 Summary
+
+Child agent processes running in separate OS processes (via `ProcessBackend`) were invisible to the process monitor — no tool activity, token counts, or progress was displayed. This release adds a structured progress event protocol that streams real-time execution data from child processes to the parent's `AgentProgressTracker`, making child agent work fully visible in `ParallelAgentDisplay` and WebSocket dashboards.
+
+### Added
+
+#### Structured Progress Event Protocol
+- **`__PROGRESS__:` stderr protocol**: child processes emit structured JSON events on stderr with a `__PROGRESS__:` prefix. Three event types: `tool_use` (tool name, input parameters), `tool_result` (success/error, result size), and `turn` (per-turn token usage including cache tokens)
+- **`agent-runner.php` StreamingHandler**: creates a `StreamingHandler` with `onToolUse`, `onToolResult`, and `onTurn` callbacks that serialize execution events back to the parent process. Changed from `Agent::run()` to `Agent::prompt($prompt, $streamingHandler)` to enable callback injection
+
+#### ProcessBackend Event Parsing
+- **`ProcessBackend::poll()`**: now detects `__PROGRESS__:` prefixed lines in stderr, parses them as JSON, and queues them per agent ID. Regular log lines continue to be forwarded to the PSR-3 logger as before
+- **`ProcessBackend::consumeProgressEvents(string $agentId): array`**: new method that returns and clears all queued progress events for a given agent. Called by the parent during each poll cycle
+
+#### AgentTool Coordinator Integration
+- **`AgentTool::waitForProcessCompletion()`**: now registers child agents with `ParallelAgentCoordinator` and creates an `AgentProgressTracker` before the polling loop. On each iteration, consumes progress events and applies them to the tracker
+- **`AgentTool::applyProgressEvents()`**: new private method that maps `tool_use` events to `addToolActivity()` (updates tool count and current activity description) and `turn` events to `updateFromResponse()` (updates token counts)
+
+### Changed
+- **`bin/agent-runner.php`**: uses `Agent::prompt()` with `StreamingHandler` instead of `Agent::run()` to enable real-time progress event emission
+- **`ProcessBackend::cleanup()`**: now also clears `$progressEvents` for the cleaned-up agent
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.6.17; added v0.6.17 feature section
+- **INSTALL** (EN/CN/FR): added v0.6.17 upgrade notes and compatibility matrix row
+
 ## [0.6.16] - 2026-04-04
 
 ### 🚀 Summary
