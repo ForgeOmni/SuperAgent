@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.0-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.1-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,16 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.7.1 — Suite de Performance d'Exécution (8 stratégies)
+- **Exécution Parallèle d'Outils** — Exécute les outils en lecture seule (Read, Grep, Glob, WebSearch) en parallèle via PHP Fibers. Plusieurs tool_use dans un tour s'exécutent simultanément. Config : `performance.parallel_tool_execution`
+- **Dispatch d'Outils en Streaming** — Lance l'exécution dès qu'un bloc tool_use est complet pendant le streaming SSE, avant la réponse LLM complète. Config : `performance.streaming_tool_dispatch`
+- **Pool de Connexions HTTP** — Réutilise les connexions TCP/TLS via cURL keep-alive, TCP_NODELAY et handler multi partagé. Config : `performance.connection_pool`
+- **Pré-lecture Spéculative** — Après exécution de Read, prédit et pré-lit les fichiers liés (tests, interfaces, configs). Les lectures suivantes touchent le cache mémoire. Config : `performance.speculative_prefetch`
+- **Exécuteur Bash en Streaming** — Collecte la sortie Bash en streaming avec troncature par timeout. Les sorties longues retournent les N dernières lignes + résumé. Config : `performance.streaming_bash`
+- **max_tokens Adaptatif** — Ajuste max_tokens par tour : 2048 pour les appels d'outils purs, 8192 pour le raisonnement. Config : `performance.adaptive_max_tokens`
+- **Support API Batch** — File les requêtes non temps-réel pour l'API Message Batches d'Anthropic (réduction de coût 50%). Config : `performance.batch_api`
+- **Zéro-Copie Outils Locaux** — Cache de contenu fichier entre outils Read/Edit/Write. Résultat Read mis en cache mémoire, Edit/Write invalide le cache. Config : `performance.local_tool_zero_copy`
 
 ### 🆕 v0.7.0 — Suite d'Optimisation des Performances (5 stratégies, toutes configurables)
 - **Compaction des Résultats d'Outils** — Compacte automatiquement les anciens résultats d'outils (au-delà des N derniers tours) en résumés concis, réduisant les tokens d'entrée de 30-50%. Préserve les résultats d'erreur et le contexte récent. Config : `optimization.tool_result_compaction` (`enabled`, `preserve_recent_turns`, `max_result_length`)

@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-04-05
+
+### 🚀 Summary
+
+Execution performance release: 8 runtime optimizations that reduce tool execution latency, enable parallel execution, and improve resource utilization. Parallel Fiber-based tool execution, streaming tool dispatch, HTTP connection pooling, speculative file prefetch, adaptive max_tokens, Bash streaming with timeout, Anthropic Batch API support, and local tool zero-copy file caching. All integrated into the QueryEngine pipeline and individually configurable via env vars.
+
+### Added
+
+#### Execution Performance Suite (`src/Performance/`)
+- **`ParallelToolExecutor`**: classifies tool_use blocks into parallel-safe (read-only) and sequential (write) groups, executes read-only tools concurrently using PHP Fibers. Config: `SUPERAGENT_PERF_PARALLEL_TOOLS`, `SUPERAGENT_PERF_MAX_PARALLEL`
+- **`StreamingToolDispatch`**: starts tool execution as soon as a tool_use block is fully received during SSE streaming, before the complete LLM response. Uses Fibers with pump/collect pattern. Config: `SUPERAGENT_PERF_STREAMING_DISPATCH`
+- **`ConnectionPool`**: shared Guzzle clients with cURL keep-alive, TCP_NODELAY, TCP_KEEPALIVE. Eliminates repeated TCP/TLS handshakes for same-host API calls. Config: `SUPERAGENT_PERF_CONNECTION_POOL`
+- **`SpeculativePrefetch`**: after Read tool, predicts related files (tests, interfaces, configs in same directory) and pre-reads them into memory cache (LRU, max 50 entries). Config: `SUPERAGENT_PERF_SPECULATIVE_PREFETCH`
+- **`StreamingBashExecutor`**: streams Bash output with configurable timeout (30s default). Long output returns last N lines + summary header instead of full wait. Config: `SUPERAGENT_PERF_STREAMING_BASH`
+- **`AdaptiveMaxTokens`**: dynamically adjusts max_tokens per turn — 2048 for pure tool-call responses, 8192 for reasoning. Reduces reserved capacity waste. Config: `SUPERAGENT_PERF_ADAPTIVE_TOKENS`
+- **`BatchApiClient`**: queues non-realtime requests for Anthropic Message Batches API (50% cost). Submit/poll/wait pattern. Disabled by default. Config: `SUPERAGENT_PERF_BATCH_API`
+- **`LocalToolZeroCopy`**: file content cache between Read/Edit/Write. Read results cached in memory (50MB LRU), Edit/Write invalidates. md5 integrity check on cache reads. Config: `SUPERAGENT_PERF_ZERO_COPY`
+
+### Changed
+- **`QueryEngine::callProvider()`**: applies AdaptiveMaxTokens before provider call
+- **`QueryEngine::executeTools()`**: parallel execution path for multi-tool turns via `executeSingleTool()` + `ParallelToolExecutor::classify()/executeParallel()`. Falls back to sequential for single tools or write operations
+- **`QueryEngine::executeSingleTool()`**: new extracted method for single tool execution with full pipeline (permissions, hooks, caching, zero-copy). Used by both parallel and sequential paths
+- **`QueryEngine::runSpeculativePrefetch()`**: triggers prefetch after tool results are collected
+- **`config/superagent.php`**: new `performance` section with 8 subsections
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.7.1; added v0.7.1 feature section
+- **INSTALL** (EN/CN/FR): added v0.7.1 upgrade notes and compatibility matrix row
+
 ## [0.7.0] - 2026-04-05
 
 ### 🚀 Summary

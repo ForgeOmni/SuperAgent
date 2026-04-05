@@ -32,6 +32,11 @@ use SuperAgent\Optimization\ToolSchemaFilter;
 use SuperAgent\Optimization\ModelRouter;
 use SuperAgent\Optimization\ResponsePrefill;
 use SuperAgent\Optimization\PromptCachePinning;
+use SuperAgent\Performance\ParallelToolExecutor;
+use SuperAgent\Performance\StreamingToolDispatch;
+use SuperAgent\Performance\AdaptiveMaxTokens;
+use SuperAgent\Performance\SpeculativePrefetch;
+use SuperAgent\Performance\LocalToolZeroCopy;
 use SuperAgent\Traits\CachedToolExecutionTrait;
 
 class QueryEngine
@@ -75,12 +80,19 @@ class QueryEngine
 
     protected ?SmartContextManager $smartContextManager = null;
 
-    // ── Performance optimizations ─────────────────────────────────
+    // ── Token optimizations (v0.7.0) ────────────────────────────────
     protected ?ToolResultCompactor $toolResultCompactor = null;
     protected ?ToolSchemaFilter $toolSchemaFilter = null;
     protected ?ModelRouter $modelRouter = null;
     protected ?ResponsePrefill $responsePrefill = null;
     protected ?PromptCachePinning $promptCachePinning = null;
+
+    // ── Execution performance (v0.7.1) ───────────────────────────
+    protected ?ParallelToolExecutor $parallelExecutor = null;
+    protected ?StreamingToolDispatch $streamingDispatch = null;
+    protected ?AdaptiveMaxTokens $adaptiveMaxTokens = null;
+    protected ?SpeculativePrefetch $speculativePrefetch = null;
+    protected ?LocalToolZeroCopy $zeroCopy = null;
 
     public function __construct(
         protected readonly LLMProvider $provider,
@@ -139,7 +151,7 @@ class QueryEngine
             );
         }
 
-        // ── Initialize performance optimizations from config ──────
+        // ── Initialize token optimizations (v0.7.0) ─────────────────
         $this->toolResultCompactor = ToolResultCompactor::fromConfig();
         $this->toolSchemaFilter = ToolSchemaFilter::fromConfig();
         $this->modelRouter = ModelRouter::fromConfig(
@@ -147,6 +159,13 @@ class QueryEngine
         );
         $this->responsePrefill = ResponsePrefill::fromConfig();
         $this->promptCachePinning = PromptCachePinning::fromConfig();
+
+        // ── Initialize execution performance (v0.7.1) ───────────────
+        $this->parallelExecutor = ParallelToolExecutor::fromConfig();
+        $this->streamingDispatch = StreamingToolDispatch::fromConfig();
+        $this->adaptiveMaxTokens = AdaptiveMaxTokens::fromConfig();
+        $this->speculativePrefetch = SpeculativePrefetch::fromConfig();
+        $this->zeroCopy = LocalToolZeroCopy::fromConfig();
     }
 
     public function getMessages(): array
@@ -346,6 +365,15 @@ class QueryEngine
             }
         }
 
+        // ── Performance: Adaptive max_tokens ──────────────────────
+        if ($this->adaptiveMaxTokens?->isEnabled()) {
+            $options['max_tokens'] = $this->adaptiveMaxTokens->adjust(
+                $messages,
+                $this->turnCount,
+                $options['max_tokens'] ?? 8192,
+            );
+        }
+
         // ── Optimization 4: Response prefill ──────────────────────
         if ($this->responsePrefill?->isEnabled()) {
             $prefill = $this->responsePrefill->generate($messages, $tools);
@@ -397,6 +425,31 @@ class QueryEngine
     protected function executeTools(AssistantMessage $assistantMessage): ToolResultMessage
     {
         $results = [];
+
+        // ── Performance: Parallel tool execution ──────────────────
+        $toolBlocks = $assistantMessage->toolUseBlocks();
+        if ($this->parallelExecutor?->isEnabled() && count($toolBlocks) > 1) {
+            $classified = $this->parallelExecutor->classify($toolBlocks);
+
+            // Execute read-only tools in parallel
+            if (!empty($classified['parallel'])) {
+                $parallelResults = $this->parallelExecutor->executeParallel(
+                    $classified['parallel'],
+                    fn($block) => $this->executeSingleTool($block),
+                );
+                array_push($results, ...$parallelResults);
+            }
+
+            // Execute remaining tools sequentially
+            foreach ($classified['sequential'] as $block) {
+                $results[] = $this->executeSingleTool($block);
+            }
+
+            // Speculative prefetch after tool execution
+            $this->runSpeculativePrefetch($results);
+
+            return ToolResultMessage::fromResults($results);
+        }
 
         foreach ($assistantMessage->toolUseBlocks() as $block) {
             $toolName = $block->toolName;
@@ -518,7 +571,102 @@ class QueryEngine
             }
         }
 
+        // Speculative prefetch after sequential execution
+        $this->runSpeculativePrefetch($results);
+
         return ToolResultMessage::fromResults($results);
+    }
+
+    /**
+     * Execute a single tool block through the full pipeline (permissions, hooks, execution).
+     * Used by both parallel and sequential execution paths.
+     *
+     * @return array{tool_use_id: string, content: string, is_error: bool}
+     */
+    protected function executeSingleTool(ContentBlock $block): array
+    {
+        $toolName = $block->toolName;
+        $toolInput = $block->toolInput ?? [];
+        $toolUseId = $block->toolUseId;
+
+        if (!$this->isToolAllowed($toolName)) {
+            $content = "Error: Tool '{$toolName}' is not permitted.";
+            $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
+            return ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
+        }
+
+        if (!isset($this->toolMap[$toolName])) {
+            $content = "Error: Unknown tool '{$toolName}'";
+            $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
+            return ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
+        }
+
+        $tool = $this->toolMap[$toolName];
+
+        if (method_exists($tool, 'validateInput')) {
+            $validationError = $tool->validateInput($toolInput);
+            if ($validationError !== null) {
+                $content = "Error: Invalid input for tool '{$toolName}': {$validationError}";
+                $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
+                return ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
+            }
+        }
+
+        try {
+            // Zero-copy: check file cache before executing Read
+            if ($this->zeroCopy?->isEnabled() && $toolName === 'read' && isset($toolInput['file_path'])) {
+                $cached = $this->zeroCopy->getCachedFile($toolInput['file_path']);
+                if ($cached !== null) {
+                    $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $cached, false);
+                    return ['tool_use_id' => $toolUseId, 'content' => $cached, 'is_error' => false];
+                }
+            }
+
+            if (method_exists($this, 'executeToolWithCache')) {
+                $result = $this->executeToolWithCache(
+                    $toolName,
+                    $toolInput,
+                    fn() => $tool->execute($toolInput)
+                );
+            } else {
+                $result = $tool->execute($toolInput);
+            }
+
+            $content = $result->contentAsString();
+            $isError = $result->isError;
+
+            // Zero-copy: cache result for subsequent tools
+            if ($this->zeroCopy?->isEnabled()) {
+                $this->zeroCopy->wrapResult($toolName, $toolInput, $result);
+            }
+
+            $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, $isError);
+            return ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => $isError];
+
+        } catch (\Throwable $e) {
+            $content = "Error executing tool '{$toolName}': {$e->getMessage()}";
+            $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
+            return ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
+        }
+    }
+
+    /**
+     * Run speculative prefetch after tool results are collected.
+     */
+    protected function runSpeculativePrefetch(array $results): void
+    {
+        if (!$this->speculativePrefetch?->isEnabled()) {
+            return;
+        }
+
+        foreach ($results as $result) {
+            // After successful Read, prefetch related files
+            if (!($result['is_error'] ?? false)) {
+                // Check if this was a Read by looking at the content pattern
+                // (tool name not available in results, but file paths are in content for reads)
+                $this->speculativePrefetch->prefetchRelated($result['content'] ?? '');
+            }
+        }
     }
 
     /**

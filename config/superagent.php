@@ -163,6 +163,67 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Execution Performance
+    |--------------------------------------------------------------------------
+    | Runtime performance optimizations that speed up tool execution, reduce
+    | latency, and improve resource utilization. Each can be independently
+    | enabled/disabled.
+    */
+    'performance' => [
+
+        // Execute read-only tools (Read, Grep, Glob) in parallel using Fibers
+        'parallel_tool_execution' => [
+            'enabled' => env('SUPERAGENT_PERF_PARALLEL_TOOLS', true),
+            'max_parallel' => (int) env('SUPERAGENT_PERF_MAX_PARALLEL', 5),
+        ],
+
+        // Start tool execution during SSE streaming before full response completes
+        'streaming_tool_dispatch' => [
+            'enabled' => env('SUPERAGENT_PERF_STREAMING_DISPATCH', true),
+        ],
+
+        // Reuse HTTP connections (TCP keep-alive) for API calls
+        'connection_pool' => [
+            'enabled' => env('SUPERAGENT_PERF_CONNECTION_POOL', true),
+        ],
+
+        // Pre-read related files after Read tool executes (tests, interfaces, configs)
+        'speculative_prefetch' => [
+            'enabled' => env('SUPERAGENT_PERF_SPECULATIVE_PREFETCH', true),
+            'max_cache_entries' => (int) env('SUPERAGENT_PERF_PREFETCH_CACHE', 50),
+            'max_file_size' => (int) env('SUPERAGENT_PERF_PREFETCH_MAX_SIZE', 100000),
+        ],
+
+        // Stream Bash output with timeout truncation, return last N lines + summary
+        'streaming_bash' => [
+            'enabled' => env('SUPERAGENT_PERF_STREAMING_BASH', true),
+            'max_output_lines' => (int) env('SUPERAGENT_PERF_BASH_MAX_LINES', 500),
+            'tail_lines' => (int) env('SUPERAGENT_PERF_BASH_TAIL_LINES', 100),
+            'stream_timeout_ms' => (int) env('SUPERAGENT_PERF_BASH_TIMEOUT', 30000),
+        ],
+
+        // Dynamically adjust max_tokens based on expected response type
+        'adaptive_max_tokens' => [
+            'enabled' => env('SUPERAGENT_PERF_ADAPTIVE_TOKENS', true),
+            'tool_call_tokens' => (int) env('SUPERAGENT_PERF_TOOL_TOKENS', 2048),
+            'reasoning_tokens' => (int) env('SUPERAGENT_PERF_REASON_TOKENS', 8192),
+        ],
+
+        // Batch non-realtime sub-agent requests via Anthropic Batch API (50% cost)
+        'batch_api' => [
+            'enabled' => env('SUPERAGENT_PERF_BATCH_API', false),
+            'max_batch_size' => (int) env('SUPERAGENT_PERF_BATCH_SIZE', 100),
+        ],
+
+        // Pass PHP objects directly for in-process tools (skip JSON serialization)
+        'local_tool_zero_copy' => [
+            'enabled' => env('SUPERAGENT_PERF_ZERO_COPY', true),
+            'max_cache_size_mb' => (int) env('SUPERAGENT_PERF_ZERO_COPY_MB', 50),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Permission Mode
     |--------------------------------------------------------------------------
     | Supported: "allowAll", "denyAll", "allowList"

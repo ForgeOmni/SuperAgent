@@ -512,6 +512,14 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.7.1
+
+v0.7.1 ajoute 8 optimisations de performance d'exécution. **Toutes sauf Batch API sont activées par défaut.**
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.7.0
 
 v0.7.0 ajoute 5 optimisations de performance qui réduisent la consommation de tokens et les coûts. **Toutes activées par défaut. Aucune modification de configuration requise.**
@@ -897,6 +905,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.7.1      | 10.x+   | 8.1+  | 8 optimisations de performance d'exécution : outils parallèles, dispatch streaming, pool connexions, prefetch, tokens adaptatifs, API batch, zéro-copie |
 | 0.7.0      | 10.x+   | 8.1+  | 5 optimisations de performance : compaction résultats, schéma sélectif, routage modèle, prefill réponse, épinglage cache |
 | 0.6.19     | 10.x+   | 8.1+  | Journalisation NDJSON in-process via `NdjsonStreamingHandler` pour visibilité moniteur |
 | 0.6.18     | 10.x+   | 8.1+  | Journalisation structurée NDJSON compatible Claude Code remplace le protocole `__PROGRESS__:` |
