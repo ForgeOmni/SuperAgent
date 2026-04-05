@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-04-05
+
+### Fixed
+- **`AgentManager::resolveBasePath()`**: used `getcwd()` as fallback when Laravel is unavailable. When LLM changes cwd to a subdirectory (e.g. `docs/test/`), `.claude/agents` resolved to `docs/test/.claude/agents` instead of the project root. Now walks up from cwd looking for `composer.json` / `.git` / `artisan` to find the true project root. Result cached per-process
+- **`SkillManager::resolveBasePath()`**: same fix — `.claude/commands` and `.claude/skills` now resolve from project root regardless of cwd
+- **`MCPManager::resolveBasePath()`**: same fix — `.mcp.json` and MCP config paths now resolve from project root
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.7.2
+- **INSTALL** (EN/CN/FR): added v0.7.2 compatibility matrix row
+
 ## [0.7.1] - 2026-04-05
 
 ### Fixed

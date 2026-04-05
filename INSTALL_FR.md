@@ -897,6 +897,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.7.2      | 10.x+   | 8.1+  | Correction résolution chemins .claude/ : racine du projet au lieu de cwd pour AgentManager, SkillManager, MCPManager |
 | 0.7.1      | 10.x+   | 8.1+  | Correction AgentTool PermissionMode 'bypass' enum incompatible |
 | 0.7.0      | 10.x+   | 8.1+  | 13 optimisations de performance : compaction token, outils sélectifs, routage modèle, prefill, cache pinning + outils parallèles, dispatch streaming, pool connexions, prefetch, tokens adaptatifs, API batch, zéro-copie : compaction résultats, schéma sélectif, routage modèle, prefill réponse, épinglage cache |
 | 0.6.19     | 10.x+   | 8.1+  | Journalisation NDJSON in-process via `NdjsonStreamingHandler` pour visibilité moniteur |
