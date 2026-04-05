@@ -97,7 +97,7 @@ class AgentTool extends Tool
                 'mode' => [
                     'type' => 'string',
                     'description' => 'Permission mode for spawned agent',
-                    'enum' => ['default', 'plan', 'acceptEdits', 'bypass', 'dontAsk', 'auto'],
+                    'enum' => ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'bypass', 'dontAsk', 'auto'],
                 ],
                 'isolation' => [
                     'type' => 'string',
@@ -127,7 +127,7 @@ class AgentTool extends Tool
             $name = $input['name'] ?? $this->generateAgentName($subagentType);
             $teamName = $input['team_name'] ?? $this->teamContext?->getTeamName();
             $model = $input['model'] ?? null;
-            $mode = isset($input['mode']) ? PermissionMode::from($input['mode']) : null;
+            $mode = isset($input['mode']) ? self::resolvePermissionMode($input['mode']) : null;
             $isolation = isset($input['isolation']) ? IsolationMode::from($input['isolation']) : IsolationMode::NONE;
             $runInBackground = $input['run_in_background'] ?? false;
 
@@ -494,6 +494,26 @@ class AgentTool extends Tool
             throw new \RuntimeException("Backend '{$type->value}' not initialized");
         }
         return $this->backends[$type->value];
+    }
+
+    /**
+     * Resolve permission mode from input string, mapping schema aliases
+     * to PermissionMode enum values.
+     */
+    private static function resolvePermissionMode(string $mode): PermissionMode
+    {
+        // Map schema aliases to enum values
+        $aliases = [
+            'bypass' => 'bypassPermissions',
+        ];
+
+        $resolved = $aliases[$mode] ?? $mode;
+
+        try {
+            return PermissionMode::from($resolved);
+        } catch (\ValueError) {
+            return PermissionMode::DEFAULT;
+        }
     }
 
     private function generateAgentName(string $type): string
