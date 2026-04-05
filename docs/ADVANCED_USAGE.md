@@ -39,6 +39,10 @@ This document consolidates all advanced feature documentation for SuperAgent int
 - [22. Checkpoint & Resume](#22-checkpoint--resume)
 - [23. File History](#23-file-history)
 
+### Performance & Logging (v0.7.0)
+- [24. Performance Optimization](#24-performance-optimization)
+- [25. NDJSON Structured Logging](#25-ndjson-structured-logging)
+
 ---
 
 ## 1. Pipeline DSL
@@ -3074,3 +3078,439 @@ Secret detection patterns: `api_key`, `aws_key`, `private_key` (PEM headers), `t
 | Sensitive file write blocked | File matches protected pattern | Remove pattern or disable protection for testing |
 | Git commit fails | No staged changes or not a git repo | Check `hasStagedChanges()` and `isGitRepository()` |
 | Undo doesn't work | No snapshot ID recorded | Ensure `createSnapshot()` before and after edits |
+
+---
+
+## 24. Performance Optimization
+
+> 13 configurable strategies that reduce token consumption (30-50%), lower cost (40-60%), improve cache hit rates (~90%), and speed up tool execution through parallelism.
+
+### Overview
+
+SuperAgent v0.7.0 introduces two optimization layers integrated into the `QueryEngine` pipeline:
+
+- **Token Optimizations** (`src/Optimization/`) — 5 strategies that reduce API input/output tokens
+- **Execution Performance** (`src/Performance/`) — 8 strategies that speed up runtime execution
+
+All optimizations are initialized automatically in the `QueryEngine` constructor via `fromConfig()` and applied transparently in `callProvider()` and `executeTools()`. Each can be independently disabled via env vars.
+
+### Configuration
+
+```php
+// config/superagent.php
+
+'optimization' => [
+    'tool_result_compaction' => [
+        'enabled' => env('SUPERAGENT_OPT_TOOL_COMPACTION', true),
+        'preserve_recent_turns' => 2,   // Keep last N turns intact
+        'max_result_length' => 200,     // Max chars for compacted result
+    ],
+    'selective_tool_schema' => [
+        'enabled' => env('SUPERAGENT_OPT_SELECTIVE_TOOLS', true),
+        'max_tools' => 20,              // Max tools to include per request
+    ],
+    'model_routing' => [
+        'enabled' => env('SUPERAGENT_OPT_MODEL_ROUTING', true),
+        'fast_model' => env('SUPERAGENT_OPT_FAST_MODEL', 'claude-haiku-4-5-20251001'),
+        'min_turns_before_downgrade' => 2,
+    ],
+    'response_prefill' => [
+        'enabled' => env('SUPERAGENT_OPT_RESPONSE_PREFILL', true),
+    ],
+    'prompt_cache_pinning' => [
+        'enabled' => env('SUPERAGENT_OPT_CACHE_PINNING', true),
+        'min_static_length' => 500,
+    ],
+],
+
+'performance' => [
+    'parallel_tool_execution' => [
+        'enabled' => env('SUPERAGENT_PERF_PARALLEL_TOOLS', true),
+        'max_parallel' => 5,
+    ],
+    'streaming_tool_dispatch' => [
+        'enabled' => env('SUPERAGENT_PERF_STREAMING_DISPATCH', true),
+    ],
+    'connection_pool' => [
+        'enabled' => env('SUPERAGENT_PERF_CONNECTION_POOL', true),
+    ],
+    'speculative_prefetch' => [
+        'enabled' => env('SUPERAGENT_PERF_SPECULATIVE_PREFETCH', true),
+        'max_cache_entries' => 50,
+        'max_file_size' => 100000,
+    ],
+    'streaming_bash' => [
+        'enabled' => env('SUPERAGENT_PERF_STREAMING_BASH', true),
+        'max_output_lines' => 500,
+        'tail_lines' => 100,
+        'stream_timeout_ms' => 30000,
+    ],
+    'adaptive_max_tokens' => [
+        'enabled' => env('SUPERAGENT_PERF_ADAPTIVE_TOKENS', true),
+        'tool_call_tokens' => 2048,
+        'reasoning_tokens' => 8192,
+    ],
+    'batch_api' => [
+        'enabled' => env('SUPERAGENT_PERF_BATCH_API', false),  // Disabled by default
+        'max_batch_size' => 100,
+    ],
+    'local_tool_zero_copy' => [
+        'enabled' => env('SUPERAGENT_PERF_ZERO_COPY', true),
+        'max_cache_size_mb' => 50,
+    ],
+],
+```
+
+### Token Optimizations
+
+#### Tool Result Compaction (`ToolResultCompactor`)
+
+Replaces old tool results with concise summaries. Results beyond the last N turns are compacted to `"[Compacted] Read: <?php class Agent..."`. Error results are preserved intact.
+
+```php
+use SuperAgent\Optimization\ToolResultCompactor;
+
+$compactor = new ToolResultCompactor(
+    enabled: true,
+    preserveRecentTurns: 2,
+    maxResultLength: 200,
+);
+
+// Compact a message array (returns new array, originals unchanged)
+$compacted = $compactor->compact($messages);
+```
+
+**Impact**: 30-50% input token reduction in multi-turn conversations.
+
+#### Selective Tool Schema (`ToolSchemaFilter`)
+
+Sends only relevant tool schemas per turn instead of all 59. Detects the current task phase from recent tool usage:
+
+| Phase | Detected When | Tools Included |
+|-------|--------------|----------------|
+| Explore | Last tool was Read/Grep/Glob/WebSearch | read, grep, glob, bash, web_search, web_fetch |
+| Edit | Last tool was Edit/Write | read, write, edit, bash, grep, glob |
+| Plan | Last tool was Agent/PlanMode | read, grep, glob, agent, enter_plan_mode, exit_plan_mode |
+| First turn | No tool history | All tools (no filtering) |
+
+Always includes `read` and `bash`. Also includes any tool used in the last 2 turns. Minimum 5 tools threshold — if filtering would be too aggressive, all tools pass through.
+
+**Impact**: ~10K tokens saved per request.
+
+#### Per-Turn Model Routing (`ModelRouter`)
+
+Auto-downgrades to a cheaper model for pure tool-call turns (no text, just tool_use blocks), auto-upgrades back when the model produces substantial text.
+
+```php
+use SuperAgent\Optimization\ModelRouter;
+
+$router = ModelRouter::fromConfig('claude-sonnet-4-6-20250627');
+
+// Returns fast model or null (use primary)
+$model = $router->route($messages, $turnCount);
+
+// After each turn, record whether it was tool-only
+$router->recordTurn($assistantMessage);
+```
+
+Routing logic:
+1. First N turns (default 2): always use primary model
+2. After 2+ consecutive tool-only turns: downgrade to fast model
+3. When fast model produces text: auto-upgrade back
+4. Never downgrade if primary is already a cheap model (heuristic: name contains "haiku")
+
+**Impact**: 40-60% cost reduction.
+
+#### Response Prefill (`ResponsePrefill`)
+
+Uses Anthropic's assistant prefill to guide output after extended tool-call sequences. After 3+ consecutive tool round-trips, prefills `"I'll"` to encourage summarization instead of more tool calls. Conservative strategy: no prefill on first turn, after tool results, or during active exploration.
+
+#### Prompt Cache Pinning (`PromptCachePinning`)
+
+Auto-inserts cache boundary marker in system prompts. The `AnthropicProvider` splits the prompt at the boundary: static content before gets `cache_control: ephemeral`, dynamic content after does not. This enables prompt caching: the static prefix stays cached across turns.
+
+Detection heuristics for the split point:
+- Looks for dynamic section markers: `# Current`, `# Context`, `# Memory`, `# Session`, `# Recent`, `# Task`
+- Falls back to 80% point if no markers found
+
+**Impact**: ~90% prompt cache hit rate.
+
+### Execution Performance
+
+#### Parallel Tool Execution (`ParallelToolExecutor`)
+
+When the LLM returns multiple tool_use blocks in one turn, read-only tools execute in parallel using PHP Fibers.
+
+```php
+use SuperAgent\Performance\ParallelToolExecutor;
+
+$executor = ParallelToolExecutor::fromConfig();
+$classified = $executor->classify($toolBlocks);
+// $classified = ['parallel' => [...read-only...], 'sequential' => [...write...]]
+
+$results = $executor->executeParallel($classified['parallel'], function ($block) {
+    return $this->executeSingleTool($block);
+});
+```
+
+Read-only (parallel-safe): `read`, `grep`, `glob`, `web_search`, `web_fetch`, `tool_search`, `task_list`, `task_get`
+
+**Impact**: Multi-tool turn time: max(t1,t2,t3) instead of sum(t1+t2+t3).
+
+#### Streaming Tool Dispatch (`StreamingToolDispatch`)
+
+Pre-executes read-only tools as soon as their tool_use block is complete in the SSE stream, before the full LLM response finishes.
+
+#### HTTP Connection Pooling (`ConnectionPool`)
+
+Shared Guzzle clients per base URL with cURL keep-alive, TCP_NODELAY, and TCP_KEEPALIVE. Eliminates repeated TCP/TLS handshakes.
+
+```php
+use SuperAgent\Performance\ConnectionPool;
+
+$pool = ConnectionPool::fromConfig();
+$client = $pool->getClient('https://api.anthropic.com/', [
+    'x-api-key' => $apiKey,
+    'anthropic-version' => '2023-06-01',
+]);
+```
+
+#### Speculative Prefetch (`SpeculativePrefetch`)
+
+After a Read tool executes, predicts and pre-reads related files into memory cache:
+- Source file → test files (`tests/Unit/BarTest.php`, `tests/Feature/BarTest.php`)
+- Test file → source file
+- PHP class → interfaces in same directory
+- Same directory files with similar name prefix
+
+Max 5 predictions per read, LRU cache with 50 entries.
+
+#### Streaming Bash Executor (`StreamingBashExecutor`)
+
+Streams Bash output with timeout truncation. Long output returns last N lines + summary header.
+
+```php
+use SuperAgent\Performance\StreamingBashExecutor;
+
+$bash = StreamingBashExecutor::fromConfig();
+$result = $bash->execute('npm test', '/path/to/project');
+// $result = ['output' => '...', 'exit_code' => 0, 'truncated' => true, 'total_lines' => 1500]
+```
+
+#### Adaptive max_tokens (`AdaptiveMaxTokens`)
+
+Dynamically adjusts `max_tokens` per turn based on expected response type:
+
+| Context | max_tokens |
+|---------|-----------|
+| First turn | 8192 |
+| Pure tool-call turn (no text) | 2048 |
+| Reasoning/text turn | 8192 |
+
+#### Batch API (`BatchApiClient`)
+
+Queues non-realtime requests for Anthropic's Message Batches API (50% cost reduction).
+
+```php
+use SuperAgent\Performance\BatchApiClient;
+
+$batch = BatchApiClient::fromConfig();
+$batch->queue('task-1', $requestBody1);
+$batch->queue('task-2', $requestBody2);
+
+$results = $batch->submitAndWait(timeoutSeconds: 300);
+// $results = ['task-1' => [...], 'task-2' => [...]]
+```
+
+**Note**: Disabled by default. Enable with `SUPERAGENT_PERF_BATCH_API=true`.
+
+#### Local Tool Zero-Copy (`LocalToolZeroCopy`)
+
+File content cache between Read/Edit/Write tools. Read results cached in memory, Edit/Write invalidates the cache. Uses md5 integrity check to detect external modifications.
+
+```php
+use SuperAgent\Performance\LocalToolZeroCopy;
+
+$zc = LocalToolZeroCopy::fromConfig();
+$zc->cacheFile('/src/Agent.php', $content);
+
+// Next Read: check cache first
+$cached = $zc->getCachedFile('/src/Agent.php');
+
+// After Edit/Write: invalidate
+$zc->invalidateFile('/src/Agent.php');
+```
+
+### Disabling All Optimizations
+
+```env
+# Token optimizations
+SUPERAGENT_OPT_TOOL_COMPACTION=false
+SUPERAGENT_OPT_SELECTIVE_TOOLS=false
+SUPERAGENT_OPT_MODEL_ROUTING=false
+SUPERAGENT_OPT_RESPONSE_PREFILL=false
+SUPERAGENT_OPT_CACHE_PINNING=false
+
+# Execution performance
+SUPERAGENT_PERF_PARALLEL_TOOLS=false
+SUPERAGENT_PERF_STREAMING_DISPATCH=false
+SUPERAGENT_PERF_CONNECTION_POOL=false
+SUPERAGENT_PERF_SPECULATIVE_PREFETCH=false
+SUPERAGENT_PERF_STREAMING_BASH=false
+SUPERAGENT_PERF_ADAPTIVE_TOKENS=false
+SUPERAGENT_PERF_BATCH_API=false
+SUPERAGENT_PERF_ZERO_COPY=false
+```
+
+### Troubleshooting
+
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| Model routing produces errors | Fast model can't handle complex tools | Set `SUPERAGENT_OPT_MODEL_ROUTING=false` or increase `min_turns_before_downgrade` |
+| Tool results too aggressively compacted | Important context in old results lost | Increase `preserve_recent_turns` or `max_result_length` |
+| Selective tools removes needed tool | Phase detection misclassified | Tool used in last 2 turns is always included; increase `max_tools` |
+| Parallel execution causes file conflicts | Write tool incorrectly classified as read-only | Report bug — only `read`, `grep`, `glob`, `web_search`, `web_fetch`, `tool_search`, `task_list`, `task_get` are parallel-safe |
+| Prefetch cache too large | Too many files cached | Reduce `max_cache_entries` or `max_file_size` |
+| Batch API timeout | Large batch takes too long | Increase timeout in `submitAndWait()` or reduce batch size |
+
+---
+
+## 25. NDJSON Structured Logging
+
+> Claude Code-compatible NDJSON (Newline Delimited JSON) logging for real-time process monitoring. Emits the same event format as CC's `stream-json` output.
+
+### Overview
+
+SuperAgent can write structured execution logs in NDJSON format — one JSON object per line, matching Claude Code's `stream-json` protocol. This enables:
+
+- **Process monitor visibility**: tools like CC's bridge/sessionRunner can parse the log and display real-time tool activity
+- **Debugging**: full execution transcript with tool calls, results, and token usage
+- **Replay**: log files can be replayed to reconstruct execution flow
+
+Two components:
+- **`NdjsonWriter`** — Low-level writer that formats and emits individual NDJSON events
+- **`NdjsonStreamingHandler`** — Factory that creates a `StreamingHandler` wired to `NdjsonWriter`
+
+### Event Types
+
+| Type | Role | Description |
+|------|------|-------------|
+| `assistant` | assistant | LLM response with text and/or tool_use content blocks + per-turn usage |
+| `user` | user | Tool result with `parent_tool_use_id` set |
+| `result` | — | Final execution result (success or error) |
+
+### Usage
+
+#### Quick: One-liner with StreamingHandler factory
+
+```php
+use SuperAgent\Logging\NdjsonStreamingHandler;
+
+// Create handler that writes NDJSON to a log file
+$handler = NdjsonStreamingHandler::create(
+    logTarget: '/tmp/agent-execution.jsonl',
+    agentId: 'my-agent',
+);
+
+$result = $agent->prompt('Fix the bug in UserController', $handler);
+```
+
+#### Full: With result/error events
+
+```php
+use SuperAgent\Logging\NdjsonStreamingHandler;
+
+$pair = NdjsonStreamingHandler::createWithWriter(
+    logTarget: '/tmp/agent.jsonl',
+    agentId: 'task-123',
+    onText: function (string $delta, string $full) {
+        echo $delta;  // Stream text to terminal
+    },
+);
+
+try {
+    $result = $agent->prompt($prompt, $pair->handler);
+
+    $pair->writer->writeResult(
+        numTurns: $result->turns(),
+        resultText: $result->text(),
+        usage: $result->totalUsage()->toArray(),
+        costUsd: $result->totalCostUsd,
+    );
+} catch (\Throwable $e) {
+    $pair->writer->writeError($e->getMessage());
+    throw $e;
+}
+```
+
+#### Low-level: Direct NdjsonWriter
+
+```php
+use SuperAgent\Logging\NdjsonWriter;
+
+$writer = new NdjsonWriter(
+    agentId: 'agent-1',
+    sessionId: 'session-abc',
+    stream: fopen('/tmp/log.jsonl', 'a'),
+);
+
+// Write individual events
+$writer->writeToolUse('Read', 'tu_001', ['file_path' => '/src/Agent.php']);
+$writer->writeToolResult('tu_001', 'Read', '<?php class Agent { ... }', false);
+$writer->writeAssistant($assistantMessage);
+$writer->writeResult(3, 'Task completed.', ['input_tokens' => 5000, 'output_tokens' => 1200]);
+```
+
+### NDJSON Format Reference
+
+#### Assistant event (tool_use)
+```json
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_001","name":"Read","input":{"file_path":"/src/Agent.php"}}]},"usage":{"inputTokens":1500,"outputTokens":200,"cacheReadInputTokens":0,"cacheCreationInputTokens":0},"session_id":"agent-1","uuid":"a1b2c3d4-...","parent_tool_use_id":null}
+```
+
+#### User event (tool_result)
+```json
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_001","content":"<?php class Agent { ... }"}]},"parent_tool_use_id":"tu_001","session_id":"agent-1","uuid":"e5f6g7h8-..."}
+```
+
+#### Result event (success)
+```json
+{"type":"result","subtype":"success","duration_ms":12345,"duration_api_ms":12345,"is_error":false,"num_turns":3,"result":"Task completed.","total_cost_usd":0.005,"usage":{"inputTokens":5000,"outputTokens":1200,"cacheReadInputTokens":800,"cacheCreationInputTokens":0},"session_id":"agent-1","uuid":"i9j0k1l2-..."}
+```
+
+#### Result event (error)
+```json
+{"type":"result","subtype":"error_during_execution","duration_ms":500,"is_error":true,"num_turns":0,"errors":["Connection refused"],"session_id":"agent-1","uuid":"m3n4o5p6-..."}
+```
+
+### Child Process Integration
+
+Child agent processes (`agent-runner.php`) automatically emit NDJSON on stderr. The parent's `ProcessBackend::poll()` detects JSON lines (starting with `{`) and queues them as progress events. `AgentTool::applyProgressEvents()` parses both CC NDJSON format and the legacy `__PROGRESS__:` format for backward compatibility.
+
+### API Reference
+
+#### `NdjsonWriter`
+
+| Method | Description |
+|--------|-------------|
+| `writeAssistant(AssistantMessage, ?parentToolUseId)` | Emit assistant message with content blocks + usage |
+| `writeToolUse(toolName, toolUseId, input)` | Emit single tool_use as assistant message |
+| `writeToolResult(toolUseId, toolName, result, isError)` | Emit tool result as user message |
+| `writeResult(numTurns, resultText, usage, costUsd)` | Emit success result |
+| `writeError(error, subtype)` | Emit error result |
+
+#### `NdjsonStreamingHandler`
+
+| Method | Description |
+|--------|-------------|
+| `create(logTarget, agentId, append, onText, onThinking)` | Returns `StreamingHandler` |
+| `createWithWriter(logTarget, agentId, append, onText, onThinking)` | Returns `{handler, writer}` pair |
+
+### Troubleshooting
+
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| Log file empty | Handler not passed to `$agent->prompt()` | Ensure handler is the second argument |
+| No tool events in log | Only `onText` registered | Use `NdjsonStreamingHandler::create()` which registers all callbacks |
+| Process monitor shows no activity | Parsing expects NDJSON but gets plain text | Verify child process uses `NdjsonWriter` (v0.6.18+) |
+| Unicode breaks NDJSON parser | U+2028/U+2029 in content | `NdjsonWriter` escapes these automatically |

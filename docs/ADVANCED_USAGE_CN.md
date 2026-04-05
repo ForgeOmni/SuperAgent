@@ -1,6 +1,6 @@
 # SuperAgent 高级用法指南
 
-> SuperAgent SDK 所有高级功能的完整文档。本指南涵盖 23 个功能，分为 6 大类，从多智能体编排到开发工作流工具。
+> SuperAgent SDK 所有高级功能的完整文档。本指南涵盖 25 个功能，分为 7 大类，从多智能体编排到性能优化与结构化日志。
 
 > **语言**: [English](ADVANCED_USAGE.md) | [中文](ADVANCED_USAGE_CN.md) | [Français](ADVANCED_USAGE_FR.md)
 
@@ -46,6 +46,11 @@
 - [21. Plan V2 访谈阶段](#21-plan-v2-访谈阶段)
 - [22. 检查点与恢复](#22-检查点与恢复)
 - [23. 文件历史](#23-文件历史)
+
+### 性能与日志 (v0.7.0)
+
+- [24. 性能优化](#24-性能优化)
+- [25. NDJSON 结构化日志](#25-ndjson-结构化日志)
 
 ---
 
@@ -4189,3 +4194,439 @@ $protection->addProtectedFile('/path/to/specific/file.conf');
 | 敏感文件写入被阻止 | 文件匹配受保护模式 | 移除模式或在测试时禁用保护 |
 | Git 提交失败 | 没有暂存的更改或不是 git 仓库 | 检查 `hasStagedChanges()` 和 `isGitRepository()` |
 | 撤销不工作 | 未记录快照 ID | 确保在编辑前后都调用 `createSnapshot()` |
+
+---
+
+## 24. 性能优化
+
+> 13 项可配置策略，减少 Token 消耗（30-50%）、降低成本（40-60%）、提升缓存命中率（约 90%），并通过并行化加速工具执行。
+
+### 概述
+
+SuperAgent v0.7.0 引入了两个优化层，集成到 `QueryEngine` 流水线中：
+
+- **Token 优化** (`src/Optimization/`) — 5 种策略，减少 API 输入/输出 Token
+- **执行性能** (`src/Performance/`) — 8 种策略，加速运行时执行
+
+所有优化在 `QueryEngine` 构造函数中通过 `fromConfig()` 自动初始化，并在 `callProvider()` 和 `executeTools()` 中透明应用。每项优化均可通过环境变量独立禁用。
+
+### 配置
+
+```php
+// config/superagent.php
+
+'optimization' => [
+    'tool_result_compaction' => [
+        'enabled' => env('SUPERAGENT_OPT_TOOL_COMPACTION', true),
+        'preserve_recent_turns' => 2,   // 保留最近 N 轮完整内容
+        'max_result_length' => 200,     // 压缩后结果最大字符数
+    ],
+    'selective_tool_schema' => [
+        'enabled' => env('SUPERAGENT_OPT_SELECTIVE_TOOLS', true),
+        'max_tools' => 20,              // 每次请求最多包含的工具数
+    ],
+    'model_routing' => [
+        'enabled' => env('SUPERAGENT_OPT_MODEL_ROUTING', true),
+        'fast_model' => env('SUPERAGENT_OPT_FAST_MODEL', 'claude-haiku-4-5-20251001'),
+        'min_turns_before_downgrade' => 2,
+    ],
+    'response_prefill' => [
+        'enabled' => env('SUPERAGENT_OPT_RESPONSE_PREFILL', true),
+    ],
+    'prompt_cache_pinning' => [
+        'enabled' => env('SUPERAGENT_OPT_CACHE_PINNING', true),
+        'min_static_length' => 500,
+    ],
+],
+
+'performance' => [
+    'parallel_tool_execution' => [
+        'enabled' => env('SUPERAGENT_PERF_PARALLEL_TOOLS', true),
+        'max_parallel' => 5,
+    ],
+    'streaming_tool_dispatch' => [
+        'enabled' => env('SUPERAGENT_PERF_STREAMING_DISPATCH', true),
+    ],
+    'connection_pool' => [
+        'enabled' => env('SUPERAGENT_PERF_CONNECTION_POOL', true),
+    ],
+    'speculative_prefetch' => [
+        'enabled' => env('SUPERAGENT_PERF_SPECULATIVE_PREFETCH', true),
+        'max_cache_entries' => 50,
+        'max_file_size' => 100000,
+    ],
+    'streaming_bash' => [
+        'enabled' => env('SUPERAGENT_PERF_STREAMING_BASH', true),
+        'max_output_lines' => 500,
+        'tail_lines' => 100,
+        'stream_timeout_ms' => 30000,
+    ],
+    'adaptive_max_tokens' => [
+        'enabled' => env('SUPERAGENT_PERF_ADAPTIVE_TOKENS', true),
+        'tool_call_tokens' => 2048,
+        'reasoning_tokens' => 8192,
+    ],
+    'batch_api' => [
+        'enabled' => env('SUPERAGENT_PERF_BATCH_API', false),  // 默认禁用
+        'max_batch_size' => 100,
+    ],
+    'local_tool_zero_copy' => [
+        'enabled' => env('SUPERAGENT_PERF_ZERO_COPY', true),
+        'max_cache_size_mb' => 50,
+    ],
+],
+```
+
+### Token 优化
+
+#### 工具结果压缩 (`ToolResultCompactor`)
+
+将旧的工具结果替换为简洁摘要。超过最近 N 轮的结果会被压缩为 `"[Compacted] Read: <?php class Agent..."`。错误结果保持原样不被压缩。
+
+```php
+use SuperAgent\Optimization\ToolResultCompactor;
+
+$compactor = new ToolResultCompactor(
+    enabled: true,
+    preserveRecentTurns: 2,
+    maxResultLength: 200,
+);
+
+// 压缩消息数组（返回新数组，原始数据不变）
+$compacted = $compactor->compact($messages);
+```
+
+**效果**：多轮对话中输入 Token 减少 30-50%。
+
+#### 按需工具 Schema (`ToolSchemaFilter`)
+
+每轮只发送相关的工具 Schema，而非全部 59 个。根据最近的工具使用情况检测当前任务阶段：
+
+| 阶段 | 检测条件 | 包含的工具 |
+|------|---------|-----------|
+| 探索 | 上次工具为 Read/Grep/Glob/WebSearch | read, grep, glob, bash, web_search, web_fetch |
+| 编辑 | 上次工具为 Edit/Write | read, write, edit, bash, grep, glob |
+| 规划 | 上次工具为 Agent/PlanMode | read, grep, glob, agent, enter_plan_mode, exit_plan_mode |
+| 首轮 | 无工具历史 | 所有工具（不过滤） |
+
+始终包含 `read` 和 `bash`。同时包含最近 2 轮中使用过的工具。最少 5 个工具阈值 — 如果过滤过于激进，则所有工具全部通过。
+
+**效果**：每次请求节省约 10K Token。
+
+#### 按轮模型路由 (`ModelRouter`)
+
+纯工具调用轮（无文本，仅 tool_use 块）自动降级到更便宜的模型，当模型产生大量文本时自动升级回来。
+
+```php
+use SuperAgent\Optimization\ModelRouter;
+
+$router = ModelRouter::fromConfig('claude-sonnet-4-6-20250627');
+
+// 返回快速模型或 null（使用主模型）
+$model = $router->route($messages, $turnCount);
+
+// 每轮结束后记录是否为纯工具调用轮
+$router->recordTurn($assistantMessage);
+```
+
+路由逻辑：
+1. 前 N 轮（默认 2）：始终使用主模型
+2. 连续 2+ 轮纯工具调用后：降级到快速模型
+3. 快速模型产生文本时：自动升级回主模型
+4. 如果主模型已是廉价模型（启发式：名称包含 "haiku"），则不降级
+
+**效果**：成本降低 40-60%。
+
+#### 响应预填充 (`ResponsePrefill`)
+
+利用 Anthropic 的 assistant 预填充功能，在长工具调用序列后引导输出。连续 3+ 轮工具往返后，预填充 `"I'll"` 以鼓励总结而非继续调用工具。保守策略：首轮、工具结果之后或活跃探索期间不预填充。
+
+#### 提示缓存固定 (`PromptCachePinning`)
+
+在系统提示中自动插入缓存边界标记。`AnthropicProvider` 在边界处分割提示：之前的静态内容设置 `cache_control: ephemeral`，之后的动态内容不设置。这实现了提示缓存：静态前缀在各轮之间保持缓存。
+
+分割点检测启发式：
+- 查找动态区段标记：`# Current`、`# Context`、`# Memory`、`# Session`、`# Recent`、`# Task`
+- 如果未找到标记，则回退到 80% 位置
+
+**效果**：提示缓存命中率约 90%。
+
+### 执行性能
+
+#### 并行工具执行 (`ParallelToolExecutor`)
+
+当 LLM 在一轮中返回多个 tool_use 块时，只读工具使用 PHP Fibers 并行执行。
+
+```php
+use SuperAgent\Performance\ParallelToolExecutor;
+
+$executor = ParallelToolExecutor::fromConfig();
+$classified = $executor->classify($toolBlocks);
+// $classified = ['parallel' => [...只读...], 'sequential' => [...写入...]]
+
+$results = $executor->executeParallel($classified['parallel'], function ($block) {
+    return $this->executeSingleTool($block);
+});
+```
+
+只读（并行安全）：`read`、`grep`、`glob`、`web_search`、`web_fetch`、`tool_search`、`task_list`、`task_get`
+
+**效果**：多工具轮执行时间：max(t1,t2,t3) 而非 sum(t1+t2+t3)。
+
+#### 流式工具分发 (`StreamingToolDispatch`)
+
+在 SSE 流中只读工具的 tool_use 块完成后立即预执行，无需等待 LLM 完整响应结束。
+
+#### 连接池 (`ConnectionPool`)
+
+每个基础 URL 共享 Guzzle 客户端，支持 cURL keep-alive、TCP_NODELAY 和 TCP_KEEPALIVE。消除重复的 TCP/TLS 握手。
+
+```php
+use SuperAgent\Performance\ConnectionPool;
+
+$pool = ConnectionPool::fromConfig();
+$client = $pool->getClient('https://api.anthropic.com/', [
+    'x-api-key' => $apiKey,
+    'anthropic-version' => '2023-06-01',
+]);
+```
+
+#### 推测性预读 (`SpeculativePrefetch`)
+
+Read 工具执行后，预测并预读相关文件到内存缓存中：
+- 源文件 → 测试文件（`tests/Unit/BarTest.php`、`tests/Feature/BarTest.php`）
+- 测试文件 → 源文件
+- PHP 类 → 同目录下的接口
+- 同目录下名称前缀相似的文件
+
+每次读取最多 5 个预测，LRU 缓存 50 个条目。
+
+#### 流式 Bash 执行器 (`StreamingBashExecutor`)
+
+流式传输 Bash 输出，支持超时截断。长输出返回最后 N 行 + 摘要头。
+
+```php
+use SuperAgent\Performance\StreamingBashExecutor;
+
+$bash = StreamingBashExecutor::fromConfig();
+$result = $bash->execute('npm test', '/path/to/project');
+// $result = ['output' => '...', 'exit_code' => 0, 'truncated' => true, 'total_lines' => 1500]
+```
+
+#### 自适应 max_tokens (`AdaptiveMaxTokens`)
+
+根据预期响应类型动态调整每轮的 `max_tokens`：
+
+| 场景 | max_tokens |
+|------|-----------|
+| 首轮 | 8192 |
+| 纯工具调用轮（无文本） | 2048 |
+| 推理/文本轮 | 8192 |
+
+#### 批量 API (`BatchApiClient`)
+
+将非实时请求排队到 Anthropic 的 Message Batches API（成本降低 50%）。
+
+```php
+use SuperAgent\Performance\BatchApiClient;
+
+$batch = BatchApiClient::fromConfig();
+$batch->queue('task-1', $requestBody1);
+$batch->queue('task-2', $requestBody2);
+
+$results = $batch->submitAndWait(timeoutSeconds: 300);
+// $results = ['task-1' => [...], 'task-2' => [...]]
+```
+
+**注意**：默认禁用。通过 `SUPERAGENT_PERF_BATCH_API=true` 启用。
+
+#### 本地工具零拷贝 (`LocalToolZeroCopy`)
+
+Read/Edit/Write 工具之间的文件内容缓存。Read 结果缓存在内存中，Edit/Write 使缓存失效。使用 md5 完整性校验检测外部修改。
+
+```php
+use SuperAgent\Performance\LocalToolZeroCopy;
+
+$zc = LocalToolZeroCopy::fromConfig();
+$zc->cacheFile('/src/Agent.php', $content);
+
+// 下次 Read：先检查缓存
+$cached = $zc->getCachedFile('/src/Agent.php');
+
+// Edit/Write 之后：使缓存失效
+$zc->invalidateFile('/src/Agent.php');
+```
+
+### 禁用所有优化
+
+```env
+# Token 优化
+SUPERAGENT_OPT_TOOL_COMPACTION=false
+SUPERAGENT_OPT_SELECTIVE_TOOLS=false
+SUPERAGENT_OPT_MODEL_ROUTING=false
+SUPERAGENT_OPT_RESPONSE_PREFILL=false
+SUPERAGENT_OPT_CACHE_PINNING=false
+
+# 执行性能
+SUPERAGENT_PERF_PARALLEL_TOOLS=false
+SUPERAGENT_PERF_STREAMING_DISPATCH=false
+SUPERAGENT_PERF_CONNECTION_POOL=false
+SUPERAGENT_PERF_SPECULATIVE_PREFETCH=false
+SUPERAGENT_PERF_STREAMING_BASH=false
+SUPERAGENT_PERF_ADAPTIVE_TOKENS=false
+SUPERAGENT_PERF_BATCH_API=false
+SUPERAGENT_PERF_ZERO_COPY=false
+```
+
+### 故障排除
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 模型路由产生错误 | 快速模型无法处理复杂工具 | 设置 `SUPERAGENT_OPT_MODEL_ROUTING=false` 或增加 `min_turns_before_downgrade` |
+| 工具结果被过度压缩 | 旧结果中的重要上下文丢失 | 增加 `preserve_recent_turns` 或 `max_result_length` |
+| 按需工具移除了所需工具 | 阶段检测误分类 | 最近 2 轮使用的工具始终包含；增加 `max_tools` |
+| 并行执行导致文件冲突 | 写入工具被错误分类为只读 | 请报告 Bug — 仅 `read`、`grep`、`glob`、`web_search`、`web_fetch`、`tool_search`、`task_list`、`task_get` 是并行安全的 |
+| 预读缓存过大 | 缓存文件过多 | 减少 `max_cache_entries` 或 `max_file_size` |
+| 批量 API 超时 | 大批量处理耗时过长 | 增加 `submitAndWait()` 的超时时间或减小批量大小 |
+
+---
+
+## 25. NDJSON 结构化日志
+
+> 兼容 Claude Code 的 NDJSON（换行分隔 JSON）日志，用于实时进程监控。发出与 CC 的 `stream-json` 输出相同的事件格式。
+
+### 概述
+
+SuperAgent 可以 NDJSON 格式写入结构化执行日志 — 每行一个 JSON 对象，匹配 Claude Code 的 `stream-json` 协议。这实现了：
+
+- **进程监控可见性**：CC 的 bridge/sessionRunner 等工具可以解析日志并显示实时工具活动
+- **调试**：包含工具调用、结果和 Token 用量的完整执行记录
+- **回放**：日志文件可被回放以重建执行流程
+
+两个组件：
+- **`NdjsonWriter`** — 底层写入器，格式化并发出单个 NDJSON 事件
+- **`NdjsonStreamingHandler`** — 工厂类，创建连接到 `NdjsonWriter` 的 `StreamingHandler`
+
+### 事件类型
+
+| 类型 | 角色 | 说明 |
+|------|------|------|
+| `assistant` | assistant | LLM 响应，包含文本和/或 tool_use 内容块 + 每轮用量 |
+| `user` | user | 工具结果，设置了 `parent_tool_use_id` |
+| `result` | — | 最终执行结果（成功或错误） |
+
+### 用法
+
+#### 快速：使用 StreamingHandler 工厂的一行代码
+
+```php
+use SuperAgent\Logging\NdjsonStreamingHandler;
+
+// 创建将 NDJSON 写入日志文件的处理器
+$handler = NdjsonStreamingHandler::create(
+    logTarget: '/tmp/agent-execution.jsonl',
+    agentId: 'my-agent',
+);
+
+$result = $agent->prompt('Fix the bug in UserController', $handler);
+```
+
+#### 完整：包含结果/错误事件
+
+```php
+use SuperAgent\Logging\NdjsonStreamingHandler;
+
+$pair = NdjsonStreamingHandler::createWithWriter(
+    logTarget: '/tmp/agent.jsonl',
+    agentId: 'task-123',
+    onText: function (string $delta, string $full) {
+        echo $delta;  // 将文本流式输出到终端
+    },
+);
+
+try {
+    $result = $agent->prompt($prompt, $pair->handler);
+
+    $pair->writer->writeResult(
+        numTurns: $result->turns(),
+        resultText: $result->text(),
+        usage: $result->totalUsage()->toArray(),
+        costUsd: $result->totalCostUsd,
+    );
+} catch (\Throwable $e) {
+    $pair->writer->writeError($e->getMessage());
+    throw $e;
+}
+```
+
+#### 底层：直接使用 NdjsonWriter
+
+```php
+use SuperAgent\Logging\NdjsonWriter;
+
+$writer = new NdjsonWriter(
+    agentId: 'agent-1',
+    sessionId: 'session-abc',
+    stream: fopen('/tmp/log.jsonl', 'a'),
+);
+
+// 写入单个事件
+$writer->writeToolUse('Read', 'tu_001', ['file_path' => '/src/Agent.php']);
+$writer->writeToolResult('tu_001', 'Read', '<?php class Agent { ... }', false);
+$writer->writeAssistant($assistantMessage);
+$writer->writeResult(3, 'Task completed.', ['input_tokens' => 5000, 'output_tokens' => 1200]);
+```
+
+### NDJSON 格式参考
+
+#### Assistant 事件 (tool_use)
+```json
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu_001","name":"Read","input":{"file_path":"/src/Agent.php"}}]},"usage":{"inputTokens":1500,"outputTokens":200,"cacheReadInputTokens":0,"cacheCreationInputTokens":0},"session_id":"agent-1","uuid":"a1b2c3d4-...","parent_tool_use_id":null}
+```
+
+#### User 事件 (tool_result)
+```json
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_001","content":"<?php class Agent { ... }"}]},"parent_tool_use_id":"tu_001","session_id":"agent-1","uuid":"e5f6g7h8-..."}
+```
+
+#### Result 事件（成功）
+```json
+{"type":"result","subtype":"success","duration_ms":12345,"duration_api_ms":12345,"is_error":false,"num_turns":3,"result":"Task completed.","total_cost_usd":0.005,"usage":{"inputTokens":5000,"outputTokens":1200,"cacheReadInputTokens":800,"cacheCreationInputTokens":0},"session_id":"agent-1","uuid":"i9j0k1l2-..."}
+```
+
+#### Result 事件（错误）
+```json
+{"type":"result","subtype":"error_during_execution","duration_ms":500,"is_error":true,"num_turns":0,"errors":["Connection refused"],"session_id":"agent-1","uuid":"m3n4o5p6-..."}
+```
+
+### 子进程集成
+
+子 Agent 进程（`agent-runner.php`）自动在 stderr 上发出 NDJSON。父进程的 `ProcessBackend::poll()` 检测 JSON 行（以 `{` 开头）并将其排队为进度事件。`AgentTool::applyProgressEvents()` 同时解析 CC NDJSON 格式和旧版 `__PROGRESS__:` 格式以保持向后兼容。
+
+### API 参考
+
+#### `NdjsonWriter`
+
+| 方法 | 说明 |
+|------|------|
+| `writeAssistant(AssistantMessage, ?parentToolUseId)` | 发出包含内容块 + 用量的 assistant 消息 |
+| `writeToolUse(toolName, toolUseId, input)` | 发出单个 tool_use 作为 assistant 消息 |
+| `writeToolResult(toolUseId, toolName, result, isError)` | 发出工具结果作为 user 消息 |
+| `writeResult(numTurns, resultText, usage, costUsd)` | 发出成功结果 |
+| `writeError(error, subtype)` | 发出错误结果 |
+
+#### `NdjsonStreamingHandler`
+
+| 方法 | 说明 |
+|------|------|
+| `create(logTarget, agentId, append, onText, onThinking)` | 返回 `StreamingHandler` |
+| `createWithWriter(logTarget, agentId, append, onText, onThinking)` | 返回 `{handler, writer}` 对 |
+
+### 故障排除
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 日志文件为空 | 处理器未传递给 `$agent->prompt()` | 确保处理器是第二个参数 |
+| 日志中无工具事件 | 仅注册了 `onText` | 使用 `NdjsonStreamingHandler::create()` 来注册所有回调 |
+| 进程监控无活动显示 | 解析器期望 NDJSON 但收到纯文本 | 验证子进程使用 `NdjsonWriter`（v0.6.18+） |
+| Unicode 导致 NDJSON 解析器中断 | 内容中包含 U+2028/U+2029 | `NdjsonWriter` 会自动转义这些字符 |
