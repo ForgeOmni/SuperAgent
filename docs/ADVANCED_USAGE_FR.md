@@ -36,7 +36,7 @@
 ### Infrastructure & Intégration
 
 - [16. Intégration du Protocole MCP](#16-intégration-du-protocole-mcp)
-- [17. Mode Bridge s#](#17-mode-bridge-s)
+- [17. Mode Bridge](#17-mode-bridge)
 - [18. Télémétrie & Observabilité](#18-télémétrie--observabilité)
 - [19. Recherche d'Outils & Chargement Différé](#19-recherche-doutils--chargement-différé)
 - [20. Contexte Incrémental & Paresseux](#20-contexte-incrémental--paresseux)
