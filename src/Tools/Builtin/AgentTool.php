@@ -97,12 +97,12 @@ class AgentTool extends Tool
                 'mode' => [
                     'type' => 'string',
                     'description' => 'Permission mode for spawned agent',
-                    'enum' => ['default', 'plan', 'acceptEdits', 'bypassPermissions', 'bypass', 'dontAsk', 'auto'],
+                    'enum' => self::permissionModeEnum(),
                 ],
                 'isolation' => [
                     'type' => 'string',
                     'description' => 'Isolation mode. "worktree" creates a temporary git worktree',
-                    'enum' => ['none', 'worktree', 'container'],
+                    'enum' => array_column(IsolationMode::cases(), 'value'),
                 ],
                 'run_in_background' => [
                     'type' => 'boolean',
@@ -496,18 +496,28 @@ class AgentTool extends Tool
         return $this->backends[$type->value];
     }
 
+    /** Aliases for backward-compatible schema values → canonical enum values. */
+    private const MODE_ALIASES = [
+        'bypass' => 'bypassPermissions',
+    ];
+
+    /**
+     * Build the enum array for the 'mode' schema field.
+     * Canonical values from PermissionMode + aliases for backward compat.
+     */
+    private static function permissionModeEnum(): array
+    {
+        $values = array_column(PermissionMode::cases(), 'value');
+        return array_values(array_unique(array_merge($values, array_keys(self::MODE_ALIASES))));
+    }
+
     /**
      * Resolve permission mode from input string, mapping schema aliases
      * to PermissionMode enum values.
      */
     private static function resolvePermissionMode(string $mode): PermissionMode
     {
-        // Map schema aliases to enum values
-        $aliases = [
-            'bypass' => 'bypassPermissions',
-        ];
-
-        $resolved = $aliases[$mode] ?? $mode;
+        $resolved = self::MODE_ALIASES[$mode] ?? $mode;
 
         try {
             return PermissionMode::from($resolved);
