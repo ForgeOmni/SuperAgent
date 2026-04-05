@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-04-05
+
+### Fixed
+- **`AgentTool`**: `PermissionMode::from('bypass')` threw `ValueError` because schema enum had `'bypass'` but the enum value is `'bypassPermissions'`. Added `resolvePermissionMode()` with alias mapping (`bypass` → `bypassPermissions`) and try/catch fallback to `DEFAULT`. Schema enum now accepts both `'bypass'` (alias) and `'bypassPermissions'` (canonical)
+
 ## [0.7.0] - 2026-04-05
 
 ### 🚀 Summary

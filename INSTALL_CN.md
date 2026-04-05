@@ -907,6 +907,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.7.1      | 10.x+   | 8.1+  | 修复 AgentTool PermissionMode 'bypass' 枚举不匹配 |
 | 0.7.0      | 10.x+   | 8.1+  | 13 项性能优化：token 压缩、按需工具、模型路由、预填充、缓存固定 + 并行工具、流式分发、连接池、预读、自适应 tokens、批量 API、零拷贝：工具结果压缩、按需工具 Schema、模型路由、响应预填充、提示缓存固定 |
 | 0.6.19     | 10.x+   | 8.1+  | In-process NDJSON 日志（`NdjsonStreamingHandler`）支持进程监控 |
 | 0.6.18     | 10.x+   | 8.1+  | Claude Code 兼容 NDJSON 结构化日志替代 `__PROGRESS__:` 协议 |

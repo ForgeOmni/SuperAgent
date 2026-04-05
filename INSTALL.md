@@ -1253,6 +1253,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.7.1      | 10.x+   | 8.1+ | Fix AgentTool PermissionMode 'bypass' enum mismatch |
 | 0.7.0      | 10.x+   | 8.1+ | 13 performance optimizations: token compaction, selective tools, model routing, prefill, cache pinning + parallel tools, streaming dispatch, connection pool, prefetch, adaptive tokens, batch API, zero-copy: tool result compaction, selective tool schema, model routing, response prefill, prompt cache pinning |
 | 0.6.19     | 10.x+   | 8.1+ | In-process NDJSON logging via `NdjsonStreamingHandler` for process monitor visibility |
 | 0.6.18     | 10.x+   | 8.1+ | Claude Code-compatible NDJSON structured logging replaces `__PROGRESS__:` protocol |
