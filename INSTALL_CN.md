@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.6.18 升级说明
+
+v0.6.18 将子 agent 日志从自定义协议升级为 Claude Code 兼容的 NDJSON 格式。**无需修改配置。**
+
+子进程现在在 stderr 上输出标准 NDJSON 事件（`{"type":"assistant",...}`、`{"type":"result",...}`），替代 `__PROGRESS__:` 前缀协议。父进程的 `ProcessBackend` 自动检测两种格式，完全向后兼容。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.17 升级说明
 
 v0.6.17 为子 agent 进程添加实时进度监控。**无需修改配置。**
@@ -868,6 +878,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.6.18     | 10.x+   | 8.1+  | Claude Code 兼容 NDJSON 结构化日志替代 `__PROGRESS__:` 协议 |
 | 0.6.17     | 10.x+   | 8.1+  | 子 agent 进程实时进度监控（`__PROGRESS__:` stderr 协议） |
 | 0.6.16     | 10.x+   | 8.1+  | 父进程 agent/MCP 注册数据透传子进程（stdin 序列化） |
 | 0.6.15     | 10.x+   | 8.1+  | MCP Server TCP 桥接共享 — N 个子 agent 共享 1 个 MCP server 进程 |

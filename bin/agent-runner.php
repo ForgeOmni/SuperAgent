@@ -74,6 +74,7 @@ if (!$laravelBootstrapped) {
 
 use SuperAgent\Agent;
 use SuperAgent\StreamingHandler;
+use SuperAgent\Logging\NdjsonWriter;
 use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\AssistantMessage;
 
@@ -126,47 +127,25 @@ fwrite(STDERR, "[agent-runner] Starting agent {$agentId} ({$agentName})"
     . ($laravelBootstrapped ? ' [Laravel]' : ' [standalone]')
     . " agents={$defCount} mcp={$mcpCount}\n");
 
-// ── Progress event emitter ──────────────────────────────────────
-// Emit structured JSON progress events on stderr so the parent
-// process can parse them and update the process monitor in real time.
-// Protocol: lines prefixed with __PROGRESS__: followed by JSON.
-$emitProgress = function (string $type, array $data) use ($agentId): void {
-    $event = json_encode([
-        'type' => $type,
-        'agent_id' => $agentId,
-        'timestamp' => microtime(true),
-        'data' => $data,
-    ], JSON_UNESCAPED_UNICODE);
-    fwrite(STDERR, "__PROGRESS__:{$event}\n");
-};
+// ── NDJSON structured logging ────────────────────────────────────
+// Emit Claude Code-compatible NDJSON events on stderr so the parent
+// process monitor can display real-time tool activity, text output,
+// and execution progress — identical format to CC's stream-json.
+$ndjson = new NdjsonWriter($agentId, sessionId: $agentId);
 
-// StreamingHandler that forwards execution events to the parent
 $streamingHandler = new StreamingHandler(
-    onToolUse: function (ContentBlock $block) use ($emitProgress) {
-        $emitProgress('tool_use', [
-            'tool_name' => $block->toolName ?? 'unknown',
-            'tool_use_id' => $block->toolUseId ?? '',
-            'input' => $block->toolInput ?? [],
-        ]);
+    onToolUse: function (ContentBlock $block) use ($ndjson) {
+        $ndjson->writeToolUse(
+            $block->toolName ?? 'unknown',
+            $block->toolUseId ?? '',
+            $block->toolInput ?? [],
+        );
     },
-    onToolResult: function (string $toolUseId, string $toolName, string $result, bool $isError) use ($emitProgress) {
-        $emitProgress('tool_result', [
-            'tool_name' => $toolName,
-            'tool_use_id' => $toolUseId,
-            'is_error' => $isError,
-            'result_length' => strlen($result),
-        ]);
+    onToolResult: function (string $toolUseId, string $toolName, string $result, bool $isError) use ($ndjson) {
+        $ndjson->writeToolResult($toolUseId, $toolName, $result, $isError);
     },
-    onTurn: function (AssistantMessage $message, int $turnNumber) use ($emitProgress) {
-        $usage = $message->usage;
-        $emitProgress('turn', [
-            'turn_number' => $turnNumber,
-            'input_tokens' => $usage?->inputTokens ?? 0,
-            'output_tokens' => $usage?->outputTokens ?? 0,
-            'cache_creation_input_tokens' => $usage?->cacheCreationInputTokens ?? 0,
-            'cache_read_input_tokens' => $usage?->cacheReadInputTokens ?? 0,
-            'tool_use_count' => count($message->toolUseBlocks()),
-        ]);
+    onTurn: function (AssistantMessage $message, int $turnNumber) use ($ndjson) {
+        $ndjson->writeAssistant($message);
     },
 );
 
@@ -196,8 +175,21 @@ try {
         }, $result->allResponses),
     ];
 
+    // Emit CC-compatible result event on stderr
+    $totalUsage = $result->totalUsage();
+    $ndjson->writeResult(
+        numTurns: $result->turns(),
+        resultText: $result->text(),
+        usage: [
+            'input_tokens' => $totalUsage->inputTokens,
+            'output_tokens' => $totalUsage->outputTokens,
+            'cache_read_input_tokens' => $totalUsage->cacheReadInputTokens ?? 0,
+            'cache_creation_input_tokens' => $totalUsage->cacheCreationInputTokens ?? 0,
+        ],
+        costUsd: $result->totalCostUsd,
+    );
+
     fwrite(STDOUT, json_encode($output, JSON_UNESCAPED_UNICODE) . "\n");
-    fwrite(STDERR, "[agent-runner] Agent {$agentId} completed ({$result->turns()} turns)\n");
     exit(0);
 
 } catch (\Throwable $e) {
@@ -209,7 +201,8 @@ try {
         'line' => $e->getLine(),
     ];
 
+    $ndjson->writeError($e->getMessage());
+
     fwrite(STDOUT, json_encode($error, JSON_UNESCAPED_UNICODE) . "\n");
-    fwrite(STDERR, "[agent-runner] Error: {$e->getMessage()}\n");
     exit(1);
 }

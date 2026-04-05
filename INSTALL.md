@@ -818,6 +818,16 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.6.18 Upgrade Notes
+
+v0.6.18 upgrades child agent logging from a custom protocol to Claude Code-compatible NDJSON. **No configuration changes required.**
+
+Child processes now emit standard NDJSON events on stderr (`{"type":"assistant",...}`, `{"type":"result",...}`) instead of the `__PROGRESS__:` prefix protocol. The parent's `ProcessBackend` auto-detects both formats, so this is fully backward-compatible.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.17 Upgrade Notes
 
 v0.6.17 adds real-time progress monitoring for child agent processes. **No configuration changes required.**
@@ -1214,6 +1224,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.18     | 10.x+   | 8.1+ | Claude Code-compatible NDJSON structured logging replaces `__PROGRESS__:` protocol |
 | 0.6.17     | 10.x+   | 8.1+ | Real-time child agent progress monitoring via `__PROGRESS__:` stderr protocol |
 | 0.6.16     | 10.x+   | 8.1+ | Parent-to-child agent/MCP registration propagation via stdin serialization |
 | 0.6.15     | 10.x+   | 8.1+ | MCP server sharing via TCP bridge — N child agents share 1 MCP server process |

@@ -395,6 +395,9 @@ class AgentTool extends Tool
 
     /**
      * Apply progress events from child process stderr to the tracker.
+     *
+     * Handles both CC-compatible NDJSON format (type: assistant/user/result)
+     * and the legacy __PROGRESS__ format for backward compatibility.
      */
     private function applyProgressEvents(
         ProcessBackend $backend,
@@ -403,10 +406,53 @@ class AgentTool extends Tool
     ): void {
         foreach ($backend->consumeProgressEvents($agentId) as $event) {
             $type = $event['type'] ?? '';
-            $data = $event['data'] ?? [];
 
             switch ($type) {
+                // ── CC NDJSON format ──────────────────────────────
+                case 'assistant':
+                    // Extract tool_use blocks from assistant message content
+                    $content = $event['message']['content'] ?? [];
+                    foreach ($content as $block) {
+                        if (($block['type'] ?? '') === 'tool_use') {
+                            $tracker->addToolActivity([
+                                'name' => $block['name'] ?? 'unknown',
+                                'input' => $block['input'] ?? [],
+                            ]);
+                        }
+                    }
+                    // Per-turn usage (SuperAgent extension on assistant events)
+                    $usage = $event['usage'] ?? [];
+                    if (!empty($usage)) {
+                        $tracker->updateFromResponse([
+                            'input_tokens' => $usage['inputTokens'] ?? 0,
+                            'output_tokens' => $usage['outputTokens'] ?? 0,
+                            'cache_creation_input_tokens' => $usage['cacheCreationInputTokens'] ?? 0,
+                            'cache_read_input_tokens' => $usage['cacheReadInputTokens'] ?? 0,
+                        ]);
+                    }
+                    break;
+
+                case 'user':
+                    // tool_result events — update token stats when paired with
+                    // an assistant turn (token info comes from 'result' events)
+                    break;
+
+                case 'result':
+                    // Final result — extract usage for token tracking
+                    $usage = $event['usage'] ?? [];
+                    if (!empty($usage)) {
+                        $tracker->updateFromResponse([
+                            'input_tokens' => $usage['inputTokens'] ?? 0,
+                            'output_tokens' => $usage['outputTokens'] ?? 0,
+                            'cache_creation_input_tokens' => $usage['cacheCreationInputTokens'] ?? 0,
+                            'cache_read_input_tokens' => $usage['cacheReadInputTokens'] ?? 0,
+                        ]);
+                    }
+                    break;
+
+                // ── Legacy __PROGRESS__ format (backward compat) ─
                 case 'tool_use':
+                    $data = $event['data'] ?? [];
                     $tracker->addToolActivity([
                         'name' => $data['tool_name'] ?? 'unknown',
                         'input' => $data['input'] ?? [],
@@ -414,6 +460,7 @@ class AgentTool extends Tool
                     break;
 
                 case 'turn':
+                    $data = $event['data'] ?? [];
                     $tracker->updateFromResponse([
                         'input_tokens' => $data['input_tokens'] ?? 0,
                         'output_tokens' => $data['output_tokens'] ?? 0,

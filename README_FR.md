@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.17-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.6.18-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,12 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.6.18 — Journalisation Structurée NDJSON Compatible Claude Code
+- **`NdjsonWriter`** (`src/Logging/NdjsonWriter.php`) — Nouvelle classe qui écrit des événements NDJSON (JSON délimité par des sauts de ligne) compatibles Claude Code vers tout flux inscriptible. Supporte 5 méthodes : `writeAssistant()` (tour LLM avec blocs text/tool_use + usage par tour), `writeToolUse()` (appel d'outil unique), `writeToolResult()` (résultat d'exécution d'outil en `type:user` avec `parent_tool_use_id`), `writeResult()` (succès avec usage/coût/durée), `writeError()` (erreur avec sous-type). Échappe les séparateurs de ligne U+2028/U+2029 comme le `ndjsonSafeStringify` de CC
+- **NDJSON Remplace le Protocole `__PROGRESS__:`** — `agent-runner.php` utilise désormais `NdjsonWriter` sur stderr au lieu du préfixe personnalisé `__PROGRESS__:`. Les événements sont des lignes NDJSON standard analysables par `extractActivities()` du bridge/sessionRunner de CC. Chaque événement assistant inclut le `usage` par tour (inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens) pour le suivi de tokens en temps réel
+- **Parsing NDJSON ProcessBackend** — `ProcessBackend::poll()` amélioré pour détecter les lignes NDJSON (objets JSON commençant par `{`) en plus des lignes `__PROGRESS__:` héritées. Les lignes stderr non-JSON (ex. messages `[agent-runner]`) continuent d'être transmises au logger PSR-3
+- **Support Format CC dans AgentTool** — `applyProgressEvents()` gère désormais le format NDJSON CC (`assistant` → extraction des blocs tool_use + usage, `user` → tool_result, `result` → usage final) et le format hérité, permettant une intégration transparente avec le moniteur de processus
 
 ### 🆕 v0.6.17 — Surveillance en Temps Réel de la Progression des Agents Enfants
 - **Événements de Progression Structurés** — Les processus agents enfants émettent désormais des événements de progression JSON structurés sur stderr via le protocole `__PROGRESS__:`. Les événements incluent `tool_use` (nom de l'outil, entrée), `tool_result` (succès/erreur, taille du résultat) et `turn` (utilisation de tokens par tour LLM)

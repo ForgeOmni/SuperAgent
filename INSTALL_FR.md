@@ -512,6 +512,16 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.6.18
+
+v0.6.18 met à niveau la journalisation des agents enfants du protocole personnalisé vers le NDJSON compatible Claude Code. **Aucune modification de configuration requise.**
+
+Les processus enfants émettent désormais des événements NDJSON standard sur stderr (`{"type":"assistant",...}`, `{"type":"result",...}`) au lieu du protocole préfixé `__PROGRESS__:`. Le `ProcessBackend` du parent détecte automatiquement les deux formats, assurant une compatibilité ascendante complète.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.6.17
 
 v0.6.17 ajoute la surveillance en temps réel de la progression des agents enfants. **Aucune modification de configuration requise.**
@@ -858,6 +868,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.6.18     | 10.x+   | 8.1+  | Journalisation structurée NDJSON compatible Claude Code remplace le protocole `__PROGRESS__:` |
 | 0.6.17     | 10.x+   | 8.1+  | Surveillance en temps réel de la progression des agents enfants via protocole stderr `__PROGRESS__:` |
 | 0.6.16     | 10.x+   | 8.1+  | Propagation des enregistrements agent/MCP parent vers enfant via sérialisation stdin |
 | 0.6.15     | 10.x+   | 8.1+  | Partage de serveurs MCP via pont TCP — N agents enfants partagent 1 processus MCP |

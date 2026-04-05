@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.17-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.6.18-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -12,7 +12,13 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 
 ## ✨ 核心特性
 
-### 🆕 v0.6.17 — 子 Agent 进程实时进度监控
+### 🆕 v0.6.18 — Claude Code 兼容 NDJSON 结构化日志
+- **`NdjsonWriter`** (`src/Logging/NdjsonWriter.php`) — 新增 Claude Code 兼容的 NDJSON（换行符分隔 JSON）事件写入器。支持 5 种事件方法：`writeAssistant()`（含 text/tool_use 内容块 + 每轮 usage 的 LLM 回复）、`writeToolUse()`（单个工具调用）、`writeToolResult()`（工具执行结果，`type:user` + `parent_tool_use_id`）、`writeResult()`（成功结果含 usage/cost/duration）、`writeError()`（错误含 subtype）。转义 U+2028/U+2029 行分隔符，与 CC 的 `ndjsonSafeStringify` 一致
+- **NDJSON 替代 `__PROGRESS__:` 协议** — `agent-runner.php` 现在在 stderr 上使用 `NdjsonWriter` 输出标准 NDJSON，替代自定义 `__PROGRESS__:` 前缀。事件可被 CC 的 bridge/sessionRunner `extractActivities()` 直接解析。每个 assistant 事件包含每轮 `usage`（inputTokens、outputTokens、cacheReadInputTokens、cacheCreationInputTokens）用于实时 token 追踪
+- **ProcessBackend NDJSON 解析** — `ProcessBackend::poll()` 升级为检测 NDJSON 行（以 `{` 开头的 JSON 对象），同时兼容旧 `__PROGRESS__:` 格式。非 JSON stderr 行（如 `[agent-runner]` 日志）继续转发到 PSR-3 logger
+- **AgentTool CC 格式支持** — `applyProgressEvents()` 现在同时处理 CC NDJSON 格式（`assistant` → 提取 tool_use 块 + usage，`user` → tool_result，`result` → 最终 usage）和旧格式，实现无缝进程监控集成
+
+### 🆕 v0.6.17 — �� Agent 进程实时进度监控
 - **结构化进度事件** — 子 agent 进程现在通过 stderr 发送 `__PROGRESS__:` 协议的结构化 JSON 进度事件。事件包括 `tool_use`（工具名、输入参数）、`tool_result`（成功/失败、结果大小）和 `turn`（每轮 LLM 调用的 token 用量）
 - **子进程 StreamingHandler** — `agent-runner.php` 创建带有 `onToolUse`、`onToolResult` 和 `onTurn` 回调的 `StreamingHandler`，将执行事件序列化回传给父进程。从 `Agent::run()` 改为 `Agent::prompt()` 以传递 handler
 - **ProcessBackend 事件解析** — `ProcessBackend::poll()` 现在识别 stderr 中 `__PROGRESS__:` 前缀的行，解析为 JSON 并按 agent 排队。新增 `consumeProgressEvents(agentId)` 方法返回并清空排队事件。普通日志行仍照常转发给 logger

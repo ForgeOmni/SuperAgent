@@ -229,26 +229,37 @@ class ProcessBackend implements BackendInterface
                 $info['stdout_buffer'] .= $chunk;
             }
 
-            // Drain stderr
+            // Drain stderr — parse CC-compatible NDJSON events for progress
+            // monitoring. Each line from the child's NdjsonWriter is a JSON
+            // object with a "type" field (assistant, user, result). Non-JSON
+            // lines (e.g. [agent-runner] log messages) are forwarded to logger.
             $chunk = fread($info['pipes'][2], 65536);
             if ($chunk !== false && $chunk !== '') {
                 $info['stderr_buffer'] .= $chunk;
-                // Forward agent stderr to our logger, parsing progress events
                 foreach (explode("\n", $chunk) as $line) {
                     $line = trim($line);
                     if ($line === '') {
                         continue;
                     }
-                    // Structured progress events from child StreamingHandler
+                    // Try parsing as NDJSON (starts with '{')
+                    if ($line[0] === '{') {
+                        $event = json_decode($line, true);
+                        if ($event && isset($event['type'])) {
+                            $this->progressEvents[$agentId][] = $event;
+                            continue;
+                        }
+                    }
+                    // Legacy __PROGRESS__: prefix (backward compat)
                     if (str_starts_with($line, '__PROGRESS__:')) {
                         $json = substr($line, strlen('__PROGRESS__:'));
                         $event = json_decode($json, true);
                         if ($event) {
                             $this->progressEvents[$agentId][] = $event;
                         }
-                    } else {
-                        $this->logger->debug("[{$agentId}] {$line}");
+                        continue;
                     }
+                    // Plain log line
+                    $this->logger->debug("[{$agentId}] {$line}");
                 }
             }
 

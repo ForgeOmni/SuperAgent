@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.18] - 2026-04-05
+
+### 🚀 Summary
+
+Replaces the custom `__PROGRESS__:` stderr protocol with Claude Code-compatible NDJSON (Newline Delimited JSON) structured logging. Child agent processes now emit the same event format as CC's `stream-json` output — `{"type":"assistant",...}`, `{"type":"user",...}`, `{"type":"result",...}` — so existing process monitors and CC bridge parsers can read them directly.
+
+### Added
+
+#### NdjsonWriter (`src/Logging/NdjsonWriter.php`)
+- **`writeAssistant(AssistantMessage)`**: emits `{"type":"assistant","message":{"role":"assistant","content":[...]}}` with serialized text, tool_use, and thinking content blocks. Includes optional per-turn `usage` (inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens) for real-time token tracking
+- **`writeToolUse(toolName, toolUseId, input)`**: convenience method emitting a single tool_use block as an assistant message
+- **`writeToolResult(toolUseId, toolName, result, isError)`**: emits `{"type":"user","parent_tool_use_id":"tu_xxx","message":{"role":"user","content":[{"type":"tool_result",...}]}}` — matching CC's tool result format
+- **`writeResult(numTurns, resultText, usage, costUsd)`**: emits `{"type":"result","subtype":"success","duration_ms":...,"usage":{...}}`
+- **`writeError(error, subtype)`**: emits `{"type":"result","subtype":"error_during_execution","errors":[...]}`
+- **NDJSON safety**: escapes U+2028/U+2029 line separators in JSON output, matching CC's `ndjsonSafeStringify()` behavior
+
+### Changed
+- **`bin/agent-runner.php`**: replaced `__PROGRESS__:` prefix emitter with `NdjsonWriter`. StreamingHandler callbacks now call `$ndjson->writeToolUse()`, `$ndjson->writeToolResult()`, `$ndjson->writeAssistant()`. Success/error exits emit `writeResult()`/`writeError()` on stderr
+- **`ProcessBackend::poll()`**: stderr parser upgraded — lines starting with `{` are tried as NDJSON first, then falls back to legacy `__PROGRESS__:` prefix, then plain log forwarding. Fully backward-compatible
+- **`AgentTool::applyProgressEvents()`**: handles both CC NDJSON format (`assistant` → extract tool_use blocks + usage from content array, `result` → final usage) and legacy format (`tool_use`/`turn` with `data` payload)
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.6.18; added v0.6.18 feature section
+- **INSTALL** (EN/CN/FR): added v0.6.18 upgrade notes and compatibility matrix row
+
 ## [0.6.17] - 2026-04-05
 
 ### 🚀 Summary
