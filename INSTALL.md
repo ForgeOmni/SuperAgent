@@ -818,17 +818,9 @@ $agent = new Agent([
 ]);
 ```
 
-## v0.7.1 Upgrade Notes
-
-v0.7.1 adds 8 execution performance optimizations. **All except Batch API are enabled by default.**
-
-```bash
-composer update forgeomni/superagent
-```
-
 ## v0.7.0 Upgrade Notes
 
-v0.7.0 adds 5 performance optimizations that reduce token consumption and cost. **All are enabled by default. No configuration changes required.**
+v0.7.0 adds 13 performance optimizations (5 token + 8 execution). **All except Batch API are enabled by default. No configuration changes required.**
 
 To disable any optimization, set the corresponding env var to `false`:
 ```env
@@ -1261,8 +1253,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
-| 0.7.1      | 10.x+   | 8.1+ | 8 execution performance optimizations: parallel tools, streaming dispatch, connection pool, prefetch, adaptive tokens, batch API, zero-copy |
-| 0.7.0      | 10.x+   | 8.1+ | 5 performance optimizations: tool result compaction, selective tool schema, model routing, response prefill, prompt cache pinning |
+| 0.7.0      | 10.x+   | 8.1+ | 13 performance optimizations: token compaction, selective tools, model routing, prefill, cache pinning + parallel tools, streaming dispatch, connection pool, prefetch, adaptive tokens, batch API, zero-copy: tool result compaction, selective tool schema, model routing, response prefill, prompt cache pinning |
 | 0.6.19     | 10.x+   | 8.1+ | In-process NDJSON logging via `NdjsonStreamingHandler` for process monitor visibility |
 | 0.6.18     | 10.x+   | 8.1+ | Claude Code-compatible NDJSON structured logging replaces `__PROGRESS__:` protocol |
 | 0.6.17     | 10.x+   | 8.1+ | Real-time child agent progress monitoring via `__PROGRESS__:` stderr protocol |

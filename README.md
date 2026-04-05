@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.1-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -62,17 +62,7 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
 
-### 🆕 v0.7.1 — Execution Performance Suite (8 strategies)
-- **Parallel Tool Execution** — Execute read-only tools (Read, Grep, Glob, WebSearch) in parallel using PHP Fibers. Multiple tool_use blocks in one turn run concurrently: time = max(t1,t2,t3) instead of sum. Config: `performance.parallel_tool_execution`
-- **Streaming Tool Dispatch** — Start tool execution as soon as tool_use block is fully received during SSE streaming, before the complete LLM response arrives. Config: `performance.streaming_tool_dispatch`
-- **HTTP Connection Pooling** — Reuse TCP/TLS connections across API calls with cURL keep-alive, TCP_NODELAY, and shared multi handler. Eliminates repeated handshake latency. Config: `performance.connection_pool`
-- **Speculative Prefetch** — After Read tool executes, predict and pre-read related files (tests, interfaces, configs in same directory). Subsequent reads hit memory cache. Config: `performance.speculative_prefetch`
-- **Streaming Bash Executor** — Stream Bash output with timeout truncation. Long output returns last N lines + summary header instead of waiting for full completion. Config: `performance.streaming_bash`
-- **Adaptive max_tokens** — Dynamically set max_tokens per turn: 2048 for pure tool-call turns, 8192 for reasoning. Reduces reserved capacity waste. Config: `performance.adaptive_max_tokens`
-- **Batch API Support** — Queue non-realtime sub-agent requests for Anthropic Message Batches API (50% cost reduction). Config: `performance.batch_api`
-- **Local Tool Zero-Copy** — File content cache between Read/Edit/Write tools. Read result cached in memory, Edit/Write invalidates cache. Eliminates redundant disk I/O. Config: `performance.local_tool_zero_copy`
-
-### 🆕 v0.7.0 — Performance Optimization Suite (5 strategies, all configurable)
+### 🆕 v0.7.0 — Performance Optimization Suite (13 strategies, all configurable)
 - **Tool Result Compaction** — Automatically compacts old tool results (beyond recent N turns) into concise summaries, reducing input tokens by 30-50%. Preserves error results and recent context intact. Config: `optimization.tool_result_compaction` (`enabled`, `preserve_recent_turns`, `max_result_length`)
 - **Selective Tool Schema** — Dynamically selects relevant tool subset per turn based on task phase (explore/edit/plan), saving ~10K tokens by omitting unused tool schemas. Always includes recently-used tools. Config: `optimization.selective_tool_schema` (`enabled`, `max_tools`)
 - **Per-Turn Model Routing** — Auto-downgrades to fast model (configurable, default Haiku) for pure tool-call turns, upgrades back for reasoning. Detects consecutive tool-only turns and routes accordingly. 40-60% cost reduction. Config: `optimization.model_routing` (`enabled`, `fast_model`, `min_turns_before_downgrade`)
@@ -80,6 +70,14 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Prompt Cache Pinning** — Auto-inserts cache boundary marker in system prompts that lack one, splitting static (tool descriptions, role) from dynamic (memory, context) sections. Achieves ~90% prompt cache hit rate. Config: `optimization.prompt_cache_pinning` (`enabled`, `min_static_length`)
 - **All optimizations default to enabled** and can be individually disabled via env vars (`SUPERAGENT_OPT_TOOL_COMPACTION`, `SUPERAGENT_OPT_SELECTIVE_TOOLS`, `SUPERAGENT_OPT_MODEL_ROUTING`, `SUPERAGENT_OPT_RESPONSE_PREFILL`, `SUPERAGENT_OPT_CACHE_PINNING`)
 - **No hardcoded model IDs** — Fast model for routing is fully configurable via `SUPERAGENT_OPT_FAST_MODEL`; cheap model detection uses heuristic name matching instead of hardcoded lists
+- **Parallel Tool Execution** — Execute read-only tools (Read, Grep, Glob, WebSearch) in parallel using PHP Fibers. Time = max(t1,t2,t3) instead of sum. Config: `performance.parallel_tool_execution`
+- **Streaming Tool Dispatch** — Start tool execution as soon as tool_use block is fully received during SSE streaming. Config: `performance.streaming_tool_dispatch`
+- **HTTP Connection Pooling** — Reuse TCP/TLS connections with cURL keep-alive. Config: `performance.connection_pool`
+- **Speculative Prefetch** — Pre-read related files after Read (tests, interfaces, configs). Config: `performance.speculative_prefetch`
+- **Streaming Bash Executor** — Stream Bash output with timeout truncation, last N lines + summary. Config: `performance.streaming_bash`
+- **Adaptive max_tokens** — 2048 for tool-call turns, 8192 for reasoning. Config: `performance.adaptive_max_tokens`
+- **Batch API Support** — Anthropic Message Batches API (50% cost). Config: `performance.batch_api`
+- **Local Tool Zero-Copy** — File content cache between Read/Edit/Write. Config: `performance.local_tool_zero_copy`
 
 ### 🆕 v0.6.19 — In-Process NDJSON Logging for Process Monitor
 - **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — Factory class for creating a `StreamingHandler` that writes CC-compatible NDJSON to any log file or stream. One-liner integration for in-process agent execution (`$agent->prompt()` calls that don't go through `agent-runner.php`/`ProcessBackend`)

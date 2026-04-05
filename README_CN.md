@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.7.1-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.7.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -12,17 +12,7 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 
 ## ✨ 核心特性
 
-### 🆕 v0.7.1 — 执行性能套件（8 项策略）
-- **并行工具执行** — 使用 PHP Fiber 并行执行只读工具（Read、Grep、Glob、WebSearch）。单轮多工具调用并发执行：耗时 = max(t1,t2,t3) 而非 sum。配置：`performance.parallel_tool_execution`
-- **流式工具分发** — SSE 流中收到完整 tool_use 块后立即启动执行，无需等待完整 LLM 响应。配置：`performance.streaming_tool_dispatch`
-- **HTTP 连接池** — 使用 cURL keep-alive、TCP_NODELAY 和共享 multi handler 复用 TCP/TLS 连接。消除重复握手延迟。配置：`performance.connection_pool`
-- **推测性预读** — Read 工具执行后，预测并预读相关文件（测试、接口、同目录配置）。后续读取命中内存缓存。配置：`performance.speculative_prefetch`
-- **流式 Bash 执行** — 流式收集 Bash 输出并超时截断。长输出返回最后 N 行 + 摘要头，无需等待完成。配置：`performance.streaming_bash`
-- **自适应 max_tokens** — 每轮动态设置 max_tokens：纯工具调用 2048，推理 8192。减少预留容量浪费。配置：`performance.adaptive_max_tokens`
-- **批量 API** — 将非实时子 agent 请求排队到 Anthropic Message Batches API（50% 成本折扣）。配置：`performance.batch_api`
-- **本地工具零拷贝** — Read/Edit/Write 工具间的文件内容缓存。Read 结果缓存到内存，Edit/Write 使缓存失效。消除冗余磁盘 I/O。配置：`performance.local_tool_zero_copy`
-
-### 🆕 v0.7.0 — 性能优化套件（5 项策略，全部可配置）
+### 🆕 v0.7.0 — 性能优化套件（13 项策略，全部可配置）
 - **工具结果压缩** — 自动将旧的工具结果（超过最近 N 轮）压缩为简洁摘要，减少 30-50% input tokens。保留错误结果和近期上下文不变。配置：`optimization.tool_result_compaction`（`enabled`、`preserve_recent_turns`、`max_result_length`）
 - **按需工具 Schema** — 根据任务阶段（探索/编辑/规划）动态选择相关工具子集，省略未使用的工具 schema 节省约 10K tokens。始终包含最近使用的工具。配置：`optimization.selective_tool_schema`（`enabled`、`max_tools`）
 - **逐轮模型路由** — 纯工具调用轮自动降级到快速模型（可配置，默认 Haiku），推理时自动升级。检测连续工具调用轮并据此路由，降低 40-60% 成本。配置：`optimization.model_routing`（`enabled`、`fast_model`、`min_turns_before_downgrade`）
@@ -30,6 +20,14 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 - **提示缓存固定** — 在缺少缓存边界的 system prompt 中自动插入 cache boundary 标记，将静态部分（工具说明、角色）与动态部分（记忆、上下文）分离，实现约 90% prompt cache 命中率。配置：`optimization.prompt_cache_pinning`（`enabled`、`min_static_length`）
 - **所有优化默认启用**，可通过环境变量单独禁用（`SUPERAGENT_OPT_TOOL_COMPACTION`、`SUPERAGENT_OPT_SELECTIVE_TOOLS`、`SUPERAGENT_OPT_MODEL_ROUTING`、`SUPERAGENT_OPT_RESPONSE_PREFILL`、`SUPERAGENT_OPT_CACHE_PINNING`）
 - **无硬编码模型 ID** — 路由用的快速模型完全通过 `SUPERAGENT_OPT_FAST_MODEL` 配置；低价模型检测使用启发式名称匹配而非硬编码列表
+- **并行工具执行** — PHP Fiber 并行执行只读工具，耗时 = max 而非 sum。配置：`performance.parallel_tool_execution`
+- **流式工具分发** — SSE 流中收到 tool_use 块后立即启动执行。配置：`performance.streaming_tool_dispatch`
+- **HTTP 连接池** — cURL keep-alive 复用连接。配置：`performance.connection_pool`
+- **推测性预读** — Read 后预读相关文件到内存缓存。配置：`performance.speculative_prefetch`
+- **流式 Bash 执行** — 超时截断 + 尾部摘要。配置：`performance.streaming_bash`
+- **自适应 max_tokens** — 工具调用 2048，推理 8192。配置：`performance.adaptive_max_tokens`
+- **批量 API** — Anthropic Batches API（50% 折扣）。配置：`performance.batch_api`
+- **本地工具零拷贝** — Read/Edit/Write 间文件内容缓存。配置：`performance.local_tool_zero_copy`
 
 ### 🆕 v0.6.19 — In-Process NDJSON 日志支持进程监控
 - **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — 工厂类，一行代码创建写 CC 兼容 NDJSON 到日志文件的 `StreamingHandler`。用于 in-process agent 执行（直接调用 `$agent->prompt()` 而不经过 `agent-runner.php`/`ProcessBackend` 的场景）

@@ -7,44 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.1] - 2026-04-05
-
-### 🚀 Summary
-
-Execution performance release: 8 runtime optimizations that reduce tool execution latency, enable parallel execution, and improve resource utilization. Parallel Fiber-based tool execution, streaming tool dispatch, HTTP connection pooling, speculative file prefetch, adaptive max_tokens, Bash streaming with timeout, Anthropic Batch API support, and local tool zero-copy file caching. All integrated into the QueryEngine pipeline and individually configurable via env vars.
-
-### Added
-
-#### Execution Performance Suite (`src/Performance/`)
-- **`ParallelToolExecutor`**: classifies tool_use blocks into parallel-safe (read-only) and sequential (write) groups, executes read-only tools concurrently using PHP Fibers. Config: `SUPERAGENT_PERF_PARALLEL_TOOLS`, `SUPERAGENT_PERF_MAX_PARALLEL`
-- **`StreamingToolDispatch`**: starts tool execution as soon as a tool_use block is fully received during SSE streaming, before the complete LLM response. Uses Fibers with pump/collect pattern. Config: `SUPERAGENT_PERF_STREAMING_DISPATCH`
-- **`ConnectionPool`**: shared Guzzle clients with cURL keep-alive, TCP_NODELAY, TCP_KEEPALIVE. Eliminates repeated TCP/TLS handshakes for same-host API calls. Config: `SUPERAGENT_PERF_CONNECTION_POOL`
-- **`SpeculativePrefetch`**: after Read tool, predicts related files (tests, interfaces, configs in same directory) and pre-reads them into memory cache (LRU, max 50 entries). Config: `SUPERAGENT_PERF_SPECULATIVE_PREFETCH`
-- **`StreamingBashExecutor`**: streams Bash output with configurable timeout (30s default). Long output returns last N lines + summary header instead of full wait. Config: `SUPERAGENT_PERF_STREAMING_BASH`
-- **`AdaptiveMaxTokens`**: dynamically adjusts max_tokens per turn — 2048 for pure tool-call responses, 8192 for reasoning. Reduces reserved capacity waste. Config: `SUPERAGENT_PERF_ADAPTIVE_TOKENS`
-- **`BatchApiClient`**: queues non-realtime requests for Anthropic Message Batches API (50% cost). Submit/poll/wait pattern. Disabled by default. Config: `SUPERAGENT_PERF_BATCH_API`
-- **`LocalToolZeroCopy`**: file content cache between Read/Edit/Write. Read results cached in memory (50MB LRU), Edit/Write invalidates. md5 integrity check on cache reads. Config: `SUPERAGENT_PERF_ZERO_COPY`
-
-### Changed
-- **`QueryEngine::callProvider()`**: applies AdaptiveMaxTokens before provider call
-- **`QueryEngine::executeTools()`**: parallel execution path for multi-tool turns via `executeSingleTool()` + `ParallelToolExecutor::classify()/executeParallel()`. Falls back to sequential for single tools or write operations
-- **`QueryEngine::executeSingleTool()`**: new extracted method for single tool execution with full pipeline (permissions, hooks, caching, zero-copy). Used by both parallel and sequential paths
-- **`QueryEngine::runSpeculativePrefetch()`**: triggers prefetch after tool results are collected
-- **`config/superagent.php`**: new `performance` section with 8 subsections
-
-### Documentation
-- **README** (EN/CN/FR): version badge → 0.7.1; added v0.7.1 feature section
-- **INSTALL** (EN/CN/FR): added v0.7.1 upgrade notes and compatibility matrix row
-
 ## [0.7.0] - 2026-04-05
 
 ### 🚀 Summary
 
-Major performance release: 5 optimization strategies integrated into the QueryEngine pipeline that collectively reduce token consumption by 30-50%, lower cost by 40-60%, and improve prompt cache hit rates to ~90%. All optimizations are enabled by default and individually configurable via env vars.
+Major performance release with 13 optimization strategies (5 token + 8 execution) integrated into the QueryEngine pipeline. Token optimizations reduce consumption by 30-50%, lower cost by 40-60%, and improve prompt cache hit rates to ~90%. Execution optimizations enable parallel tool execution, streaming dispatch, HTTP connection pooling, speculative prefetch, adaptive max_tokens, and more. All individually configurable via env vars.
 
 ### Added
 
-#### Performance Optimization Suite (`src/Optimization/`)
+#### Token Optimization Suite (`src/Optimization/`)
 
 ##### Tool Result Compaction (`ToolResultCompactor`)
 - Compacts old tool results (beyond recent N turns) into concise summaries: `"[Compacted] Read: <?php class Agent..."`. Preserves error results intact. Reduces input tokens by 30-50% in multi-turn conversations
@@ -66,22 +37,35 @@ Major performance release: 5 optimization strategies integrated into the QueryEn
 - Auto-inserts `__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__` marker in system prompts lacking one. Heuristic analysis finds split point between static (tool descriptions, role definition) and dynamic (memory, context, session) sections. Static section gets `cache_control: ephemeral` for ~90% cache hit rate
 - Config: `optimization.prompt_cache_pinning` — `enabled` (default true), `min_static_length` (default 500)
 
+#### Execution Performance Suite (`src/Performance/`)
+- **`ParallelToolExecutor`**: classifies tool_use blocks into parallel-safe (read-only) and sequential (write) groups, executes read-only tools concurrently using PHP Fibers. Config: `SUPERAGENT_PERF_PARALLEL_TOOLS`, `SUPERAGENT_PERF_MAX_PARALLEL`
+- **`StreamingToolDispatch`**: starts tool execution as soon as a tool_use block is fully received during SSE streaming, before the complete LLM response. Uses Fibers with pump/collect pattern. Config: `SUPERAGENT_PERF_STREAMING_DISPATCH`
+- **`ConnectionPool`**: shared Guzzle clients with cURL keep-alive, TCP_NODELAY, TCP_KEEPALIVE. Eliminates repeated TCP/TLS handshakes for same-host API calls. Config: `SUPERAGENT_PERF_CONNECTION_POOL`
+- **`SpeculativePrefetch`**: after Read tool, predicts related files (tests, interfaces, configs in same directory) and pre-reads them into memory cache (LRU, max 50 entries). Config: `SUPERAGENT_PERF_SPECULATIVE_PREFETCH`
+- **`StreamingBashExecutor`**: streams Bash output with configurable timeout (30s default). Long output returns last N lines + summary header instead of full wait. Config: `SUPERAGENT_PERF_STREAMING_BASH`
+- **`AdaptiveMaxTokens`**: dynamically adjusts max_tokens per turn — 2048 for pure tool-call responses, 8192 for reasoning. Reduces reserved capacity waste. Config: `SUPERAGENT_PERF_ADAPTIVE_TOKENS`
+- **`BatchApiClient`**: queues non-realtime requests for Anthropic Message Batches API (50% cost). Submit/poll/wait pattern. Disabled by default. Config: `SUPERAGENT_PERF_BATCH_API`
+- **`LocalToolZeroCopy`**: file content cache between Read/Edit/Write. Read results cached in memory (50MB LRU), Edit/Write invalidates. md5 integrity check on cache reads. Config: `SUPERAGENT_PERF_ZERO_COPY`
+
 ### Changed
-- **`QueryEngine::callProvider()`**: now applies all 5 optimizations before each provider call — compacts messages, filters tools, routes model, generates prefill, pins cache boundary. Records turn for model routing after response
-- **`AnthropicProvider::buildRequestBody()`**: supports `$options['assistant_prefill']` — appends partial assistant message to formatted messages array for Anthropic prefill feature
-- **`config/superagent.php`**: new `optimization` section with 5 subsections, each with `enabled` toggle and tuning parameters
+- **`QueryEngine::callProvider()`**: applies all token optimizations (compact, filter, route, prefill, pin) + AdaptiveMaxTokens before provider call. Records turn for model routing after response
+- **`QueryEngine::executeTools()`**: parallel execution path for multi-tool turns via `executeSingleTool()` + `ParallelToolExecutor`. Falls back to sequential for single tools or write operations
+- **`QueryEngine::executeSingleTool()`**: new extracted method for single tool execution with full pipeline (permissions, hooks, caching, zero-copy). Used by both parallel and sequential paths
+- **`QueryEngine::runSpeculativePrefetch()`**: triggers prefetch after tool results are collected
+- **`AnthropicProvider::buildRequestBody()`**: supports `$options['assistant_prefill']` — appends partial assistant message for Anthropic prefill feature
+- **`config/superagent.php`**: new `optimization` section (5 subsections) and `performance` section (8 subsections)
 
 ### Fixed
-- **`AgentResult::totalUsage()`**: now accumulates `cacheCreationInputTokens` and `cacheReadInputTokens` across all turns (previously only summed `inputTokens` and `outputTokens`)
+- **`AgentResult::totalUsage()`**: now accumulates `cacheCreationInputTokens` and `cacheReadInputTokens` across all turns
 - **`AgentTeamResult::totalUsage()`**: same fix — cache tokens now aggregated across all agents
 - **`Usage::totalTokens()`**: now includes cache creation and cache read tokens in the total count
 - **`CostCalculator`**: added pricing for `claude-sonnet-4-6-20250627`, `claude-opus-4-6-20250514`, `claude-haiku-4-5-20251001` and their Bedrock ARN formats. `calculate()` now includes cache token costs (creation at 1.25x input rate, reads at 0.10x input rate)
-- **`NdjsonStreamingHandler::create()`/`createWithWriter()`**: added optional `$onText` and `$onThinking` callback passthrough parameters so callers can receive text streaming alongside NDJSON logging
-- **`ModelRouter`**: removed hardcoded `CHEAP_MODELS` list, uses heuristic name matching (`str_contains 'haiku'`) instead
+- **`NdjsonStreamingHandler::create()`/`createWithWriter()`**: added optional `$onText` and `$onThinking` callback passthrough parameters
+- **`ModelRouter`**: removed hardcoded `CHEAP_MODELS` list, uses heuristic name matching instead
 
 ### Documentation
-- **README** (EN/CN/FR): version badge → 0.7.0; added v0.7.0 feature section
-- **INSTALL** (EN/CN/FR): added v0.7.0 upgrade notes with env var reference and compatibility matrix row
+- **README** (EN/CN/FR): version badge → 0.7.0; added v0.7.0 feature sections
+- **INSTALL** (EN/CN/FR): added v0.7.0 upgrade notes and compatibility matrix row
 
 ## [0.6.19] - 2026-04-05
 

@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.1-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -12,17 +12,7 @@ SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre d
 
 ## ✨ Fonctionnalités Principales
 
-### 🆕 v0.7.1 — Suite de Performance d'Exécution (8 stratégies)
-- **Exécution Parallèle d'Outils** — Exécute les outils en lecture seule (Read, Grep, Glob, WebSearch) en parallèle via PHP Fibers. Plusieurs tool_use dans un tour s'exécutent simultanément. Config : `performance.parallel_tool_execution`
-- **Dispatch d'Outils en Streaming** — Lance l'exécution dès qu'un bloc tool_use est complet pendant le streaming SSE, avant la réponse LLM complète. Config : `performance.streaming_tool_dispatch`
-- **Pool de Connexions HTTP** — Réutilise les connexions TCP/TLS via cURL keep-alive, TCP_NODELAY et handler multi partagé. Config : `performance.connection_pool`
-- **Pré-lecture Spéculative** — Après exécution de Read, prédit et pré-lit les fichiers liés (tests, interfaces, configs). Les lectures suivantes touchent le cache mémoire. Config : `performance.speculative_prefetch`
-- **Exécuteur Bash en Streaming** — Collecte la sortie Bash en streaming avec troncature par timeout. Les sorties longues retournent les N dernières lignes + résumé. Config : `performance.streaming_bash`
-- **max_tokens Adaptatif** — Ajuste max_tokens par tour : 2048 pour les appels d'outils purs, 8192 pour le raisonnement. Config : `performance.adaptive_max_tokens`
-- **Support API Batch** — File les requêtes non temps-réel pour l'API Message Batches d'Anthropic (réduction de coût 50%). Config : `performance.batch_api`
-- **Zéro-Copie Outils Locaux** — Cache de contenu fichier entre outils Read/Edit/Write. Résultat Read mis en cache mémoire, Edit/Write invalide le cache. Config : `performance.local_tool_zero_copy`
-
-### 🆕 v0.7.0 — Suite d'Optimisation des Performances (5 stratégies, toutes configurables)
+### 🆕 v0.7.0 — Suite d'Optimisation des Performances (13 stratégies, toutes configurables)
 - **Compaction des Résultats d'Outils** — Compacte automatiquement les anciens résultats d'outils (au-delà des N derniers tours) en résumés concis, réduisant les tokens d'entrée de 30-50%. Préserve les résultats d'erreur et le contexte récent. Config : `optimization.tool_result_compaction` (`enabled`, `preserve_recent_turns`, `max_result_length`)
 - **Schéma d'Outils Sélectif** — Sélectionne dynamiquement un sous-ensemble d'outils pertinents par tour selon la phase (exploration/édition/planification), économisant ~10K tokens. Inclut toujours les outils récemment utilisés. Config : `optimization.selective_tool_schema` (`enabled`, `max_tools`)
 - **Routage de Modèle par Tour** — Rétrograde automatiquement vers un modèle rapide (configurable, Haiku par défaut) pour les tours d'appels d'outils purs, remonte pour le raisonnement. Réduction de coût de 40-60%. Config : `optimization.model_routing` (`enabled`, `fast_model`, `min_turns_before_downgrade`)
@@ -30,6 +20,14 @@ SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre d
 - **Épinglage du Cache de Prompt** — Insère automatiquement un marqueur de frontière de cache dans les prompts système qui en manquent, séparant les sections statiques (descriptions d'outils, rôle) des dynamiques (mémoire, contexte). Taux de cache hit ~90%. Config : `optimization.prompt_cache_pinning` (`enabled`, `min_static_length`)
 - **Toutes les optimisations activées par défaut**, désactivables individuellement via variables d'environnement (`SUPERAGENT_OPT_TOOL_COMPACTION`, `SUPERAGENT_OPT_SELECTIVE_TOOLS`, `SUPERAGENT_OPT_MODEL_ROUTING`, `SUPERAGENT_OPT_RESPONSE_PREFILL`, `SUPERAGENT_OPT_CACHE_PINNING`)
 - **Aucun ID de modèle codé en dur** — Le modèle rapide est entièrement configurable via `SUPERAGENT_OPT_FAST_MODEL` ; la détection de modèles économiques utilise la correspondance heuristique de noms
+- **Exécution Parallèle d'Outils** — PHP Fibers pour outils en lecture seule en parallèle. Config : `performance.parallel_tool_execution`
+- **Dispatch Streaming** — Exécution dès réception du bloc tool_use en SSE. Config : `performance.streaming_tool_dispatch`
+- **Pool Connexions HTTP** — cURL keep-alive. Config : `performance.connection_pool`
+- **Pré-lecture Spéculative** — Pré-lit les fichiers liés après Read. Config : `performance.speculative_prefetch`
+- **Bash Streaming** — Troncature timeout + résumé. Config : `performance.streaming_bash`
+- **max_tokens Adaptatif** — 2048 outils, 8192 raisonnement. Config : `performance.adaptive_max_tokens`
+- **API Batch** — Anthropic Batches API (50% coût). Config : `performance.batch_api`
+- **Zéro-Copie** — Cache fichier Read/Edit/Write. Config : `performance.local_tool_zero_copy`
 
 ### 🆕 v0.6.19 — Journalisation NDJSON In-Process pour le Moniteur de Processus
 - **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — Classe factory pour créer un `StreamingHandler` qui écrit du NDJSON compatible CC vers tout fichier de log ou flux. Intégration en une ligne pour l'exécution d'agents in-process (appels `$agent->prompt()` sans passer par `agent-runner.php`/`ProcessBackend`)

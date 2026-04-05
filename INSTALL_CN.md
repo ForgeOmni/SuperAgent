@@ -512,17 +512,9 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
-## v0.7.1 升级说明
-
-v0.7.1 新增 8 项执行性能优化。**除 Batch API 外全部默认启用。**
-
-```bash
-composer update forgeomni/superagent
-```
-
 ## v0.7.0 升级说明
 
-v0.7.0 新增 5 项性能优化，降低 token 消耗和成本。**全部默认启用，无需修改配置。**
+v0.7.0 新增 13 项性能优化（5 项 token + 8 项执行）。**除 Batch API 外全部默认启用，无需修改配置。**
 
 如需禁用某项优化，设置对应环境变量为 `false`：
 ```env
@@ -915,8 +907,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
-| 0.7.1      | 10.x+   | 8.1+  | 8 项执行性能优化：并行工具、流式分发、连接池、预读、自适应 tokens、批量 API、零拷贝 |
-| 0.7.0      | 10.x+   | 8.1+  | 5 项性能优化：工具结果压缩、按需工具 Schema、模型路由、响应预填充、提示缓存固定 |
+| 0.7.0      | 10.x+   | 8.1+  | 13 项性能优化：token 压缩、按需工具、模型路由、预填充、缓存固定 + 并行工具、流式分发、连接池、预读、自适应 tokens、批量 API、零拷贝：工具结果压缩、按需工具 Schema、模型路由、响应预填充、提示缓存固定 |
 | 0.6.19     | 10.x+   | 8.1+  | In-process NDJSON 日志（`NdjsonStreamingHandler`）支持进程监控 |
 | 0.6.18     | 10.x+   | 8.1+  | Claude Code 兼容 NDJSON 结构化日志替代 `__PROGRESS__:` 协议 |
 | 0.6.17     | 10.x+   | 8.1+  | 子 agent 进程实时进度监控（`__PROGRESS__:` stderr 协议） |
