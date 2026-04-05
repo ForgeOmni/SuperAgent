@@ -119,6 +119,50 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Performance Optimization
+    |--------------------------------------------------------------------------
+    | Five optimization strategies that reduce token consumption, lower cost,
+    | and improve response speed. Each can be independently enabled/disabled.
+    |
+    | All optimizations default to enabled. Set the corresponding env var to
+    | false to disable any individual optimization.
+    */
+    'optimization' => [
+
+        // Compact old tool results (>N turns) to summaries, saving 30-50% input tokens
+        'tool_result_compaction' => [
+            'enabled' => env('SUPERAGENT_OPT_TOOL_COMPACTION', true),
+            'preserve_recent_turns' => (int) env('SUPERAGENT_OPT_COMPACTION_TURNS', 2),
+            'max_result_length' => (int) env('SUPERAGENT_OPT_COMPACTION_LENGTH', 200),
+        ],
+
+        // Send only relevant tool schemas per turn instead of all 59, saving ~10K tokens
+        'selective_tool_schema' => [
+            'enabled' => env('SUPERAGENT_OPT_SELECTIVE_TOOLS', true),
+            'max_tools' => (int) env('SUPERAGENT_OPT_MAX_TOOLS', 20),
+        ],
+
+        // Auto-downgrade to fast model (Haiku) for pure tool-call turns, 40-60% cost saving
+        'model_routing' => [
+            'enabled' => env('SUPERAGENT_OPT_MODEL_ROUTING', true),
+            'fast_model' => env('SUPERAGENT_OPT_FAST_MODEL', 'claude-haiku-4-5-20251001'),
+            'min_turns_before_downgrade' => (int) env('SUPERAGENT_OPT_ROUTING_MIN_TURNS', 2),
+        ],
+
+        // Prefill assistant response to eliminate preamble tokens
+        'response_prefill' => [
+            'enabled' => env('SUPERAGENT_OPT_RESPONSE_PREFILL', true),
+        ],
+
+        // Auto-insert cache boundary in system prompt for 90% prompt cache hit rate
+        'prompt_cache_pinning' => [
+            'enabled' => env('SUPERAGENT_OPT_CACHE_PINNING', true),
+            'min_static_length' => (int) env('SUPERAGENT_OPT_CACHE_MIN_LENGTH', 500),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Permission Mode
     |--------------------------------------------------------------------------
     | Supported: "allowAll", "denyAll", "allowList"

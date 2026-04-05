@@ -27,13 +27,18 @@ use SuperAgent\Tools\ToolResult;
 use SuperAgent\ErrorRecovery\ErrorRecoveryManager;
 use SuperAgent\ErrorRecovery\ErrorClassifier;
 use SuperAgent\Traits\ErrorRecoveryTrait;
+use SuperAgent\Optimization\ToolResultCompactor;
+use SuperAgent\Optimization\ToolSchemaFilter;
+use SuperAgent\Optimization\ModelRouter;
+use SuperAgent\Optimization\ResponsePrefill;
+use SuperAgent\Optimization\PromptCachePinning;
 use SuperAgent\Traits\CachedToolExecutionTrait;
 
 class QueryEngine
 {
     use ErrorRecoveryTrait;
     use CachedToolExecutionTrait;
-    
+
     /** @var Message[] */
     protected array $messages = [];
 
@@ -69,6 +74,13 @@ class QueryEngine
     protected ?CheckpointManager $checkpointManager = null;
 
     protected ?SmartContextManager $smartContextManager = null;
+
+    // ── Performance optimizations ─────────────────────────────────
+    protected ?ToolResultCompactor $toolResultCompactor = null;
+    protected ?ToolSchemaFilter $toolSchemaFilter = null;
+    protected ?ModelRouter $modelRouter = null;
+    protected ?ResponsePrefill $responsePrefill = null;
+    protected ?PromptCachePinning $promptCachePinning = null;
 
     public function __construct(
         protected readonly LLMProvider $provider,
@@ -126,6 +138,15 @@ class QueryEngine
                 $this->options['model'] ?? $this->provider->getModel(),
             );
         }
+
+        // ── Initialize performance optimizations from config ──────
+        $this->toolResultCompactor = ToolResultCompactor::fromConfig();
+        $this->toolSchemaFilter = ToolSchemaFilter::fromConfig();
+        $this->modelRouter = ModelRouter::fromConfig(
+            $this->options['model'] ?? $this->provider->getModel(),
+        );
+        $this->responsePrefill = ResponsePrefill::fromConfig();
+        $this->promptCachePinning = PromptCachePinning::fromConfig();
     }
 
     public function getMessages(): array
@@ -305,10 +326,44 @@ class QueryEngine
             $options['streaming_handler'] = $this->streamingHandler;
         }
 
+        // ── Optimization 1: Compact old tool results ──────────────
+        $messages = $this->messages;
+        if ($this->toolResultCompactor?->isEnabled()) {
+            $messages = $this->toolResultCompactor->compact($messages);
+        }
+
+        // ── Optimization 2: Selective tool schema ─────────────────
+        $tools = $this->tools;
+        if ($this->toolSchemaFilter?->isEnabled()) {
+            $tools = $this->toolSchemaFilter->filter($tools, $messages);
+        }
+
+        // ── Optimization 3: Per-turn model routing ────────────────
+        if ($this->modelRouter?->isEnabled()) {
+            $routedModel = $this->modelRouter->route($messages, $this->turnCount);
+            if ($routedModel !== null) {
+                $options['model'] = $routedModel;
+            }
+        }
+
+        // ── Optimization 4: Response prefill ──────────────────────
+        if ($this->responsePrefill?->isEnabled()) {
+            $prefill = $this->responsePrefill->generate($messages, $tools);
+            if ($prefill !== null) {
+                $options['assistant_prefill'] = $prefill;
+            }
+        }
+
+        // ── Optimization 5: Prompt cache pinning ──────────────────
+        $systemPrompt = $this->systemPrompt;
+        if ($this->promptCachePinning?->isEnabled()) {
+            $systemPrompt = $this->promptCachePinning->pin($systemPrompt);
+        }
+
         $generator = $this->provider->chat(
-            $this->messages,
-            $this->tools,
-            $this->systemPrompt,
+            $messages,
+            $tools,
+            $systemPrompt,
             $options,
         );
 
@@ -320,6 +375,9 @@ class QueryEngine
         if ($lastMessage === null) {
             throw new SuperAgentException('Provider returned no response');
         }
+
+        // Record turn for model routing decisions
+        $this->modelRouter?->recordTurn($lastMessage);
 
         return $lastMessage;
     }

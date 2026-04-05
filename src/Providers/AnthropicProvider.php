@@ -214,6 +214,14 @@ class AnthropicProvider implements LLMProvider
             }
         }
 
+        // Response prefill: inject partial assistant message to guide output
+        if (isset($options['assistant_prefill']) && is_string($options['assistant_prefill'])) {
+            $body['messages'][] = [
+                'role' => 'assistant',
+                'content' => $options['assistant_prefill'],
+            ];
+        }
+
         // Extended thinking support
         $thinkingConfig = $options['thinking'] ?? null;
         if ($thinkingConfig instanceof ThinkingConfig) {

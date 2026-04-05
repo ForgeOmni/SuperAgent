@@ -512,6 +512,25 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.7.0 升级说明
+
+v0.7.0 新增 5 项性能优化，降低 token 消耗和成本。**全部默认启用，无需修改配置。**
+
+如需禁用某项优化，设置对应环境变量为 `false`：
+```env
+SUPERAGENT_OPT_TOOL_COMPACTION=false
+SUPERAGENT_OPT_SELECTIVE_TOOLS=false
+SUPERAGENT_OPT_MODEL_ROUTING=false
+SUPERAGENT_OPT_RESPONSE_PREFILL=false
+SUPERAGENT_OPT_CACHE_PINNING=false
+```
+
+路由用的快速模型默认为 `claude-haiku-4-5-20251001`，可通过 `SUPERAGENT_OPT_FAST_MODEL=模型ID` 覆盖。
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.6.19 升级说明
 
 v0.6.19 新增 `NdjsonStreamingHandler`，为 in-process agent 执行提供日志支持。**无需修改配置。**
@@ -888,6 +907,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.7.0      | 10.x+   | 8.1+  | 5 项性能优化：工具结果压缩、按需工具 Schema、模型路由、响应预填充、提示缓存固定 |
 | 0.6.19     | 10.x+   | 8.1+  | In-process NDJSON 日志（`NdjsonStreamingHandler`）支持进程监控 |
 | 0.6.18     | 10.x+   | 8.1+  | Claude Code 兼容 NDJSON 结构化日志替代 `__PROGRESS__:` 协议 |
 | 0.6.17     | 10.x+   | 8.1+  | 子 agent 进程实时进度监控（`__PROGRESS__:` stderr 协议） |

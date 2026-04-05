@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.6.19-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.7.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,15 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.7.0 — 性能优化套件（5 项策略，全部可配置）
+- **工具结果压缩** — 自动将旧的工具结果（超过最近 N 轮）压缩为简洁摘要，减少 30-50% input tokens。保留错误结果和近期上下文不变。配置：`optimization.tool_result_compaction`（`enabled`、`preserve_recent_turns`、`max_result_length`）
+- **按需工具 Schema** — 根据任务阶段（探索/编辑/规划）动态选择相关工具子集，省略未使用的工具 schema 节省约 10K tokens。始终包含最近使用的工具。配置：`optimization.selective_tool_schema`（`enabled`、`max_tools`）
+- **逐轮模型路由** — 纯工具调用轮自动降级到快速模型（可配置，默认 Haiku），推理时自动升级。检测连续工具调用轮并据此路由，降低 40-60% 成本。配置：`optimization.model_routing`（`enabled`、`fast_model`、`min_turns_before_downgrade`）
+- **响应预填充** — 使用 Anthropic assistant prefill 在长时间工具调用后引导输出格式，鼓励总结而非更多工具调用。保守策略：仅在连续 3+ 轮工具调用后预填。配置：`optimization.response_prefill`（`enabled`）
+- **提示缓存固定** — 在缺少缓存边界的 system prompt 中自动插入 cache boundary 标记，将静态部分（工具说明、角色）与动态部分（记忆、上下文）分离，实现约 90% prompt cache 命中率。配置：`optimization.prompt_cache_pinning`（`enabled`、`min_static_length`）
+- **所有优化默认启用**，可通过环境变量单独禁用（`SUPERAGENT_OPT_TOOL_COMPACTION`、`SUPERAGENT_OPT_SELECTIVE_TOOLS`、`SUPERAGENT_OPT_MODEL_ROUTING`、`SUPERAGENT_OPT_RESPONSE_PREFILL`、`SUPERAGENT_OPT_CACHE_PINNING`）
+- **无硬编码模型 ID** — 路由用的快速模型完全通过 `SUPERAGENT_OPT_FAST_MODEL` 配置；低价模型检测使用启发式名称匹配而非硬编码列表
 
 ### 🆕 v0.6.19 — In-Process NDJSON 日志支持进程监控
 - **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — 工厂类，一行代码创建写 CC 兼容 NDJSON 到日志文件的 `StreamingHandler`。用于 in-process agent 执行（直接调用 `$agent->prompt()` 而不经过 `agent-runner.php`/`ProcessBackend` 的场景）

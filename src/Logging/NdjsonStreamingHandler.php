@@ -27,32 +27,25 @@ class NdjsonStreamingHandler
     /**
      * Create a StreamingHandler that writes all execution events as NDJSON.
      *
-     * @param string|resource $logTarget  File path (string) or writable stream resource
-     * @param string          $agentId    Agent identifier for session_id field
-     * @param bool            $append     Append to existing file (default true)
+     * @param string|resource $logTarget   File path (string) or writable stream resource
+     * @param string          $agentId     Agent identifier for session_id field
+     * @param bool            $append      Append to existing file (default true)
+     * @param ?\Closure       $onText      Optional text streaming callback (passthrough)
+     * @param ?\Closure       $onThinking  Optional thinking callback (passthrough)
      */
     public static function create(
         mixed $logTarget,
         string $agentId = 'agent',
         bool $append = true,
+        ?\Closure $onText = null,
+        ?\Closure $onThinking = null,
     ): StreamingHandler {
-        // Open file or use provided stream
-        if (is_string($logTarget)) {
-            $dir = dirname($logTarget);
-            if (!is_dir($dir)) {
-                mkdir($dir, 0755, true);
-            }
-            $stream = fopen($logTarget, $append ? 'a' : 'w');
-            if ($stream === false) {
-                throw new \RuntimeException("Cannot open log file: {$logTarget}");
-            }
-        } else {
-            $stream = $logTarget;
-        }
-
+        $stream = self::openStream($logTarget, $append);
         $ndjson = new NdjsonWriter($agentId, sessionId: $agentId, stream: $stream);
 
         return new StreamingHandler(
+            onText: $onText,
+            onThinking: $onThinking,
             onToolUse: function (ContentBlock $block) use ($ndjson) {
                 $ndjson->writeToolUse(
                     $block->toolName ?? 'unknown',
@@ -74,9 +67,9 @@ class NdjsonStreamingHandler
      * so you can call writeResult() / writeError() after execution.
      *
      * Usage:
-     *   $handler = NdjsonStreamingHandler::createWithWriter('/tmp/agent.jsonl', 'my-agent');
-     *   $result  = $agent->prompt($prompt, $handler->handler);
-     *   $handler->writer->writeResult($result->turns(), $result->text(), [...]);
+     *   $pair = NdjsonStreamingHandler::createWithWriter('/tmp/agent.jsonl', 'my-agent');
+     *   $result = $agent->prompt($prompt, $pair->handler);
+     *   $pair->writer->writeResult($result->turns(), $result->text(), [...]);
      *
      * @return object{handler: StreamingHandler, writer: NdjsonWriter}
      */
@@ -84,23 +77,15 @@ class NdjsonStreamingHandler
         mixed $logTarget,
         string $agentId = 'agent',
         bool $append = true,
+        ?\Closure $onText = null,
+        ?\Closure $onThinking = null,
     ): object {
-        if (is_string($logTarget)) {
-            $dir = dirname($logTarget);
-            if (!is_dir($dir)) {
-                mkdir($dir, 0755, true);
-            }
-            $stream = fopen($logTarget, $append ? 'a' : 'w');
-            if ($stream === false) {
-                throw new \RuntimeException("Cannot open log file: {$logTarget}");
-            }
-        } else {
-            $stream = $logTarget;
-        }
-
+        $stream = self::openStream($logTarget, $append);
         $ndjson = new NdjsonWriter($agentId, sessionId: $agentId, stream: $stream);
 
         $handler = new StreamingHandler(
+            onText: $onText,
+            onThinking: $onThinking,
             onToolUse: function (ContentBlock $block) use ($ndjson) {
                 $ndjson->writeToolUse(
                     $block->toolName ?? 'unknown',
@@ -117,5 +102,24 @@ class NdjsonStreamingHandler
         );
 
         return (object) ['handler' => $handler, 'writer' => $ndjson];
+    }
+
+    /**
+     * @return resource
+     */
+    private static function openStream(mixed $logTarget, bool $append)
+    {
+        if (is_string($logTarget)) {
+            $dir = dirname($logTarget);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+            $stream = fopen($logTarget, $append ? 'a' : 'w');
+            if ($stream === false) {
+                throw new \RuntimeException("Cannot open log file: {$logTarget}");
+            }
+            return $stream;
+        }
+        return $logTarget;
     }
 }

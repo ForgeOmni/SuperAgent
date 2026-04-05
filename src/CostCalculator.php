@@ -10,9 +10,14 @@ class CostCalculator
      * Pricing per million tokens [input, output] in USD.
      */
     protected static array $pricing = [
-        // Anthropic Claude models
+        // Anthropic Claude 4.6 models (latest)
+        'claude-sonnet-4-6-20250627' => ['input' => 3.0, 'output' => 15.0],
+        'claude-opus-4-6-20250514'   => ['input' => 15.0, 'output' => 75.0],
+        'claude-haiku-4-5-20251001'  => ['input' => 0.80, 'output' => 4.0],
+        // Anthropic Claude 4.x models
         'claude-sonnet-4-20250514' => ['input' => 3.0, 'output' => 15.0],
         'claude-opus-4-20250514'   => ['input' => 15.0, 'output' => 75.0],
+        // Anthropic Claude 3.x models (legacy)
         'claude-haiku-3-5-20241022' => ['input' => 0.80, 'output' => 4.0],
         'claude-3-5-sonnet-20241022' => ['input' => 3.0, 'output' => 15.0],
         'claude-3-opus-20240229' => ['input' => 15.0, 'output' => 75.0],
@@ -45,6 +50,11 @@ class CostCalculator
         'mistralai/mixtral-8x7b-instruct' => ['input' => 0.60, 'output' => 0.60],
         
         // AWS Bedrock models
+        'anthropic.claude-sonnet-4-6-20250627-v1:0' => ['input' => 3.0, 'output' => 15.0],
+        'anthropic.claude-opus-4-6-20250514-v1:0'   => ['input' => 15.0, 'output' => 75.0],
+        'anthropic.claude-haiku-4-5-20251001-v1:0'   => ['input' => 0.80, 'output' => 4.0],
+        'anthropic.claude-sonnet-4-20250514-v1:0' => ['input' => 3.0, 'output' => 15.0],
+        'anthropic.claude-opus-4-20250514-v1:0'   => ['input' => 15.0, 'output' => 75.0],
         'anthropic.claude-3-5-sonnet-20241022-v2:0' => ['input' => 3.0, 'output' => 15.0],
         'anthropic.claude-3-sonnet-20240229-v1:0' => ['input' => 3.0, 'output' => 15.0],
         'anthropic.claude-3-haiku-20240307-v1:0' => ['input' => 0.25, 'output' => 1.25],
@@ -87,8 +97,18 @@ class CostCalculator
     {
         $prices = static::resolve($model);
 
-        return ($usage->inputTokens * $prices['input'] / 1_000_000)
-             + ($usage->outputTokens * $prices['output'] / 1_000_000);
+        $cost = ($usage->inputTokens * $prices['input'] / 1_000_000)
+              + ($usage->outputTokens * $prices['output'] / 1_000_000);
+
+        // Cache tokens: creation costs same as input, reads cost 90% less
+        if ($usage->cacheCreationInputTokens) {
+            $cost += $usage->cacheCreationInputTokens * ($prices['input'] * 1.25) / 1_000_000;
+        }
+        if ($usage->cacheReadInputTokens) {
+            $cost += $usage->cacheReadInputTokens * ($prices['input'] * 0.10) / 1_000_000;
+        }
+
+        return $cost;
     }
 
     /**

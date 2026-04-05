@@ -117,14 +117,23 @@ class AgentTeamResult
     {
         $totalInput = 0;
         $totalOutput = 0;
-        
+        $totalCacheCreation = 0;
+        $totalCacheRead = 0;
+
         foreach ($this->agentResults as $result) {
             $usage = $result->totalUsage();
             $totalInput += $usage->inputTokens;
             $totalOutput += $usage->outputTokens;
+            $totalCacheCreation += $usage->cacheCreationInputTokens ?? 0;
+            $totalCacheRead += $usage->cacheReadInputTokens ?? 0;
         }
-        
-        return new Usage($totalInput, $totalOutput);
+
+        return new Usage(
+            $totalInput,
+            $totalOutput,
+            $totalCacheCreation > 0 ? $totalCacheCreation : null,
+            $totalCacheRead > 0 ? $totalCacheRead : null,
+        );
     }
 
     /**

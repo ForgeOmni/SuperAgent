@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.19-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -61,6 +61,15 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.7.0 — Performance Optimization Suite (5 strategies, all configurable)
+- **Tool Result Compaction** — Automatically compacts old tool results (beyond recent N turns) into concise summaries, reducing input tokens by 30-50%. Preserves error results and recent context intact. Config: `optimization.tool_result_compaction` (`enabled`, `preserve_recent_turns`, `max_result_length`)
+- **Selective Tool Schema** — Dynamically selects relevant tool subset per turn based on task phase (explore/edit/plan), saving ~10K tokens by omitting unused tool schemas. Always includes recently-used tools. Config: `optimization.selective_tool_schema` (`enabled`, `max_tools`)
+- **Per-Turn Model Routing** — Auto-downgrades to fast model (configurable, default Haiku) for pure tool-call turns, upgrades back for reasoning. Detects consecutive tool-only turns and routes accordingly. 40-60% cost reduction. Config: `optimization.model_routing` (`enabled`, `fast_model`, `min_turns_before_downgrade`)
+- **Response Prefill** — Uses Anthropic's assistant prefill to guide output format after extended tool-call sequences, encouraging summarization over more tool calls. Conservative strategy: only prefills after 3+ consecutive tool turns. Config: `optimization.response_prefill` (`enabled`)
+- **Prompt Cache Pinning** — Auto-inserts cache boundary marker in system prompts that lack one, splitting static (tool descriptions, role) from dynamic (memory, context) sections. Achieves ~90% prompt cache hit rate. Config: `optimization.prompt_cache_pinning` (`enabled`, `min_static_length`)
+- **All optimizations default to enabled** and can be individually disabled via env vars (`SUPERAGENT_OPT_TOOL_COMPACTION`, `SUPERAGENT_OPT_SELECTIVE_TOOLS`, `SUPERAGENT_OPT_MODEL_ROUTING`, `SUPERAGENT_OPT_RESPONSE_PREFILL`, `SUPERAGENT_OPT_CACHE_PINNING`)
+- **No hardcoded model IDs** — Fast model for routing is fully configurable via `SUPERAGENT_OPT_FAST_MODEL`; cheap model detection uses heuristic name matching instead of hardcoded lists
 
 ### 🆕 v0.6.19 — In-Process NDJSON Logging for Process Monitor
 - **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — Factory class for creating a `StreamingHandler` that writes CC-compatible NDJSON to any log file or stream. One-liner integration for in-process agent execution (`$agent->prompt()` calls that don't go through `agent-runner.php`/`ProcessBackend`)

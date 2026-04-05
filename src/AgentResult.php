@@ -41,13 +41,22 @@ class AgentResult
     {
         $input = 0;
         $output = 0;
+        $cacheCreation = 0;
+        $cacheRead = 0;
         foreach ($this->allResponses as $response) {
             if ($response->usage) {
                 $input += $response->usage->inputTokens;
                 $output += $response->usage->outputTokens;
+                $cacheCreation += $response->usage->cacheCreationInputTokens ?? 0;
+                $cacheRead += $response->usage->cacheReadInputTokens ?? 0;
             }
         }
 
-        return new Usage($input, $output);
+        return new Usage(
+            $input,
+            $output,
+            $cacheCreation > 0 ? $cacheCreation : null,
+            $cacheRead > 0 ? $cacheRead : null,
+        );
     }
 }

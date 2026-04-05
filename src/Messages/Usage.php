@@ -14,7 +14,10 @@ class Usage
 
     public function totalTokens(): int
     {
-        return $this->inputTokens + $this->outputTokens;
+        return $this->inputTokens
+            + $this->outputTokens
+            + ($this->cacheCreationInputTokens ?? 0)
+            + ($this->cacheReadInputTokens ?? 0);
     }
 
     public function toArray(): array

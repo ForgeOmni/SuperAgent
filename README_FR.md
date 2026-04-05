@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.19-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,15 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.7.0 — Suite d'Optimisation des Performances (5 stratégies, toutes configurables)
+- **Compaction des Résultats d'Outils** — Compacte automatiquement les anciens résultats d'outils (au-delà des N derniers tours) en résumés concis, réduisant les tokens d'entrée de 30-50%. Préserve les résultats d'erreur et le contexte récent. Config : `optimization.tool_result_compaction` (`enabled`, `preserve_recent_turns`, `max_result_length`)
+- **Schéma d'Outils Sélectif** — Sélectionne dynamiquement un sous-ensemble d'outils pertinents par tour selon la phase (exploration/édition/planification), économisant ~10K tokens. Inclut toujours les outils récemment utilisés. Config : `optimization.selective_tool_schema` (`enabled`, `max_tools`)
+- **Routage de Modèle par Tour** — Rétrograde automatiquement vers un modèle rapide (configurable, Haiku par défaut) pour les tours d'appels d'outils purs, remonte pour le raisonnement. Réduction de coût de 40-60%. Config : `optimization.model_routing` (`enabled`, `fast_model`, `min_turns_before_downgrade`)
+- **Préremplissage de Réponse** — Utilise le prefill assistant d'Anthropic pour guider le format de sortie après des séquences d'appels d'outils, encourageant la synthèse. Stratégie conservatrice : préremplissage uniquement après 3+ tours d'outils consécutifs. Config : `optimization.response_prefill` (`enabled`)
+- **Épinglage du Cache de Prompt** — Insère automatiquement un marqueur de frontière de cache dans les prompts système qui en manquent, séparant les sections statiques (descriptions d'outils, rôle) des dynamiques (mémoire, contexte). Taux de cache hit ~90%. Config : `optimization.prompt_cache_pinning` (`enabled`, `min_static_length`)
+- **Toutes les optimisations activées par défaut**, désactivables individuellement via variables d'environnement (`SUPERAGENT_OPT_TOOL_COMPACTION`, `SUPERAGENT_OPT_SELECTIVE_TOOLS`, `SUPERAGENT_OPT_MODEL_ROUTING`, `SUPERAGENT_OPT_RESPONSE_PREFILL`, `SUPERAGENT_OPT_CACHE_PINNING`)
+- **Aucun ID de modèle codé en dur** — Le modèle rapide est entièrement configurable via `SUPERAGENT_OPT_FAST_MODEL` ; la détection de modèles économiques utilise la correspondance heuristique de noms
 
 ### 🆕 v0.6.19 — Journalisation NDJSON In-Process pour le Moniteur de Processus
 - **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — Classe factory pour créer un `StreamingHandler` qui écrit du NDJSON compatible CC vers tout fichier de log ou flux. Intégration en une ligne pour l'exécution d'agents in-process (appels `$agent->prompt()` sans passer par `agent-runner.php`/`ProcessBackend`)

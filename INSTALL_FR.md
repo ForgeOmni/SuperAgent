@@ -512,6 +512,25 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.7.0
+
+v0.7.0 ajoute 5 optimisations de performance qui réduisent la consommation de tokens et les coûts. **Toutes activées par défaut. Aucune modification de configuration requise.**
+
+Pour désactiver une optimisation, définissez la variable d'environnement correspondante à `false` :
+```env
+SUPERAGENT_OPT_TOOL_COMPACTION=false
+SUPERAGENT_OPT_SELECTIVE_TOOLS=false
+SUPERAGENT_OPT_MODEL_ROUTING=false
+SUPERAGENT_OPT_RESPONSE_PREFILL=false
+SUPERAGENT_OPT_CACHE_PINNING=false
+```
+
+Le modèle rapide pour le routage est par défaut `claude-haiku-4-5-20251001`. Remplacez avec `SUPERAGENT_OPT_FAST_MODEL=votre-modele-id`.
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.6.19
 
 v0.6.19 ajoute `NdjsonStreamingHandler` pour la journalisation des agents exécutés in-process. **Aucune modification de configuration requise.**
@@ -878,6 +897,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.7.0      | 10.x+   | 8.1+  | 5 optimisations de performance : compaction résultats, schéma sélectif, routage modèle, prefill réponse, épinglage cache |
 | 0.6.19     | 10.x+   | 8.1+  | Journalisation NDJSON in-process via `NdjsonStreamingHandler` pour visibilité moniteur |
 | 0.6.18     | 10.x+   | 8.1+  | Journalisation structurée NDJSON compatible Claude Code remplace le protocole `__PROGRESS__:` |
 | 0.6.17     | 10.x+   | 8.1+  | Surveillance en temps réel de la progression des agents enfants via protocole stderr `__PROGRESS__:` |
