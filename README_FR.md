@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.6-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.7-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,11 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.7.7 — Déboguabilité & Renforcement Qualité
+- **Journalisation des Exceptions Silencieuses** — Ajout de `error_log('[SuperAgent] ...')` aux 27 blocs catch silencieux dans 24 fichiers (Performance, Optimization, ProcessBackend, MCPManager, etc.). Les problèmes de production invisibles sont maintenant traçables via le préfixe `[SuperAgent]`
+- **Tests Unitaires Agent** (`tests/Unit/AgentTest.php`) — 31 tests, 44 assertions couvrant la construction, le routage de providers, le chaînage fluide, la gestion d'outils, le mode bridge, le mode auto et l'injection de config provider dans les sous-agents
+- **Framework de Revue de Code** (`docs/REVIEW.md`) — Modèle d'évaluation architecturale périodique avec métriques, analyse forces/faiblesses, lacunes de couverture de tests, actions prioritaires et scoring par version (actuel : 7.6/10)
 
 ### 🆕 v0.7.6 — Suite d'Intelligence Agent Innovante (6 nouveaux sous-systèmes)
 - **Replay d'Agent & Débogage Temporel** (`src/Replay/`) — Enregistrez les traces d'exécution complètes (appels LLM, appels d'outils, créations d'agents, messages inter-agents) et rejouez-les pas à pas. `ReplayPlayer` supporte la navigation avant/arrière, l'inspection d'état d'agent à n'importe quel pas, la recherche, le fork depuis n'importe quel pas, et la timeline formatée avec coût cumulé. Traces persistées en NDJSON via `ReplayStore` avec nettoyage par âge. Config : `replay.enabled`, `replay.snapshot_interval`

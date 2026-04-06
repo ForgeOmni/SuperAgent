@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.6-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.7-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -61,6 +61,11 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.7.7 — Debuggability & Quality Hardening
+- **Swallowed Exception Logging** — Added `error_log('[SuperAgent] ...')` to all 27 previously-silent catch blocks across 24 files (Performance, Optimization, ProcessBackend, MCPManager, etc.). Production issues that were invisible are now traceable via `[SuperAgent]` log prefix
+- **Agent Unit Tests** (`tests/Unit/AgentTest.php`) — 31 tests, 44 assertions covering construction, provider routing, fluent API chaining, tool management, bridge mode, auto mode, and provider config injection into sub-agents
+- **Code Review Framework** (`docs/REVIEW.md`) — Periodic architecture assessment with scale metrics, strengths/issues analysis, test coverage gaps, prioritized action items, and version-over-version scoring (current: 7.6/10)
 
 ### 🆕 v0.7.6 — Innovative Agent Intelligence Suite (6 new subsystems)
 - **Agent Replay & Time-Travel Debugging** (`src/Replay/`) — Record complete execution traces (LLM calls, tool calls, agent spawns, inter-agent messages) and replay them step-by-step. `ReplayPlayer` supports forward/backward navigation, agent inspection at any step, search, fork-from-step for re-execution, and formatted timeline with cumulative cost. Traces persisted as NDJSON via `ReplayStore` with age-based pruning. Config: `replay.enabled`, `replay.snapshot_interval`

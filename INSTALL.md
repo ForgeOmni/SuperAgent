@@ -1253,6 +1253,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.7.7      | 10.x+   | 8.1+ | Debuggability hardening: error logging for 27 swallowed exceptions, Agent unit tests (31 tests), docs/REVIEW.md code review framework |
 | 0.7.6      | 10.x+   | 8.1+ | 6 innovative subsystems: Agent Replay & Time-Travel Debugging, Conversation Forking, Agent Debate Protocol, Cost Prediction Engine, Natural Language Guardrails, Self-Healing Pipelines |
 | 0.7.5      | 10.x+   | 8.1+ | Claude Code tool name compatibility: bidirectional ToolNameResolver, auto-resolve in agent definitions and permission system |
 | 0.7.2      | 10.x+   | 8.1+ | Fix .claude/ path resolution: use project root instead of cwd for AgentManager, SkillManager, MCPManager |

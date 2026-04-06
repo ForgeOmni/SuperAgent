@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.7.6-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.7.7-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,11 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.7.7 — 可调试性与质量加固
+- **吞没异常日志修复** — 为24个文件中27个静默catch块添加 `error_log('[SuperAgent] ...')`（Performance、Optimization、ProcessBackend、MCPManager等）。此前生产环境中不可见的异常现在可通过 `[SuperAgent]` 日志前缀追踪
+- **Agent 核心单元测试** (`tests/Unit/AgentTest.php`) — 31个测试、44个断言，覆盖构造函数、Provider路由、fluent API链式调用、工具管理、bridge模式、auto模式、Provider配置注入子Agent
+- **代码审查框架** (`docs/REVIEW.md`) — 定期架构评估模板，包含规模指标、优劣势分析、测试覆盖缺口、优先级行动项和版本间评分追踪（当前评分：7.6/10）
 
 ### 🆕 v0.7.6 — 创新智能体能力套件（6个新子系统）
 - **Agent Replay 时间旅行调试** (`src/Replay/`) — 记录完整执行轨迹（LLM调用、工具调用、Agent生成、消息传递），支持逐步回放。`ReplayPlayer` 支持前进/后退导航、任意步骤的Agent状态检查、搜索、从任意步骤分叉重新执行、带累计成本的格式化时间线。通过 `ReplayStore` 以 NDJSON 格式持久化，支持按时间清理。配置：`replay.enabled`、`replay.snapshot_interval`

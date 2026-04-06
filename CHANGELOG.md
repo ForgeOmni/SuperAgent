@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-04-05
+
+### 🚀 Summary
+
+Debuggability & quality hardening. Added error logging to all 27 previously-silent exception catch blocks across 24 files, created the first unit test suite for the core `Agent` class (31 tests, 44 assertions), and introduced `docs/REVIEW.md` — a periodic code review and architecture assessment framework.
+
+### Fixed
+
+#### Swallowed Exception Logging (24 files, 27 catch blocks)
+- **Performance modules** (8 files: `BatchApiClient`, `ConnectionPool`, `SpeculativePrefetch`, `AdaptiveMaxTokens`, `ParallelToolExecutor`, `LocalToolZeroCopy`, `StreamingBashExecutor`, `StreamingToolDispatch`): config-loading catch blocks now log `[SuperAgent] Config unavailable for {class}: {message}`
+- **Optimization modules** (5 files: `ToolResultCompactor`, `ModelRouter`, `PromptCachePinning`, `ToolSchemaFilter`, `ResponsePrefill`): same pattern as Performance modules
+- **`ProcessBackend`**: 4 catch blocks — AgentManager propagation, MCPManager propagation, MCPBridge poll, Laravel config fallback
+- **`MCPManager`**: 3 catch blocks — config loading, server registration, `base_path()` resolution
+- **Other files** (7): `MCPBridge` (broken connection), `MarkdownFrontmatter` (YAML parse fallback), `ExperimentalFeatures` (config unavailable), `SkillManager` (config check), `AgentManager` (config check), `ToolLoader` (tool instantiation deferred), `DiagnosticAgent` (LLM diagnosis fallback), `SimpleTracingManager` (2× export errors), `ParallelAgentCoordinator` (fiber reset)
+- All use `error_log('[SuperAgent] context: message')` format for consistent log filtering
+
+### Added
+
+#### Agent Unit Tests (`tests/Unit/AgentTest.php`)
+- **31 tests, 44 assertions** covering:
+  - Construction: provider instance injection, invalid provider rejection, max_turns/max_budget/system_prompt from config
+  - Tool management: explicit tools, `load_tools` modes (`none`, `false`, array), `addTool()`
+  - Fluent API: `withSystemPrompt()`, `withModel()`, `withMaxTurns()`, `withMaxBudget()`, `withOptions()`, `withAllowedTools()`, `withDeniedTools()`, `withAutoMode()`, `withStreamingHandler()` — all return `$this` for chaining
+  - Provider routing: mock provider passthrough, bridge mode skip for Anthropic
+  - Provider config injection into `AgentTool` sub-agents
+  - Auto mode: default disabled, enabled via config
+  - Message management: initially empty, `clear()` resets
+  - Engine creation: `createEngine()` returns `QueryEngine`
+
+#### Code Review Framework (`docs/REVIEW.md`)
+- Periodic architecture assessment template with 9 sections
+- Scale metrics (70K LOC, 429 files, 64 tools, 33 subsystems)
+- Architecture strengths and issues analysis
+- Code quality findings (10 god classes, static singleton inventory)
+- Test coverage gap analysis (~45% estimated coverage)
+- Performance and security assessments
+- Prioritized action items (P0/P1/P2) with effort estimates
+- Overall scores (7.6/10) with per-dimension breakdown
+- Review history table for version-over-version tracking
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.7.7; added v0.7.7 feature section
+- **INSTALL** (EN/CN/FR): added v0.7.7 compatibility matrix row
+
 ## [0.7.6] - 2026-04-05
 
 ### 🚀 Summary
