@@ -24,7 +24,8 @@ class ModelRouter
     {
         try {
             $config = function_exists('config') ? (config('superagent.optimization.model_routing') ?? []) : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

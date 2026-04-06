@@ -194,8 +194,8 @@ class MCPBridge
         } catch (\Throwable $e) {
             try {
                 $this->sendHttpResponse($conn, 500, ['error' => $e->getMessage()]);
-            } catch (\Throwable) {
-                // Connection may be broken
+            } catch (\Throwable $e) {
+                error_log('[SuperAgent] MCPBridge response failed (connection broken): ' . $e->getMessage());
             }
         } finally {
             @fclose($conn);

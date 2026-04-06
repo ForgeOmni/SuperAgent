@@ -73,7 +73,8 @@ class ExperimentalFeatures
         try {
             config('superagent.experimental.enabled');
             return true;
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] ExperimentalFeatures config unavailable: ' . $e->getMessage());
             return false;
         }
     }

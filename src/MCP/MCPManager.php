@@ -48,8 +48,8 @@ class MCPManager
                 $resolved = $this->resolvePath($path);
                 $this->loadFromJsonFile($resolved);
             }
-        } catch (\Throwable) {
-            // Silently skip if config is unavailable
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] MCP config loading skipped: ' . $e->getMessage());
         }
     }
 
@@ -101,7 +101,8 @@ class MCPManager
     {
         try {
             return function_exists('app') && app()->bound('config');
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] MCP server registration failed: ' . $e->getMessage());
             return false;
         }
     }
@@ -498,7 +499,8 @@ class MCPManager
             if (function_exists('base_path') && function_exists('app') && app()->bound('config')) {
                 return base_path($relative);
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Laravel base_path unavailable: ' . $e->getMessage());
         }
 
         $root = self::findProjectRoot();

@@ -27,7 +27,8 @@ class SpeculativePrefetch
     {
         try {
             $config = function_exists('config') ? (config('superagent.performance.speculative_prefetch') ?? []) : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

@@ -269,7 +269,8 @@ class SkillManager
         try {
             return function_exists('app')
                 && app()->bound('config');
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] SkillManager config check failed: ' . $e->getMessage());
             return false;
         }
     }

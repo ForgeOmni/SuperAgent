@@ -21,7 +21,8 @@ class ResponsePrefill
     {
         try {
             $config = function_exists('config') ? (config('superagent.optimization.response_prefill') ?? []) : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

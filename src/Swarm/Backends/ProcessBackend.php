@@ -123,8 +123,8 @@ class ProcessBackend implements BackendInterface
             $agentDefinitions = [];
             try {
                 $agentDefinitions = \SuperAgent\Agent\AgentManager::getInstance()->exportDefinitions();
-            } catch (\Throwable) {
-                // AgentManager may not be initialized
+            } catch (\Throwable $e) {
+                error_log('[SuperAgent] AgentManager propagation skipped: ' . $e->getMessage());
             }
 
             // Export parent's MCP server configs so child can register
@@ -135,8 +135,8 @@ class ProcessBackend implements BackendInterface
                 foreach ($mgr->getServers() as $name => $serverConfig) {
                     $mcpServers[$name] = $serverConfig->toArray();
                 }
-            } catch (\Throwable) {
-                // MCPManager may not be initialized
+            } catch (\Throwable $e) {
+                error_log('[SuperAgent] MCPManager propagation skipped: ' . $e->getMessage());
             }
 
             $stdinPayload = json_encode([
@@ -214,8 +214,8 @@ class ProcessBackend implements BackendInterface
         // Also poll MCP bridge so child processes can talk to shared MCP servers
         try {
             \SuperAgent\MCP\MCPBridge::getInstance()->poll();
-        } catch (\Throwable) {
-            // Bridge may not be initialized — ignore
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] MCPBridge poll skipped: ' . $e->getMessage());
         }
 
         foreach ($this->processes as $agentId => &$info) {
@@ -493,8 +493,8 @@ class ProcessBackend implements BackendInterface
             if (function_exists('base_path') && function_exists('app') && app()->bound('config')) {
                 return base_path();
             }
-        } catch (\Throwable) {
-            // Not in Laravel context
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Laravel config unavailable in ProcessBackend: ' . $e->getMessage());
         }
 
         // Heuristic: walk up from cwd looking for artisan + bootstrap/app.php

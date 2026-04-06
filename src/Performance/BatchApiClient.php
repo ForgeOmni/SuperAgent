@@ -37,7 +37,8 @@ class BatchApiClient
             $config = function_exists('config')
                 ? (config('superagent.performance.batch_api') ?? [])
                 : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

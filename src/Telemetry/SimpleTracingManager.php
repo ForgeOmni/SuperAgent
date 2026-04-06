@@ -110,7 +110,7 @@ class SimpleTracingManager
             try {
                 $exporter($span);
             } catch (\Exception $e) {
-                // Log but don't fail
+                error_log('[SuperAgent] Span export failed: ' . $e->getMessage());
             }
         }
     }
@@ -210,7 +210,7 @@ class SimpleTracingManager
             try {
                 $exporter($event);
             } catch (\Exception $e) {
-                // Don't fail on export errors
+                error_log('[SuperAgent] Event export failed: ' . $e->getMessage());
             }
         }
 

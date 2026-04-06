@@ -78,8 +78,8 @@ class MarkdownFrontmatter
             try {
                 $result = \Symfony\Component\Yaml\Yaml::parse($yaml);
                 return is_array($result) ? $result : [];
-            } catch (\Throwable) {
-                // Fall through to simple parser
+            } catch (\Throwable $e) {
+                error_log('[SuperAgent] Symfony YAML parse failed, using simple parser: ' . $e->getMessage());
             }
         }
 

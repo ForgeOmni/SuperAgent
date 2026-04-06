@@ -34,7 +34,8 @@ class PromptCachePinning
     {
         try {
             $config = function_exists('config') ? (config('superagent.optimization.prompt_cache_pinning') ?? []) : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

@@ -44,7 +44,8 @@ class StreamingToolDispatch
             $config = function_exists('config')
                 ? (config('superagent.performance.streaming_tool_dispatch') ?? [])
                 : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

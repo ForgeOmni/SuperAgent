@@ -447,7 +447,7 @@ class ParallelAgentCoordinator
                     try {
                         $fiber->throw(new \Exception("Coordinator reset"));
                     } catch (\FiberError $e) {
-                        // Ignore
+                        error_log('[SuperAgent] Fiber reset error (expected during cleanup): ' . $e->getMessage());
                     }
                 }
             }

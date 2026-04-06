@@ -142,8 +142,8 @@ final class DiagnosticAgent
             if ($parsed !== null) {
                 return $parsed;
             }
-        } catch (\Throwable) {
-            // Fall back to rule-based
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] LLM diagnosis failed, using rule-based: ' . $e->getMessage());
         }
 
         return $ruleBased;

@@ -23,7 +23,8 @@ class ToolResultCompactor
     {
         try {
             $config = function_exists('config') ? (config('superagent.optimization.tool_result_compaction') ?? []) : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

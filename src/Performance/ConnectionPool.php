@@ -32,7 +32,8 @@ class ConnectionPool
             $config = function_exists('config')
                 ? (config('superagent.performance.connection_pool') ?? [])
                 : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

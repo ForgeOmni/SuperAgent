@@ -57,7 +57,8 @@ class ToolSchemaFilter
     {
         try {
             $config = function_exists('config') ? (config('superagent.optimization.selective_tool_schema') ?? []) : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 

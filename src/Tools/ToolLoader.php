@@ -280,8 +280,8 @@ class ToolLoader
                     'safe'        => $probe->isReadOnly(),
                     'cacheable'   => $probe->isReadOnly(),
                 ]);
-            } catch (\Throwable) {
-                // Fallback for tools whose constructor has required args
+            } catch (\Throwable $e) {
+                error_log('[SuperAgent] Tool instantiation deferred for ' . $class . ': ' . $e->getMessage());
                 $this->register($name, $class);
             }
         }

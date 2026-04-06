@@ -37,7 +37,8 @@ class LocalToolZeroCopy
             $config = function_exists('config')
                 ? (config('superagent.performance.local_tool_zero_copy') ?? [])
                 : [];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
             $config = [];
         }
 
