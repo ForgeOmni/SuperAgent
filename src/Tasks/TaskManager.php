@@ -11,7 +11,7 @@ class TaskManager
     private Collection $tasks;
     private Collection $taskLists;
 
-    private function __construct()
+    protected function __construct()
     {
         $this->tasks = collect();
         $this->taskLists = collect([
@@ -232,6 +232,18 @@ class TaskManager
     }
 
     /**
+     * Inject a pre-built Task directly into the collection (for restore).
+     */
+    protected function injectTask(Task $task, string $listId = 'default'): void
+    {
+        $this->tasks->put($task->id, $task);
+
+        if ($list = $this->taskLists->get($listId)) {
+            $list->addTask($task->id);
+        }
+    }
+
+    /**
      * Generate a unique task ID.
      */
     private function generateTaskId(): string
@@ -295,12 +307,20 @@ class Task
             'owner' => $this->owner,
             'blocks' => $this->blocks,
             'blockedBy' => $this->blockedBy,
-            'createdAt' => $this->createdAt->toIso8601String(),
-            'updatedAt' => $this->updatedAt->toIso8601String(),
-            'startedAt' => $this->startedAt?->toIso8601String(),
-            'endedAt' => $this->endedAt?->toIso8601String(),
+            'createdAt' => self::formatDate($this->createdAt),
+            'updatedAt' => self::formatDate($this->updatedAt),
+            'startedAt' => $this->startedAt ? self::formatDate($this->startedAt) : null,
+            'endedAt' => $this->endedAt ? self::formatDate($this->endedAt) : null,
             'output' => $this->output,
         ];
+    }
+
+    private static function formatDate(\DateTimeInterface $date): string
+    {
+        if (method_exists($date, 'toIso8601String')) {
+            return $date->toIso8601String();
+        }
+        return $date->format('c');
     }
 }
 

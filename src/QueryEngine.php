@@ -80,6 +80,9 @@ class QueryEngine
 
     protected ?SmartContextManager $smartContextManager = null;
 
+    /** Last prompt text (for checkpoint context in continuePending) */
+    protected string $lastPrompt = '';
+
     // ── Token optimizations (v0.7.0) ────────────────────────────────
     protected ?ToolResultCompactor $toolResultCompactor = null;
     protected ?ToolSchemaFilter $toolSchemaFilter = null;
@@ -183,6 +186,48 @@ class QueryEngine
         return $this->totalCostUsd;
     }
 
+    public function getTurnCount(): int
+    {
+        return $this->turnCount;
+    }
+
+    /**
+     * Check if the conversation ends with tool results awaiting model response.
+     *
+     * This happens when:
+     *  - The agent loop was interrupted (max turns, budget, error)
+     *  - The last message is a ToolResultMessage
+     *
+     * Use continuePending() to resume the loop from this state.
+     */
+    public function hasPendingContinuation(): bool
+    {
+        if (empty($this->messages)) {
+            return false;
+        }
+
+        $last = end($this->messages);
+        return $last instanceof ToolResultMessage;
+    }
+
+    /**
+     * Continue the agentic loop without a new user message.
+     *
+     * Resumes from where hasPendingContinuation() == true.
+     * Useful for interrupted loops, REPL /continue, or externally
+     * paused tool execution.
+     *
+     * @return Generator<int, AssistantMessage>
+     */
+    public function continuePending(): Generator
+    {
+        if (!$this->hasPendingContinuation()) {
+            return;
+        }
+
+        yield from $this->runLoop();
+    }
+
     /**
      * Run the agentic loop: send prompt, handle tool calls, repeat until done.
      *
@@ -199,12 +244,12 @@ class QueryEngine
         $this->messages[] = new UserMessage($prompt);
         $this->turnCount = 0;
         $this->turnOutputTokens = 0;
+        $this->lastPrompt = is_string($prompt) ? $prompt : json_encode($prompt);
         $this->budgetTracker?->reset();
 
         // --- Smart Context Window: adjust thinking budget based on task complexity ---
         if ($this->smartContextManager !== null && $this->smartContextManager->isEnabled()) {
-            $promptText = is_string($prompt) ? $prompt : json_encode($prompt);
-            $allocation = $this->smartContextManager->allocate($promptText);
+            $allocation = $this->smartContextManager->allocate($this->lastPrompt);
 
             // Apply thinking budget to options (if model supports thinking)
             if (!isset($this->options['thinking']) || $this->options['thinking'] === null) {
@@ -215,6 +260,16 @@ class QueryEngine
             $this->options['_smart_context_allocation'] = $allocation->toArray();
         }
 
+        yield from $this->runLoop();
+    }
+
+    /**
+     * Inner agentic loop shared by run() and continuePending().
+     *
+     * @return Generator<int, AssistantMessage>
+     */
+    protected function runLoop(): Generator
+    {
         while ($this->turnCount < $this->maxTurns) {
             $this->turnCount++;
             $this->guardrailsCollector?->recordTurn();
@@ -251,7 +306,7 @@ class QueryEngine
                 totalCostUsd: $this->totalCostUsd,
                 turnOutputTokens: $this->turnOutputTokens,
                 model: $this->options['model'] ?? $this->provider->getModel(),
-                prompt: is_string($prompt) ? $prompt : json_encode($prompt),
+                prompt: $this->lastPrompt ?? '',
             );
 
             // --- Cost Autopilot evaluation ---

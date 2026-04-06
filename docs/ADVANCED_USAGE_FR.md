@@ -61,6 +61,17 @@
 - [30. Garde-fous en Langage Naturel](#30-garde-fous-en-langage-naturel)
 - [31. Pipelines Auto-Réparateurs](#31-pipelines-auto-réparateurs)
 
+### Mode Agent Harness (v0.7.8)
+
+- [32. Gestionnaire de Tâches Persistant](#32-gestionnaire-de-tâches-persistant)
+- [33. Gestionnaire de Sessions](#33-gestionnaire-de-sessions)
+- [34. Architecture d'Événements Stream](#34-architecture-dévénements-stream)
+- [35. Boucle REPL Harness](#35-boucle-repl-harness)
+- [36. Auto-Compacteur](#36-auto-compacteur)
+- [37. Framework de Scénarios E2E](#37-framework-de-scénarios-e2e)
+- [38. Gestionnaire de Worktrees](#38-gestionnaire-de-worktrees)
+- [39. Backend Tmux](#39-backend-tmux)
+
 ---
 
 ## 1. Pipeline DSL
@@ -5576,3 +5587,346 @@ if ($healer->canHeal($failure)) {
 **Le réparateur échoue toujours.** Vérifiez `allowed_mutations` — si trop restrictif, le réparateur ne peut pas apporter de changements significatifs. Autorisez au moins `modify_prompt` et `adjust_timeout`.
 
 **La réparation coûte trop cher.** L'agent de diagnostic utilise `sonnet` par défaut. Configurez `diagnose_model: haiku` pour un diagnostic moins coûteux.
+
+---
+
+## 32. Gestionnaire de Tâches Persistant
+
+> Persistance de tâches sur fichier avec index JSON, logs de sortie par tâche et surveillance non-bloquante des processus.
+
+### Vue d'ensemble
+
+`PersistentTaskManager` étend `TaskManager` pour persister les tâches sur disque. Il maintient un fichier d'index JSON (`tasks.json`) et des fichiers de log de sortie par tâche (`{id}.log`). Au redémarrage, `restoreIndex()` marque les tâches en cours obsolètes comme échouées. `prune()` basé sur l'âge nettoie les tâches terminées.
+
+Classe principale : `SuperAgent\Tasks\PersistentTaskManager`
+
+### Configuration
+
+```php
+// config/superagent.php
+'persistence' => [
+    'enabled' => env('SUPERAGENT_PERSISTENCE_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_PERSISTENCE_PATH', null),
+    'tasks' => [
+        'enabled' => true,
+        'max_output_read_bytes' => 12000,
+        'prune_after_days' => 30,
+    ],
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Tasks\PersistentTaskManager;
+
+$manager = PersistentTaskManager::fromConfig(overrides: ['enabled' => true]);
+
+// Créer une tâche
+$task = $manager->createTask('Construire la fonctionnalité X');
+
+// Streaming de sortie
+$manager->appendOutput($task->id, "Étape 1 terminée\n");
+$manager->appendOutput($task->id, "Étape 2 terminée\n");
+$output = $manager->readOutput($task->id);
+
+// Surveiller un processus
+$manager->watchProcess($task->id, $process, $generation);
+$manager->pollProcesses(); // Vérification non-bloquante de tous les processus surveillés
+
+// Nettoyage
+$manager->prune(days: 30);
+```
+
+### Dépannage
+
+**Tâches perdues après redémarrage.** Assurez-vous que `persistence.enabled` est `true` et que `storage_path` est accessible en écriture. Vérifiez que `restoreIndex()` est appelé au démarrage.
+
+**Les fichiers de sortie deviennent trop volumineux.** `readOutput()` retourne uniquement les derniers `max_output_read_bytes` (12 Ko par défaut). Augmentez cette valeur de config ou purgez les anciennes tâches.
+
+---
+
+## 33. Gestionnaire de Sessions
+
+> Sauvegarde, chargement, liste et suppression de snapshots de conversation avec reprise par projet et auto-nettoyage.
+
+### Vue d'ensemble
+
+`SessionManager` sauvegarde l'état de conversation (messages, métadonnées) en fichiers JSON dans `~/.superagent/sessions/`. Chaque session reçoit un ID unique, un résumé auto-extrait et un tag CWD pour le filtrage par projet.
+
+Classe principale : `SuperAgent\Session\SessionManager`
+
+### Configuration
+
+```php
+// config/superagent.php
+'persistence' => [
+    'sessions' => [
+        'enabled' => true,
+        'max_sessions' => 50,
+        'prune_after_days' => 90,
+    ],
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Session\SessionManager;
+
+$manager = SessionManager::fromConfig();
+
+// Sauvegarder la conversation courante
+$sessionId = $manager->save($messages, ['cwd' => getcwd()]);
+
+// Lister les sessions (optionnellement filtrées par CWD)
+$sessions = $manager->list(cwd: getcwd());
+
+// Charger une session spécifique
+$snapshot = $manager->load($sessionId);
+
+// Reprendre la dernière session pour ce projet
+$latest = $manager->loadLatest(cwd: getcwd());
+
+// Supprimer une session
+$manager->delete($sessionId);
+```
+
+### Dépannage
+
+**Session introuvable après sauvegarde.** Vérifiez que l'ID de session ne contient pas de caractères de traversée de chemin (`../`). Les IDs sont assainis automatiquement.
+
+**Trop de sessions accumulées.** Ajustez `max_sessions` et `prune_after_days` dans la config. Le nettoyage s'exécute automatiquement à la sauvegarde.
+
+---
+
+## 34. Architecture d'Événements Stream
+
+> Hiérarchie unifiée de 9 types d'événements et dispatch multi-écouteurs pour la surveillance en temps réel des agents.
+
+### Vue d'ensemble
+
+Le système d'événements stream fournit une hiérarchie unifiée d'événements typés émis pendant l'exécution de l'agent. `StreamEventEmitter` supporte l'abonnement/désabonnement avec dispatch multi-écouteurs et enregistrement optionnel de l'historique. L'adaptateur pont `toStreamingHandler()` se connecte à `QueryEngine` sans modification de code.
+
+### Types d'Événements
+
+| Événement | Description |
+|---|---|
+| `TextDeltaEvent` | Sortie texte incrémentale du modèle |
+| `ThinkingDeltaEvent` | Sortie incrémentale de pensée/raisonnement |
+| `TurnCompleteEvent` | Un tour complet (requête + réponse) terminé |
+| `ToolStartedEvent` | L'exécution d'un outil a commencé |
+| `ToolCompletedEvent` | L'exécution d'un outil est terminée |
+| `CompactionEvent` | La compaction du contexte a été déclenchée |
+| `StatusEvent` | Mise à jour de statut générale |
+| `ErrorEvent` | Une erreur est survenue |
+| `AgentCompleteEvent` | L'agent a terminé tout le travail |
+
+### Utilisation
+
+```php
+use SuperAgent\Harness\StreamEventEmitter;
+use SuperAgent\Harness\TextDeltaEvent;
+use SuperAgent\Harness\ToolStartedEvent;
+
+$emitter = new StreamEventEmitter();
+
+// S'abonner à des événements spécifiques
+$emitter->on(TextDeltaEvent::class, fn($e) => echo $e->text);
+$emitter->on(ToolStartedEvent::class, fn($e) => echo "Outil : {$e->toolName}\n");
+
+// Pont vers le streaming handler de QueryEngine
+$handler = $emitter->toStreamingHandler();
+$engine->prompt($message, streamingHandler: $handler);
+```
+
+---
+
+## 35. Boucle REPL Harness
+
+> Boucle agent interactive avec 10 commandes intégrées, verrouillage d'occupation et sauvegarde automatique de session.
+
+### Vue d'ensemble
+
+`HarnessLoop` fournit un REPL interactif pour converser avec un agent. Il intègre `CommandRouter` avec 10 commandes intégrées, supporte `continue_pending()` pour les boucles d'outils interrompues et sauvegarde automatiquement les sessions à la sortie.
+
+### Commandes Intégrées
+
+| Commande | Description |
+|---|---|
+| `/help` | Afficher les commandes disponibles |
+| `/status` | Afficher le statut de l'agent (modèle, tours, coût) |
+| `/tasks` | Lister les tâches persistantes |
+| `/compact` | Déclencher la compaction du contexte |
+| `/continue` | Reprendre une boucle d'outils interrompue |
+| `/session save\|load\|list\|delete` | Gestion de session |
+| `/clear` | Effacer l'historique de conversation |
+| `/model <nom>` | Changer de modèle |
+| `/cost` | Afficher le détail des coûts |
+| `/quit` | Quitter la boucle |
+
+### Utilisation
+
+```php
+use SuperAgent\Harness\HarnessLoop;
+use SuperAgent\Harness\CommandRouter;
+
+$loop = new HarnessLoop($agent, $engine);
+
+// Enregistrer des commandes personnalisées
+$loop->getRouter()->register('/deploy', 'Déployer en staging', function ($args) {
+    return new CommandResult('Déploiement en cours...');
+});
+
+// Lancer la boucle interactive
+$loop->run();
+```
+
+### Dépannage
+
+**Soumission concurrente de prompt.** Le verrouillage d'occupation empêche les soumissions qui se chevauchent. Attendez la fin du tour courant avant d'envoyer un autre prompt.
+
+**Boucle d'outils interrompue.** Utilisez `/continue` pour reprendre. Le moteur détecte le `ToolResultMessage` en attente et reprend `runLoop()` sans ajouter de nouveau message utilisateur.
+
+---
+
+## 36. Auto-Compacteur
+
+> Composable de compaction à deux niveaux pour la boucle agentique avec disjoncteur.
+
+### Vue d'ensemble
+
+`AutoCompactor` fournit une compaction automatique du contexte à chaque début de tour :
+- **Niveau 1 (micro) :** Tronquer le contenu ancien des `ToolResultMessage` — pas d'appel LLM requis
+- **Niveau 2 (complet) :** Déléguer à `ContextManager` pour la synthèse basée sur LLM
+
+Un compteur d'échecs avec `maxFailures` configurable agit comme disjoncteur. Émet `CompactionEvent` via `StreamEventEmitter`.
+
+### Utilisation
+
+```php
+use SuperAgent\Harness\AutoCompactor;
+
+$compactor = AutoCompactor::fromConfig(overrides: ['enabled' => true]);
+
+// Appeler à chaque début de tour de boucle
+$compacted = $compactor->maybeCompact($messages, $tokenCount);
+```
+
+### Configuration
+
+L'auto-compacteur respecte la section de config `context_management` existante. La méthode `fromConfig()` accepte aussi `$overrides` avec priorité : overrides > config > défauts.
+
+---
+
+## 37. Framework de Scénarios E2E
+
+> Définitions de scénarios structurées avec builder fluide, espaces de travail temporaires et validation 3D.
+
+### Vue d'ensemble
+
+Le framework de scénarios permet les tests de bout en bout du comportement des agents. `Scenario` est un objet valeur immuable avec un builder fluide. `ScenarioRunner` gère les espaces de travail temporaires, suit les appels d'outils de façon transparente et valide les résultats sur 3 dimensions : outils requis, texte attendu et closures personnalisées.
+
+### Utilisation
+
+```php
+use SuperAgent\Harness\Scenario;
+use SuperAgent\Harness\ScenarioRunner;
+
+$scenario = Scenario::create('Test de création de fichier')
+    ->withPrompt('Créer un fichier hello.txt avec "Hello World"')
+    ->withRequiredTools(['write_file'])
+    ->withExpectedText('hello.txt')
+    ->withValidation(function ($result, $workspace) {
+        return file_exists("$workspace/hello.txt");
+    })
+    ->withTags(['smoke', 'file-ops']);
+
+$runner = new ScenarioRunner($agentFactory);
+$result = $runner->run($scenario);
+
+// Exécuter plusieurs scénarios avec filtrage par tags
+$results = $runner->runAll($scenarios, tags: ['smoke']);
+echo $runner->summary($results); // compteurs réussite/échec/erreur
+```
+
+---
+
+## 38. Gestionnaire de Worktrees
+
+> Gestion autonome du cycle de vie git worktree avec liens symboliques, persistance des métadonnées et nettoyage.
+
+### Vue d'ensemble
+
+`WorktreeManager` fournit la gestion du cycle de vie git worktree, extraite de `ProcessBackend` pour la réutilisation. Il crée des worktrees avec des liens symboliques automatiques pour les grands répertoires (node_modules, vendor, .venv), persiste les métadonnées en `{slug}.meta.json` et supporte la reprise et le nettoyage.
+
+### Utilisation
+
+```php
+use SuperAgent\Swarm\WorktreeManager;
+
+$manager = WorktreeManager::fromConfig(overrides: ['enabled' => true]);
+
+// Créer un worktree
+$info = $manager->create('feature-auth', baseBranch: 'main');
+echo $info->path; // /path/to/.worktrees/feature-auth
+echo $info->branch; // superagent/feature-auth
+
+// Reprendre un worktree existant
+$info = $manager->resume('feature-auth');
+
+// Nettoyer les worktrees obsolètes
+$manager->prune();
+```
+
+### Dépannage
+
+**Échec de création du worktree.** Assurez-vous que le dépôt est un repo git et que la branche de base existe. Vérifiez que le slug contient uniquement des caractères `[a-zA-Z0-9._-]`.
+
+**Liens symboliques non créés.** Les grands répertoires (node_modules, vendor, .venv) doivent exister dans le worktree principal pour être liés.
+
+---
+
+## 39. Backend Tmux
+
+> Débogage visuel multi-agents avec chaque agent s'exécutant dans un panneau tmux.
+
+### Vue d'ensemble
+
+`TmuxBackend` implémente `BackendInterface` pour créer des agents dans des panneaux tmux visibles. Chaque agent obtient son propre panneau via `tmux split-window -h` avec `select-layout tiled` automatique. Repli gracieux : `isAvailable()` retourne false en dehors des sessions tmux.
+
+### Utilisation
+
+```php
+use SuperAgent\Swarm\Backends\TmuxBackend;
+
+$backend = new TmuxBackend();
+
+if ($backend->isAvailable()) {
+    $result = $backend->spawn($agentConfig);
+    // L'agent s'exécute maintenant dans un panneau tmux visible
+
+    // Arrêt gracieux
+    $backend->requestShutdown($agentId); // Envoie Ctrl+C
+
+    // Arrêt forcé
+    $backend->kill($agentId); // Supprime le panneau
+}
+```
+
+### Configuration
+
+Ajoutez `BackendType::TMUX` à votre config swarm :
+
+```php
+'swarm' => [
+    'backend' => env('SUPERAGENT_SWARM_BACKEND', 'process'),
+    // Configurez 'tmux' pour le débogage visuel
+],
+```
+
+### Dépannage
+
+**Backend non disponible.** TmuxBackend nécessite d'être dans une session tmux (variable `$TMUX`) et que `tmux` soit installé. Utilisez `detect()` pour vérifier avant de créer des agents.
+
+**Panneaux mal disposés.** Après la création de plusieurs agents, `select-layout tiled` est appelé automatiquement. Si la disposition est incorrecte, exécutez `tmux select-layout tiled` manuellement.

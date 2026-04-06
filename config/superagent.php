@@ -668,6 +668,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Persistence (Task & Session)
+    |--------------------------------------------------------------------------
+    | When enabled, task state and session conversations are persisted to disk
+    | so they survive process restarts. Tasks get per-task output log files;
+    | sessions get JSON snapshots for resume/continuation.
+    |
+    | storage_path defaults to ~/.superagent/ when null.
+    */
+    'persistence' => [
+        'enabled' => env('SUPERAGENT_PERSISTENCE_ENABLED', false),
+
+        // Base directory for all persistent data (tasks/, sessions/)
+        'storage_path' => env('SUPERAGENT_PERSISTENCE_PATH', null),
+
+        'tasks' => [
+            'enabled' => env('SUPERAGENT_PERSISTENCE_TASKS', true),
+
+            // Maximum bytes to read from tail of task output log
+            'max_output_read_bytes' => (int) env('SUPERAGENT_TASK_OUTPUT_MAX_BYTES', 12000),
+
+            // Auto-prune completed task logs older than N days (0 = never)
+            'prune_after_days' => (int) env('SUPERAGENT_TASK_PRUNE_DAYS', 30),
+        ],
+
+        'sessions' => [
+            'enabled' => env('SUPERAGENT_PERSISTENCE_SESSIONS', true),
+
+            // Maximum sessions to keep (oldest auto-pruned, 0 = unlimited)
+            'max_sessions' => (int) env('SUPERAGENT_SESSION_MAX', 50),
+
+            // Auto-prune sessions older than N days (0 = never)
+            'prune_after_days' => (int) env('SUPERAGENT_SESSION_PRUNE_DAYS', 90),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Replay & Time-Travel Debugging
     |--------------------------------------------------------------------------
     |

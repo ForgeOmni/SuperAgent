@@ -7,6 +7,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-04-06
+
+### 🚀 Summary
+
+Agent Harness mode — 5 new subsystems providing persistent background tasks, session save/resume, unified stream events, interactive REPL loop with slash commands, E2E scenario testing framework, auto-compaction integrated into the agentic loop, `continue_pending()` for interrupted tool loops, standalone WorktreeManager, and Tmux visual backend. All features default-off with parameter-overrides-config priority pattern. 216 new tests, 466 assertions.
+
+### Added
+
+#### Persistent Task Manager (`src/Tasks/PersistentTaskManager.php`)
+- File-backed `TaskManager` subclass: JSON index (`tasks.json`) + per-task output logs (`{id}.log`)
+- `appendOutput()` / `readOutput()` for task output streaming with tail truncation
+- `watchProcess()` + `pollProcesses()` for non-blocking process lifecycle monitoring with generation counters
+- `restoreIndex()` marks stale in-progress tasks as failed on restart
+- Age-based `prune()` for completed task cleanup
+- Atomic writes for crash safety
+
+#### Session Manager (`src/Session/SessionManager.php`)
+- Save/load/list/delete conversation snapshots to `~/.superagent/sessions/`
+- `loadLatest()` with optional CWD filtering for project-scoped resume
+- Auto-extracts summary from first user message (120 char max)
+- Session ID path sanitization against directory traversal
+- Count-based + age-based auto-pruning
+
+#### Stream Event Architecture (`src/Harness/StreamEvent.php` + 8 event classes)
+- Unified event hierarchy: `TextDeltaEvent`, `ThinkingDeltaEvent`, `TurnCompleteEvent`, `ToolStartedEvent`, `ToolCompletedEvent`, `CompactionEvent`, `StatusEvent`, `ErrorEvent`, `AgentCompleteEvent`
+- `StreamEventEmitter` with multi-listener dispatch, subscribe/unsubscribe, optional history recording
+- `toStreamingHandler()` bridge adapter — existing `QueryEngine` emits structured events without code changes
+
+#### Harness REPL Loop (`src/Harness/HarnessLoop.php`)
+- Interactive loop with `CommandRouter`: 10 built-in slash commands (`/help`, `/status`, `/tasks`, `/compact`, `/continue`, `/session`, `/clear`, `/model`, `/cost`, `/quit`)
+- Control signal mechanism (`__QUIT__`, `__CLEAR__`, `__MODEL__:`, `__SESSION_LOAD__:`) decouples command handling from loop control
+- Busy lock prevents concurrent prompt submission
+- `hasPendingContinuation()` + `/continue` for interrupted tool loop recovery
+- Auto-save session on exit; manual `/session save|load|list|delete`
+- `restoreFromSnapshot()` for full conversation restore
+- Custom command registration via `CommandRouter::register()`
+
+#### Auto-Compactor (`src/Harness/AutoCompactor.php`)
+- Two-tier compaction composable for the agentic loop:
+  - Tier 1 (micro): truncate old `ToolResultMessage` content (no LLM call)
+  - Tier 2 (full): delegate to `ContextManager` for LLM-based summarization
+- Failure counter with `maxFailures` circuit breaker
+- Emits `CompactionEvent` via `StreamEventEmitter`
+- `maybeCompact()` designed to be called at each loop turn start
+
+#### E2E Scenario Framework (`src/Harness/Scenario.php`, `ScenarioRunner.php`, `ScenarioResult.php`)
+- `Scenario` immutable value object with fluent builder: name, prompt, requiredTools, expectedText, setup/validate closures, tags, maxTurns
+- `ScenarioRunner`: temp workspace management, transparent tool-call tracking, 3-dimensional validation (required tools + expected text + custom closure)
+- `runAll()` with tag filtering; `summary()` for pass/fail/error aggregation
+- Workspace auto-cleanup (custom workspace preserved)
+
+#### QueryEngine `continue_pending()` (`src/QueryEngine.php`)
+- `hasPendingContinuation()` — checks if last message is `ToolResultMessage`
+- `continuePending()` — resumes `runLoop()` without adding a new user message
+- Extracted inner while-loop into shared `runLoop()` method
+- New `getTurnCount()` public accessor
+
+#### Worktree Manager (`src/Swarm/WorktreeManager.php`)
+- Standalone git worktree lifecycle manager extracted from `ProcessBackend`
+- Symlinks large directories (node_modules, vendor, .venv, etc.) to save space
+- Metadata persistence (`{slug}.meta.json`) with restore and resume support
+- `prune()` cleans stale metadata pointing to deleted directories
+- Slug sanitization (`[a-zA-Z0-9._-]`, max length enforcement)
+
+#### Tmux Backend (`src/Swarm/Backends/TmuxBackend.php`)
+- New `BackendInterface` implementation: agents run in visible tmux panes
+- `detect()` checks `$TMUX` env var + `which tmux`
+- `spawn()` via `tmux split-window -h` with auto `select-layout tiled`
+- `requestShutdown()` sends `Ctrl+C`; `kill()` removes pane
+- Graceful fallback: `isAvailable()` returns false outside tmux, `spawn()` returns error result
+- New `BackendType::TMUX` enum value
+
+#### Parameter-Overrides-Config Pattern
+- All 4 configurable subsystems (`PersistentTaskManager`, `SessionManager`, `AutoCompactor`, `WorktreeManager`) now accept `array $overrides` in `fromConfig()`
+- Priority chain: `$overrides` > config file > defaults
+- Enables force-enabling features at call site even when config has them disabled
+
+### Configuration
+
+#### New `persistence` config section (`config/superagent.php`)
+```php
+'persistence' => [
+    'enabled' => env('SUPERAGENT_PERSISTENCE_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_PERSISTENCE_PATH', null),
+    'tasks' => ['enabled' => true, 'max_output_read_bytes' => 12000, 'prune_after_days' => 30],
+    'sessions' => ['enabled' => true, 'max_sessions' => 50, 'prune_after_days' => 90],
+],
+```
+
+### Tests
+- **216 new tests, 466 assertions** across 9 test files
+- `PersistentTaskManagerTest` (23 tests), `SessionManagerTest` (29 tests), `StreamEventTest` (28 tests), `AutoCompactorTest` (14 tests), `HarnessLoopTest` (32 tests), `ScenarioTest` (22 tests), `ContinuePendingTest` (9 tests), `WorktreeManagerTest` (24 tests), `TmuxBackendTest` (12 tests)
+- Zero regression on existing 1036 tests
+
+### Changed
+- `TaskManager::__construct()` visibility changed from `private` to `protected` (enables `PersistentTaskManager` subclass)
+- `Task::toArray()` date formatting now compatible with both Carbon and `DateTimeImmutable`
+- `TaskManager::injectTask()` added for restore-with-timestamps path
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.7.8; added v0.7.8 Agent Harness Mode feature section
+- **INSTALL** (EN/CN/FR): added v0.7.8 compatibility matrix row
+- **ADVANCED_USAGE** (EN/CN/FR): added 8 new sections (32–39) covering Persistent Task Manager, Session Manager, Stream Event Architecture, Harness REPL Loop, Auto-Compactor, E2E Scenario Framework, Worktree Manager, Tmux Backend
+
 ## [0.7.7] - 2026-04-05
 
 ### 🚀 Summary

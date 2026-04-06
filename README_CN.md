@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.7.7-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.7.8-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,18 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.7.8 — Agent Harness 模式（5个新子系统，216个测试）
+- **持久化任务管理器** (`src/Tasks/PersistentTaskManager.php`) — 基于文件的任务持久化：JSON 索引 + 每任务输出日志。`appendOutput()` / `readOutput()` 日志流式读写，`watchProcess()` + `pollProcesses()` 非阻塞进程监控，重启时自动标记残留运行任务为失败，按天数自动清理。配置：`persistence.tasks`
+- **会话管理器** (`src/Session/SessionManager.php`) — 对话快照保存/加载/列表/删除到 `~/.superagent/sessions/`。`loadLatest()` 支持 CWD 过滤实现项目级恢复，自动提取摘要，Session ID 路径消毒，按数量+天数自动清理。配置：`persistence.sessions`
+- **StreamEvent 统一事件架构** (`src/Harness/`) — 9 种统一事件类型（`TextDelta`、`ThinkingDelta`、`TurnComplete`、`ToolStarted`、`ToolCompleted`、`Compaction`、`Status`、`Error`、`AgentComplete`）。`StreamEventEmitter` 多监听器分发 + `toStreamingHandler()` 桥接器，QueryEngine 零改动接入
+- **Harness REPL 交互循环** (`src/Harness/HarnessLoop.php`) — 带 `CommandRouter` 的交互式 Agent 循环（10 个内建命令：`/help`、`/status`、`/tasks`、`/compact`、`/continue`、`/session`、`/clear`、`/model`、`/cost`、`/quit`）。忙碌锁、`continue_pending()` 中断恢复、自动保存会话、自定义命令注册
+- **自动压缩器** (`src/Harness/AutoCompactor.php`) — 两级压缩：micro（截断旧工具结果，无 LLM 调用）→ full（LLM 摘要）。失败熔断器、`CompactionEvent` 事件通知。`maybeCompact()` 在每轮循环开始调用
+- **E2E 场景测试框架** (`src/Harness/Scenario.php`, `ScenarioRunner.php`) — 结构化场景定义 + fluent builder，临时工作区管理，透明工具调用跟踪，三维验证（必需工具 + 预期文本 + 自定义闭包），标签过滤，通过/失败/错误汇总
+- **QueryEngine `continue_pending()`** — `hasPendingContinuation()` + `continuePending()` 恢复被中断的工具循环，无需新的用户消息。内部循环提取为共享的 `runLoop()` 方法
+- **Worktree 管理器** (`src/Swarm/WorktreeManager.php`) — 独立的 git worktree 生命周期管理：创建时为大目录（node_modules、vendor、.venv）建立符号链接，元数据持久化，支持恢复和清理。从 ProcessBackend 提取复用
+- **Tmux 后端** (`src/Swarm/Backends/TmuxBackend.php`) — 可视化多 Agent 调试：每个 Agent 运行在 tmux 面板中。自动检测（`$TMUX` + `which tmux`），不可用时优雅降级。新增 `BackendType::TMUX` 枚举
+- **参数优于配置** — 所有新子系统的 `fromConfig()` 接受 `array $overrides` 参数，优先级：`$overrides` > 配置文件 > 默认值。可在调用处强制启用被配置禁用的功能
 
 ### 🆕 v0.7.7 — 可调试性与质量加固
 - **吞没异常日志修复** — 为24个文件中27个静默catch块添加 `error_log('[SuperAgent] ...')`（Performance、Optimization、ProcessBackend、MCPManager等）。此前生产环境中不可见的异常现在可通过 `[SuperAgent]` 日志前缀追踪

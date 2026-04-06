@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.7-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.8-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,18 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.7.8 — Mode Agent Harness (5 nouveaux sous-systèmes, 216 tests)
+- **Gestionnaire de Tâches Persistant** (`src/Tasks/PersistentTaskManager.php`) — Persistance sur fichier avec index JSON + logs de sortie par tâche. `appendOutput()` / `readOutput()` pour le streaming de logs, `watchProcess()` + `pollProcesses()` pour la surveillance non-bloquante, marquage automatique des tâches obsolètes comme échouées au redémarrage, nettoyage par âge. Config : `persistence.tasks`
+- **Gestionnaire de Sessions** (`src/Session/SessionManager.php`) — Sauvegarde/chargement/liste/suppression de snapshots de conversation dans `~/.superagent/sessions/`. `loadLatest()` avec filtrage CWD pour la reprise par projet, extraction automatique de résumé, assainissement des ID de session, nettoyage par comptage + âge. Config : `persistence.sessions`
+- **Architecture d'Événements Stream** (`src/Harness/`) — 9 types d'événements unifiés (`TextDelta`, `ThinkingDelta`, `TurnComplete`, `ToolStarted`, `ToolCompleted`, `Compaction`, `Status`, `Error`, `AgentComplete`). `StreamEventEmitter` avec dispatch multi-écouteurs et pont `toStreamingHandler()` pour intégration QueryEngine sans modification
+- **Boucle REPL Harness** (`src/Harness/HarnessLoop.php`) — Boucle agent interactive avec `CommandRouter` (10 commandes intégrées : `/help`, `/status`, `/tasks`, `/compact`, `/continue`, `/session`, `/clear`, `/model`, `/cost`, `/quit`). Verrouillage d'occupation, `continue_pending()` pour la reprise de boucles d'outils interrompues, sauvegarde automatique de session, enregistrement de commandes personnalisées
+- **Auto-Compacteur** (`src/Harness/AutoCompactor.php`) — Compaction à deux niveaux : micro (tronquer les anciens résultats d'outils, sans LLM) → complet (résumé LLM via ContextManager). Disjoncteur d'échec, émission de `CompactionEvent`. `maybeCompact()` à chaque début de tour
+- **Framework de Scénarios E2E** (`src/Harness/Scenario.php`, `ScenarioRunner.php`) — Définitions de scénarios structurées avec builder fluide, gestion d'espace de travail temporaire, suivi transparent des appels d'outils, validation 3D (outils requis + texte attendu + closure personnalisée), filtrage par tags, résumé réussite/échec/erreur
+- **QueryEngine `continue_pending()`** — `hasPendingContinuation()` + `continuePending()` reprennent les boucles d'outils interrompues sans nouveau message utilisateur. Boucle interne extraite en méthode partagée `runLoop()`
+- **Gestionnaire de Worktrees** (`src/Swarm/WorktreeManager.php`) — Gestion autonome du cycle de vie git worktree : création avec liens symboliques pour les grands répertoires (node_modules, vendor, .venv), persistance des métadonnées, reprise, nettoyage. Extrait de ProcessBackend
+- **Backend Tmux** (`src/Swarm/Backends/TmuxBackend.php`) — Débogage visuel multi-agents : chaque agent s'exécute dans un panneau tmux. Auto-détection (`$TMUX` + `which tmux`), repli gracieux. `BackendType::TMUX`
+- **Paramètres Prioritaires sur Config** — Tous les nouveaux sous-systèmes acceptent `array $overrides` dans `fromConfig()` avec priorité : `$overrides` > fichier de config > défauts. Permet d'activer des fonctionnalités désactivées en config directement à l'appel
 
 ### 🆕 v0.7.7 — Déboguabilité & Renforcement Qualité
 - **Journalisation des Exceptions Silencieuses** — Ajout de `error_log('[SuperAgent] ...')` aux 27 blocs catch silencieux dans 24 fichiers (Performance, Optimization, ProcessBackend, MCPManager, etc.). Les problèmes de production invisibles sont maintenant traçables via le préfixe `[SuperAgent]`

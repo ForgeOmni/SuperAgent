@@ -11,6 +11,7 @@ enum BackendType: string
 {
     case IN_PROCESS = 'in-process';
     case PROCESS = 'process';
+    case TMUX = 'tmux';
     case DOCKER = 'docker';
     case REMOTE = 'remote';
 }

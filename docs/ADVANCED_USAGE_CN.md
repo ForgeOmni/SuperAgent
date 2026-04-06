@@ -61,6 +61,17 @@
 - [30. 自然语言护栏](#30-自然语言护栏)
 - [31. 自愈流水线](#31-自愈流水线)
 
+### Agent Harness 模式 (v0.7.8)
+
+- [32. 持久化任务管理器](#32-持久化任务管理器)
+- [33. 会话管理器](#33-会话管理器)
+- [34. StreamEvent 统一事件架构](#34-streamevent-统一事件架构)
+- [35. Harness REPL 交互循环](#35-harness-repl-交互循环)
+- [36. 自动压缩器](#36-自动压缩器)
+- [37. E2E 场景测试框架](#37-e2e-场景测试框架)
+- [38. Worktree 管理器](#38-worktree-管理器)
+- [39. Tmux 后端](#39-tmux-后端)
+
 ---
 
 ## 1. 流水线 DSL
@@ -4987,3 +4998,346 @@ if ($healer->canHeal($failure)) {
 **修复器始终失败。** 检查 `allowed_mutations`——如果过于严格，修复器无法做出有意义的更改。至少允许 `modify_prompt` 和 `adjust_timeout`。
 
 **修复成本太高。** 诊断Agent默认使用 `sonnet`。设置 `diagnose_model: haiku` 以降低诊断成本。
+
+---
+
+## 32. 持久化任务管理器
+
+> 基于文件的任务持久化，JSON 索引、每任务输出日志和非阻塞进程监控。
+
+### 概述
+
+`PersistentTaskManager` 继承 `TaskManager`，将任务持久化到磁盘。维护 JSON 索引文件（`tasks.json`）和每任务输出日志文件（`{id}.log`）。重启时 `restoreIndex()` 自动将残留的运行中任务标记为失败。基于天数的 `prune()` 清理已完成任务。
+
+核心类：`SuperAgent\Tasks\PersistentTaskManager`
+
+### 配置
+
+```php
+// config/superagent.php
+'persistence' => [
+    'enabled' => env('SUPERAGENT_PERSISTENCE_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_PERSISTENCE_PATH', null),
+    'tasks' => [
+        'enabled' => true,
+        'max_output_read_bytes' => 12000,
+        'prune_after_days' => 30,
+    ],
+],
+```
+
+### 使用
+
+```php
+use SuperAgent\Tasks\PersistentTaskManager;
+
+$manager = PersistentTaskManager::fromConfig(overrides: ['enabled' => true]);
+
+// 创建任务
+$task = $manager->createTask('构建功能 X');
+
+// 流式输出
+$manager->appendOutput($task->id, "步骤 1 完成\n");
+$manager->appendOutput($task->id, "步骤 2 完成\n");
+$output = $manager->readOutput($task->id);
+
+// 监控进程
+$manager->watchProcess($task->id, $process, $generation);
+$manager->pollProcesses(); // 非阻塞检查所有被监控的进程
+
+// 清理
+$manager->prune(days: 30);
+```
+
+### 故障排除
+
+**重启后任务丢失。** 确保 `persistence.enabled` 为 `true` 且 `storage_path` 可写。检查启动时是否调用了 `restoreIndex()`。
+
+**输出文件过大。** `readOutput()` 仅返回最后 `max_output_read_bytes`（默认 12KB）。增大此配置值或清理旧任务。
+
+---
+
+## 33. 会话管理器
+
+> 对话快照的保存、加载、列表和删除，支持项目级恢复和自动清理。
+
+### 概述
+
+`SessionManager` 将对话状态（消息、元数据）以 JSON 文件保存到 `~/.superagent/sessions/`。每个会话获得唯一 ID、自动提取的摘要和 CWD 标签，用于项目级过滤。
+
+核心类：`SuperAgent\Session\SessionManager`
+
+### 配置
+
+```php
+// config/superagent.php
+'persistence' => [
+    'sessions' => [
+        'enabled' => true,
+        'max_sessions' => 50,
+        'prune_after_days' => 90,
+    ],
+],
+```
+
+### 使用
+
+```php
+use SuperAgent\Session\SessionManager;
+
+$manager = SessionManager::fromConfig();
+
+// 保存当前对话
+$sessionId = $manager->save($messages, ['cwd' => getcwd()]);
+
+// 列出会话（可选按 CWD 过滤）
+$sessions = $manager->list(cwd: getcwd());
+
+// 加载指定会话
+$snapshot = $manager->load($sessionId);
+
+// 恢复当前项目的最新会话
+$latest = $manager->loadLatest(cwd: getcwd());
+
+// 删除会话
+$manager->delete($sessionId);
+```
+
+### 故障排除
+
+**保存后找不到会话。** 检查会话 ID 是否包含路径遍历字符（`../`）。ID 会被自动消毒。
+
+**会话累积过多。** 调整配置中的 `max_sessions` 和 `prune_after_days`。保存时自动执行清理。
+
+---
+
+## 34. StreamEvent 统一事件架构
+
+> 9 种统一事件类型和多监听器分发，用于实时 Agent 监控。
+
+### 概述
+
+StreamEvent 系统提供在 Agent 执行期间发出的统一类型事件层级。`StreamEventEmitter` 支持订阅/取消订阅、多监听器分发和可选的历史记录。`toStreamingHandler()` 桥接适配器无需代码改动即可连接 `QueryEngine`。
+
+### 事件类型
+
+| 事件 | 描述 |
+|---|---|
+| `TextDeltaEvent` | 模型的增量文本输出 |
+| `ThinkingDeltaEvent` | 增量思考/推理输出 |
+| `TurnCompleteEvent` | 一个完整轮次（请求 + 响应）完成 |
+| `ToolStartedEvent` | 工具执行开始 |
+| `ToolCompletedEvent` | 工具执行完成 |
+| `CompactionEvent` | 触发了上下文压缩 |
+| `StatusEvent` | 一般状态更新 |
+| `ErrorEvent` | 发生错误 |
+| `AgentCompleteEvent` | Agent 已完成所有工作 |
+
+### 使用
+
+```php
+use SuperAgent\Harness\StreamEventEmitter;
+use SuperAgent\Harness\TextDeltaEvent;
+use SuperAgent\Harness\ToolStartedEvent;
+
+$emitter = new StreamEventEmitter();
+
+// 订阅特定事件
+$emitter->on(TextDeltaEvent::class, fn($e) => echo $e->text);
+$emitter->on(ToolStartedEvent::class, fn($e) => echo "工具: {$e->toolName}\n");
+
+// 桥接到 QueryEngine 的 streaming handler
+$handler = $emitter->toStreamingHandler();
+$engine->prompt($message, streamingHandler: $handler);
+```
+
+---
+
+## 35. Harness REPL 交互循环
+
+> 带 10 个内建命令的交互式 Agent 循环，支持忙碌锁和会话自动保存。
+
+### 概述
+
+`HarnessLoop` 提供与 Agent 对话的交互式 REPL。集成 `CommandRouter` 的 10 个内建命令，支持 `continue_pending()` 恢复中断的工具循环，退出时自动保存会话。
+
+### 内建命令
+
+| 命令 | 描述 |
+|---|---|
+| `/help` | 显示可用命令 |
+| `/status` | 显示 Agent 状态（模型、轮次、成本） |
+| `/tasks` | 列出持久化任务 |
+| `/compact` | 触发上下文压缩 |
+| `/continue` | 恢复中断的工具循环 |
+| `/session save\|load\|list\|delete` | 会话管理 |
+| `/clear` | 清空对话历史 |
+| `/model <name>` | 切换模型 |
+| `/cost` | 显示成本明细 |
+| `/quit` | 退出循环 |
+
+### 使用
+
+```php
+use SuperAgent\Harness\HarnessLoop;
+use SuperAgent\Harness\CommandRouter;
+
+$loop = new HarnessLoop($agent, $engine);
+
+// 注册自定义命令
+$loop->getRouter()->register('/deploy', '部署到 staging', function ($args) {
+    return new CommandResult('部署中...');
+});
+
+// 运行交互循环
+$loop->run();
+```
+
+### 故障排除
+
+**并发提交提示。** 忙碌锁防止重叠提交。等待当前轮次完成后再发送下一个提示。
+
+**工具循环被中断。** 使用 `/continue` 恢复。引擎检测到待处理的 `ToolResultMessage` 后会恢复 `runLoop()` 而不添加新的用户消息。
+
+---
+
+## 36. 自动压缩器
+
+> 两级压缩组件，用于 Agent 循环，带熔断器。
+
+### 概述
+
+`AutoCompactor` 在每轮循环开始时提供自动上下文压缩：
+- **第 1 级（micro）：** 截断旧的 `ToolResultMessage` 内容——无需 LLM 调用
+- **第 2 级（full）：** 委托 `ContextManager` 进行 LLM 摘要
+
+可配置 `maxFailures` 的失败计数器作为熔断器。通过 `StreamEventEmitter` 发出 `CompactionEvent`。
+
+### 使用
+
+```php
+use SuperAgent\Harness\AutoCompactor;
+
+$compactor = AutoCompactor::fromConfig(overrides: ['enabled' => true]);
+
+// 在每轮循环开始时调用
+$compacted = $compactor->maybeCompact($messages, $tokenCount);
+```
+
+### 配置
+
+自动压缩器遵循现有的 `context_management` 配置节。`fromConfig()` 方法也接受 `$overrides`，优先级：overrides > 配置 > 默认值。
+
+---
+
+## 37. E2E 场景测试框架
+
+> 结构化场景定义、fluent builder、临时工作区和三维验证。
+
+### 概述
+
+场景框架支持 Agent 行为的端到端测试。`Scenario` 是带 fluent builder 的不可变值对象。`ScenarioRunner` 管理临时工作区，透明跟踪工具调用，在 3 个维度验证结果：必需工具、预期文本和自定义闭包。
+
+### 使用
+
+```php
+use SuperAgent\Harness\Scenario;
+use SuperAgent\Harness\ScenarioRunner;
+
+$scenario = Scenario::create('文件创建测试')
+    ->withPrompt('创建一个名为 hello.txt 的文件，内容为 "Hello World"')
+    ->withRequiredTools(['write_file'])
+    ->withExpectedText('hello.txt')
+    ->withValidation(function ($result, $workspace) {
+        return file_exists("$workspace/hello.txt");
+    })
+    ->withTags(['smoke', 'file-ops']);
+
+$runner = new ScenarioRunner($agentFactory);
+$result = $runner->run($scenario);
+
+// 运行多个场景并按标签过滤
+$results = $runner->runAll($scenarios, tags: ['smoke']);
+echo $runner->summary($results); // 通过/失败/错误计数
+```
+
+---
+
+## 38. Worktree 管理器
+
+> 独立的 git worktree 生命周期管理，支持符号链接、元数据持久化和清理。
+
+### 概述
+
+`WorktreeManager` 提供从 `ProcessBackend` 提取的 git worktree 生命周期管理，便于复用。创建 worktree 时自动为大目录（node_modules、vendor、.venv）建立符号链接，以 `{slug}.meta.json` 持久化元数据，支持恢复和清理操作。
+
+### 使用
+
+```php
+use SuperAgent\Swarm\WorktreeManager;
+
+$manager = WorktreeManager::fromConfig(overrides: ['enabled' => true]);
+
+// 创建 worktree
+$info = $manager->create('feature-auth', baseBranch: 'main');
+echo $info->path; // /path/to/.worktrees/feature-auth
+echo $info->branch; // superagent/feature-auth
+
+// 恢复已有 worktree
+$info = $manager->resume('feature-auth');
+
+// 清理过时的 worktree
+$manager->prune();
+```
+
+### 故障排除
+
+**Worktree 创建失败。** 确保仓库是 git 仓库且基础分支存在。检查 slug 仅包含 `[a-zA-Z0-9._-]` 字符。
+
+**符号链接未创建。** 大目录（node_modules、vendor、.venv）必须在主 worktree 中存在才能被链接。
+
+---
+
+## 39. Tmux 后端
+
+> 可视化多 Agent 调试，每个 Agent 运行在 tmux 面板中。
+
+### 概述
+
+`TmuxBackend` 实现 `BackendInterface`，在可见的 tmux 面板中生成 Agent。每个 Agent 通过 `tmux split-window -h` 获得自己的面板，自动执行 `select-layout tiled`。优雅降级：在 tmux 会话外 `isAvailable()` 返回 false。
+
+### 使用
+
+```php
+use SuperAgent\Swarm\Backends\TmuxBackend;
+
+$backend = new TmuxBackend();
+
+if ($backend->isAvailable()) {
+    $result = $backend->spawn($agentConfig);
+    // Agent 现在运行在可见的 tmux 面板中
+
+    // 优雅关闭
+    $backend->requestShutdown($agentId); // 发送 Ctrl+C
+
+    // 强制终止
+    $backend->kill($agentId); // 移除面板
+}
+```
+
+### 配置
+
+在 swarm 配置中添加 `BackendType::TMUX`：
+
+```php
+'swarm' => [
+    'backend' => env('SUPERAGENT_SWARM_BACKEND', 'process'),
+    // 设置为 'tmux' 进行可视化调试
+],
+```
+
+### 故障排除
+
+**后端不可用。** TmuxBackend 需要在 tmux 会话中运行（`$TMUX` 环境变量）且安装了 `tmux`。使用 `detect()` 在生成前检查。
+
+**面板排列不正确。** 生成多个 Agent 后会自动调用 `select-layout tiled`。如果布局有误，手动运行 `tmux select-layout tiled`。
