@@ -666,4 +666,102 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Replay & Time-Travel Debugging
+    |--------------------------------------------------------------------------
+    |
+    | Record complete execution traces for step-by-step replay, inspection,
+    | and time-travel debugging of agent runs.
+    |
+    */
+    'replay' => [
+        'enabled' => env('SUPERAGENT_REPLAY_ENABLED', false),
+        'storage_path' => env('SUPERAGENT_REPLAY_STORAGE_PATH', null), // defaults to storage_path('superagent/replays')
+        'snapshot_interval' => (int) env('SUPERAGENT_REPLAY_SNAPSHOT_INTERVAL', 5),
+        'max_age_days' => (int) env('SUPERAGENT_REPLAY_MAX_AGE_DAYS', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Conversation Forking
+    |--------------------------------------------------------------------------
+    |
+    | Branch conversations at any point to explore multiple approaches
+    | in parallel, then select the best result.
+    |
+    */
+    'fork' => [
+        'enabled' => env('SUPERAGENT_FORK_ENABLED', false),
+        'default_timeout' => (int) env('SUPERAGENT_FORK_TIMEOUT', 300),
+        'max_branches' => (int) env('SUPERAGENT_FORK_MAX_BRANCHES', 5),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Agent Debate Protocol
+    |--------------------------------------------------------------------------
+    |
+    | Multi-agent structured debate, red-teaming, and ensemble solving
+    | for higher-quality outputs.
+    |
+    */
+    'debate' => [
+        'enabled' => env('SUPERAGENT_DEBATE_ENABLED', false),
+        'default_rounds' => (int) env('SUPERAGENT_DEBATE_ROUNDS', 3),
+        'default_max_budget' => (float) env('SUPERAGENT_DEBATE_MAX_BUDGET', 5.0),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Cost Prediction Engine
+    |--------------------------------------------------------------------------
+    |
+    | Estimate cost before executing tasks based on historical data and
+    | prompt complexity analysis.
+    |
+    */
+    'cost_prediction' => [
+        'enabled' => env('SUPERAGENT_COST_PREDICTION_ENABLED', false),
+        'storage_path' => env('SUPERAGENT_COST_PREDICTION_STORAGE_PATH', null), // defaults to storage_path('superagent/cost_history')
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Natural Language Guardrails
+    |--------------------------------------------------------------------------
+    |
+    | Define guardrail rules in plain English instead of YAML DSL.
+    | Rules are compiled to standard guardrail conditions at zero cost.
+    |
+    */
+    'nl_guardrails' => [
+        'enabled' => env('SUPERAGENT_NL_GUARDRAILS_ENABLED', false),
+        'rules' => [
+            // 'Never modify files in database/migrations',
+            // 'If cost exceeds $5, pause and ask for approval',
+            // 'Max 10 bash calls per minute',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Self-Healing Pipelines
+    |--------------------------------------------------------------------------
+    |
+    | When pipeline steps fail, automatically diagnose root cause, adapt
+    | the approach, and retry with intelligent mutations.
+    |
+    */
+    'self_healing' => [
+        'enabled' => env('SUPERAGENT_SELF_HEALING_ENABLED', false),
+        'max_heal_attempts' => (int) env('SUPERAGENT_SELF_HEALING_MAX_ATTEMPTS', 3),
+        'diagnose_model' => env('SUPERAGENT_SELF_HEALING_DIAGNOSE_MODEL', 'sonnet'),
+        'max_diagnose_budget' => (float) env('SUPERAGENT_SELF_HEALING_MAX_BUDGET', 0.50),
+        'allowed_mutations' => [
+            'modify_prompt', 'change_model', 'adjust_timeout',
+            'add_context', 'simplify_task',
+        ],
+    ],
+
 ];

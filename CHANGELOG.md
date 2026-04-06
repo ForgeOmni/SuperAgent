@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-04-05
+
+### 🚀 Summary
+
+Six innovative features that bring SuperAgent to the next level: time-travel debugging, conversation forking, structured multi-agent debate, cost prediction, natural language guardrails, and self-healing pipelines.
+
+### Added
+
+#### Agent Replay & Time-Travel Debugging (`src/Replay/`)
+- **ReplayRecorder**: Record complete execution traces — LLM calls, tool calls, agent spawns, inter-agent messages, and state snapshots
+- **ReplayPlayer**: Step forward/backward through traces, inspect agent state at any point, fork from any step for re-execution
+- **ReplayStore**: Persist traces as NDJSON files with listing, pruning, and age-based cleanup
+- **ReplayTrace/ReplayEvent/ReplayState**: Immutable data structures for trace representation
+
+#### Conversation Forking (`src/Fork/`)
+- **ForkManager**: Branch conversations at any point to explore N parallel approaches, then select the best result
+- **ForkExecutor**: True parallel execution via `proc_open` with timeout handling and progress tracking
+- **ForkScorer**: Built-in scoring strategies — `costEfficiency`, `completeness`, `brevity`, `composite`, `custom`
+- **ForkSession/ForkBranch/ForkResult**: Session management with per-branch status tracking and aggregated results
+
+#### Agent Debate Protocol (`src/Debate/`)
+- **DebateOrchestrator**: Three collaboration modes:
+  - **Debate**: Proposer argues → Critic critiques → Judge synthesizes (structured rounds with rebuttals)
+  - **Red Team**: Builder creates → Attacker finds vulnerabilities → Reviewer synthesizes (security/quality focused)
+  - **Ensemble**: N agents solve independently → Merger combines best elements
+- **DebateProtocol**: Internal flow logic with role-specific system prompts and budget-per-round management
+- **DebateConfig/RedTeamConfig/EnsembleConfig**: Fluent configuration with per-agent model selection
+- **DebateRound/DebateResult**: Round-by-round tracking with cost breakdown and agent contributions
+
+#### Cost Prediction Engine (`src/CostPrediction/`)
+- **CostPredictor**: Estimate cost before execution using three strategies:
+  - **Historical**: Weighted average from past similar tasks (confidence up to 95%)
+  - **Hybrid**: Type-average adjusted by complexity multiplier
+  - **Heuristic**: Token estimation × model pricing (fallback)
+- **TaskAnalyzer**: Detect task type (code_generation, refactoring, debugging, etc.) and complexity via keyword/pattern analysis
+- **CostHistoryStore**: Persistent JSON storage indexed by task hash and model, with pruning
+- **CostEstimate**: Includes lower/upper bounds, confidence score, and `withModel()` for instant model comparison
+- **PredictionAccuracy**: Track prediction vs actual accuracy metrics
+
+#### Natural Language Guardrails (`src/Guardrails/NaturalLanguage/`)
+- **NLGuardrailCompiler**: Zero-cost (no LLM calls) compilation of English rules to standard guardrail YAML
+- **RuleParser**: Pattern-based parser handling 6 rule types:
+  - Tool restrictions: "Never modify files in database/migrations"
+  - Cost rules: "If cost exceeds $5, pause and ask"
+  - Rate limits: "Max 10 bash calls per minute"
+  - File restrictions: "Don't touch .env files"
+  - Warning rules: "Warn if modifying config files"
+  - Content rules: "All generated code must have error handling"
+- **NLGuardrailFacade**: Fluent API — `NLGuardrailFacade::create()->rule('...')->compile()`
+- Confidence scoring with `needsReview` flag for ambiguous rules
+- YAML export for integration with existing GuardrailsEngine
+
+#### Self-Healing Pipelines (`src/Pipeline/SelfHealing/`)
+- **SelfHealingStrategy**: New pipeline failure strategy — diagnose → plan → mutate → retry (not simple retry)
+- **DiagnosticAgent**: Rule-based + LLM-based failure diagnosis with 8 error categories
+- **StepMutator**: Apply healing mutations — modify_prompt, change_model, adjust_timeout, add_context, simplify_task, split_step
+- **HealingPlan**: Strategy-specific mutation plans with estimated success rates and additional costs
+- **StepFailure/Diagnosis/HealingResult**: Rich failure context with recoverable detection and healing history
+
+### Changed
+- **config/superagent.php**: Added 6 new config sections (`replay`, `fork`, `debate`, `cost_prediction`, `nl_guardrails`, `self_healing`)
+- **SuperAgentServiceProvider**: Registered 6 new singletons with conditional enable/disable
+
+### Documentation
+- **README** (EN/CN/FR): version badge → 0.7.6; added v0.7.6 feature section with all 6 new subsystems
+- **INSTALL** (EN/CN/FR): added v0.7.6 compatibility matrix row
+- **ADVANCED_USAGE** (EN/CN/FR): added 6 new chapters (26-31) covering Replay, Forking, Debate, Cost Prediction, NL Guardrails, Self-Healing Pipelines
+
 ## [0.7.5] - 2026-04-05
 
 ### 🚀 Summary

@@ -43,6 +43,14 @@ This document consolidates all advanced feature documentation for SuperAgent int
 - [24. Performance Optimization](#24-performance-optimization)
 - [25. NDJSON Structured Logging](#25-ndjson-structured-logging)
 
+### Innovative Intelligence (v0.7.6)
+- [26. Agent Replay & Time-Travel Debugging](#26-agent-replay--time-travel-debugging)
+- [27. Conversation Forking](#27-conversation-forking)
+- [28. Agent Debate Protocol](#28-agent-debate-protocol)
+- [29. Cost Prediction Engine](#29-cost-prediction-engine)
+- [30. Natural Language Guardrails](#30-natural-language-guardrails)
+- [31. Self-Healing Pipelines](#31-self-healing-pipelines)
+
 ---
 
 ## 1. Pipeline DSL
@@ -3514,3 +3522,554 @@ Child agent processes (`agent-runner.php`) automatically emit NDJSON on stderr. 
 | No tool events in log | Only `onText` registered | Use `NdjsonStreamingHandler::create()` which registers all callbacks |
 | Process monitor shows no activity | Parsing expects NDJSON but gets plain text | Verify child process uses `NdjsonWriter` (v0.6.18+) |
 | Unicode breaks NDJSON parser | U+2028/U+2029 in content | `NdjsonWriter` escapes these automatically |
+
+---
+
+## 26. Agent Replay & Time-Travel Debugging
+
+> Record complete execution traces and replay them step-by-step for debugging complex multi-agent interactions. Inspect agent state at any point, search events, fork from any step, and visualize timelines with cumulative cost tracking.
+
+### Overview
+
+The Replay system captures every significant event during agent execution -- LLM calls, tool calls, agent spawns, inter-agent messages, and periodic state snapshots -- into an immutable `ReplayTrace`. A `ReplayPlayer` lets you navigate forward/backward through the trace, inspect individual agents, and fork from any step to re-explore different paths.
+
+Key classes:
+
+| Class | Role |
+|---|---|
+| `ReplayRecorder` | Records events during execution |
+| `ReplayTrace` | Immutable trace with events and metadata |
+| `ReplayEvent` | Single event (5 types: llm_call, tool_call, agent_spawn, agent_message, state_snapshot) |
+| `ReplayPlayer` | Step-by-step navigation, inspection, search, fork |
+| `ReplayState` | Reconstructed state at a specific step |
+| `ReplayStore` | NDJSON persistence with list/prune/delete |
+
+### Configuration
+
+```php
+'replay' => [
+    'enabled' => env('SUPERAGENT_REPLAY_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_REPLAY_STORAGE_PATH', null),
+    'snapshot_interval' => (int) env('SUPERAGENT_REPLAY_SNAPSHOT_INTERVAL', 5),
+    'max_age_days' => (int) env('SUPERAGENT_REPLAY_MAX_AGE_DAYS', 30),
+],
+```
+
+### Usage
+
+#### Recording Execution Traces
+
+```php
+use SuperAgent\Replay\ReplayRecorder;
+
+$recorder = new ReplayRecorder('session-123', snapshotInterval: 5);
+
+// Record during agent execution (integrated into QueryEngine)
+$recorder->recordLlmCall('main', 'claude-sonnet-4-6', $messages, $response, $usage, $durationMs);
+$recorder->recordToolCall('main', 'read', $toolId, $input, $output, $durationMs);
+$recorder->recordAgentSpawn('child-1', 'main', 'researcher', $config);
+$recorder->recordAgentMessage('main', 'main', 'child-1', 'Research this topic');
+
+// Periodic snapshots (automatic based on interval)
+if ($recorder->shouldSnapshot($turnCount)) {
+    $recorder->recordStateSnapshot('main', $messages, $turnCount, $cost, $activeAgents);
+}
+
+$trace = $recorder->finalize();
+```
+
+#### Replaying and Debugging
+
+```php
+use SuperAgent\Replay\ReplayPlayer;
+use SuperAgent\Replay\ReplayStore;
+
+// Load a saved trace
+$store = new ReplayStore(storage_path('superagent/replays'));
+$trace = $store->load('session-123');
+
+$player = new ReplayPlayer($trace);
+
+// Navigate step by step
+$state = $player->stepTo(15);       // Jump to step 15
+$state = $player->next();            // Forward one step
+$state = $player->previous();        // Back one step
+
+// Inspect specific agent state
+$info = $player->inspect('child-1');
+// Returns: agent_id, event_count, llm_calls, tool_calls, estimated_cost, last_activity
+
+// Search for events
+$results = $player->search('bash');  // Find all events mentioning 'bash'
+
+// Get formatted timeline
+$timeline = $player->getTimeline();
+// Each entry: step, type, agent, timestamp, duration_ms, cumulative_cost, [model/tool/role]
+
+// Fork from a point for re-execution
+$forkedTrace = $player->fork(10);   // Get trace up to step 10 for replay with different approach
+```
+
+### Troubleshooting
+
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| Trace file too large | Long-running session | Increase `snapshot_interval` to reduce snapshot frequency |
+| Missing events in replay | Recorder not wired | Ensure `ReplayRecorder` hooks into QueryEngine |
+| `ReplayStore::load()` fails | Corrupted NDJSON | Check file for malformed JSON lines |
+
+---
+
+## 27. Conversation Forking
+
+> Branch a conversation at any point to explore multiple approaches in parallel, then automatically select the best result using built-in or custom scoring strategies.
+
+### Overview
+
+Conversation Forking lets you take a conversation snapshot, create N branches with different prompts or strategies, execute them all in parallel via `proc_open`, and pick the best one. This is ideal for:
+
+- Comparing design approaches (Strategy vs Command vs simple extraction)
+- A/B testing different prompts
+- Exploring solution variants under budget constraints
+
+Key classes:
+
+| Class | Role |
+|---|---|
+| `ForkManager` | High-level API for creating and executing forks |
+| `ForkSession` | Represents a forking session with base messages and branches |
+| `ForkBranch` | Single branch with prompt, status, result, score |
+| `ForkExecutor` | Parallel execution via `proc_open` |
+| `ForkResult` | Aggregated results with scoring and ranking |
+| `ForkScorer` | Built-in scoring strategies |
+
+### Configuration
+
+```php
+'fork' => [
+    'enabled' => env('SUPERAGENT_FORK_ENABLED', false),
+    'default_timeout' => (int) env('SUPERAGENT_FORK_TIMEOUT', 300),
+    'max_branches' => (int) env('SUPERAGENT_FORK_MAX_BRANCHES', 5),
+],
+```
+
+### Usage
+
+#### Same Prompt, Multiple Attempts
+
+```php
+use SuperAgent\Fork\ForkManager;
+use SuperAgent\Fork\ForkExecutor;
+use SuperAgent\Fork\ForkScorer;
+
+$manager = new ForkManager(new ForkExecutor());
+
+$session = $manager->fork(
+    messages: $agent->getMessages(),
+    turnCount: $currentTurn,
+    prompt: 'Refactor this service class for better testability',
+    branches: 3,
+    config: ['model' => 'sonnet', 'max_turns' => 10],
+);
+
+$result = $manager->execute($session);
+
+// Select best by cost efficiency
+$best = $result->getBest([ForkScorer::class, 'costEfficiency']);
+echo $best->getLastAssistantMessage();
+```
+
+#### Different Approaches
+
+```php
+$session = $manager->forkWithVariants(
+    messages: $agent->getMessages(),
+    turnCount: $currentTurn,
+    prompts: [
+        'Refactor using the Strategy pattern',
+        'Refactor using the Command pattern',
+        'Refactor using simple function extraction',
+    ],
+);
+
+$result = $manager->execute($session);
+
+// Composite scoring: 70% cost efficiency + 30% brevity
+$scorer = ForkScorer::composite(
+    [[ForkScorer::class, 'costEfficiency'], [ForkScorer::class, 'brevity']],
+    [0.7, 0.3],
+);
+
+$ranked = $result->getRanked($scorer);
+foreach ($ranked as $branch) {
+    echo "#{$branch->id}: score={$branch->score}, cost=\${$branch->cost}\n";
+}
+```
+
+### Troubleshooting
+
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| All branches fail | `agent-runner.php` not found | Verify `bin/agent-runner.php` exists and is executable |
+| Branches timeout | Complex task + short timeout | Increase `fork.default_timeout` or per-session `timeout` |
+| Scores all zero | Using `completeness` with chat-only tasks | Use `costEfficiency` or `brevity` for non-tool tasks |
+
+---
+
+## 28. Agent Debate Protocol
+
+> Three structured multi-agent collaboration modes -- Debate, Red Team, and Ensemble -- that improve output quality through adversarial or independent-then-merge approaches.
+
+### Overview
+
+The Debate Protocol goes beyond simple parallel execution by introducing structured interaction patterns between agents:
+
+1. **Debate**: A proposer argues a position, a critic finds flaws, and a judge synthesizes the best approach. Runs for multiple rounds with rebuttals.
+2. **Red Team**: A builder creates a solution, an attacker systematically finds vulnerabilities (security, edge cases, performance), and a reviewer produces the final assessment.
+3. **Ensemble**: N agents solve the same problem independently with potentially different models, then a merger combines the best elements from each solution.
+
+Key classes:
+
+| Class | Role |
+|---|---|
+| `DebateOrchestrator` | Main entry point with `debate()`, `redTeam()`, `ensemble()` methods |
+| `DebateProtocol` | Internal flow logic for each mode |
+| `DebateConfig` / `RedTeamConfig` / `EnsembleConfig` | Fluent configuration |
+| `DebateRound` | Single round of debate (proposer argument, critic response, optional rebuttal) |
+| `DebateResult` | Final result with rounds, verdict, cost breakdown, contributions |
+
+### Configuration
+
+```php
+'debate' => [
+    'enabled' => env('SUPERAGENT_DEBATE_ENABLED', false),
+    'default_rounds' => (int) env('SUPERAGENT_DEBATE_ROUNDS', 3),
+    'default_max_budget' => (float) env('SUPERAGENT_DEBATE_MAX_BUDGET', 5.0),
+],
+```
+
+### Usage
+
+#### Structured Debate
+
+```php
+use SuperAgent\Debate\DebateOrchestrator;
+use SuperAgent\Debate\DebateConfig;
+
+$orchestrator = new DebateOrchestrator($agentRunner);
+
+$config = DebateConfig::create()
+    ->withProposerModel('opus')
+    ->withCriticModel('sonnet')
+    ->withJudgeModel('opus')
+    ->withRounds(3)
+    ->withMaxBudget(5.0)
+    ->withJudgingCriteria('Evaluate correctness, maintainability, and performance');
+
+$result = $orchestrator->debate($config, 'Should we use microservices or monolith for this project?');
+
+echo $result->getVerdict();
+echo "Cost: $" . $result->totalCost;
+```
+
+#### Red Team Security Review
+
+```php
+use SuperAgent\Debate\RedTeamConfig;
+
+$config = RedTeamConfig::create()
+    ->withBuilderModel('opus')
+    ->withAttackerModel('sonnet')
+    ->withAttackVectors(['security', 'edge_cases', 'race_conditions', 'error_handling'])
+    ->withRounds(3);
+
+$result = $orchestrator->redTeam($config, 'Build a JWT authentication system');
+
+foreach ($result->getRounds() as $round) {
+    echo "Round {$round->roundNumber}:\n";
+    echo "  Solution: " . substr($round->proposerArgument, 0, 100) . "...\n";
+    echo "  Issues: " . substr($round->criticResponse, 0, 100) . "...\n";
+}
+```
+
+#### Ensemble Solving
+
+```php
+use SuperAgent\Debate\EnsembleConfig;
+
+$config = EnsembleConfig::create()
+    ->withAgentCount(3)
+    ->withModels(['opus', 'sonnet', 'haiku'])
+    ->withMergerModel('opus')
+    ->withMergeCriteria('Take the best algorithm from each, prefer correctness over performance');
+
+$result = $orchestrator->ensemble($config, 'Implement a rate limiter with sliding window');
+
+echo $result->getVerdict();       // Merged solution
+echo $result->recommendation;     // Actionable recommendation
+```
+
+### Troubleshooting
+
+**Debate costs too much.** Use `sonnet` for proposer/critic and `opus` only for the judge. Reduce `rounds` to 2. Set a strict `maxBudget`.
+
+**Red team attacker misses real issues.** Add specific `attackVectors` relevant to your domain. Consider a custom `attackerSystemPrompt` with domain-specific attack patterns.
+
+---
+
+## 29. Cost Prediction Engine
+
+> Estimate task cost before execution using historical data and prompt complexity analysis. Compare costs across models instantly.
+
+### Overview
+
+The Cost Prediction Engine analyzes prompts to predict token usage, turns needed, and total cost -- before spending a single token. It uses three strategies in priority order:
+
+1. **Historical**: If similar tasks have been recorded, uses weighted average (recent data weighted higher). Confidence up to 95%.
+2. **Hybrid**: If type-level averages exist (e.g., "refactoring tasks on Sonnet"), adjusts by complexity. Confidence up to 70%.
+3. **Heuristic**: Estimates tokens from prompt length and complexity patterns × model pricing. Confidence 30%.
+
+Key classes:
+
+| Class | Role |
+|---|---|
+| `CostPredictor` | Main prediction engine |
+| `TaskAnalyzer` | Classifies task type and complexity from prompt text |
+| `TaskProfile` | Analysis result (type, complexity, estimated tokens/turns/tools) |
+| `CostEstimate` | Prediction with bounds, confidence, and `withModel()` re-estimation |
+| `CostHistoryStore` | Persistent JSON storage of actual execution data |
+| `PredictionAccuracy` | Tracks prediction vs actual accuracy |
+
+### Configuration
+
+```php
+'cost_prediction' => [
+    'enabled' => env('SUPERAGENT_COST_PREDICTION_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_COST_PREDICTION_STORAGE_PATH', null),
+],
+```
+
+### Usage
+
+```php
+use SuperAgent\CostPrediction\CostPredictor;
+use SuperAgent\CostPrediction\CostHistoryStore;
+
+$predictor = new CostPredictor(new CostHistoryStore(storage_path('superagent/cost_history')));
+
+// Estimate a single task
+$estimate = $predictor->estimate('Refactor all controllers to use DTOs', 'claude-sonnet-4-6');
+
+echo $estimate->format();
+// "Estimated: $0.5200 (range: $0.2080-$1.3000), ~45,000 tokens, ~8 turns, confidence: 30% [heuristic]"
+
+if (!$estimate->isWithinBudget(1.00)) {
+    // Try a cheaper model
+    $cheaper = $estimate->withModel('haiku');
+    echo $cheaper->format();
+}
+
+// Compare across models
+$comparison = $predictor->compareModels('Write unit tests for UserService', ['opus', 'sonnet', 'haiku']);
+foreach ($comparison as $model => $est) {
+    echo "{$model}: \${$est->estimatedCost} (confidence: {$est->confidence})\n";
+}
+
+// Record actual execution for future predictions
+$predictor->recordExecution($taskHash, 'sonnet', $actualCost, $actualTokens, $actualTurns, $durationMs);
+```
+
+### Troubleshooting
+
+**Predictions are always "heuristic" with 30% confidence.** Record actual executions via `recordExecution()`. After 3+ similar tasks, predictions switch to "historical" with higher confidence.
+
+**Wrong task type detected.** `TaskAnalyzer` uses keyword heuristics. For ambiguous prompts, the type defaults to "chat". Include action verbs like "refactor", "fix", "write tests" for accurate detection.
+
+---
+
+## 30. Natural Language Guardrails
+
+> Define guardrail rules in plain English instead of YAML. Zero-cost compilation (no LLM calls) via deterministic pattern matching.
+
+### Overview
+
+Natural Language Guardrails let non-technical stakeholders define security and compliance rules without learning the YAML DSL. The `RuleParser` uses regex patterns and keyword matching to compile English sentences into standard guardrail conditions. It handles 6 rule types:
+
+| Rule Type | Example | Compiled Action |
+|---|---|---|
+| Tool restriction | "Never modify files in database/migrations" | deny + tool_input_contains |
+| Cost rule | "If cost exceeds $5, pause and ask" | ask + cost_exceeds |
+| Rate limit | "Max 10 bash calls per minute" | rate_limit + rate condition |
+| File restriction | "Don't touch .env files" | deny + tool_input_contains |
+| Warning | "Warn if modifying config files" | warn + tool_input_contains |
+| Content rule | "All generated code must have error handling" | warn (needs review) |
+
+### Configuration
+
+```php
+'nl_guardrails' => [
+    'enabled' => env('SUPERAGENT_NL_GUARDRAILS_ENABLED', false),
+    'rules' => [
+        'Never modify files in database/migrations',
+        'If cost exceeds $5, pause and ask for approval',
+        'Max 10 bash calls per minute',
+    ],
+],
+```
+
+### Usage
+
+#### Fluent API
+
+```php
+use SuperAgent\Guardrails\NaturalLanguage\NLGuardrailFacade;
+
+$compiled = NLGuardrailFacade::create()
+    ->rule('Never modify files in database/migrations')
+    ->rule('If cost exceeds $5, pause and ask for approval')
+    ->rule('Max 10 bash calls per minute')
+    ->rule("Don't touch .env files")
+    ->rule('Block all web searches')
+    ->compile();
+
+echo "Total: {$compiled->totalRules}, High confidence: {$compiled->highConfidenceCount}\n";
+
+// Check rules that need human review
+foreach ($compiled->getNeedsReview() as $rule) {
+    echo "REVIEW: {$rule->originalText} (confidence: {$rule->confidence})\n";
+}
+
+// Export as YAML for GuardrailsEngine
+$yaml = $compiled->toYaml();
+file_put_contents('guardrails-from-nl.yaml', $yaml);
+```
+
+#### Direct Compilation
+
+```php
+use SuperAgent\Guardrails\NaturalLanguage\NLGuardrailCompiler;
+
+$compiler = new NLGuardrailCompiler();
+$rule = $compiler->compile('If cost exceeds $10, stop execution');
+
+echo $rule->groupName;     // "cost"
+echo $rule->confidence;    // 0.9
+echo $rule->needsReview;   // false
+```
+
+### Troubleshooting
+
+**Rule compiles with low confidence.** The parser uses regex patterns -- rephrase to match supported formats. E.g., "No bash" → "Block all bash calls".
+
+**Rule marked as needsReview.** Ambiguous rules that don't match any pattern get low confidence. Either rephrase in a supported format or manually review the compiled YAML output.
+
+---
+
+## 31. Self-Healing Pipelines
+
+> When pipeline steps fail, automatically diagnose root cause, create a healing plan, apply intelligent mutations, and retry -- going beyond simple retry with real adaptation.
+
+### Overview
+
+Self-Healing Pipelines replace the basic `retry` failure strategy with an intelligent `self_heal` strategy that:
+
+1. **Diagnoses** the failure using rule-based classification (fast, free) or LLM-based analysis (for ambiguous cases)
+2. **Plans** a healing approach based on the diagnosis category
+3. **Mutates** the step configuration (prompt, model, timeout, context)
+4. **Retries** with the mutated configuration
+
+The system classifies failures into 8 categories and maps each to appropriate healing strategies:
+
+| Error Category | Healing Strategy | Example |
+|---|---|---|
+| `timeout` | Increase timeout + simplify task | "Connection timed out after 60s" |
+| `rate_limit` | Wait + retry with increased timeout | "429 Too Many Requests" |
+| `model_limitation` | Upgrade model + simplify prompt | "Token limit exceeded" |
+| `resource_exhaustion` | Simplify task + reduce output | "Out of memory" |
+| `external_dependency` | Retry with backoff | "Connection refused" |
+| `tool_failure` | Modify prompt to avoid failed tool | "Tool execution error" |
+| `input_error` | Add context about the error | "File not found" |
+| `unknown` | Add error context + careful approach | (fallback) |
+
+Key classes:
+
+| Class | Role |
+|---|---|
+| `SelfHealingStrategy` | Main healing orchestrator with `heal()` and `canHeal()` |
+| `DiagnosticAgent` | Rule-based + LLM-based failure diagnosis |
+| `StepMutator` | Applies 6 mutation types to step configs |
+| `StepFailure` | Rich failure context with error categorization |
+| `Diagnosis` | Root cause analysis with confidence and suggested fixes |
+| `HealingPlan` | Strategy-specific mutations with success rate estimates |
+| `HealingResult` | Outcome with full diagnosis/plan history |
+
+### Configuration
+
+```php
+'self_healing' => [
+    'enabled' => env('SUPERAGENT_SELF_HEALING_ENABLED', false),
+    'max_heal_attempts' => (int) env('SUPERAGENT_SELF_HEALING_MAX_ATTEMPTS', 3),
+    'diagnose_model' => env('SUPERAGENT_SELF_HEALING_DIAGNOSE_MODEL', 'sonnet'),
+    'max_diagnose_budget' => (float) env('SUPERAGENT_SELF_HEALING_MAX_BUDGET', 0.50),
+    'allowed_mutations' => ['modify_prompt', 'change_model', 'adjust_timeout', 'add_context', 'simplify_task'],
+],
+```
+
+### Usage
+
+```php
+use SuperAgent\Pipeline\SelfHealing\SelfHealingStrategy;
+use SuperAgent\Pipeline\SelfHealing\StepFailure;
+
+$healer = new SelfHealingStrategy(config: [
+    'max_heal_attempts' => 3,
+    'diagnose_model' => 'sonnet',
+]);
+
+// When a pipeline step fails
+$failure = new StepFailure(
+    stepName: 'deploy_service',
+    stepType: 'agent',
+    stepConfig: ['prompt' => 'Deploy to staging', 'timeout' => 60, 'model' => 'sonnet'],
+    errorMessage: 'Connection timed out after 60 seconds',
+    errorClass: 'RuntimeException',
+    stackTrace: $exception->getTraceAsString(),
+    attemptNumber: 1,
+);
+
+if ($healer->canHeal($failure)) {
+    $result = $healer->heal($failure, function (array $mutatedConfig) {
+        // Re-execute the step with mutated config
+        return $this->executeStep($mutatedConfig);
+    });
+
+    if ($result->wasHealed()) {
+        echo "Healed after {$result->attemptsUsed} attempts: {$result->summary}\n";
+        $stepOutput = $result->result;
+    } else {
+        echo "Could not heal: {$result->summary}\n";
+    }
+}
+```
+
+#### In Pipeline YAML
+
+```yaml
+steps:
+  - name: deploy
+    type: agent
+    prompt: "Deploy the service to staging"
+    timeout: 120
+    on_failure:
+      strategy: self_heal
+      max_attempts: 3
+      diagnose_model: sonnet
+```
+
+### Troubleshooting
+
+**Healer always fails.** Check `allowed_mutations` -- if too restrictive, the healer can't make meaningful changes. Ensure at least `modify_prompt` and `adjust_timeout` are allowed.
+
+**Healing costs too much.** The diagnostic agent uses `sonnet` by default. Set `diagnose_model: haiku` for cheaper diagnosis. Reduce `max_heal_attempts` to 2.
+
+**Unrecoverable errors trigger healing.** `InvalidArgumentException` and `LogicException` are auto-classified as unrecoverable. Custom exceptions need `isRecoverable()` logic in `StepFailure`.

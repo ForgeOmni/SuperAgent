@@ -52,6 +52,15 @@
 - [24. Optimisation des Performances](#24-optimisation-des-performances)
 - [25. Journalisation Structurée NDJSON](#25-journalisation-structurée-ndjson)
 
+### Intelligence Innovante (v0.7.6)
+
+- [26. Replay d'Agent & Débogage Temporel](#26-replay-dagent--débogage-temporel)
+- [27. Fork de Conversation](#27-fork-de-conversation)
+- [28. Protocole de Débat Agent](#28-protocole-de-débat-agent)
+- [29. Moteur de Prédiction de Coûts](#29-moteur-de-prédiction-de-coûts)
+- [30. Garde-fous en Langage Naturel](#30-garde-fous-en-langage-naturel)
+- [31. Pipelines Auto-Réparateurs](#31-pipelines-auto-réparateurs)
+
 ---
 
 ## 1. Pipeline DSL
@@ -5219,3 +5228,351 @@ Les processus d'agents enfants (`agent-runner.php`) émettent automatiquement du
 | Pas d'événements d'outils dans le journal | Seul `onText` a été enregistré | Utilisez `NdjsonStreamingHandler::create()` qui enregistre tous les callbacks |
 | Le moniteur de processus n'affiche aucune activité | L'analyseur attend du NDJSON mais reçoit du texte brut | Vérifiez que le processus enfant utilise `NdjsonWriter` (v0.6.18+) |
 | L'Unicode casse l'analyseur NDJSON | U+2028/U+2029 dans le contenu | `NdjsonWriter` échappe ces caractères automatiquement |
+
+---
+
+## 26. Replay d'Agent & Débogage Temporel
+
+> Enregistrez les traces d'exécution complètes et rejouez-les pas à pas pour déboguer les interactions multi-agents complexes. Inspectez l'état d'un agent à n'importe quel moment, recherchez des événements, forkez depuis n'importe quel pas, et visualisez les timelines avec le coût cumulé.
+
+### Aperçu
+
+Le système Replay capture chaque événement significatif pendant l'exécution — appels LLM, appels d'outils, créations d'agents, messages inter-agents et snapshots d'état périodiques — dans une `ReplayTrace` immuable. Un `ReplayPlayer` vous permet de naviguer en avant/arrière, d'inspecter des agents individuels et de forker depuis n'importe quel pas.
+
+Classes clés :
+
+| Classe | Rôle |
+|---|---|
+| `ReplayRecorder` | Enregistre les événements pendant l'exécution |
+| `ReplayTrace` | Trace immuable avec événements et métadonnées |
+| `ReplayEvent` | Événement unique (5 types : llm_call, tool_call, agent_spawn, agent_message, state_snapshot) |
+| `ReplayPlayer` | Navigation pas à pas, inspection, recherche, fork |
+| `ReplayState` | État reconstruit à un pas spécifique |
+| `ReplayStore` | Persistance NDJSON avec liste/nettoyage/suppression |
+
+### Configuration
+
+```php
+'replay' => [
+    'enabled' => env('SUPERAGENT_REPLAY_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_REPLAY_STORAGE_PATH', null),
+    'snapshot_interval' => (int) env('SUPERAGENT_REPLAY_SNAPSHOT_INTERVAL', 5),
+    'max_age_days' => (int) env('SUPERAGENT_REPLAY_MAX_AGE_DAYS', 30),
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Replay\ReplayRecorder;
+use SuperAgent\Replay\ReplayPlayer;
+use SuperAgent\Replay\ReplayStore;
+
+// Enregistrer les traces d'exécution
+$recorder = new ReplayRecorder('session-123', snapshotInterval: 5);
+$recorder->recordLlmCall('main', 'claude-sonnet-4-6', $messages, $response, $usage, $durationMs);
+$recorder->recordToolCall('main', 'read', $toolId, $input, $output, $durationMs);
+$recorder->recordAgentSpawn('child-1', 'main', 'researcher', $config);
+$trace = $recorder->finalize();
+
+// Charger et rejouer
+$store = new ReplayStore(storage_path('superagent/replays'));
+$store->save($trace);
+$trace = $store->load('session-123');
+
+$player = new ReplayPlayer($trace);
+$state = $player->stepTo(15);       // Aller au pas 15
+$info = $player->inspect('child-1'); // Inspecter l'état d'un agent enfant
+$results = $player->search('bash');  // Rechercher des événements
+$timeline = $player->getTimeline();  // Timeline formatée
+$forked = $player->fork(10);        // Forker depuis le pas 10
+```
+
+### Dépannage
+
+| Problème | Cause | Solution |
+|----------|-------|----------|
+| Fichier de trace trop volumineux | Session longue | Augmentez `snapshot_interval` pour réduire la fréquence des snapshots |
+| Événements manquants dans le replay | Recorder non connecté | Assurez-vous que `ReplayRecorder` est connecté au QueryEngine |
+
+---
+
+## 27. Fork de Conversation
+
+> Branchez une conversation à n'importe quel point pour explorer plusieurs approches en parallèle, puis sélectionnez automatiquement le meilleur résultat avec des stratégies de scoring intégrées ou personnalisées.
+
+### Aperçu
+
+Le Fork de Conversation vous permet de prendre un snapshot de conversation, créer N branches avec différents prompts ou stratégies, les exécuter toutes en parallèle via `proc_open`, et choisir la meilleure. Idéal pour : comparer des approches de conception, A/B tester des prompts, explorer des variantes sous contraintes budgétaires.
+
+Classes clés :
+
+| Classe | Rôle |
+|---|---|
+| `ForkManager` | API de haut niveau pour créer et exécuter des forks |
+| `ForkSession` | Session de fork avec messages de base et branches |
+| `ForkBranch` | Branche unique avec prompt, statut, résultat, score |
+| `ForkExecutor` | Exécution parallèle via `proc_open` |
+| `ForkResult` | Résultats agrégés avec scoring et classement |
+| `ForkScorer` | Stratégies de scoring intégrées |
+
+### Configuration
+
+```php
+'fork' => [
+    'enabled' => env('SUPERAGENT_FORK_ENABLED', false),
+    'default_timeout' => (int) env('SUPERAGENT_FORK_TIMEOUT', 300),
+    'max_branches' => (int) env('SUPERAGENT_FORK_MAX_BRANCHES', 5),
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Fork\ForkManager;
+use SuperAgent\Fork\ForkExecutor;
+use SuperAgent\Fork\ForkScorer;
+
+$manager = new ForkManager(new ForkExecutor());
+
+// Différentes approches
+$session = $manager->forkWithVariants(
+    messages: $agent->getMessages(),
+    turnCount: $currentTurn,
+    prompts: ['Refactorer avec le pattern Strategy', 'Refactorer avec le pattern Command', 'Extraction de fonctions simple'],
+);
+
+$result = $manager->execute($session);
+
+// Scoring composite : 70% efficacité coût + 30% brièveté
+$scorer = ForkScorer::composite(
+    [[ForkScorer::class, 'costEfficiency'], [ForkScorer::class, 'brevity']],
+    [0.7, 0.3],
+);
+$best = $result->getBest($scorer);
+```
+
+### Dépannage
+
+| Problème | Cause | Solution |
+|----------|-------|----------|
+| Toutes les branches échouent | `agent-runner.php` introuvable | Vérifiez que `bin/agent-runner.php` existe et est exécutable |
+| Branches en timeout | Tâche complexe + timeout court | Augmentez `fork.default_timeout` |
+
+---
+
+## 28. Protocole de Débat Agent
+
+> Trois modes de collaboration multi-agents structurée — Débat, Red Team et Ensemble — qui améliorent la qualité des résultats par des approches adversariales ou indépendantes-puis-fusion.
+
+### Aperçu
+
+Le Protocole de Débat va au-delà de l'exécution parallèle simple en introduisant des patterns d'interaction structurée :
+
+1. **Débat** : Un proposant argumente, un critique trouve les failles, un juge synthétise la meilleure approche. Plusieurs rounds avec réfutations.
+2. **Red Team** : Un constructeur crée une solution, un attaquant trouve systématiquement les vulnérabilités, un réviseur produit l'évaluation finale.
+3. **Ensemble** : N agents résolvent le même problème indépendamment, puis un fusionneur combine les meilleurs éléments.
+
+### Configuration
+
+```php
+'debate' => [
+    'enabled' => env('SUPERAGENT_DEBATE_ENABLED', false),
+    'default_rounds' => (int) env('SUPERAGENT_DEBATE_ROUNDS', 3),
+    'default_max_budget' => (float) env('SUPERAGENT_DEBATE_MAX_BUDGET', 5.0),
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Debate\DebateOrchestrator;
+use SuperAgent\Debate\DebateConfig;
+use SuperAgent\Debate\RedTeamConfig;
+use SuperAgent\Debate\EnsembleConfig;
+
+$orchestrator = new DebateOrchestrator($agentRunner);
+
+// Débat structuré
+$config = DebateConfig::create()
+    ->withProposerModel('opus')->withCriticModel('sonnet')->withJudgeModel('opus')
+    ->withRounds(3)->withMaxBudget(5.0)
+    ->withJudgingCriteria('Évaluer la correction, la maintenabilité et la performance');
+$result = $orchestrator->debate($config, 'Microservices ou monolithe pour ce projet ?');
+
+// Red Team sécurité
+$config = RedTeamConfig::create()
+    ->withAttackVectors(['security', 'edge_cases', 'race_conditions'])->withRounds(3);
+$result = $orchestrator->redTeam($config, 'Construire un système d\'authentification JWT');
+
+// Résolution ensemble
+$config = EnsembleConfig::create()
+    ->withAgentCount(3)->withModels(['opus', 'sonnet', 'haiku'])->withMergerModel('opus');
+$result = $orchestrator->ensemble($config, 'Implémenter un rate limiter à fenêtre glissante');
+```
+
+### Dépannage
+
+**Le débat coûte trop cher.** Utilisez `sonnet` pour le proposant/critique et `opus` uniquement pour le juge. Réduisez les rounds à 2. Définissez un `maxBudget` strict.
+
+---
+
+## 29. Moteur de Prédiction de Coûts
+
+> Estimez le coût d'une tâche avant exécution en utilisant les données historiques et l'analyse de complexité du prompt. Comparez les coûts entre modèles instantanément.
+
+### Aperçu
+
+Le Moteur de Prédiction de Coûts analyse les prompts pour prédire l'utilisation de tokens, les tours nécessaires et le coût total. Trois stratégies par ordre de priorité : moyenne pondérée historique (confiance jusqu'à 95%), hybride type-moyenne (confiance jusqu'à 70%), heuristique (confiance 30%).
+
+### Configuration
+
+```php
+'cost_prediction' => [
+    'enabled' => env('SUPERAGENT_COST_PREDICTION_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_COST_PREDICTION_STORAGE_PATH', null),
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\CostPrediction\CostPredictor;
+use SuperAgent\CostPrediction\CostHistoryStore;
+
+$predictor = new CostPredictor(new CostHistoryStore(storage_path('superagent/cost_history')));
+
+$estimate = $predictor->estimate('Refactorer tous les contrôleurs pour utiliser des DTOs', 'claude-sonnet-4-6');
+echo $estimate->format();
+
+if (!$estimate->isWithinBudget(1.00)) {
+    $cheaper = $estimate->withModel('haiku');
+}
+
+// Comparaison multi-modèles
+$comparison = $predictor->compareModels('Écrire les tests unitaires du UserService', ['opus', 'sonnet', 'haiku']);
+
+// Enregistrer l'exécution réelle pour améliorer les prédictions futures
+$predictor->recordExecution($taskHash, 'sonnet', $actualCost, $actualTokens, $actualTurns, $durationMs);
+```
+
+### Dépannage
+
+**Les prédictions sont toujours « heuristiques » avec 30% de confiance.** Enregistrez les exécutions réelles via `recordExecution()`. Après 3+ tâches similaires, les prédictions passent en mode « historique ».
+
+---
+
+## 30. Garde-fous en Langage Naturel
+
+> Définissez des règles de garde-fous en anglais simple. Compilation sans coût (pas d'appels LLM) via la correspondance de patterns déterministe.
+
+### Aperçu
+
+Les Garde-fous en Langage Naturel permettent aux parties prenantes non techniques de définir des règles de sécurité et de conformité sans apprendre le DSL YAML. Le `RuleParser` utilise des regex et la correspondance de mots-clés pour compiler des phrases en conditions de garde-fous standard. Il gère 6 types de règles :
+
+| Type de règle | Exemple | Action compilée |
+|---|---|---|
+| Restriction d'outil | "Never modify files in database/migrations" | deny + tool_input_contains |
+| Règle de coût | "If cost exceeds $5, pause and ask" | ask + cost_exceeds |
+| Limite de débit | "Max 10 bash calls per minute" | rate_limit + condition de débit |
+| Restriction de fichier | "Don't touch .env files" | deny + tool_input_contains |
+| Avertissement | "Warn if modifying config files" | warn + tool_input_contains |
+| Règle de contenu | "All generated code must have error handling" | warn (à revoir) |
+
+### Configuration
+
+```php
+'nl_guardrails' => [
+    'enabled' => env('SUPERAGENT_NL_GUARDRAILS_ENABLED', false),
+    'rules' => [
+        'Never modify files in database/migrations',
+        'If cost exceeds $5, pause and ask for approval',
+        'Max 10 bash calls per minute',
+    ],
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Guardrails\NaturalLanguage\NLGuardrailFacade;
+
+$compiled = NLGuardrailFacade::create()
+    ->rule('Never modify files in database/migrations')
+    ->rule('If cost exceeds $5, pause and ask for approval')
+    ->rule('Max 10 bash calls per minute')
+    ->rule("Don't touch .env files")
+    ->compile();
+
+echo "Total : {$compiled->totalRules}, Haute confiance : {$compiled->highConfidenceCount}\n";
+
+foreach ($compiled->getNeedsReview() as $rule) {
+    echo "À REVOIR : {$rule->originalText} (confiance : {$rule->confidence})\n";
+}
+
+$yaml = $compiled->toYaml();
+```
+
+### Dépannage
+
+**Règle compilée avec faible confiance.** Le parseur utilise des patterns regex — reformulez pour correspondre aux formats supportés. Ex. : "No bash" → "Block all bash calls".
+
+---
+
+## 31. Pipelines Auto-Réparateurs
+
+> Quand des étapes de pipeline échouent, diagnostiquez automatiquement la cause racine, créez un plan de réparation, appliquez des mutations intelligentes et réessayez — au-delà du simple retry avec une vraie adaptation.
+
+### Aperçu
+
+Les Pipelines Auto-Réparateurs remplacent la stratégie d'échec basique `retry` par une stratégie intelligente `self_heal` : diagnostiquer → planifier → muter → réessayer. Le système classifie les échecs en 8 catégories :
+
+| Catégorie d'erreur | Stratégie de réparation | Exemple |
+|---|---|---|
+| `timeout` | Augmenter le timeout + simplifier | "Connection timed out after 60s" |
+| `rate_limit` | Attendre + réessayer avec backoff | "429 Too Many Requests" |
+| `model_limitation` | Upgrader le modèle + simplifier | "Token limit exceeded" |
+| `resource_exhaustion` | Simplifier la tâche + réduire la sortie | "Out of memory" |
+| `external_dependency` | Réessayer avec backoff | "Connection refused" |
+| `tool_failure` | Modifier le prompt pour éviter l'outil échoué | "Tool execution error" |
+
+### Configuration
+
+```php
+'self_healing' => [
+    'enabled' => env('SUPERAGENT_SELF_HEALING_ENABLED', false),
+    'max_heal_attempts' => (int) env('SUPERAGENT_SELF_HEALING_MAX_ATTEMPTS', 3),
+    'diagnose_model' => env('SUPERAGENT_SELF_HEALING_DIAGNOSE_MODEL', 'sonnet'),
+    'max_diagnose_budget' => (float) env('SUPERAGENT_SELF_HEALING_MAX_BUDGET', 0.50),
+    'allowed_mutations' => ['modify_prompt', 'change_model', 'adjust_timeout', 'add_context', 'simplify_task'],
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Pipeline\SelfHealing\SelfHealingStrategy;
+use SuperAgent\Pipeline\SelfHealing\StepFailure;
+
+$healer = new SelfHealingStrategy(config: ['max_heal_attempts' => 3]);
+
+$failure = new StepFailure(
+    stepName: 'deploy_service', stepType: 'agent',
+    stepConfig: ['prompt' => 'Déployer en staging', 'timeout' => 60],
+    errorMessage: 'Connection timed out after 60 seconds', errorClass: 'RuntimeException',
+    stackTrace: null, attemptNumber: 1,
+);
+
+if ($healer->canHeal($failure)) {
+    $result = $healer->heal($failure, function (array $mutatedConfig) {
+        return $this->executeStep($mutatedConfig);
+    });
+    echo $result->wasHealed() ? "Réparé : {$result->summary}" : "Impossible de réparer : {$result->summary}";
+}
+```
+
+### Dépannage
+
+**Le réparateur échoue toujours.** Vérifiez `allowed_mutations` — si trop restrictif, le réparateur ne peut pas apporter de changements significatifs. Autorisez au moins `modify_prompt` et `adjust_timeout`.
+
+**La réparation coûte trop cher.** L'agent de diagnostic utilise `sonnet` par défaut. Configurez `diagnose_model: haiku` pour un diagnostic moins coûteux.

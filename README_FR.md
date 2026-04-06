@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.5-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.6-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,14 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.7.6 — Suite d'Intelligence Agent Innovante (6 nouveaux sous-systèmes)
+- **Replay d'Agent & Débogage Temporel** (`src/Replay/`) — Enregistrez les traces d'exécution complètes (appels LLM, appels d'outils, créations d'agents, messages inter-agents) et rejouez-les pas à pas. `ReplayPlayer` supporte la navigation avant/arrière, l'inspection d'état d'agent à n'importe quel pas, la recherche, le fork depuis n'importe quel pas, et la timeline formatée avec coût cumulé. Traces persistées en NDJSON via `ReplayStore` avec nettoyage par âge. Config : `replay.enabled`, `replay.snapshot_interval`
+- **Fork de Conversation** (`src/Fork/`) — Branchez les conversations à n'importe quel point pour explorer N approches en parallèle, puis sélectionnez automatiquement le meilleur résultat. `ForkManager` crée des `ForkSession` avec plusieurs `ForkBranch`, exécutés en vrai parallèle via `proc_open` (`ForkExecutor`), et notés avec des stratégies intégrées (`ForkScorer::costEfficiency`, `brevity`, `completeness`, `composite`). Config : `fork.enabled`, `fork.max_branches`
+- **Protocole de Débat Agent** (`src/Debate/`) — Trois modes de collaboration multi-agents structurée via `DebateOrchestrator` : **Débat** (Proposant → Critique → Juge avec réfutations), **Red Team** (Constructeur → Attaquant → Réviseur avec vecteurs d'attaque configurables), **Ensemble** (N agents résolvent indépendamment → Fusionneur combine les meilleurs éléments). Configuration fluide, sélection de modèle par agent, suivi des coûts par round. Config : `debate.enabled`, `debate.default_rounds`
+- **Moteur de Prédiction de Coûts** (`src/CostPrediction/`) — Estimez le coût avant exécution avec 3 stratégies : moyenne pondérée historique (confiance jusqu'à 95%), hybride type-moyenne, ou heuristique (estimation tokens × tarification modèle). `TaskAnalyzer` détecte le type de tâche (génération de code, refactoring, débogage, tests, analyse, chat) et la complexité. `CostPredictor::compareModels()` pour la comparaison instantanée multi-modèles. Config : `cost_prediction.enabled`
+- **Garde-fous en Langage Naturel** (`src/Guardrails/NaturalLanguage/`) — Définissez des règles de garde-fous en anglais simple. Compilation sans coût (pas d'appels LLM) via `RuleParser` gérant 6 types : restrictions d'outils, règles de coût, limites de débit, restrictions de fichiers, avertissements, et règles de contenu. API fluide : `NLGuardrailFacade::create()->rule('...')->compile()`. Scoring de confiance avec flag `needsReview`. Export YAML. Config : `nl_guardrails.enabled`, `nl_guardrails.rules`
+- **Pipelines Auto-Réparateurs** (`src/Pipeline/SelfHealing/`) — Nouvelle stratégie d'échec `self_heal` : diagnostiquer → planifier → muter → réessayer. `DiagnosticAgent` avec diagnostic basé sur règles + LLM pour 8 catégories d'erreurs. `StepMutator` applique 6 types de mutations (modifier le prompt, changer de modèle, ajuster le timeout, ajouter du contexte, simplifier la tâche, diviser l'étape). Config : `self_healing.enabled`, `self_healing.max_heal_attempts`
 
 ### 🆕 v0.7.5 — Compatibilité des Noms d'Outils Claude Code
 - **`ToolNameResolver`** (`src/Tools/ToolNameResolver.php`) — Mappage bidirectionnel entre les noms PascalCase de Claude Code (`Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Agent`, `WebSearch`, etc.) et les noms snake_case de SuperAgent (`read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`, `agent`, `web_search`, etc.). 40+ mappages incluant les noms hérités CC (`Task` → `agent`)

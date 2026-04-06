@@ -52,6 +52,15 @@
 - [24. 性能优化](#24-性能优化)
 - [25. NDJSON 结构化日志](#25-ndjson-结构化日志)
 
+### 创新智能 (v0.7.6)
+
+- [26. Agent Replay 时间旅行调试](#26-agent-replay-时间旅行调试)
+- [27. 对话分叉](#27-对话分叉)
+- [28. Agent 辩论协议](#28-agent-辩论协议)
+- [29. 成本预测引擎](#29-成本预测引擎)
+- [30. 自然语言护栏](#30-自然语言护栏)
+- [31. 自愈流水线](#31-自愈流水线)
+
 ---
 
 ## 1. 流水线 DSL
@@ -4630,3 +4639,351 @@ $writer->writeResult(3, 'Task completed.', ['input_tokens' => 5000, 'output_toke
 | 日志中无工具事件 | 仅注册了 `onText` | 使用 `NdjsonStreamingHandler::create()` 来注册所有回调 |
 | 进程监控无活动显示 | 解析器期望 NDJSON 但收到纯文本 | 验证子进程使用 `NdjsonWriter`（v0.6.18+） |
 | Unicode 导致 NDJSON 解析器中断 | 内容中包含 U+2028/U+2029 | `NdjsonWriter` 会自动转义这些字符 |
+
+---
+
+## 26. Agent Replay 时间旅行调试
+
+> 记录完整的执行轨迹并逐步回放，用于调试复杂的多Agent交互。支持在任意步骤检查Agent状态、搜索事件、从任意步骤分叉、带累计成本的时间线可视化。
+
+### 概述
+
+Replay系统在Agent执行期间捕获每个重要事件——LLM调用、工具调用、Agent生成、Agent间消息和周期性状态快照——形成不可变的 `ReplayTrace`。`ReplayPlayer` 允许你在轨迹中前进/后退导航、检查单个Agent、从任意步骤分叉以探索不同路径。
+
+核心类：
+
+| 类 | 职责 |
+|---|---|
+| `ReplayRecorder` | 执行期间记录事件 |
+| `ReplayTrace` | 包含事件和元数据的不可变轨迹 |
+| `ReplayEvent` | 单个事件（5种类型：llm_call、tool_call、agent_spawn、agent_message、state_snapshot） |
+| `ReplayPlayer` | 逐步导航、检查、搜索、分叉 |
+| `ReplayState` | 特定步骤的重建状态 |
+| `ReplayStore` | NDJSON持久化，支持列表/清理/删除 |
+
+### 配置
+
+```php
+'replay' => [
+    'enabled' => env('SUPERAGENT_REPLAY_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_REPLAY_STORAGE_PATH', null),
+    'snapshot_interval' => (int) env('SUPERAGENT_REPLAY_SNAPSHOT_INTERVAL', 5),
+    'max_age_days' => (int) env('SUPERAGENT_REPLAY_MAX_AGE_DAYS', 30),
+],
+```
+
+### 使用
+
+```php
+use SuperAgent\Replay\ReplayRecorder;
+use SuperAgent\Replay\ReplayPlayer;
+use SuperAgent\Replay\ReplayStore;
+
+// 记录执行轨迹
+$recorder = new ReplayRecorder('session-123', snapshotInterval: 5);
+$recorder->recordLlmCall('main', 'claude-sonnet-4-6', $messages, $response, $usage, $durationMs);
+$recorder->recordToolCall('main', 'read', $toolId, $input, $output, $durationMs);
+$recorder->recordAgentSpawn('child-1', 'main', 'researcher', $config);
+$trace = $recorder->finalize();
+
+// 加载并回放
+$store = new ReplayStore(storage_path('superagent/replays'));
+$store->save($trace);
+$trace = $store->load('session-123');
+
+$player = new ReplayPlayer($trace);
+$state = $player->stepTo(15);       // 跳到第15步
+$info = $player->inspect('child-1'); // 检查子Agent状态
+$results = $player->search('bash');  // 搜索事件
+$timeline = $player->getTimeline();  // 格式化时间线
+$forked = $player->fork(10);        // 从第10步分叉
+```
+
+### 故障排除
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 轨迹文件过大 | 长时间运行的会话 | 增大 `snapshot_interval` 以减少快照频率 |
+| 回放中缺少事件 | Recorder未接入 | 确保 `ReplayRecorder` 连接到 QueryEngine |
+
+---
+
+## 27. 对话分叉
+
+> 在对话任意节点分叉，并行探索多种方案，使用内置或自定义评分策略自动选择最优结果。
+
+### 概述
+
+对话分叉允许你获取对话快照，创建N个不同提示或策略的分支，通过 `proc_open` 全部并行执行，然后选择最优结果。适用于：比较设计方案、A/B测试提示词、在预算约束下探索解决方案变体。
+
+核心类：
+
+| 类 | 职责 |
+|---|---|
+| `ForkManager` | 创建和执行分叉的高级API |
+| `ForkSession` | 包含基础消息和分支的分叉会话 |
+| `ForkBranch` | 单个分支，含提示词、状态、结果、评分 |
+| `ForkExecutor` | 通过 `proc_open` 并行执行 |
+| `ForkResult` | 聚合结果，支持评分和排名 |
+| `ForkScorer` | 内置评分策略 |
+
+### 配置
+
+```php
+'fork' => [
+    'enabled' => env('SUPERAGENT_FORK_ENABLED', false),
+    'default_timeout' => (int) env('SUPERAGENT_FORK_TIMEOUT', 300),
+    'max_branches' => (int) env('SUPERAGENT_FORK_MAX_BRANCHES', 5),
+],
+```
+
+### 使用
+
+```php
+use SuperAgent\Fork\ForkManager;
+use SuperAgent\Fork\ForkExecutor;
+use SuperAgent\Fork\ForkScorer;
+
+$manager = new ForkManager(new ForkExecutor());
+
+// 不同方案分叉
+$session = $manager->forkWithVariants(
+    messages: $agent->getMessages(),
+    turnCount: $currentTurn,
+    prompts: ['使用策略模式重构', '使用命令模式重构', '使用简单函数提取重构'],
+);
+
+$result = $manager->execute($session);
+
+// 组合评分：70%成本效率 + 30%简洁度
+$scorer = ForkScorer::composite(
+    [[ForkScorer::class, 'costEfficiency'], [ForkScorer::class, 'brevity']],
+    [0.7, 0.3],
+);
+$best = $result->getBest($scorer);
+```
+
+### 故障排除
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 所有分支失败 | 找不到 `agent-runner.php` | 验证 `bin/agent-runner.php` 存在且可执行 |
+| 分支超时 | 复杂任务+短超时 | 增加 `fork.default_timeout` |
+
+---
+
+## 28. Agent 辩论协议
+
+> 三种结构化多Agent协作模式——辩论、红队和集成——通过对抗性或独立-合并方法提升输出质量。
+
+### 概述
+
+辩论协议超越简单的并行执行，引入Agent之间的结构化交互模式：
+
+1. **辩论**：提议者提出方案，批评者寻找缺陷，裁判综合最佳方案。多轮进行，含反驳环节。
+2. **红队**：构建者创建解决方案，攻击者系统性地发现漏洞（安全、边界情况、性能），审查者产出最终评估。
+3. **集成**：N个Agent用可能不同的模型独立解决同一问题，然后合并器将各方案的最优元素结合起来。
+
+### 配置
+
+```php
+'debate' => [
+    'enabled' => env('SUPERAGENT_DEBATE_ENABLED', false),
+    'default_rounds' => (int) env('SUPERAGENT_DEBATE_ROUNDS', 3),
+    'default_max_budget' => (float) env('SUPERAGENT_DEBATE_MAX_BUDGET', 5.0),
+],
+```
+
+### 使用
+
+```php
+use SuperAgent\Debate\DebateOrchestrator;
+use SuperAgent\Debate\DebateConfig;
+use SuperAgent\Debate\RedTeamConfig;
+use SuperAgent\Debate\EnsembleConfig;
+
+$orchestrator = new DebateOrchestrator($agentRunner);
+
+// 结构化辩论
+$config = DebateConfig::create()
+    ->withProposerModel('opus')->withCriticModel('sonnet')->withJudgeModel('opus')
+    ->withRounds(3)->withMaxBudget(5.0)
+    ->withJudgingCriteria('评估正确性、可维护性和性能');
+$result = $orchestrator->debate($config, '微服务还是单体架构？');
+
+// 红队安全审查
+$config = RedTeamConfig::create()
+    ->withAttackVectors(['security', 'edge_cases', 'race_conditions'])->withRounds(3);
+$result = $orchestrator->redTeam($config, '构建JWT认证系统');
+
+// 集成求解
+$config = EnsembleConfig::create()
+    ->withAgentCount(3)->withModels(['opus', 'sonnet', 'haiku'])->withMergerModel('opus');
+$result = $orchestrator->ensemble($config, '实现滑动窗口限流器');
+```
+
+### 故障排除
+
+**辩论成本太高。** 提议者/批评者使用 `sonnet`，仅裁判使用 `opus`。将轮数减到2。设置严格的 `maxBudget`。
+
+---
+
+## 29. 成本预测引擎
+
+> 执行前基于历史数据和提示词复杂度分析估算任务成本。支持跨模型即时比较。
+
+### 概述
+
+成本预测引擎分析提示词以预测token使用量、所需轮次和总成本。三种策略按优先级排列：历史加权平均（置信度可达95%）、类型平均混合（置信度可达70%）、启发式估算（置信度30%）。
+
+### 配置
+
+```php
+'cost_prediction' => [
+    'enabled' => env('SUPERAGENT_COST_PREDICTION_ENABLED', false),
+    'storage_path' => env('SUPERAGENT_COST_PREDICTION_STORAGE_PATH', null),
+],
+```
+
+### 使用
+
+```php
+use SuperAgent\CostPrediction\CostPredictor;
+use SuperAgent\CostPrediction\CostHistoryStore;
+
+$predictor = new CostPredictor(new CostHistoryStore(storage_path('superagent/cost_history')));
+
+$estimate = $predictor->estimate('重构所有控制器使用DTO', 'claude-sonnet-4-6');
+echo $estimate->format();
+
+if (!$estimate->isWithinBudget(1.00)) {
+    $cheaper = $estimate->withModel('haiku');
+}
+
+// 多模型成本对比
+$comparison = $predictor->compareModels('编写UserService单元测试', ['opus', 'sonnet', 'haiku']);
+
+// 记录实际执行以改善未来预测
+$predictor->recordExecution($taskHash, 'sonnet', $actualCost, $actualTokens, $actualTurns, $durationMs);
+```
+
+### 故障排除
+
+**预测始终是"启发式"且置信度30%。** 通过 `recordExecution()` 记录实际执行。累积3+条相似任务记录后，预测将切换到"历史"模式。
+
+---
+
+## 30. 自然语言护栏
+
+> 用自然语言定义护栏规则，零成本编译（无LLM调用），通过确定性模式匹配。
+
+### 概述
+
+自然语言护栏让非技术人员无需学习YAML DSL即可定义安全和合规规则。`RuleParser` 使用正则表达式和关键词匹配将自然语言编译为标准护栏条件。支持6种规则类型：
+
+| 规则类型 | 示例 | 编译动作 |
+|----------|------|----------|
+| 工具限制 | "禁止修改database/migrations中的文件" | deny + tool_input_contains |
+| 成本规则 | "成本超过$5时暂停并请求批准" | ask + cost_exceeds |
+| 速率限制 | "每分钟最多10次bash调用" | rate_limit + rate条件 |
+| 文件限制 | "不要触碰.env文件" | deny + tool_input_contains |
+| 警告规则 | "修改config文件时发出警告" | warn + tool_input_contains |
+| 内容规则 | "所有生成的代码必须有错误处理" | warn（需审查） |
+
+### 配置
+
+```php
+'nl_guardrails' => [
+    'enabled' => env('SUPERAGENT_NL_GUARDRAILS_ENABLED', false),
+    'rules' => [
+        'Never modify files in database/migrations',
+        'If cost exceeds $5, pause and ask for approval',
+        'Max 10 bash calls per minute',
+    ],
+],
+```
+
+### 使用
+
+```php
+use SuperAgent\Guardrails\NaturalLanguage\NLGuardrailFacade;
+
+$compiled = NLGuardrailFacade::create()
+    ->rule('Never modify files in database/migrations')
+    ->rule('If cost exceeds $5, pause and ask for approval')
+    ->rule('Max 10 bash calls per minute')
+    ->rule("Don't touch .env files")
+    ->compile();
+
+echo "总计: {$compiled->totalRules}, 高置信度: {$compiled->highConfidenceCount}\n";
+
+foreach ($compiled->getNeedsReview() as $rule) {
+    echo "需审查: {$rule->originalText} (置信度: {$rule->confidence})\n";
+}
+
+$yaml = $compiled->toYaml();
+```
+
+### 故障排除
+
+**规则编译后置信度低。** 解析器使用正则模式匹配——请重新措辞以匹配支持的格式。例如 "No bash" → "Block all bash calls"。
+
+---
+
+## 31. 自愈流水线
+
+> Pipeline步骤失败时，自动诊断根因、制定修复计划、应用智能变异并重试——超越简单重试，实现真正的自适应。
+
+### 概述
+
+自愈流水线用智能 `self_heal` 策略替代基本的 `retry` 失败策略。流程为：诊断（规则+LLM分类）→ 制定修复计划 → 应用配置变异 → 重试。系统将失败分为8类，每类映射到相应的修复策略：
+
+| 错误类别 | 修复策略 | 示例 |
+|----------|----------|------|
+| `timeout` | 增加超时+简化任务 | "连接在60秒后超时" |
+| `rate_limit` | 等待+带退避重试 | "429 Too Many Requests" |
+| `model_limitation` | 升级模型+简化提示词 | "Token限制超出" |
+| `resource_exhaustion` | 简化任务+减少输出 | "内存不足" |
+| `external_dependency` | 带退避重试 | "连接被拒绝" |
+| `tool_failure` | 修改提示词避开失败工具 | "工具执行错误" |
+
+### 配置
+
+```php
+'self_healing' => [
+    'enabled' => env('SUPERAGENT_SELF_HEALING_ENABLED', false),
+    'max_heal_attempts' => (int) env('SUPERAGENT_SELF_HEALING_MAX_ATTEMPTS', 3),
+    'diagnose_model' => env('SUPERAGENT_SELF_HEALING_DIAGNOSE_MODEL', 'sonnet'),
+    'max_diagnose_budget' => (float) env('SUPERAGENT_SELF_HEALING_MAX_BUDGET', 0.50),
+    'allowed_mutations' => ['modify_prompt', 'change_model', 'adjust_timeout', 'add_context', 'simplify_task'],
+],
+```
+
+### 使用
+
+```php
+use SuperAgent\Pipeline\SelfHealing\SelfHealingStrategy;
+use SuperAgent\Pipeline\SelfHealing\StepFailure;
+
+$healer = new SelfHealingStrategy(config: ['max_heal_attempts' => 3]);
+
+$failure = new StepFailure(
+    stepName: 'deploy_service', stepType: 'agent',
+    stepConfig: ['prompt' => '部署到staging', 'timeout' => 60],
+    errorMessage: '连接在60秒后超时', errorClass: 'RuntimeException',
+    stackTrace: null, attemptNumber: 1,
+);
+
+if ($healer->canHeal($failure)) {
+    $result = $healer->heal($failure, function (array $mutatedConfig) {
+        return $this->executeStep($mutatedConfig);
+    });
+    echo $result->wasHealed() ? "已修复: {$result->summary}" : "无法修复: {$result->summary}";
+}
+```
+
+### 故障排除
+
+**修复器始终失败。** 检查 `allowed_mutations`——如果过于严格，修复器无法做出有意义的更改。至少允许 `modify_prompt` 和 `adjust_timeout`。
+
+**修复成本太高。** 诊断Agent默认使用 `sonnet`。设置 `diagnose_model: haiku` 以降低诊断成本。

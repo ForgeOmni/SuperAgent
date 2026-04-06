@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.7.5-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.7.6-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,14 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.7.6 — 创新智能体能力套件（6个新子系统）
+- **Agent Replay 时间旅行调试** (`src/Replay/`) — 记录完整执行轨迹（LLM调用、工具调用、Agent生成、消息传递），支持逐步回放。`ReplayPlayer` 支持前进/后退导航、任意步骤的Agent状态检查、搜索、从任意步骤分叉重新执行、带累计成本的格式化时间线。通过 `ReplayStore` 以 NDJSON 格式持久化，支持按时间清理。配置：`replay.enabled`、`replay.snapshot_interval`
+- **对话分叉** (`src/Fork/`) — 在对话任意节点分叉，并行探索N条路径，自动选择最优结果。`ForkManager` 创建 `ForkSession` 包含多个 `ForkBranch`，通过 `proc_open`（`ForkExecutor`）真并行执行，使用内置评分策略（`ForkScorer::costEfficiency`、`brevity`、`completeness`、`composite`）。配置：`fork.enabled`、`fork.max_branches`
+- **Agent辩论协议** (`src/Debate/`) — 三种结构化多Agent协作模式：**辩论**（提议者→批评者→裁判，含反驳环节）、**红队**（构建者→攻击者→审查者，可配置攻击向量）、**集成**（N个Agent独立求解→合并最优元素）。流式配置 `DebateConfig::create()->withRounds(3)->withMaxBudget(5.0)`，按Agent选择模型，逐轮成本追踪。配置：`debate.enabled`、`debate.default_rounds`
+- **成本预测引擎** (`src/CostPrediction/`) — 执行前估算任务成本，3种策略：历史加权平均（置信度可达95%）、类型平均混合、启发式（token估算×模型定价）。`TaskAnalyzer` 通过关键词分析检测任务类型（代码生成、重构、调试、测试、分析、聊天）和复杂度。`CostPredictor::compareModels()` 多模型即时成本对比。配置：`cost_prediction.enabled`
+- **自然语言护栏** (`src/Guardrails/NaturalLanguage/`) — 用自然语言定义护栏规则，零成本编译（无LLM调用）。基于模式的 `RuleParser` 支持6种规则：工具限制（"禁止修改database/migrations中的文件"）、成本规则（"成本超过$5时暂停"）、速率限制（"每分钟最多10次bash调用"）、文件限制（"不要触碰.env文件"）、警告规则和内容规则。流式API：`NLGuardrailFacade::create()->rule('...')->compile()`。支持置信度评分和YAML导出。配置：`nl_guardrails.enabled`、`nl_guardrails.rules`
+- **自愈流水线** (`src/Pipeline/SelfHealing/`) — Pipeline步骤的新失败策略 `self_heal`：诊断失败→制定修复计划→应用变异→重试。`DiagnosticAgent` 通过规则+LLM进行8类错误诊断（超时、限流、模型限制、资源耗尽等）。`StepMutator` 支持6种变异（修改提示词、更换模型、调整超时、添加上下文、简化任务、拆分步骤）。配置：`self_healing.enabled`、`self_healing.max_heal_attempts`
 
 ### 🆕 v0.7.5 — Claude Code 工具名兼容
 - **`ToolNameResolver`** (`src/Tools/ToolNameResolver.php`) — Claude Code PascalCase 工具名（`Read`、`Write`、`Edit`、`Bash`、`Glob`、`Grep`、`Agent`、`WebSearch` 等）与 SuperAgent snake_case 工具名（`read_file`、`write_file`、`edit_file`、`bash`、`glob`、`grep`、`agent`、`web_search` 等）的双向映射。40+ 工具映射，包括 CC 旧名称（`Task` → `agent`）

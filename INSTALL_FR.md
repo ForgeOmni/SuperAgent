@@ -897,6 +897,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.7.6      | 10.x+   | 8.1+  | 6 sous-systèmes innovants : Replay d'Agent & Débogage Temporel, Fork de Conversation, Protocole de Débat, Prédiction de Coûts, Garde-fous en Langage Naturel, Pipelines Auto-Réparateurs |
 | 0.7.5      | 10.x+   | 8.1+  | Compatibilité noms d'outils Claude Code : ToolNameResolver bidirectionnel, résolution auto dans définitions d'agents et système de permissions |
 | 0.7.2      | 10.x+   | 8.1+  | Correction résolution chemins .claude/ : racine du projet au lieu de cwd pour AgentManager, SkillManager, MCPManager |
 | 0.7.1      | 10.x+   | 8.1+  | Correction AgentTool PermissionMode 'bypass' enum incompatible |

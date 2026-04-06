@@ -907,6 +907,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.7.6      | 10.x+   | 8.1+  | 6大创新子系统：Agent Replay时间旅行调试、对话分叉、Agent辩论协议、成本预测引擎、自然语言护栏、自愈流水线 |
 | 0.7.5      | 10.x+   | 8.1+  | Claude Code 工具名兼容：双向 ToolNameResolver，agent 定义和权限系统自动解析 |
 | 0.7.2      | 10.x+   | 8.1+  | 修复 .claude/ 路径解析：AgentManager/SkillManager/MCPManager 使用项目根目录而非 cwd |
 | 0.7.1      | 10.x+   | 8.1+  | 修复 AgentTool PermissionMode 'bypass' 枚举不匹配 |

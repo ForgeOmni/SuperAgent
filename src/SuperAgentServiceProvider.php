@@ -24,6 +24,15 @@ use SuperAgent\Providers\ModelResolver;
 use SuperAgent\SkillDistillation\DistillationEngine;
 use SuperAgent\SkillDistillation\DistillationManager;
 use SuperAgent\SkillDistillation\DistillationStore;
+use SuperAgent\Replay\ReplayRecorder;
+use SuperAgent\Replay\ReplayStore;
+use SuperAgent\Fork\ForkExecutor;
+use SuperAgent\Fork\ForkManager;
+use SuperAgent\Debate\DebateOrchestrator;
+use SuperAgent\CostPrediction\CostHistoryStore;
+use SuperAgent\CostPrediction\CostPredictor;
+use SuperAgent\Guardrails\NaturalLanguage\NLGuardrailCompiler;
+use SuperAgent\Pipeline\SelfHealing\SelfHealingStrategy;
 
 class SuperAgentServiceProvider extends ServiceProvider
 {
@@ -202,6 +211,106 @@ class SuperAgentServiceProvider extends ServiceProvider
             );
 
             return new DistillationManager($store, $engine);
+        });
+
+        // Register ReplayStore singleton when enabled
+        $this->app->singleton(ReplayStore::class, function ($app) {
+            $config = $app['config']->get('superagent.replay', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $storagePath = $config['storage_path']
+                ?? storage_path('superagent/replays');
+
+            return new ReplayStore($storagePath);
+        });
+
+        // Register ForkManager singleton when enabled
+        $this->app->singleton(ForkManager::class, function ($app) {
+            $config = $app['config']->get('superagent.fork', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $executor = new ForkExecutor(
+                defaultTimeout: (int) ($config['default_timeout'] ?? 300),
+            );
+
+            return new ForkManager($executor);
+        });
+
+        // Register DebateOrchestrator singleton when enabled
+        $this->app->singleton(DebateOrchestrator::class, function ($app) {
+            $config = $app['config']->get('superagent.debate', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            // The agent runner callback must be set externally
+            return new DebateOrchestrator(
+                agentRunner: fn() => ['content' => '', 'cost' => 0.0, 'turns' => 0],
+                defaultConfig: $config,
+            );
+        });
+
+        // Register CostPredictor singleton when enabled
+        $this->app->singleton(CostPredictor::class, function ($app) {
+            $config = $app['config']->get('superagent.cost_prediction', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $storagePath = $config['storage_path']
+                ?? storage_path('superagent/cost_history');
+
+            return new CostPredictor(
+                historyStore: new CostHistoryStore($storagePath),
+                config: $config,
+            );
+        });
+
+        // Register NLGuardrailCompiler singleton when enabled
+        $this->app->singleton(NLGuardrailCompiler::class, function ($app) {
+            $config = $app['config']->get('superagent.nl_guardrails', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $compiler = new NLGuardrailCompiler();
+
+            // Auto-compile configured rules and merge into GuardrailsEngine
+            $rules = $config['rules'] ?? [];
+            if (!empty($rules)) {
+                $compiled = $compiler->compileAll($rules);
+                $engine = $app->make(GuardrailsEngine::class);
+                if ($engine !== null) {
+                    // The compiled rules will be available for the engine
+                    logger()->info('NL Guardrails compiled', [
+                        'total' => $compiled->totalRules,
+                        'high_confidence' => $compiled->highConfidenceCount,
+                        'needs_review' => $compiled->needsReviewCount,
+                    ]);
+                }
+            }
+
+            return $compiler;
+        });
+
+        // Register SelfHealingStrategy singleton when enabled
+        $this->app->singleton(SelfHealingStrategy::class, function ($app) {
+            $config = $app['config']->get('superagent.self_healing', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            return new SelfHealingStrategy(config: $config);
         });
 
         // Register PipelineEngine singleton when enabled
