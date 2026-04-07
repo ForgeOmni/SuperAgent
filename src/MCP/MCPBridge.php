@@ -32,12 +32,15 @@ class MCPBridge
     /** Path to the shared bridge registry file */
     private string $registryPath;
 
-    private function __construct()
+    public function __construct()
     {
         $pid = function_exists('posix_getpid') ? posix_getpid() : getmypid();
         $this->registryPath = sys_get_temp_dir() . '/superagent_mcp_bridges_' . $pid . '.json';
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

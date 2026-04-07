@@ -11,7 +11,7 @@ class TaskManager
     private Collection $tasks;
     private Collection $taskLists;
 
-    protected function __construct()
+    public function __construct()
     {
         $this->tasks = collect();
         $this->taskLists = collect([
@@ -19,6 +19,9 @@ class TaskManager
         ]);
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

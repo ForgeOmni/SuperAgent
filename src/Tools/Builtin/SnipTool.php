@@ -7,8 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class SnipTool extends Tool
 {
-    private static array $snippets = [];
-
     public function name(): string
     {
         return 'snip';
@@ -97,7 +95,7 @@ class SnipTool extends Tool
             return ToolResult::error('Snippet content is required.');
         }
 
-        self::$snippets[$name] = [
+        $this->state()->putIn($this->name(), 'snippets', $name, [
             'name' => $name,
             'content' => $content,
             'language' => $input['language'] ?? 'text',
@@ -105,7 +103,7 @@ class SnipTool extends Tool
             'tags' => $input['tags'] ?? [],
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
-        ];
+        ]);
 
         return ToolResult::success([
             'message' => 'Snippet saved successfully',
@@ -121,11 +119,13 @@ class SnipTool extends Tool
             return ToolResult::error('Snippet name is required.');
         }
         
-        if (!isset(self::$snippets[$name])) {
+        $snippets = $this->state()->get($this->name(), 'snippets', []);
+
+        if (!isset($snippets[$name])) {
             return ToolResult::error("Snippet '{$name}' not found.");
         }
 
-        return ToolResult::success(self::$snippets[$name]);
+        return ToolResult::success($snippets[$name]);
     }
 
     private function listSnippets(array $input): ToolResult
@@ -133,7 +133,7 @@ class SnipTool extends Tool
         $language = $input['language'] ?? null;
         $tags = $input['tags'] ?? [];
         
-        $filtered = self::$snippets;
+        $filtered = $this->state()->get($this->name(), 'snippets', []);
         
         if ($language) {
             $filtered = array_filter($filtered, fn($s) => $s['language'] === $language);
@@ -159,11 +159,13 @@ class SnipTool extends Tool
             return ToolResult::error('Snippet name is required.');
         }
         
-        if (!isset(self::$snippets[$name])) {
+        $snippets = $this->state()->get($this->name(), 'snippets', []);
+
+        if (!isset($snippets[$name])) {
             return ToolResult::error("Snippet '{$name}' not found.");
         }
 
-        unset(self::$snippets[$name]);
+        $this->state()->removeFrom($this->name(), 'snippets', $name);
 
         return ToolResult::success([
             'message' => 'Snippet deleted successfully',
@@ -182,7 +184,7 @@ class SnipTool extends Tool
         $results = [];
         $queryLower = strtolower($query);
 
-        foreach (self::$snippets as $snippet) {
+        foreach ($this->state()->get($this->name(), 'snippets', []) as $snippet) {
             if (str_contains(strtolower($snippet['name']), $queryLower) ||
                 str_contains(strtolower($snippet['content']), $queryLower) ||
                 str_contains(strtolower($snippet['description']), $queryLower)) {
@@ -197,9 +199,9 @@ class SnipTool extends Tool
         ]);
     }
 
-    public static function clearSnippets(): void
+    public function clearSnippets(): void
     {
-        self::$snippets = [];
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

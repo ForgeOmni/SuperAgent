@@ -4,6 +4,7 @@ namespace SuperAgent\Tools\Builtin;
 
 use SuperAgent\Tools\Tool;
 use SuperAgent\Tools\ToolResult;
+use SuperAgent\Tools\ToolStateManager;
 
 /**
  * Tool search with deferred tool loading ported from Claude Code.
@@ -21,11 +22,7 @@ use SuperAgent\Tools\ToolResult;
  */
 class ToolSearchTool extends Tool
 {
-    /** @var array<string, array{name: string, description: string, deferred: bool}> */
-    private static array $toolRegistry = [];
-
-    /** @var array<string> Tool names that have been discovered (loaded via search) */
-    private static array $discoveredTools = [];
+    private const TOOL_KEY = 'ToolSearch';
 
     /** Scoring weights */
     private const SCORE_EXACT_NAME = 10;
@@ -38,6 +35,21 @@ class ToolSearchTool extends Tool
 
     /** Maximum results per query */
     private const MAX_RESULTS = 5;
+
+    private static ?ToolStateManager $sharedState = null;
+
+    private static function shared(): ToolStateManager
+    {
+        if (self::$sharedState === null) {
+            self::$sharedState = new ToolStateManager();
+        }
+        return self::$sharedState;
+    }
+
+    public static function setSharedStateManager(ToolStateManager $manager): void
+    {
+        self::$sharedState = $manager;
+    }
 
     public function name(): string
     {
@@ -91,22 +103,19 @@ class ToolSearchTool extends Tool
         return $this->searchTools($query, (int) $maxResults);
     }
 
-    /**
-     * Direct selection by exact tool names.
-     */
     private function selectTools(array $names): ToolResult
     {
+        $registry = self::shared()->get(self::TOOL_KEY, 'toolRegistry', []);
         $found = [];
         $notFound = [];
 
         foreach ($names as $name) {
-            $tool = self::$toolRegistry[$name] ?? null;
+            $tool = $registry[$name] ?? null;
             if ($tool !== null) {
                 $found[] = $tool;
                 self::markDiscovered($name);
             } else {
-                // Case-insensitive fallback
-                foreach (self::$toolRegistry as $regName => $regTool) {
+                foreach ($registry as $regName => $regTool) {
                     if (strcasecmp($regName, $name) === 0) {
                         $found[] = $regTool;
                         self::markDiscovered($regName);
@@ -125,29 +134,23 @@ class ToolSearchTool extends Tool
         return ToolResult::success($result);
     }
 
-    /**
-     * Fuzzy keyword search across tool names and descriptions.
-     */
     private function searchTools(string $query, int $maxResults): ToolResult
     {
+        $registry = self::shared()->get(self::TOOL_KEY, 'toolRegistry', []);
         $queryLower = strtolower($query);
         $queryWords = preg_split('/[\s_-]+/', $queryLower);
         $scored = [];
 
-        foreach (self::$toolRegistry as $name => $tool) {
+        foreach ($registry as $name => $tool) {
             $score = $this->scoreTool($tool, $queryLower, $queryWords);
             if ($score > 0) {
                 $scored[] = ['tool' => $tool, 'score' => $score];
             }
         }
 
-        // Sort by score descending
         usort($scored, fn($a, $b) => $b['score'] <=> $a['score']);
-
-        // Take top results
         $results = array_slice($scored, 0, $maxResults);
 
-        // Mark discovered
         foreach ($results as $r) {
             self::markDiscovered($r['tool']['name']);
         }
@@ -158,9 +161,6 @@ class ToolSearchTool extends Tool
         ]);
     }
 
-    /**
-     * Score a tool against a search query.
-     */
     private function scoreTool(array $tool, string $queryLower, array $queryWords): int
     {
         $score = 0;
@@ -168,10 +168,8 @@ class ToolSearchTool extends Tool
         $descLower = strtolower($tool['description'] ?? '');
         $isMcp = str_starts_with($nameLower, 'mcp__');
 
-        // Split tool name into parts (CamelCase, underscores, MCP segments)
         $nameParts = $this->splitToolName($nameLower);
 
-        // Exact name part matches
         foreach ($queryWords as $word) {
             if (strlen($word) < 2) continue;
 
@@ -183,18 +181,15 @@ class ToolSearchTool extends Tool
                 }
             }
 
-            // Search hint / category match
             if (isset($tool['search_hint']) && str_contains(strtolower($tool['search_hint']), $word)) {
                 $score += self::SCORE_HINT;
             }
 
-            // Description match
             if (str_contains($descLower, $word)) {
                 $score += self::SCORE_DESCRIPTION;
             }
         }
 
-        // Require name or query to be a prefix match for relevance
         if (str_contains($nameLower, $queryLower)) {
             $score += self::SCORE_EXACT_NAME;
         }
@@ -202,18 +197,11 @@ class ToolSearchTool extends Tool
         return $score;
     }
 
-    /**
-     * Split a tool name into searchable parts.
-     */
     private function splitToolName(string $name): array
     {
-        // MCP format: mcp__server__action
         $parts = explode('__', $name);
-
-        // Also split by underscore and CamelCase
         $allParts = [];
         foreach ($parts as $part) {
-            // Split CamelCase
             $camelParts = preg_split('/(?=[A-Z])/', $part);
             foreach ($camelParts as $cp) {
                 $cp = strtolower(trim($cp));
@@ -221,7 +209,6 @@ class ToolSearchTool extends Tool
                     $allParts[] = $cp;
                 }
             }
-            // Also add underscore-split
             foreach (explode('_', $part) as $up) {
                 $up = strtolower(trim($up));
                 if ($up !== '' && !in_array($up, $allParts, true)) {
@@ -229,30 +216,21 @@ class ToolSearchTool extends Tool
                 }
             }
         }
-
         return $allParts;
     }
 
-    // ================================================================
-    // Registry management (static, shared across instances)
-    // ================================================================
+    // ── Registry management ──────────────────────────────────────
 
-    /**
-     * Register a tool for search.
-     */
     public static function registerTool(string $name, string $description, bool $deferred = false, ?string $searchHint = null): void
     {
-        self::$toolRegistry[$name] = [
+        self::shared()->putIn(self::TOOL_KEY, 'toolRegistry', $name, [
             'name' => $name,
             'description' => $description,
             'deferred' => $deferred,
             'search_hint' => $searchHint,
-        ];
+        ]);
     }
 
-    /**
-     * Register multiple tools at once.
-     */
     public static function registerTools(array $tools): void
     {
         foreach ($tools as $tool) {
@@ -273,50 +251,35 @@ class ToolSearchTool extends Tool
         }
     }
 
-    /**
-     * Mark a tool as discovered (loaded via search).
-     */
     private static function markDiscovered(string $name): void
     {
-        if (!in_array($name, self::$discoveredTools, true)) {
-            self::$discoveredTools[] = $name;
+        $discovered = self::shared()->get(self::TOOL_KEY, 'discoveredTools', []);
+        if (!in_array($name, $discovered, true)) {
+            self::shared()->push(self::TOOL_KEY, 'discoveredTools', $name);
         }
     }
 
-    /**
-     * Get list of discovered tool names.
-     */
     public static function getDiscoveredTools(): array
     {
-        return self::$discoveredTools;
+        return self::shared()->get(self::TOOL_KEY, 'discoveredTools', []);
     }
 
-    /**
-     * Check if a tool should be deferred based on auto-threshold.
-     *
-     * @param int $totalToolTokens  Estimated tokens for all tool definitions
-     * @param int $contextWindow    Model's context window size
-     */
     public static function shouldDeferTools(int $totalToolTokens, int $contextWindow): bool
     {
         $threshold = (int) ($contextWindow * self::AUTO_THRESHOLD_PERCENT / 100);
         return $totalToolTokens > $threshold;
     }
 
-    /**
-     * Check if a specific tool is deferred.
-     */
     public static function isDeferredTool(string $name): bool
     {
-        return (self::$toolRegistry[$name]['deferred'] ?? false) === true;
+        $registry = self::shared()->get(self::TOOL_KEY, 'toolRegistry', []);
+        return ($registry[$name]['deferred'] ?? false) === true;
     }
 
-    /**
-     * Get deferred tools delta (added/removed since last check).
-     */
     public static function getDeferredToolsDelta(array $previousNames): array
     {
-        $currentNames = array_keys(array_filter(self::$toolRegistry, fn($t) => $t['deferred']));
+        $registry = self::shared()->get(self::TOOL_KEY, 'toolRegistry', []);
+        $currentNames = array_keys(array_filter($registry, fn($t) => $t['deferred']));
 
         return [
             'added' => array_values(array_diff($currentNames, $previousNames)),
@@ -324,13 +287,9 @@ class ToolSearchTool extends Tool
         ];
     }
 
-    /**
-     * Reset (for testing).
-     */
     public static function reset(): void
     {
-        self::$toolRegistry = [];
-        self::$discoveredTools = [];
+        self::shared()->clearTool(self::TOOL_KEY);
     }
 
     public function isReadOnly(): bool

@@ -8,6 +8,13 @@ use SuperAgent\MCP\MCPManager;
 
 class ListMcpResourcesTool extends Tool
 {
+    private ?MCPManager $mcpManager;
+
+    public function __construct(?MCPManager $mcpManager = null)
+    {
+        $this->mcpManager = $mcpManager;
+    }
+
     public function name(): string
     {
         return 'list_mcp_resources';
@@ -42,7 +49,7 @@ class ListMcpResourcesTool extends Tool
 
     public function execute(array $input): ToolResult
     {
-        $manager = MCPManager::getInstance();
+        $manager = $this->mcpManager ?? MCPManager::getInstance();
         $serverFilter = $input['server'] ?? null;
         $pattern = $input['pattern'] ?? null;
 

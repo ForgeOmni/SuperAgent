@@ -136,7 +136,7 @@ class CtxInspectTool extends Tool
 
     private function inspectConfig(bool $verbose): array
     {
-        $config = ConfigTool::getConfiguration();
+        $config = $this->state()->get('config', 'config', []);
         
         return [
             'total_keys' => $this->countKeys($config),

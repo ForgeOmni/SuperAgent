@@ -16,6 +16,9 @@ class AgentManager
     /** @var array<string, AgentDefinition> */
     private array $agents = [];
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {
@@ -24,7 +27,7 @@ class AgentManager
         return self::$instance;
     }
 
-    private function __construct()
+    public function __construct()
     {
         $this->loadBuiltinAgents();
         $this->loadConfiguredPaths();

@@ -7,8 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class MonitorTool extends Tool
 {
-    private static array $monitors = [];
-    private static int $nextId = 1;
 
     public function name(): string
     {
@@ -93,8 +91,8 @@ class MonitorTool extends Tool
         $duration = $input['duration'] ?? 60;
         $threshold = $input['threshold'] ?? [];
 
-        $monitorId = self::$nextId++;
-        
+        $monitorId = $this->state()->nextId($this->name());
+
         $monitor = [
             'id' => $monitorId,
             'type' => $type,
@@ -111,7 +109,7 @@ class MonitorTool extends Tool
         // Simulate initial data collection
         $monitor['data'][] = $this->collectData($type, $target);
 
-        self::$monitors[$monitorId] = $monitor;
+        $this->state()->putIn($this->name(), 'monitors', $monitorId, $monitor);
 
         return ToolResult::success([
             'message' => 'Monitor started',
@@ -129,12 +127,15 @@ class MonitorTool extends Tool
             return ToolResult::error('Monitor ID is required.');
         }
 
-        if (!isset(self::$monitors[$monitorId])) {
+        $monitors = $this->state()->get($this->name(), 'monitors', []);
+
+        if (!isset($monitors[$monitorId])) {
             return ToolResult::error("Monitor {$monitorId} not found.");
         }
 
-        self::$monitors[$monitorId]['status'] = 'stopped';
-        self::$monitors[$monitorId]['stopped_at'] = date('Y-m-d H:i:s');
+        $monitors[$monitorId]['status'] = 'stopped';
+        $monitors[$monitorId]['stopped_at'] = date('Y-m-d H:i:s');
+        $this->state()->set($this->name(), 'monitors', $monitors);
 
         return ToolResult::success([
             'message' => 'Monitor stopped',
@@ -150,12 +151,14 @@ class MonitorTool extends Tool
             return ToolResult::error('Monitor ID is required.');
         }
 
-        if (!isset(self::$monitors[$monitorId])) {
+        $monitors = $this->state()->get($this->name(), 'monitors', []);
+
+        if (!isset($monitors[$monitorId])) {
             return ToolResult::error("Monitor {$monitorId} not found.");
         }
 
-        $monitor = self::$monitors[$monitorId];
-        
+        $monitor = $monitors[$monitorId];
+
         return ToolResult::success([
             'monitor_id' => $monitorId,
             'status' => $monitor['status'],
@@ -175,18 +178,20 @@ class MonitorTool extends Tool
             return ToolResult::error('Monitor ID is required.');
         }
 
-        if (!isset(self::$monitors[$monitorId])) {
+        $monitors = $this->state()->get($this->name(), 'monitors', []);
+
+        if (!isset($monitors[$monitorId])) {
             return ToolResult::error("Monitor {$monitorId} not found.");
         }
 
-        return ToolResult::success(self::$monitors[$monitorId]);
+        return ToolResult::success($monitors[$monitorId]);
     }
 
     private function listMonitors(): ToolResult
     {
         $summary = [];
-        
-        foreach (self::$monitors as $monitor) {
+
+        foreach ($this->state()->get($this->name(), 'monitors', []) as $monitor) {
             $summary[] = [
                 'id' => $monitor['id'],
                 'type' => $monitor['type'],
@@ -239,10 +244,9 @@ class MonitorTool extends Tool
         }
     }
 
-    public static function clearMonitors(): void
+    public function clearMonitors(): void
     {
-        self::$monitors = [];
-        self::$nextId = 1;
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

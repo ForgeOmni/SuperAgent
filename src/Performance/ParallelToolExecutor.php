@@ -195,24 +195,31 @@ class ParallelToolExecutor
             return $this->executeParallel($toolBlocks, $executor);
         }
 
-        $processes = [];
         $results = [];
 
-        // Spawn a subprocess for each tool block
-        foreach ($toolBlocks as $block) {
-            try {
-                $processes[] = $this->spawnToolProcess($block, $executor);
-            } catch (\Throwable $e) {
-                // If spawning fails, execute sequentially as fallback
-                error_log('[SuperAgent] Process spawn failed for tool ' . ($block->toolName ?? 'unknown') . ': ' . $e->getMessage());
-                $results[$block->toolUseId] = $executor($block);
-            }
-        }
+        // Process in batches of maxParallel to limit concurrent OS processes
+        $pending = array_values($toolBlocks);
 
-        // Collect results from all spawned processes
-        if (!empty($processes)) {
-            $processResults = $this->collectProcessResults($processes, $timeoutSeconds);
-            $results = array_merge($results, $processResults);
+        while (!empty($pending)) {
+            $batch = array_splice($pending, 0, $this->maxParallel);
+            $processes = [];
+
+            // Spawn a subprocess for each tool block in this batch
+            foreach ($batch as $block) {
+                try {
+                    $processes[] = $this->spawnToolProcess($block, $executor);
+                } catch (\Throwable $e) {
+                    // If spawning fails, execute sequentially as fallback
+                    error_log('[SuperAgent] Process spawn failed for tool ' . ($block->toolName ?? 'unknown') . ': ' . $e->getMessage());
+                    $results[$block->toolUseId] = $executor($block);
+                }
+            }
+
+            // Collect results from all spawned processes in this batch
+            if (!empty($processes)) {
+                $processResults = $this->collectProcessResults($processes, $timeoutSeconds);
+                $results = array_merge($results, $processResults);
+            }
         }
 
         // Ensure every tool block has a result; fall back to sequential for any missing

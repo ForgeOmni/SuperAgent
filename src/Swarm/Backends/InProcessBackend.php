@@ -34,9 +34,10 @@ class InProcessBackend implements BackendInterface
     
     public function __construct(
         ?LoggerInterface $logger = null,
+        ?ParallelAgentCoordinator $coordinator = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
-        $this->coordinator = ParallelAgentCoordinator::getInstance($this->logger);
+        $this->coordinator = $coordinator ?? ParallelAgentCoordinator::getInstance($this->logger);
     }
     
     public function setTeamContext(TeamContext $context): void

@@ -33,10 +33,11 @@ class DistributedBackend implements BackendInterface
     public function __construct(
         ?LoggerInterface $logger = null,
         ?string $messageQueueUrl = null,
-        ?string $coordinatorUrl = null
+        ?string $coordinatorUrl = null,
+        ?ParallelAgentCoordinator $coordinator = null
     ) {
         $this->logger = $logger ?? new NullLogger();
-        $this->coordinator = ParallelAgentCoordinator::getInstance($this->logger);
+        $this->coordinator = $coordinator ?? ParallelAgentCoordinator::getInstance($this->logger);
         $this->messageQueueUrl = $messageQueueUrl ?? getenv('SUPERAGENT_MQ_URL') ?: 'redis://localhost:6379';
         $this->coordinatorUrl = $coordinatorUrl ?? getenv('SUPERAGENT_COORDINATOR_URL') ?: 'http://localhost:8080';
         

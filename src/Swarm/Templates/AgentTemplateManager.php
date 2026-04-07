@@ -17,6 +17,9 @@ class AgentTemplateManager
     private array $templates = [];
     private array $categories = [];
     
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {
@@ -26,9 +29,9 @@ class AgentTemplateManager
         return self::$instance;
     }
     
-    private function __construct()
+    public function __construct()
     {
-        // Private constructor for singleton
+        // Public constructor for dependency injection
     }
     
     /**

@@ -28,7 +28,7 @@ class FileSnapshotManager
     /** Set of tracked file paths (relative for space efficiency) */
     private Collection $trackedFiles;
 
-    private function __construct()
+    public function __construct()
     {
         $this->snapshotDir = sys_get_temp_dir() . '/superagent_snapshots';
         $this->snapshots = collect();
@@ -41,6 +41,9 @@ class FileSnapshotManager
         $this->ensureSnapshotDirectory();
     }
 
+    /**
+     * @deprecated Use constructor injection instead
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

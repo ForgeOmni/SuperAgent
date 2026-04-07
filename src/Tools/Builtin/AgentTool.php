@@ -35,11 +35,17 @@ class AgentTool extends Tool
     private LoggerInterface $logger;
     private array $activeTasks = [];
     private array $providerConfig = [];
+    private ?AgentManager $agentManager;
+    private ?ParallelAgentCoordinator $coordinator;
 
     public function __construct(
         ?LoggerInterface $logger = null,
+        ?AgentManager $agentManager = null,
+        ?ParallelAgentCoordinator $coordinator = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
+        $this->agentManager = $agentManager;
+        $this->coordinator = $coordinator;
         $this->initializeBackends();
     }
 
@@ -79,7 +85,7 @@ class AgentTool extends Tool
                 'subagent_type' => [
                     'type' => 'string',
                     'description' => 'The type of specialized agent to use for this task',
-                    'enum' => AgentManager::getInstance()->getNames(),
+                    'enum' => ($this->agentManager ?? AgentManager::getInstance())->getNames(),
                 ],
                 'name' => [
                     'type' => 'string',
@@ -159,7 +165,7 @@ class AgentTool extends Tool
             }
 
             // Resolve agent definition for system prompt / allowed tools
-            $definition = AgentManager::getInstance()->get($subagentType);
+            $definition = ($this->agentManager ?? AgentManager::getInstance())->get($subagentType);
 
             $config = new AgentSpawnConfig(
                 name: $name,
@@ -263,8 +269,8 @@ class AgentTool extends Tool
         $maxWaitTime = 300; // 5 minutes
 
         // Register with coordinator so the process monitor can display progress
-        $coordinator = ParallelAgentCoordinator::getInstance();
-        $tracker = $coordinator->registerAgent($agentId, $name);
+        $coordinatorInstance = $this->coordinator ?? ParallelAgentCoordinator::getInstance();
+        $tracker = $coordinatorInstance->registerAgent($agentId, $name);
 
         // If it's a ProcessBackend, use its poll/waitAll mechanism
         if ($backend instanceof ProcessBackend) {
@@ -338,10 +344,10 @@ class AgentTool extends Tool
     ): ToolResult {
         $startTime = microtime(true);
         $maxWaitTime = 300;
-        $coordinator = ParallelAgentCoordinator::getInstance();
+        $coordinatorInstance = $this->coordinator ?? ParallelAgentCoordinator::getInstance();
 
         while (microtime(true) - $startTime < $maxWaitTime) {
-            $tracker = $coordinator->getTracker($agentId);
+            $tracker = $coordinatorInstance->getTracker($agentId);
             if ($tracker && $tracker->getStatus() === 'completed') {
                 break;
             }
@@ -353,14 +359,14 @@ class AgentTool extends Tool
                     break;
                 }
                 if ($backend instanceof InProcessBackend) {
-                    $coordinator->processAllFibers();
+                    $coordinatorInstance->processAllFibers();
                 }
             }
 
             usleep(10_000);
         }
 
-        $agentResult = $coordinator->getAgentResult($agentId);
+        $agentResult = $coordinatorInstance->getAgentResult($agentId);
         if (!$agentResult) {
             return ToolResult::failure('Agent execution timed out or failed');
         }

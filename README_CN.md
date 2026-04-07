@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.7.8-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.7.9-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,13 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.7.9 — 依赖注入与架构加固（63个新单元测试）
+- **单例 → 构造函数注入** — 19个单例类（`AgentManager`、`TaskManager`、`MCPManager`、`ParallelAgentCoordinator`、`EventDispatcher`、`CostTracker` 等）现已具有公开构造函数，`getInstance()` 标记为 `@deprecated`。25个调用点更新为接受注入依赖并保持向后兼容降级。支持正确的测试隔离和进程安全的 Swarm 执行
+- **ToolStateManager** (`src/Tools/ToolStateManager.php`) — 集中式可注入状态容器，替代 14 个内建工具类中分散的 `private static` 属性（`EnterPlanModeTool`、`ToolSearchTool`、`MonitorTool`、`REPLTool`、`SkillTool`、`WorkflowTool`、`BriefTool`、`ConfigTool`、`SnipTool`、`TodoWriteTool`、`AskUserQuestionTool`、`TerminalCaptureTool`、`VerifyPlanExecutionTool`）。基于桶的状态存储，支持自增ID、集合辅助方法和按工具重置。在 Swarm 模式中注入共享实例以确保跨进程正确性
+- **SessionManager 分解** — 从 631 行的 `SessionManager` 中提取 `SessionStorage`（原子文件 I/O、目录扫描、路径解析）和 `SessionPruner`（按时间 + 按数量清理）。管理器现在委托给两者，简化为纯编排层
+- **进程并发限制** — `ParallelToolExecutor::executeProcessParallel()` 现在遵守 `$maxParallel`（默认 5），按批处理工具块而非无限制生成并发 OS 进程
+- **v0.7.6 功能单元测试** — 4 个专用测试类中新增 63 个单元测试：`ForkTest`（20 个测试：分支生命周期、会话管理、评分策略、结果排名）、`DebateTest`（12 个测试：配置流式 API、回合数据、结果聚合）、`CostPredictionTest`（18 个测试：类型/复杂度检测、token 估算、预算检查、模型对比）、`ReplayTest`（13 个测试：事件类型、记录器捕获、步骤计数、快照间隔）
 
 ### 🆕 v0.7.8 — Agent Harness 模式 + 企业级子系统（20个子系统，628个测试）
 - **持久化任务管理器** (`src/Tasks/PersistentTaskManager.php`) — 基于文件的任务持久化：JSON 索引 + 每任务输出日志。`appendOutput()` / `readOutput()` 日志流式读写，`watchProcess()` + `pollProcesses()` 非阻塞进程监控，重启时自动标记残留运行任务为失败，按天数自动清理。配置：`persistence.tasks`

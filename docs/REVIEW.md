@@ -288,11 +288,11 @@ v0.7.7 added `error_log('[SuperAgent] ...')` to 27 previously-silent catch block
 
 | # | Item | Impact | Effort | Status |
 |---|------|--------|--------|--------|
-| 5 | **Replace getInstance() singletons** with constructor injection (36 classes, was 22) | Testability, process safety | Large | 🔴 Worsened |
-| 6 | **Extract static state from built-in tools** into injectable state managers | Correctness in Swarm mode | Medium | 🔴 Not started |
-| 7 | **Add unit tests for v0.7.6 features** (Fork, Debate, CostPrediction, Replay) beyond smoke tests | Regression safety | Medium | 🔴 Not started |
-| 8 | **Extract SessionStorage/SessionPruner** from SessionManager (631 lines) | Maintainability | Small | 🔴 New |
-| 9 | **Add max concurrent process limit** to `ParallelToolExecutor::executeProcessParallel()` | Resource safety | Small | 🔴 New |
+| 5 | **Replace getInstance() singletons** with constructor injection (19 classes + 25 call sites) | Testability, process safety | Large | 🟢 Done |
+| 6 | **Extract static state from built-in tools** into injectable ToolStateManager (14 tools) | Correctness in Swarm mode | Medium | 🟢 Done |
+| 7 | **Add unit tests for v0.7.6 features** (Fork, Debate, CostPrediction, Replay) — 63 tests | Regression safety | Medium | 🟢 Done |
+| 8 | **Extract SessionStorage/SessionPruner** from SessionManager (631→3 classes) | Maintainability | Small | 🟢 Done |
+| 9 | **Add max concurrent process limit** to `ParallelToolExecutor::executeProcessParallel()` | Resource safety | Small | 🟢 Done |
 
 ### P2 — Improvement (Backlog)
 

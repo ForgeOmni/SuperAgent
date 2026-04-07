@@ -7,9 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class BriefTool extends Tool
 {
-    private static string $outputMode = 'normal';
-    private static array $modeStack = [];
-
     public function name(): string
     {
         return 'brief';
@@ -47,28 +44,32 @@ class BriefTool extends Tool
         switch ($mode) {
             case 'push':
                 // Save current mode to stack
-                self::$modeStack[] = self::$outputMode;
-                return ToolResult::success("Saved current output mode: " . self::$outputMode);
+                $stack = $this->state()->get($this->name(), 'modeStack', []);
+                $stack[] = $this->state()->get($this->name(), 'outputMode', 'normal');
+                $this->state()->set($this->name(), 'modeStack', $stack);
+                return ToolResult::success("Saved current output mode: " . $this->state()->get($this->name(), 'outputMode', 'normal'));
 
             case 'pop':
                 // Restore previous mode from stack
-                if (empty(self::$modeStack)) {
+                $stack = $this->state()->get($this->name(), 'modeStack', []);
+                if (empty($stack)) {
                     return ToolResult::error('No saved output mode to restore.');
                 }
-                $previousMode = array_pop(self::$modeStack);
-                self::$outputMode = $previousMode;
+                $previousMode = array_pop($stack);
+                $this->state()->set($this->name(), 'modeStack', $stack);
+                $this->state()->set($this->name(), 'outputMode', $previousMode);
                 return ToolResult::success("Restored output mode to: {$previousMode}");
 
             case 'brief':
             case 'normal':
             case 'verbose':
-                $previousMode = self::$outputMode;
-                self::$outputMode = $mode;
-                
+                $previousMode = $this->state()->get($this->name(), 'outputMode', 'normal');
+                $this->state()->set($this->name(), 'outputMode', $mode);
+
                 if ($previousMode === $mode) {
                     return ToolResult::success("Output mode is already: {$mode}");
                 }
-                
+
                 return ToolResult::success("Output mode changed from {$previousMode} to {$mode}");
 
             default:
@@ -79,34 +80,33 @@ class BriefTool extends Tool
     /**
      * Get current output mode.
      */
-    public static function getMode(): string
+    public function getMode(): string
     {
-        return self::$outputMode;
+        return $this->state()->get($this->name(), 'outputMode', 'normal');
     }
 
     /**
      * Check if in brief mode.
      */
-    public static function isBrief(): bool
+    public function isBrief(): bool
     {
-        return self::$outputMode === 'brief';
+        return $this->state()->get($this->name(), 'outputMode', 'normal') === 'brief';
     }
 
     /**
      * Check if in verbose mode.
      */
-    public static function isVerbose(): bool
+    public function isVerbose(): bool
     {
-        return self::$outputMode === 'verbose';
+        return $this->state()->get($this->name(), 'outputMode', 'normal') === 'verbose';
     }
 
     /**
      * Reset to default mode.
      */
-    public static function reset(): void
+    public function reset(): void
     {
-        self::$outputMode = 'normal';
-        self::$modeStack = [];
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

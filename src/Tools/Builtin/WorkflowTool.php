@@ -7,8 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class WorkflowTool extends Tool
 {
-    private static array $workflows = [];
-    private static int $nextId = 1;
 
     public function name(): string
     {
@@ -102,9 +100,9 @@ class WorkflowTool extends Tool
             return ToolResult::error('Workflow must have at least one step.');
         }
 
-        $workflowId = self::$nextId++;
-        
-        self::$workflows[$workflowId] = [
+        $workflowId = $this->state()->nextId($this->name());
+
+        $this->state()->putIn($this->name(), 'workflows', $workflowId, [
             'id' => $workflowId,
             'name' => $name,
             'description' => $description,
@@ -112,7 +110,7 @@ class WorkflowTool extends Tool
             'created_at' => date('Y-m-d H:i:s'),
             'run_count' => 0,
             'last_run' => null,
-        ];
+        ]);
 
         return ToolResult::success([
             'message' => 'Workflow created',
@@ -131,13 +129,17 @@ class WorkflowTool extends Tool
             return ToolResult::error('Workflow ID is required.');
         }
 
-        if (!isset(self::$workflows[$workflowId])) {
+        $workflows = $this->state()->get($this->name(), 'workflows', []);
+
+        if (!isset($workflows[$workflowId])) {
             return ToolResult::error("Workflow {$workflowId} not found.");
         }
 
-        $workflow = &self::$workflows[$workflowId];
+        $workflow = $workflows[$workflowId];
         $workflow['run_count']++;
         $workflow['last_run'] = date('Y-m-d H:i:s');
+
+        $this->state()->putIn($this->name(), 'workflows', $workflowId, $workflow);
 
         // Simulate workflow execution
         $results = [];
@@ -167,18 +169,21 @@ class WorkflowTool extends Tool
             return ToolResult::error('Workflow ID is required.');
         }
 
-        if (!isset(self::$workflows[$workflowId])) {
+        $workflows = $this->state()->get($this->name(), 'workflows', []);
+
+        if (!isset($workflows[$workflowId])) {
             return ToolResult::error("Workflow {$workflowId} not found.");
         }
 
-        return ToolResult::success(self::$workflows[$workflowId]);
+        return ToolResult::success($workflows[$workflowId]);
     }
 
     private function listWorkflows(): ToolResult
     {
+        $workflows = $this->state()->get($this->name(), 'workflows', []);
         $summary = [];
-        
-        foreach (self::$workflows as $workflow) {
+
+        foreach ($workflows as $workflow) {
             $summary[] = [
                 'id' => $workflow['id'],
                 'name' => $workflow['name'],
@@ -203,12 +208,14 @@ class WorkflowTool extends Tool
             return ToolResult::error('Workflow ID is required.');
         }
 
-        if (!isset(self::$workflows[$workflowId])) {
+        $workflows = $this->state()->get($this->name(), 'workflows', []);
+
+        if (!isset($workflows[$workflowId])) {
             return ToolResult::error("Workflow {$workflowId} not found.");
         }
 
-        $name = self::$workflows[$workflowId]['name'];
-        unset(self::$workflows[$workflowId]);
+        $name = $workflows[$workflowId]['name'];
+        $this->state()->removeFrom($this->name(), 'workflows', $workflowId);
 
         return ToolResult::success([
             'message' => 'Workflow deleted',
@@ -217,10 +224,9 @@ class WorkflowTool extends Tool
         ]);
     }
 
-    public static function clearWorkflows(): void
+    public function clearWorkflows(): void
     {
-        self::$workflows = [];
-        self::$nextId = 1;
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

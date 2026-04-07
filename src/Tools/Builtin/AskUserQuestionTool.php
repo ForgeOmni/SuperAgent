@@ -7,8 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class AskUserQuestionTool extends Tool
 {
-    private static array $questionHistory = [];
-    private static $questionHandler = null;
 
     public function name(): string
     {
@@ -93,12 +91,12 @@ class AskUserQuestionTool extends Tool
         $processedAnswer = $this->processAnswer($answer, $type);
 
         // Store in history
-        self::$questionHistory[] = [
+        $this->state()->push($this->name(), 'questionHistory', [
             'question' => $question,
             'answer' => $processedAnswer,
             'type' => $type,
             'timestamp' => date('Y-m-d H:i:s'),
-        ];
+        ]);
 
         return ToolResult::success([
             'question' => $question,
@@ -155,8 +153,9 @@ class AskUserQuestionTool extends Tool
     private function getAnswer(string $formattedQuestion, string $type, array $options, ?string $default): string
     {
         // If a custom handler is set (for testing or integration), use it
-        if (self::$questionHandler !== null) {
-            return call_user_func(self::$questionHandler, $formattedQuestion, $type, $options, $default);
+        $handler = $this->state()->get($this->name(), 'questionHandler');
+        if ($handler !== null) {
+            return call_user_func($handler, $formattedQuestion, $type, $options, $default);
         }
 
         // In a real implementation, this would interact with the user
@@ -258,25 +257,25 @@ class AskUserQuestionTool extends Tool
     /**
      * Set a custom question handler (for testing or integration).
      */
-    public static function setQuestionHandler(?callable $handler): void
+    public function setQuestionHandler(?callable $handler): void
     {
-        self::$questionHandler = $handler;
+        $this->state()->set($this->name(), 'questionHandler', $handler);
     }
 
     /**
      * Get question history.
      */
-    public static function getHistory(): array
+    public function getHistory(): array
     {
-        return self::$questionHistory;
+        return $this->state()->get($this->name(), 'questionHistory', []);
     }
 
     /**
      * Clear question history.
      */
-    public static function clearHistory(): void
+    public function clearHistory(): void
     {
-        self::$questionHistory = [];
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

@@ -26,11 +26,13 @@ class AutoModeAgent
     private LoggerInterface $logger;
     private array $config;
     private ?OutputInterface $output;
-    
+    private AgentTemplateManager $templateManager;
+
     public function __construct(
         array $config = [],
         ?LoggerInterface $logger = null,
-        ?OutputInterface $output = null
+        ?OutputInterface $output = null,
+        ?AgentTemplateManager $templateManager = null
     ) {
         $this->config = array_merge([
             'auto_mode' => true,
@@ -52,6 +54,7 @@ class AutoModeAgent
         
         $this->logger = $logger ?? new NullLogger();
         $this->output = $output ?? new NullOutput();
+        $this->templateManager = $templateManager ?? AgentTemplateManager::getInstance();
     }
     
     /**
@@ -177,9 +180,8 @@ class AutoModeAgent
             
             // Apply template if available
             if (isset($subtask['template'])) {
-                $templateManager = AgentTemplateManager::getInstance();
-                if ($templateManager->hasTemplate($subtask['template'])) {
-                    $config = $templateManager->createSpawnConfig(
+                if ($this->templateManager->hasTemplate($subtask['template'])) {
+                    $config = $this->templateManager->createSpawnConfig(
                         $subtask['template'],
                         ['prompt' => $subtask['prompt']]
                     );

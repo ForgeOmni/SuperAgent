@@ -13,7 +13,7 @@ class CostTracker
     private array $modelPricing;
     private bool $enabled;
 
-    private function __construct()
+    public function __construct()
     {
         $this->costs = collect();
         $this->sessionCosts = collect();
@@ -22,6 +22,9 @@ class CostTracker
         $this->loadModelPricing();
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

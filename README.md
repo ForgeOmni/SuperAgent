@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.8-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.9-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -61,6 +61,13 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.7.9 — Dependency Injection & Architecture Hardening (63 new unit tests)
+- **Singleton → Constructor Injection** — 19 singleton classes (`AgentManager`, `TaskManager`, `MCPManager`, `ParallelAgentCoordinator`, `EventDispatcher`, `CostTracker`, etc.) now have public constructors with `getInstance()` marked `@deprecated`. 25 call sites updated to accept injected dependencies with backward-compatible fallback. Enables proper test isolation and process-safe Swarm execution
+- **ToolStateManager** (`src/Tools/ToolStateManager.php`) — Centralized injectable state container replacing scattered `private static` properties across 14 built-in tool classes (`EnterPlanModeTool`, `ToolSearchTool`, `MonitorTool`, `REPLTool`, `SkillTool`, `WorkflowTool`, `BriefTool`, `ConfigTool`, `SnipTool`, `TodoWriteTool`, `AskUserQuestionTool`, `TerminalCaptureTool`, `VerifyPlanExecutionTool`). Bucket-based state with auto-increment IDs, collection helpers, and per-tool reset. Inject a shared instance in Swarm mode for cross-process correctness
+- **SessionManager Decomposition** — Extracted `SessionStorage` (atomic file I/O, directory scanning, path resolution) and `SessionPruner` (age-based + count-based cleanup) from the 631-line `SessionManager`. Manager now delegates to both, reducing to pure orchestration
+- **Process Concurrency Limit** — `ParallelToolExecutor::executeProcessParallel()` now respects `$maxParallel` (default 5), processing tool blocks in batches instead of spawning unlimited concurrent OS processes
+- **Unit Tests for v0.7.6 Features** — 63 new unit tests across 4 dedicated test classes: `ForkTest` (20 tests: branch lifecycle, session management, scoring strategies, result ranking), `DebateTest` (12 tests: config fluent API, round data, result aggregation), `CostPredictionTest` (18 tests: type/complexity detection, token estimation, budget checks, model comparison), `ReplayTest` (13 tests: event types, recorder capture, step counting, snapshot intervals)
 
 ### 🆕 v0.7.8 — Agent Harness Mode + Enterprise Subsystems (20 subsystems, 628 tests)
 - **Persistent Task Manager** (`src/Tasks/PersistentTaskManager.php`) — File-backed task persistence with JSON index + per-task output logs. `appendOutput()` / `readOutput()` for log streaming, `watchProcess()` + `pollProcesses()` for non-blocking process monitoring, auto-mark stale tasks as failed on restart, age-based pruning. Config: `persistence.tasks`

@@ -11,6 +11,9 @@ use SuperAgent\Swarm\AgentSpawnConfig;
 use SuperAgent\Swarm\AgentSpawnResult;
 use SuperAgent\Swarm\AgentStatus;
 use SuperAgent\Swarm\BackendType;
+use SuperAgent\Agent\AgentManager;
+use SuperAgent\MCP\MCPManager;
+use SuperAgent\MCP\MCPBridge;
 
 /**
  * Process backend: runs each agent in a separate OS process via proc_open().
@@ -36,13 +39,22 @@ class ProcessBackend implements BackendInterface
     private array $progressEvents = [];
     private LoggerInterface $logger;
     private string $agentScript;
+    private ?AgentManager $agentManager;
+    private ?MCPManager $mcpManager;
+    private ?MCPBridge $mcpBridge;
 
     public function __construct(
         ?string $agentScript = null,
         ?LoggerInterface $logger = null,
+        ?AgentManager $agentManager = null,
+        ?MCPManager $mcpManager = null,
+        ?MCPBridge $mcpBridge = null,
     ) {
         $this->agentScript = $agentScript ?? $this->getDefaultAgentScript();
         $this->logger = $logger ?? new NullLogger();
+        $this->agentManager = $agentManager;
+        $this->mcpManager = $mcpManager;
+        $this->mcpBridge = $mcpBridge;
     }
 
     public function getType(): BackendType
@@ -122,7 +134,7 @@ class ProcessBackend implements BackendInterface
             // without needing Laravel config or filesystem access.
             $agentDefinitions = [];
             try {
-                $agentDefinitions = \SuperAgent\Agent\AgentManager::getInstance()->exportDefinitions();
+                $agentDefinitions = ($this->agentManager ?? AgentManager::getInstance())->exportDefinitions();
             } catch (\Throwable $e) {
                 error_log('[SuperAgent] AgentManager propagation skipped: ' . $e->getMessage());
             }
@@ -131,7 +143,7 @@ class ProcessBackend implements BackendInterface
             // them without re-reading config files.
             $mcpServers = [];
             try {
-                $mgr = \SuperAgent\MCP\MCPManager::getInstance();
+                $mgr = $this->mcpManager ?? MCPManager::getInstance();
                 foreach ($mgr->getServers() as $name => $serverConfig) {
                     $mcpServers[$name] = $serverConfig->toArray();
                 }
@@ -213,7 +225,7 @@ class ProcessBackend implements BackendInterface
     {
         // Also poll MCP bridge so child processes can talk to shared MCP servers
         try {
-            \SuperAgent\MCP\MCPBridge::getInstance()->poll();
+            ($this->mcpBridge ?? MCPBridge::getInstance())->poll();
         } catch (\Throwable $e) {
             error_log('[SuperAgent] MCPBridge poll skipped: ' . $e->getMessage());
         }

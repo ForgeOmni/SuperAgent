@@ -13,7 +13,7 @@ class EventDispatcher
     private bool $enabled;
     private int $maxHistorySize = 1000;
 
-    private function __construct()
+    public function __construct()
     {
         $this->listeners = collect();
         $this->eventHistory = collect();
@@ -21,6 +21,9 @@ class EventDispatcher
             && config('superagent.telemetry.events.enabled', false);
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

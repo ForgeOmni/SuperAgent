@@ -12,7 +12,7 @@ class SensitiveFileProtection
     private bool $enabled = true;
     private array $violations = [];
 
-    private function __construct()
+    public function __construct()
     {
         // Default protected patterns
         $this->protectedPatterns = collect([
@@ -71,6 +71,9 @@ class SensitiveFileProtection
         $this->loadProtectedFiles();
     }
 
+    /**
+     * @deprecated Use constructor injection instead
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

@@ -7,9 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class TerminalCaptureTool extends Tool
 {
-    private static array $captures = [];
-    private static int $nextId = 1;
-
     public function name(): string
     {
         return 'terminal_capture';
@@ -93,16 +90,16 @@ class TerminalCaptureTool extends Tool
     {
         $description = $input['description'] ?? 'Terminal capture session';
         
-        $captureId = self::$nextId++;
-        
-        self::$captures[$captureId] = [
+        $captureId = $this->state()->nextId($this->name());
+
+        $this->state()->putIn($this->name(), 'captures', $captureId, [
             'id' => $captureId,
             'description' => $description,
             'status' => 'recording',
             'started_at' => date('Y-m-d H:i:s'),
             'stopped_at' => null,
             'commands' => [],
-        ];
+        ]);
 
         return ToolResult::success([
             'message' => 'Capture started',
@@ -119,21 +116,24 @@ class TerminalCaptureTool extends Tool
             return ToolResult::error('Capture ID is required.');
         }
 
-        if (!isset(self::$captures[$captureId])) {
+        $captures = $this->state()->get($this->name(), 'captures', []);
+
+        if (!isset($captures[$captureId])) {
             return ToolResult::error("Capture {$captureId} not found.");
         }
 
-        if (self::$captures[$captureId]['status'] !== 'recording') {
+        if ($captures[$captureId]['status'] !== 'recording') {
             return ToolResult::error("Capture {$captureId} is not recording.");
         }
 
-        self::$captures[$captureId]['status'] = 'stopped';
-        self::$captures[$captureId]['stopped_at'] = date('Y-m-d H:i:s');
+        $captures[$captureId]['status'] = 'stopped';
+        $captures[$captureId]['stopped_at'] = date('Y-m-d H:i:s');
+        $this->state()->set($this->name(), 'captures', $captures);
 
         return ToolResult::success([
             'message' => 'Capture stopped',
             'capture_id' => $captureId,
-            'commands_recorded' => count(self::$captures[$captureId]['commands']),
+            'commands_recorded' => count($captures[$captureId]['commands']),
         ]);
     }
 
@@ -144,25 +144,27 @@ class TerminalCaptureTool extends Tool
         $output = $input['output'] ?? '';
         $exitCode = $input['exit_code'] ?? 0;
 
+        $captures = $this->state()->get($this->name(), 'captures', []);
+
         if ($captureId === null) {
             // Find active capture
-            foreach (self::$captures as $capture) {
+            foreach ($captures as $capture) {
                 if ($capture['status'] === 'recording') {
                     $captureId = $capture['id'];
                     break;
                 }
             }
-            
+
             if ($captureId === null) {
                 return ToolResult::error('No active capture session. Start one first.');
             }
         }
 
-        if (!isset(self::$captures[$captureId])) {
+        if (!isset($captures[$captureId])) {
             return ToolResult::error("Capture {$captureId} not found.");
         }
 
-        if (self::$captures[$captureId]['status'] !== 'recording') {
+        if ($captures[$captureId]['status'] !== 'recording') {
             return ToolResult::error("Capture {$captureId} is not recording.");
         }
 
@@ -174,12 +176,13 @@ class TerminalCaptureTool extends Tool
             'duration_ms' => rand(100, 5000), // Simulated
         ];
 
-        self::$captures[$captureId]['commands'][] = $entry;
+        $captures[$captureId]['commands'][] = $entry;
+        $this->state()->set($this->name(), 'captures', $captures);
 
         return ToolResult::success([
             'message' => 'Command added to capture',
             'capture_id' => $captureId,
-            'entry_number' => count(self::$captures[$captureId]['commands']),
+            'entry_number' => count($captures[$captureId]['commands']),
         ]);
     }
 
@@ -191,11 +194,13 @@ class TerminalCaptureTool extends Tool
             return ToolResult::error('Capture ID is required.');
         }
 
-        if (!isset(self::$captures[$captureId])) {
+        $captures = $this->state()->get($this->name(), 'captures', []);
+
+        if (!isset($captures[$captureId])) {
             return ToolResult::error("Capture {$captureId} not found.");
         }
 
-        $capture = self::$captures[$captureId];
+        $capture = $captures[$captureId];
         $replay = [];
         
         foreach ($capture['commands'] as $index => $cmd) {
@@ -218,8 +223,8 @@ class TerminalCaptureTool extends Tool
     private function listCaptures(): ToolResult
     {
         $summary = [];
-        
-        foreach (self::$captures as $capture) {
+
+        foreach ($this->state()->get($this->name(), 'captures', []) as $capture) {
             $summary[] = [
                 'id' => $capture['id'],
                 'description' => $capture['description'],
@@ -244,11 +249,13 @@ class TerminalCaptureTool extends Tool
             return ToolResult::error('Capture ID is required.');
         }
 
-        if (!isset(self::$captures[$captureId])) {
+        $captures = $this->state()->get($this->name(), 'captures', []);
+
+        if (!isset($captures[$captureId])) {
             return ToolResult::error("Capture {$captureId} not found.");
         }
 
-        return ToolResult::success(self::$captures[$captureId]);
+        return ToolResult::success($captures[$captureId]);
     }
 
     private function exportCapture(array $input): ToolResult
@@ -260,11 +267,13 @@ class TerminalCaptureTool extends Tool
             return ToolResult::error('Capture ID is required.');
         }
 
-        if (!isset(self::$captures[$captureId])) {
+        $captures = $this->state()->get($this->name(), 'captures', []);
+
+        if (!isset($captures[$captureId])) {
             return ToolResult::error("Capture {$captureId} not found.");
         }
 
-        $capture = self::$captures[$captureId];
+        $capture = $captures[$captureId];
 
         switch ($format) {
             case 'json':
@@ -312,10 +321,9 @@ class TerminalCaptureTool extends Tool
         }
     }
 
-    public static function clearCaptures(): void
+    public function clearCaptures(): void
     {
-        self::$captures = [];
-        self::$nextId = 1;
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

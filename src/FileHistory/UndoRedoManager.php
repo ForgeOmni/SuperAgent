@@ -12,12 +12,15 @@ class UndoRedoManager
     private int $maxHistorySize = 100;
     private FileSnapshotManager $snapshotManager;
 
-    private function __construct()
+    public function __construct(?FileSnapshotManager $snapshotManager = null)
     {
         $this->history = collect();
-        $this->snapshotManager = FileSnapshotManager::getInstance();
+        $this->snapshotManager = $snapshotManager ?? FileSnapshotManager::getInstance();
     }
 
+    /**
+     * @deprecated Use constructor injection instead
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

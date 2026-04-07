@@ -512,6 +512,20 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## v0.7.9 升级说明
+
+v0.7.9 是纯架构加固版本。**无需配置更改，完全向后兼容。**
+
+主要变更：
+- 19个单例类的 `getInstance()` 方法标记为 `@deprecated` — 现有代码继续正常工作，但新代码建议使用构造函数注入
+- 14个内建工具类现使用 `ToolStateManager` 替代 `private static` 属性 — 在 Swarm 模式下注入共享实例以确保跨进程正确性
+- `SessionManager` 分解为 `SessionStorage` + `SessionPruner` — 公开 API 不变
+- `executeProcessParallel()` 现按 `$maxParallel`（默认 5）分批处理 — 此前无限制生成并发进程
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.7.0 升级说明
 
 v0.7.0 新增 13 项性能优化（5 项 token + 8 项执行）。**除 Batch API 外全部默认启用，无需修改配置。**

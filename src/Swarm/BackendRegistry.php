@@ -24,8 +24,11 @@ class BackendRegistry
     private ?BackendType $detectedType = null;
     private array $backends = [];
 
-    private function __construct() {}
+    public function __construct() {}
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

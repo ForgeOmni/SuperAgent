@@ -4,6 +4,7 @@ namespace SuperAgent\Tools\Builtin;
 
 use SuperAgent\Tools\Tool;
 use SuperAgent\Tools\ToolResult;
+use SuperAgent\Tools\ToolStateManager;
 
 /**
  * Plan mode with V2 interview phase ported from Claude Code.
@@ -22,23 +23,32 @@ use SuperAgent\Tools\ToolResult;
  */
 class EnterPlanModeTool extends Tool
 {
-    private static bool $inPlanMode = false;
-    private static array $currentPlan = [];
-
-    /** Whether the interview phase workflow is active (gated by experimental.plan_interview) */
-    private static bool $interviewPhaseEnabled = true;
-
-    /** Plan file path (persisted to disk) */
-    private static ?string $planFilePath = null;
-
-    /** Previous permission mode before entering plan mode */
-    private static ?string $prePlanMode = null;
-
-    /** Number of turns since last plan mode reminder */
-    private static int $turnsSinceReminder = 0;
-
     /** How often to send full reminders */
     private const TURNS_BETWEEN_REMINDERS = 5;
+
+    private const TOOL_KEY = 'enter_plan_mode';
+
+    /**
+     * Shared state manager for static method access.
+     * Instance methods prefer the injected state() from the base class.
+     */
+    private static ?ToolStateManager $sharedState = null;
+
+    private static function shared(): ToolStateManager
+    {
+        if (self::$sharedState === null) {
+            self::$sharedState = new ToolStateManager();
+        }
+        return self::$sharedState;
+    }
+
+    /**
+     * Inject a shared state manager (for testing or Swarm mode).
+     */
+    public static function setSharedStateManager(ToolStateManager $manager): void
+    {
+        self::$sharedState = $manager;
+    }
 
     public function name(): string
     {
@@ -84,7 +94,9 @@ class EnterPlanModeTool extends Tool
 
     public function execute(array $input): ToolResult
     {
-        if (self::$inPlanMode) {
+        $s = self::shared();
+
+        if ($s->get(self::TOOL_KEY, 'inPlanMode', false)) {
             return ToolResult::error('Already in plan mode. Exit current plan first.');
         }
 
@@ -97,16 +109,17 @@ class EnterPlanModeTool extends Tool
             return ToolResult::error('Plan description is required.');
         }
 
-        self::$inPlanMode = true;
-        self::$interviewPhaseEnabled = $useInterview;
-        self::$turnsSinceReminder = 0;
+        $s->set(self::TOOL_KEY, 'inPlanMode', true);
+        $s->set(self::TOOL_KEY, 'interviewPhaseEnabled', $useInterview);
+        $s->set(self::TOOL_KEY, 'turnsSinceReminder', 0);
 
         // Generate plan file path
         $plansDir = self::getPlansDirectory();
         $slug = self::generateSlug();
-        self::$planFilePath = "{$plansDir}/{$slug}.md";
+        $planFilePath = "{$plansDir}/{$slug}.md";
+        $s->set(self::TOOL_KEY, 'planFilePath', $planFilePath);
 
-        self::$currentPlan = [
+        $s->set(self::TOOL_KEY, 'currentPlan', [
             'description' => $description,
             'estimated_steps' => $estimatedSteps,
             'tags' => $tags,
@@ -114,8 +127,8 @@ class EnterPlanModeTool extends Tool
             'steps' => [],
             'status' => 'planning',
             'interview' => $useInterview,
-            'plan_file' => self::$planFilePath,
-        ];
+            'plan_file' => $planFilePath,
+        ]);
 
         // Write initial plan file
         self::writePlanFile($description);
@@ -129,7 +142,7 @@ class EnterPlanModeTool extends Tool
             'description' => $description,
             'mode' => 'planning',
             'workflow' => $useInterview ? 'interview' : 'traditional',
-            'plan_file' => self::$planFilePath,
+            'plan_file' => $planFilePath,
             'instructions' => $instructions,
         ]);
     }
@@ -195,20 +208,21 @@ INST;
      */
     public static function getPlanModeReminder(): ?string
     {
-        if (!self::$inPlanMode) {
+        $s = self::shared();
+
+        if (!$s->get(self::TOOL_KEY, 'inPlanMode', false)) {
             return null;
         }
 
-        self::$turnsSinceReminder++;
+        $turns = $s->get(self::TOOL_KEY, 'turnsSinceReminder', 0) + 1;
+        $s->set(self::TOOL_KEY, 'turnsSinceReminder', $turns);
 
-        if (self::$turnsSinceReminder % self::TURNS_BETWEEN_REMINDERS === 0) {
-            // Full reminder
-            return self::$interviewPhaseEnabled
+        if ($turns % self::TURNS_BETWEEN_REMINDERS === 0) {
+            return $s->get(self::TOOL_KEY, 'interviewPhaseEnabled', true)
                 ? self::getInterviewInstructions()
                 : self::getTraditionalInstructions();
         }
 
-        // Sparse reminder
         return 'REMINDER: You are in plan mode. Do NOT modify files. Update the plan file and ask user about ambiguities.';
     }
 
@@ -217,18 +231,17 @@ INST;
      */
     public static function updatePlanFile(string $section, string $content): void
     {
-        if (self::$planFilePath === null) {
+        $planFilePath = self::shared()->get(self::TOOL_KEY, 'planFilePath');
+        if ($planFilePath === null) {
             return;
         }
 
-        $existing = file_exists(self::$planFilePath)
-            ? file_get_contents(self::$planFilePath)
+        $existing = file_exists($planFilePath)
+            ? file_get_contents($planFilePath)
             : '';
 
-        // Append or update section
         $sectionHeader = "## {$section}";
         if (str_contains($existing, $sectionHeader)) {
-            // Replace existing section content (up to next ##)
             $pattern = '/(## ' . preg_quote($section, '/') . '\n)([\s\S]*?)(?=\n## |\z)/';
             $replacement = "## {$section}\n{$content}\n";
             $existing = preg_replace($pattern, $replacement, $existing);
@@ -236,7 +249,7 @@ INST;
             $existing .= "\n\n## {$section}\n{$content}\n";
         }
 
-        file_put_contents(self::$planFilePath, $existing);
+        file_put_contents($planFilePath, $existing);
     }
 
     /**
@@ -244,62 +257,48 @@ INST;
      */
     public static function getPlanFileContent(): string
     {
-        if (self::$planFilePath === null || !file_exists(self::$planFilePath)) {
+        $planFilePath = self::shared()->get(self::TOOL_KEY, 'planFilePath');
+        if ($planFilePath === null || !file_exists($planFilePath)) {
             return '';
         }
-        return file_get_contents(self::$planFilePath) ?: '';
+        return file_get_contents($planFilePath) ?: '';
     }
 
-    /**
-     * Check if currently in plan mode.
-     */
     public static function isInPlanMode(): bool
     {
-        return self::$inPlanMode;
+        return self::shared()->get(self::TOOL_KEY, 'inPlanMode', false);
     }
 
-    /**
-     * Add a step to the current plan.
-     */
     public static function addStep(array $step): void
     {
-        if (self::$inPlanMode) {
-            self::$currentPlan['steps'][] = array_merge($step, [
-                'step_number' => count(self::$currentPlan['steps']) + 1,
+        $s = self::shared();
+        if ($s->get(self::TOOL_KEY, 'inPlanMode', false)) {
+            $plan = $s->get(self::TOOL_KEY, 'currentPlan', []);
+            $plan['steps'][] = array_merge($step, [
+                'step_number' => count($plan['steps'] ?? []) + 1,
                 'added_at' => date('Y-m-d H:i:s'),
             ]);
+            $s->set(self::TOOL_KEY, 'currentPlan', $plan);
         }
     }
 
-    /**
-     * Get the current plan.
-     */
     public static function getCurrentPlan(): array
     {
-        return self::$currentPlan;
+        return self::shared()->get(self::TOOL_KEY, 'currentPlan', []);
     }
 
-    /**
-     * Exit plan mode and return the plan.
-     */
     public static function exitPlanMode(): array
     {
-        $plan = self::$currentPlan;
-        self::$inPlanMode = false;
-        self::$currentPlan = [];
+        $s = self::shared();
+        $plan = $s->get(self::TOOL_KEY, 'currentPlan', []);
+        $s->set(self::TOOL_KEY, 'inPlanMode', false);
+        $s->set(self::TOOL_KEY, 'currentPlan', []);
         return $plan;
     }
 
-    /**
-     * Reset plan mode (for testing).
-     */
     public static function reset(): void
     {
-        self::$inPlanMode = false;
-        self::$currentPlan = [];
-        self::$planFilePath = null;
-        self::$prePlanMode = null;
-        self::$turnsSinceReminder = 0;
+        self::shared()->clearTool(self::TOOL_KEY);
     }
 
     public function isReadOnly(): bool
@@ -307,38 +306,36 @@ INST;
         return false;
     }
 
-    /**
-     * Set the pre-plan permission mode for restoration on exit.
-     */
     public static function setPrePlanMode(?string $mode): void
     {
-        self::$prePlanMode = $mode;
+        self::shared()->set(self::TOOL_KEY, 'prePlanMode', $mode);
     }
 
     public static function getPrePlanMode(): ?string
     {
-        return self::$prePlanMode;
+        return self::shared()->get(self::TOOL_KEY, 'prePlanMode');
     }
 
     public static function getPlanFilePath(): ?string
     {
-        return self::$planFilePath;
+        return self::shared()->get(self::TOOL_KEY, 'planFilePath');
     }
 
     public static function isInterviewPhaseEnabled(): bool
     {
-        return self::$interviewPhaseEnabled
+        return self::shared()->get(self::TOOL_KEY, 'interviewPhaseEnabled', true)
             && \SuperAgent\Config\ExperimentalFeatures::enabled('plan_interview');
     }
 
     public static function setInterviewPhaseEnabled(bool $enabled): void
     {
-        self::$interviewPhaseEnabled = $enabled;
+        self::shared()->set(self::TOOL_KEY, 'interviewPhaseEnabled', $enabled);
     }
 
     private static function writePlanFile(string $description): void
     {
-        $dir = dirname(self::$planFilePath);
+        $planFilePath = self::shared()->get(self::TOOL_KEY, 'planFilePath');
+        $dir = dirname($planFilePath);
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
@@ -351,7 +348,7 @@ INST;
             . "## Existing Code to Reuse\n*Functions, utilities, patterns*\n\n"
             . "## Verification\n*How to test the changes*\n";
 
-        file_put_contents(self::$planFilePath, $content);
+        file_put_contents($planFilePath, $content);
     }
 
     private static function getPlansDirectory(): string

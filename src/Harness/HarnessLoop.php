@@ -9,6 +9,7 @@ use SuperAgent\Messages\Message;
 use SuperAgent\Messages\UserMessage;
 use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Session\SessionManager;
+use SuperAgent\Tasks\TaskManager;
 
 /**
  * Interactive REPL loop for the Agent Harness.
@@ -31,6 +32,7 @@ class HarnessLoop
     private StreamEventEmitter $emitter;
     private ?AutoCompactor $autoCompactor;
     private ?SessionManager $sessionManager;
+    private ?TaskManager $taskManager;
 
     /** @var Message[] Current conversation messages */
     private array $messages = [];
@@ -59,11 +61,13 @@ class HarnessLoop
         ?string $systemPrompt = null,
         ?string $sessionId = null,
         ?string $cwd = null,
+        ?TaskManager $taskManager = null,
     ) {
         $this->router = $router ?? new CommandRouter();
         $this->emitter = $emitter ?? new StreamEventEmitter();
         $this->autoCompactor = $autoCompactor;
         $this->sessionManager = $sessionManager;
+        $this->taskManager = $taskManager;
         $this->model = $model;
         $this->systemPrompt = $systemPrompt;
         $this->sessionId = $sessionId ?? ('session-' . date('Ymd-His') . '-' . bin2hex(random_bytes(4)));
@@ -437,7 +441,7 @@ class HarnessLoop
     private function getTasksSummary(): array
     {
         try {
-            $mgr = \SuperAgent\Tasks\TaskManager::getInstance();
+            $mgr = $this->taskManager ?? TaskManager::getInstance();
             return $mgr->listTasks()->map(fn($t) => $t->toArray())->toArray();
         } catch (\Throwable $e) {
             return [];

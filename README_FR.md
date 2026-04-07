@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.8-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.7.9-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,13 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.7.9 — Injection de Dépendances & Renforcement Architectural (63 nouveaux tests unitaires)
+- **Singleton → Injection par Constructeur** — 19 classes singleton (`AgentManager`, `TaskManager`, `MCPManager`, `ParallelAgentCoordinator`, `EventDispatcher`, `CostTracker`, etc.) ont maintenant des constructeurs publics avec `getInstance()` marqué `@deprecated`. 25 sites d'appel mis à jour pour accepter les dépendances injectées avec fallback rétrocompatible. Permet l'isolation correcte des tests et l'exécution Swarm sûre pour les processus
+- **ToolStateManager** (`src/Tools/ToolStateManager.php`) — Conteneur d'état injectable centralisé remplaçant les propriétés `private static` dispersées dans 14 classes d'outils intégrés (`EnterPlanModeTool`, `ToolSearchTool`, `MonitorTool`, `REPLTool`, `SkillTool`, `WorkflowTool`, `BriefTool`, `ConfigTool`, `SnipTool`, `TodoWriteTool`, `AskUserQuestionTool`, `TerminalCaptureTool`, `VerifyPlanExecutionTool`). État basé sur des buckets avec IDs auto-incrémentés, helpers de collection et reset par outil. Injectez une instance partagée en mode Swarm pour la cohérence inter-processus
+- **Décomposition de SessionManager** — Extraction de `SessionStorage` (I/O fichier atomique, scan de répertoires, résolution de chemins) et `SessionPruner` (nettoyage par âge + par comptage) du `SessionManager` de 631 lignes. Le gestionnaire délègue maintenant aux deux, réduit à la pure orchestration
+- **Limite de Concurrence des Processus** — `ParallelToolExecutor::executeProcessParallel()` respecte maintenant `$maxParallel` (défaut 5), traitant les blocs d'outils par lots au lieu de lancer un nombre illimité de processus OS concurrents
+- **Tests Unitaires pour les Fonctionnalités v0.7.6** — 63 nouveaux tests unitaires dans 4 classes de test dédiées : `ForkTest` (20 tests : cycle de vie des branches, gestion de session, stratégies de scoring, classement des résultats), `DebateTest` (12 tests : API fluide de config, données de rounds, agrégation de résultats), `CostPredictionTest` (18 tests : détection type/complexité, estimation de tokens, vérification de budget, comparaison de modèles), `ReplayTest` (13 tests : types d'événements, capture par enregistreur, comptage de pas, intervalles de snapshots)
 
 ### 🆕 v0.7.8 — Mode Agent Harness + Sous-systèmes Entreprise (20 sous-systèmes, 628 tests)
 - **Gestionnaire de Tâches Persistant** (`src/Tasks/PersistentTaskManager.php`) — Persistance sur fichier avec index JSON + logs de sortie par tâche. `appendOutput()` / `readOutput()` pour le streaming de logs, `watchProcess()` + `pollProcesses()` pour la surveillance non-bloquante, marquage automatique des tâches obsolètes comme échouées au redémarrage, nettoyage par âge. Config : `persistence.tasks`

@@ -17,13 +17,15 @@ class MCPManager
     private Collection $clients;
     private Collection $tools;
     private Collection $resources;
+    private ?MCPBridge $mcpBridge;
 
-    private function __construct()
+    public function __construct(?MCPBridge $mcpBridge = null)
     {
         $this->servers = collect();
         $this->clients = collect();
         $this->tools = collect();
         $this->resources = collect();
+        $this->mcpBridge = $mcpBridge;
         $this->loadConfiguredSources();
     }
 
@@ -107,6 +109,9 @@ class MCPManager
         }
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {
@@ -166,7 +171,7 @@ class MCPManager
             // share this MCP connection instead of spawning their own.
             if ($config->type === 'stdio') {
                 try {
-                    $bridge = MCPBridge::getInstance();
+                    $bridge = $this->mcpBridge ?? MCPBridge::getInstance();
                     $port = $bridge->startBridge($serverName, $client);
                     logger()->info("MCP bridge started for '{$serverName}' on port {$port}");
                 } catch (\Throwable $e) {

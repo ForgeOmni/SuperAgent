@@ -11,6 +11,9 @@ class SkillManager
     private array $skills = [];
     private array $aliases = [];
     
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {
@@ -19,7 +22,7 @@ class SkillManager
         return self::$instance;
     }
 
-    private function __construct()
+    public function __construct()
     {
         $this->loadBuiltinSkills();
         $this->loadConfiguredPaths();

@@ -7,7 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class TodoWriteTool extends Tool
 {
-    private static array $todos = [];
 
     public function name(): string
     {
@@ -81,7 +80,7 @@ class TodoWriteTool extends Tool
         }
 
         // Count status changes
-        $oldTodos = self::$todos;
+        $oldTodos = $this->state()->get($this->name(), 'todos', []);
         $changes = [
             'added' => 0,
             'updated' => 0,
@@ -105,8 +104,8 @@ class TodoWriteTool extends Tool
             }
         }
 
-        // Update the static todo list
-        self::$todos = $todos;
+        // Update the todo list
+        $this->state()->set($this->name(), 'todos', $todos);
 
         // Generate summary
         $summary = $this->generateSummary($todos, $changes);
@@ -159,17 +158,17 @@ class TodoWriteTool extends Tool
     /**
      * Get current todos (for testing or inspection).
      */
-    public static function getTodos(): array
+    public function getTodos(): array
     {
-        return self::$todos;
+        return $this->state()->get($this->name(), 'todos', []);
     }
 
     /**
      * Clear todos (for testing).
      */
-    public static function clearTodos(): void
+    public function clearTodos(): void
     {
-        self::$todos = [];
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

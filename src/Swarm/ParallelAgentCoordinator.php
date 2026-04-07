@@ -39,11 +39,14 @@ class ParallelAgentCoordinator
     /** @var \DateTimeImmutable|null Execution start time for tracking duration */
     private ?\DateTimeImmutable $executionStartTime = null;
     
-    private function __construct(?LoggerInterface $logger = null)
+    public function __construct(?LoggerInterface $logger = null)
     {
         $this->logger = $logger ?? new NullLogger();
     }
     
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(?LoggerInterface $logger = null): self
     {
         if (self::$instance === null) {

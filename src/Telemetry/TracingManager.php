@@ -25,7 +25,7 @@ class TracingManager
     private bool $enabled;
     private array $exporters = [];
 
-    private function __construct()
+    public function __construct()
     {
         $this->activeSpans = collect();
         $this->spanMetadata = collect();
@@ -37,6 +37,9 @@ class TracingManager
         }
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

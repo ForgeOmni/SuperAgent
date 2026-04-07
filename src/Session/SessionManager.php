@@ -24,10 +24,9 @@ use Psr\Log\NullLogger;
  */
 class SessionManager
 {
-    private string $storageDir;
+    private SessionStorage $storage;
+    private SessionPruner $pruner;
     private LoggerInterface $logger;
-    private int $maxSessions;
-    private int $pruneAfterDays;
 
     public function __construct(
         string $storageDir,
@@ -35,12 +34,9 @@ class SessionManager
         int $maxSessions = 50,
         int $pruneAfterDays = 90,
     ) {
-        $this->storageDir = rtrim($storageDir, '/');
         $this->logger = $logger ?? new NullLogger();
-        $this->maxSessions = $maxSessions;
-        $this->pruneAfterDays = $pruneAfterDays;
-
-        $this->ensureDirectory();
+        $this->storage = new SessionStorage($storageDir);
+        $this->pruner = new SessionPruner($this->storage, $maxSessions, $pruneAfterDays, $this->logger);
     }
 
     /**
@@ -90,21 +86,6 @@ class SessionManager
         return $basename . '-' . $hash;
     }
 
-    /**
-     * Get the session directory for a given CWD.
-     */
-    private function getProjectDir(?string $cwd = null): string
-    {
-        if ($cwd === null) {
-            return $this->storageDir; // fallback for global operations
-        }
-        $dir = $this->storageDir . '/' . self::projectHash($cwd);
-        if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-        return $dir;
-    }
-
     // ── Save ──────────────────────────────────────────────────────
 
     /**
@@ -134,13 +115,13 @@ class SessionManager
         ];
 
         // Write session file to project-scoped directory (atomic)
-        $projectDir = $this->getProjectDir($cwd);
-        $sessionPath = $projectDir . '/session-' . $this->sanitizeId($sessionId) . '.json';
-        $this->atomicWrite($sessionPath, $snapshot);
+        $projectDir = $this->storage->getProjectDir($cwd);
+        $sessionPath = $this->storage->sessionFilePath($projectDir, $sessionId);
+        $this->storage->atomicWrite($sessionPath, $snapshot);
 
         // Write latest pointer within project dir
         $latestPath = $projectDir . '/latest.json';
-        $this->atomicWrite($latestPath, $snapshot);
+        $this->storage->atomicWrite($latestPath, $snapshot);
 
         $this->logger->debug('Session saved', [
             'session_id' => $sessionId,
@@ -149,7 +130,7 @@ class SessionManager
         ]);
 
         // Auto-prune if over limit
-        $this->maybePrune($cwd);
+        $this->pruner->maybePrune($cwd);
     }
 
     // ── Load ──────────────────────────────────────────────────────
@@ -163,11 +144,11 @@ class SessionManager
     {
         // If cwd provided, check project-scoped latest first
         if ($cwd !== null) {
-            $projectDir = $this->getProjectDir($cwd);
+            $projectDir = $this->storage->getProjectDir($cwd);
             $latestPath = $projectDir . '/latest.json';
 
             if (file_exists($latestPath)) {
-                $data = $this->readSnapshot($latestPath);
+                $data = $this->storage->readSnapshot($latestPath);
                 if ($data !== null) {
                     return $data;
                 }
@@ -188,10 +169,10 @@ class SessionManager
         $latestTime = '';
 
         // Check project subdirs
-        foreach ($this->getProjectSubdirs() as $subdir) {
+        foreach ($this->storage->getProjectSubdirs() as $subdir) {
             $path = $subdir . '/latest.json';
             if (file_exists($path)) {
-                $data = $this->readSnapshot($path);
+                $data = $this->storage->readSnapshot($path);
                 if ($data !== null && ($data['updated_at'] ?? '') > $latestTime) {
                     $latest = $data;
                     $latestTime = $data['updated_at'] ?? '';
@@ -200,9 +181,9 @@ class SessionManager
         }
 
         // Also check global latest.json (backward compat)
-        $globalLatestPath = $this->storageDir . '/latest.json';
+        $globalLatestPath = $this->storage->getStorageDir() . '/latest.json';
         if (file_exists($globalLatestPath)) {
-            $data = $this->readSnapshot($globalLatestPath);
+            $data = $this->storage->readSnapshot($globalLatestPath);
             if ($data !== null && ($data['updated_at'] ?? '') > $latestTime) {
                 $latest = $data;
             }
@@ -216,21 +197,21 @@ class SessionManager
      */
     public function loadById(string $sessionId): ?array
     {
-        $safe = $this->sanitizeId($sessionId);
+        $safe = $this->storage->sanitizeId($sessionId);
         $filename = 'session-' . $safe . '.json';
 
         // Search project subdirs first
-        foreach ($this->getProjectSubdirs() as $subdir) {
+        foreach ($this->storage->getProjectSubdirs() as $subdir) {
             $path = $subdir . '/' . $filename;
             if (file_exists($path)) {
-                return $this->readSnapshot($path);
+                return $this->storage->readSnapshot($path);
             }
         }
 
         // Backward compat: check flat layout in storageDir
-        $flatPath = $this->storageDir . '/' . $filename;
+        $flatPath = $this->storage->getStorageDir() . '/' . $filename;
         if (file_exists($flatPath)) {
-            return $this->readSnapshot($flatPath);
+            return $this->storage->readSnapshot($flatPath);
         }
 
         return null;
@@ -251,11 +232,11 @@ class SessionManager
 
         if ($cwd !== null) {
             // Scan project-scoped directory only
-            $projectDir = $this->getProjectDir($cwd);
-            $sessions = $this->scanSessionFiles($projectDir);
+            $projectDir = $this->storage->getProjectDir($cwd);
+            $sessions = $this->storage->scanSessionFiles($projectDir);
 
             // Also include backward-compat flat sessions matching this cwd
-            foreach ($this->scanSessionFiles($this->storageDir) as $summary) {
+            foreach ($this->storage->scanSessionFiles($this->storage->getStorageDir()) as $summary) {
                 if (($summary['cwd'] ?? '') === $cwd) {
                     // Avoid duplicates
                     $dominated = false;
@@ -272,12 +253,12 @@ class SessionManager
             }
         } else {
             // Scan all project subdirs
-            foreach ($this->getProjectSubdirs() as $subdir) {
-                $sessions = array_merge($sessions, $this->scanSessionFiles($subdir));
+            foreach ($this->storage->getProjectSubdirs() as $subdir) {
+                $sessions = array_merge($sessions, $this->storage->scanSessionFiles($subdir));
             }
 
             // Also include flat-layout sessions (backward compat)
-            $sessions = array_merge($sessions, $this->scanSessionFiles($this->storageDir));
+            $sessions = array_merge($sessions, $this->storage->scanSessionFiles($this->storage->getStorageDir()));
 
             // Deduplicate by session_id (project-scoped takes priority)
             $seen = [];
@@ -311,12 +292,12 @@ class SessionManager
      */
     public function delete(string $sessionId): bool
     {
-        $safe = $this->sanitizeId($sessionId);
+        $safe = $this->storage->sanitizeId($sessionId);
         $filename = 'session-' . $safe . '.json';
         $deleted = false;
 
         // Search project subdirs
-        foreach ($this->getProjectSubdirs() as $subdir) {
+        foreach ($this->storage->getProjectSubdirs() as $subdir) {
             $path = $subdir . '/' . $filename;
             if (file_exists($path)) {
                 unlink($path);
@@ -325,7 +306,7 @@ class SessionManager
         }
 
         // Also check flat layout (backward compat)
-        $flatPath = $this->storageDir . '/' . $filename;
+        $flatPath = $this->storage->getStorageDir() . '/' . $filename;
         if (file_exists($flatPath)) {
             unlink($flatPath);
             $deleted = true;
@@ -338,35 +319,16 @@ class SessionManager
         return $deleted;
     }
 
-    // ── Pruning ───────────────────────────────────────────────────
+    // ── Pruning (delegated) ──────────────────────────────────────
 
     /**
      * Prune old sessions based on maxSessions and pruneAfterDays.
-     * When cwd is provided, prune only that project dir.
-     * When null, prune each project dir independently plus the flat layout.
      *
      * @return int Number of pruned sessions
      */
     public function prune(?string $cwd = null): int
     {
-        $pruned = 0;
-
-        if ($cwd !== null) {
-            $pruned += $this->pruneDir($this->getProjectDir($cwd));
-        } else {
-            // Prune each project subdir
-            foreach ($this->getProjectSubdirs() as $subdir) {
-                $pruned += $this->pruneDir($subdir);
-            }
-            // Also prune flat layout (backward compat)
-            $pruned += $this->pruneDir($this->storageDir);
-        }
-
-        if ($pruned > 0) {
-            $this->logger->info('Pruned old sessions', ['count' => $pruned]);
-        }
-
-        return $pruned;
+        return $this->pruner->prune($cwd);
     }
 
     /**
@@ -382,43 +344,26 @@ class SessionManager
      */
     public function getStorageDir(): string
     {
-        return $this->storageDir;
-    }
-
-    // ── Internal helpers ──────────────────────────────────────────
-
-    private function sanitizeId(string $sessionId): string
-    {
-        return preg_replace('/[^a-zA-Z0-9_\-]/', '_', $sessionId);
+        return $this->storage->getStorageDir();
     }
 
     /**
-     * Old flat-layout session path (for backward compatibility reads).
+     * Get the underlying SessionStorage instance.
      */
-    private function sessionPath(string $sessionId): string
+    public function getStorage(): SessionStorage
     {
-        $safe = $this->sanitizeId($sessionId);
-        return $this->storageDir . '/session-' . $safe . '.json';
+        return $this->storage;
     }
 
-    private function readSnapshot(string $path): ?array
+    /**
+     * Get the underlying SessionPruner instance.
+     */
+    public function getPruner(): SessionPruner
     {
-        $json = file_get_contents($path);
-        if ($json === false) {
-            return null;
-        }
-
-        $data = json_decode($json, true);
-        return is_array($data) ? $data : null;
+        return $this->pruner;
     }
 
-    private function atomicWrite(string $path, array $data): void
-    {
-        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-        $tmpPath = $path . '.tmp.' . getmypid();
-        file_put_contents($tmpPath, $json);
-        rename($tmpPath, $path);
-    }
+    // ── Internal helpers ──────────────────────────────────────────
 
     private function extractSummary(array $messages): string
     {
@@ -445,51 +390,10 @@ class SessionManager
         return '';
     }
 
-    /**
-     * Scan a single directory for session-*.json files and return summaries.
-     */
-    private function scanSessionFiles(string $dir): array
-    {
-        $sessions = [];
-        $pattern = $dir . '/session-*.json';
-
-        foreach (glob($pattern) as $path) {
-            $data = $this->readSnapshot($path);
-            if ($data === null || !isset($data['session_id'])) {
-                continue;
-            }
-
-            $sessions[] = [
-                'session_id' => $data['session_id'],
-                'cwd' => $data['cwd'] ?? null,
-                'model' => $data['model'] ?? null,
-                'summary' => $data['summary'] ?? null,
-                'message_count' => $data['message_count'] ?? 0,
-                'total_cost_usd' => $data['total_cost_usd'] ?? 0.0,
-                'created_at' => $data['created_at'] ?? null,
-                'updated_at' => $data['updated_at'] ?? null,
-            ];
-        }
-
-        return $sessions;
-    }
-
-    /**
-     * Get all project subdirectories under storageDir.
-     */
-    private function getProjectSubdirs(): array
-    {
-        $dirs = [];
-        foreach (glob($this->storageDir . '/*', GLOB_ONLYDIR) as $dir) {
-            $dirs[] = $dir;
-        }
-        return $dirs;
-    }
-
     private function findLatestByCwd(string $cwd): ?array
     {
-        $projectDir = $this->getProjectDir($cwd);
-        $sessions = $this->scanSessionFiles($projectDir);
+        $projectDir = $this->storage->getProjectDir($cwd);
+        $sessions = $this->storage->scanSessionFiles($projectDir);
 
         // Sort by updated_at descending
         usort($sessions, fn($a, $b) => strcmp($b['updated_at'] ?? '', $a['updated_at'] ?? ''));
@@ -508,94 +412,21 @@ class SessionManager
      */
     private function findLatestByCwdFlat(string $cwd): ?array
     {
-        $sessions = $this->scanSessionFiles($this->storageDir);
+        $sessions = $this->storage->scanSessionFiles($this->storage->getStorageDir());
 
         usort($sessions, fn($a, $b) => strcmp($b['updated_at'] ?? '', $a['updated_at'] ?? ''));
 
         foreach ($sessions as $summary) {
             if (($summary['cwd'] ?? '') === $cwd) {
-                $safe = $this->sanitizeId($summary['session_id']);
-                $path = $this->storageDir . '/session-' . $safe . '.json';
+                $safe = $this->storage->sanitizeId($summary['session_id']);
+                $path = $this->storage->getStorageDir() . '/session-' . $safe . '.json';
                 if (file_exists($path)) {
-                    return $this->readSnapshot($path);
+                    return $this->storage->readSnapshot($path);
                 }
             }
         }
 
         return null;
-    }
-
-    /**
-     * Prune sessions in a specific directory.
-     */
-    private function pruneDir(string $dir): int
-    {
-        $sessions = $this->scanSessionFiles($dir);
-
-        // Sort newest first
-        usort($sessions, fn($a, $b) => strcmp($b['updated_at'] ?? '', $a['updated_at'] ?? ''));
-
-        $pruned = 0;
-
-        // Prune by age
-        if ($this->pruneAfterDays > 0) {
-            $cutoff = date('c', time() - ($this->pruneAfterDays * 86400));
-            foreach ($sessions as $session) {
-                if (($session['updated_at'] ?? '') < $cutoff) {
-                    $safe = $this->sanitizeId($session['session_id']);
-                    $path = $dir . '/session-' . $safe . '.json';
-                    if (file_exists($path)) {
-                        unlink($path);
-                        $pruned++;
-                    }
-                }
-            }
-        }
-
-        // Re-fetch after age pruning
-        if ($pruned > 0) {
-            $sessions = $this->scanSessionFiles($dir);
-            usort($sessions, fn($a, $b) => strcmp($b['updated_at'] ?? '', $a['updated_at'] ?? ''));
-        }
-
-        // Prune by count (keep newest N)
-        if ($this->maxSessions > 0 && count($sessions) > $this->maxSessions) {
-            $toRemove = array_slice($sessions, $this->maxSessions);
-            foreach ($toRemove as $session) {
-                $safe = $this->sanitizeId($session['session_id']);
-                $path = $dir . '/session-' . $safe . '.json';
-                if (file_exists($path)) {
-                    unlink($path);
-                    $pruned++;
-                }
-            }
-        }
-
-        return $pruned;
-    }
-
-    private function maybePrune(?string $cwd = null): void
-    {
-        // Only check count-based pruning inline (cheap)
-        if ($this->maxSessions <= 0) {
-            return;
-        }
-
-        $dir = $this->getProjectDir($cwd);
-        $pattern = $dir . '/session-*.json';
-        $files = glob($pattern);
-
-        if (count($files) > $this->maxSessions + 5) {
-            // Buffer of 5 before triggering prune
-            $this->prune($cwd);
-        }
-    }
-
-    private function ensureDirectory(): void
-    {
-        if (!is_dir($this->storageDir)) {
-            mkdir($this->storageDir, 0755, true);
-        }
     }
 
     private static function resolveConfig(): array

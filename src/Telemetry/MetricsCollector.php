@@ -14,7 +14,7 @@ class MetricsCollector
     private Collection $histograms;
     private bool $enabled;
 
-    private function __construct()
+    public function __construct()
     {
         $this->metrics = collect();
         $this->counters = collect();
@@ -24,6 +24,9 @@ class MetricsCollector
             && config('superagent.telemetry.metrics.enabled', false);
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

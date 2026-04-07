@@ -512,6 +512,20 @@ SUPERAGENT_API_CONNECTION_POOL=50
 SUPERAGENT_API_KEEPALIVE=true
 ```
 
+## Notes de Mise à Jour v0.7.9
+
+v0.7.9 est une version de renforcement architectural pur. **Aucun changement de configuration requis. Entièrement rétrocompatible.**
+
+Changements clés :
+- Les méthodes `getInstance()` de 19 classes singleton sont maintenant `@deprecated` — le code existant continue de fonctionner, mais l'injection par constructeur est préférée pour le nouveau code
+- 14 outils intégrés utilisent maintenant `ToolStateManager` au lieu de propriétés `private static` — injectez une instance partagée en mode Swarm pour la cohérence inter-processus
+- `SessionManager` est décomposé en `SessionStorage` + `SessionPruner` — l'API publique est inchangée
+- `executeProcessParallel()` traite maintenant par lots de `$maxParallel` (défaut 5) — auparavant lançait un nombre illimité de processus concurrents
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## Notes de Mise à Jour v0.7.0
 
 v0.7.0 ajoute 13 optimisations de performance (5 token + 8 exécution). **Toutes sauf Batch API sont activées par défaut. Aucune modification de configuration requise.**

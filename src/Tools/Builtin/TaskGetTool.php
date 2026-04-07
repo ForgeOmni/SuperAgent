@@ -8,6 +8,13 @@ use SuperAgent\Tools\ToolResult;
 
 class TaskGetTool extends Tool
 {
+    private ?TaskManager $taskManager;
+
+    public function __construct(?TaskManager $taskManager = null)
+    {
+        $this->taskManager = $taskManager;
+    }
+
     public function name(): string
     {
         return 'task_get';
@@ -39,7 +46,7 @@ class TaskGetTool extends Tool
 
     public function execute(array $input): ToolResult
     {
-        $taskManager = TaskManager::getInstance();
+        $taskManager = $this->taskManager ?? TaskManager::getInstance();
         $taskId = $input['taskId'] ?? null;
 
         if ($taskId === null) {

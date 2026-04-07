@@ -5,6 +5,7 @@ namespace SuperAgent\ErrorRecovery;
 use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\Exceptions\RecoverableException;
 use SuperAgent\Exceptions\UnrecoverableException;
+use SuperAgent\Telemetry\EventDispatcher;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -15,16 +16,18 @@ class ErrorRecoveryManager
     private ?object $events = null;
     private array $retryHistory = [];
     private array $checkpoints = [];
-    
-    public function __construct(array $config = [])
+
+    public function __construct(array $config = [], ?EventDispatcher $events = null)
     {
         $this->config = array_merge($this->getDefaultConfig(), $config);
         $this->logger = $config['logger'] ?? new NullLogger();
-        
-        // Only initialize EventDispatcher if available
-        if (class_exists('\SuperAgent\Telemetry\EventDispatcher')) {
+
+        // Use injected EventDispatcher or fall back to singleton
+        if ($events !== null) {
+            $this->events = $events;
+        } elseif (class_exists('\SuperAgent\Telemetry\EventDispatcher')) {
             try {
-                $this->events = \SuperAgent\Telemetry\EventDispatcher::getInstance();
+                $this->events = EventDispatcher::getInstance();
             } catch (\Exception $e) {
                 // EventDispatcher not available in test environment
                 $this->events = null;

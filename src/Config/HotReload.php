@@ -13,10 +13,17 @@ class HotReload
     private ConfigWatcher $watcher;
     private ?Agent $agent = null;
     private array $configFiles = [];
-    
-    public function __construct(?ConfigWatcher $watcher = null)
-    {
+    private PluginManager $pluginManager;
+    private SkillManager $skillManager;
+
+    public function __construct(
+        ?ConfigWatcher $watcher = null,
+        ?PluginManager $pluginManager = null,
+        ?SkillManager $skillManager = null
+    ) {
         $this->watcher = $watcher ?? new ConfigWatcher();
+        $this->pluginManager = $pluginManager ?? PluginManager::getInstance();
+        $this->skillManager = $skillManager ?? SkillManager::getInstance();
         $this->setupDefaultWatchers();
     }
 
@@ -147,25 +154,23 @@ class HotReload
      */
     private function reloadPlugins(array $pluginConfig): void
     {
-        $manager = PluginManager::getInstance();
-        
         foreach ($pluginConfig as $pluginName => $config) {
             if (isset($config['enabled']) && $config['enabled']) {
                 try {
                     if (isset($config['settings'])) {
-                        $manager->configure($pluginName, $config['settings']);
+                        $this->pluginManager->configure($pluginName, $config['settings']);
                     }
-                    
-                    if (!$manager->isEnabled($pluginName)) {
-                        $manager->enable($pluginName, $this->agent);
+
+                    if (!$this->pluginManager->isEnabled($pluginName)) {
+                        $this->pluginManager->enable($pluginName, $this->agent);
                     }
                 } catch (\Exception $e) {
                     $this->log("Failed to reload plugin {$pluginName}: " . $e->getMessage());
                 }
             } else {
                 try {
-                    if ($manager->isEnabled($pluginName)) {
-                        $manager->disable($pluginName);
+                    if ($this->pluginManager->isEnabled($pluginName)) {
+                        $this->pluginManager->disable($pluginName);
                     }
                 } catch (\Exception $e) {
                     $this->log("Failed to disable plugin {$pluginName}: " . $e->getMessage());
@@ -250,7 +255,7 @@ class HotReload
         
         if ($className && class_exists($className)) {
             $skill = new $className();
-            SkillManager::getInstance()->register($skill);
+            $this->skillManager->register($skill);
             $this->log("New skill registered: {$className}");
         }
     }
@@ -264,7 +269,7 @@ class HotReload
         
         if ($className && class_exists($className)) {
             $plugin = new $className();
-            PluginManager::getInstance()->register($plugin);
+            $this->pluginManager->register($plugin);
             $this->log("New plugin registered: {$className}");
         }
     }

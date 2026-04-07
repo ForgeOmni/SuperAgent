@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-04-07
+
+### 🚀 Summary
+
+Dependency injection & architecture hardening — replaced 19 getInstance() singletons with constructor injection (25 call sites updated), extracted static state from 14 built-in tools into injectable ToolStateManager, decomposed SessionManager into 3 focused classes, added process concurrency limits to ParallelToolExecutor, and added 63 new unit tests for v0.7.6 features. 170 tests passing, 661 assertions.
+
+### Changed
+
+#### Singleton → Constructor Injection (19 classes, 25 call sites)
+- Made constructors `public` (was `private`) on all 19 singleton classes: `AgentManager`, `TaskManager`, `PluginManager`, `SkillManager`, `MCPManager`, `MCPBridge`, `ParallelAgentCoordinator`, `BackendRegistry`, `AgentTemplateManager`, `CostTracker`, `EventDispatcher`, `MetricsCollector`, `StructuredLogger`, `SimpleTracingManager`, `TracingManager`, `FileSnapshotManager`, `GitAttribution`, `SensitiveFileProtection`, `UndoRedoManager`
+- Marked `getInstance()` as `@deprecated` on all 19 classes (kept for backward compatibility)
+- Updated 25 call sites to accept dependencies via nullable constructor parameters with `getInstance()` fallback: `AutoModeAgent`, `HotReload`, `ParallelAgentDisplay`, `ErrorRecoveryManager`, `HarnessLoop`, `MCPManager`, `DistributedBackend`, `InProcessBackend`, `ProcessBackend`, `AgentTool`, `ListMcpResourcesTool`, `TaskCreateTool`, `TaskGetTool`, `TaskUpdateTool`, and 7 Swarm subsystem classes
+
+#### ToolStateManager — Static State Extraction (14 tools)
+- New `ToolStateManager` (`src/Tools/ToolStateManager.php`): centralized injectable state container with bucket-based storage, auto-increment IDs, collection helpers, and per-tool reset
+- Added `state()` accessor to `Tool` base class with auto-fallback to local instance
+- Refactored 14 tool classes to replace `private static` properties with `ToolStateManager`: `AskUserQuestionTool`, `TodoWriteTool`, `MonitorTool`, `SkillTool`, `TerminalCaptureTool`, `REPLTool`, `WorkflowTool`, `BriefTool`, `ConfigTool`, `SnipTool`, `EnterPlanModeTool`, `VerifyPlanExecutionTool`, `ToolSearchTool`
+- Tools with external static APIs (`EnterPlanModeTool`, `VerifyPlanExecutionTool`, `ToolSearchTool`) use shared static `ToolStateManager` injectable via `setSharedStateManager()`
+
+#### SessionManager Decomposition
+- New `SessionStorage` (`src/Session/SessionStorage.php`): atomic file I/O (`atomicWrite`, `readSnapshot`), directory scanning (`scanSessionFiles`, `getProjectSubdirs`), path resolution (`sanitizeId`, `sessionFilePath`, `ensureDirectory`)
+- New `SessionPruner` (`src/Session/SessionPruner.php`): age-based + count-based pruning logic (`prune`, `maybePrune`, `pruneDir`)
+- `SessionManager` now delegates storage and pruning to extracted classes; reduced from monolithic 631-line class to focused orchestrator
+- Added `getStorage()` and `getPruner()` accessors for direct sub-component access
+
+#### Process Concurrency Limit
+- `ParallelToolExecutor::executeProcessParallel()` now processes tool blocks in batches of `$maxParallel` (default 5) instead of spawning one OS process per tool block with no limit
+
+### Added
+
+#### Unit Tests for v0.7.6 Features (63 tests, 182 assertions)
+- `tests/Unit/Fork/ForkTest.php` — 20 tests: branch lifecycle (pending → running → completed/failed), session creation, branch lookup, config merging, scorer strategies (costEfficiency, brevity, completeness, composite), result ranking, summary generation
+- `tests/Unit/Debate/DebateTest.php` — 12 tests: DebateConfig fluent API and defaults, system prompt injection, DebateRound creation/summary/serialization, DebateResult cost breakdown and serialization
+- `tests/Unit/CostPrediction/CostPredictionTest.php` — 18 tests: TaskAnalyzer type detection (6 types), complexity detection (keyword + length heuristic), tool detection, turn/token estimation scaling, TaskProfile multiplier, CostEstimate format/budget/model-switch/serialization
+- `tests/Unit/Replay/ReplayTest.php` — 13 tests: ReplayEvent type checks and data access, fromArray roundtrip, ReplayRecorder all 5 event types, step counter, snapshot intervals, finalize
+
 ## [0.7.8] - 2026-04-06
 
 ### 🚀 Summary

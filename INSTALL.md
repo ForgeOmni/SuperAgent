@@ -818,6 +818,20 @@ $agent = new Agent([
 ]);
 ```
 
+## v0.7.9 Upgrade Notes
+
+v0.7.9 is a pure architecture-hardening release. **No configuration changes required. Fully backward compatible.**
+
+Key changes:
+- 19 singleton `getInstance()` methods are now `@deprecated` — existing code continues to work, but constructor injection is preferred for new code
+- 14 built-in tools now use `ToolStateManager` instead of `private static` properties — inject a shared instance in Swarm mode for cross-process correctness
+- `SessionManager` is decomposed into `SessionStorage` + `SessionPruner` — the public API is unchanged
+- `executeProcessParallel()` now batches by `$maxParallel` (default 5) — previously spawned unlimited concurrent processes
+
+```bash
+composer update forgeomni/superagent
+```
+
 ## v0.7.0 Upgrade Notes
 
 v0.7.0 adds 13 performance optimizations (5 token + 8 execution). **All except Batch API are enabled by default. No configuration changes required.**

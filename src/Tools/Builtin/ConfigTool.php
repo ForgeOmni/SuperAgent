@@ -7,9 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class ConfigTool extends Tool
 {
-    private static array $config = [];
-    private static string $configFile = '';
-
     public function name(): string
     {
         return 'config';
@@ -89,7 +86,8 @@ class ConfigTool extends Tool
             return ToolResult::error('Key is required for get action.');
         }
 
-        $value = $this->getNestedValue(self::$config, $key);
+        $config = $this->state()->get($this->name(), 'config', []);
+        $value = $this->getNestedValue($config, $key);
         
         if ($value === null) {
             return ToolResult::success([
@@ -116,8 +114,10 @@ class ConfigTool extends Tool
             return ToolResult::error('Value is required for set action.');
         }
 
-        $this->setNestedValue(self::$config, $key, $value);
-        
+        $config = $this->state()->get($this->name(), 'config', []);
+        $this->setNestedValue($config, $key, $value);
+        $this->state()->set($this->name(), 'config', $config);
+
         return ToolResult::success([
             'message' => 'Configuration updated',
             'key' => $key,
@@ -127,9 +127,11 @@ class ConfigTool extends Tool
 
     private function listConfig(): ToolResult
     {
+        $config = $this->state()->get($this->name(), 'config', []);
+
         return ToolResult::success([
-            'config' => self::$config,
-            'total_keys' => $this->countKeys(self::$config),
+            'config' => $config,
+            'total_keys' => $this->countKeys($config),
         ]);
     }
 
@@ -164,9 +166,10 @@ class ConfigTool extends Tool
             }
         }
 
-        self::$config = array_merge(self::$config, $data);
-        self::$configFile = $file;
-        
+        $config = $this->state()->get($this->name(), 'config', []);
+        $this->state()->set($this->name(), 'config', array_merge($config, $data));
+        $this->state()->set($this->name(), 'configFile', $file);
+
         return ToolResult::success([
             'message' => 'Configuration loaded successfully',
             'file' => $file,
@@ -177,7 +180,7 @@ class ConfigTool extends Tool
     private function saveConfig(?string $file): ToolResult
     {
         if ($file === null) {
-            $file = self::$configFile;
+            $file = $this->state()->get($this->name(), 'configFile', '');
             if (empty($file)) {
                 return ToolResult::error('No file specified and no default configuration file set.');
             }
@@ -190,28 +193,30 @@ class ConfigTool extends Tool
             }
         }
 
+        $config = $this->state()->get($this->name(), 'config', []);
+
         // Save as JSON
-        $content = json_encode(self::$config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        
+        $content = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
         if (file_put_contents($file, $content) === false) {
             return ToolResult::error("Failed to write configuration file: {$file}");
         }
 
-        self::$configFile = $file;
-        
+        $this->state()->set($this->name(), 'configFile', $file);
+
         return ToolResult::success([
             'message' => 'Configuration saved successfully',
             'file' => $file,
-            'keys_saved' => $this->countKeys(self::$config),
+            'keys_saved' => $this->countKeys($config),
         ]);
     }
 
     private function resetConfig(): ToolResult
     {
-        $keyCount = $this->countKeys(self::$config);
-        self::$config = [];
-        self::$configFile = '';
-        
+        $config = $this->state()->get($this->name(), 'config', []);
+        $keyCount = $this->countKeys($config);
+        $this->state()->clearTool($this->name());
+
         return ToolResult::success([
             'message' => 'Configuration reset',
             'keys_removed' => $keyCount,
@@ -265,20 +270,19 @@ class ConfigTool extends Tool
     }
 
     /**
-     * Get current configuration (for testing).
+     * Get current configuration (for testing/inspection).
      */
-    public static function getConfiguration(): array
+    public function getConfiguration(): array
     {
-        return self::$config;
+        return $this->state()->get($this->name(), 'config', []);
     }
 
     /**
      * Reset configuration (for testing).
      */
-    public static function resetConfiguration(): void
+    public function resetConfiguration(): void
     {
-        self::$config = [];
-        self::$configFile = '';
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

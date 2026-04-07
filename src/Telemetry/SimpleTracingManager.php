@@ -17,12 +17,15 @@ class SimpleTracingManager
     private array $exporters = [];
     private ?EventSampler $eventSampler = null;
 
-    private function __construct()
+    public function __construct()
     {
         $this->spans = collect();
         $this->activeSpans = collect();
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

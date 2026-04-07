@@ -11,7 +11,7 @@ class GitAttribution
     private bool $enabled = true;
     private array $config;
 
-    private function __construct()
+    public function __construct()
     {
         $this->config = [
             'co_author_name' => 'SuperAgent AI',
@@ -20,6 +20,9 @@ class GitAttribution
         ];
     }
 
+    /**
+     * @deprecated Use constructor injection instead
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

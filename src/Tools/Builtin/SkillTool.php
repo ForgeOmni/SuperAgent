@@ -7,8 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class SkillTool extends Tool
 {
-    private static array $skills = [];
-
     public function name(): string
     {
         return 'skill';
@@ -101,11 +99,13 @@ class SkillTool extends Tool
             return ToolResult::error('Skill prompt is required.');
         }
 
-        if (isset(self::$skills[$name])) {
+        $skills = $this->state()->get($this->name(), 'skills', []);
+
+        if (isset($skills[$name])) {
             return ToolResult::error("Skill '{$name}' already exists.");
         }
 
-        self::$skills[$name] = [
+        $this->state()->putIn($this->name(), 'skills', $name, [
             'name' => $name,
             'description' => $description,
             'prompt' => $prompt,
@@ -114,7 +114,7 @@ class SkillTool extends Tool
             'created_at' => date('Y-m-d H:i:s'),
             'execution_count' => 0,
             'last_executed' => null,
-        ];
+        ]);
 
         return ToolResult::success([
             'message' => 'Skill registered successfully',
@@ -132,12 +132,14 @@ class SkillTool extends Tool
             return ToolResult::error('Skill name is required.');
         }
 
-        if (!isset(self::$skills[$name])) {
+        $skills = $this->state()->get($this->name(), 'skills', []);
+
+        if (!isset($skills[$name])) {
             return ToolResult::error("Skill '{$name}' not found.");
         }
 
-        $skill = &self::$skills[$name];
-        
+        $skill = $skills[$name];
+
         // Replace parameters in prompt
         $prompt = $skill['prompt'];
         foreach ($parameters as $key => $value) {
@@ -147,6 +149,8 @@ class SkillTool extends Tool
         // Update execution stats
         $skill['execution_count']++;
         $skill['last_executed'] = date('Y-m-d H:i:s');
+
+        $this->state()->putIn($this->name(), 'skills', $name, $skill);
 
         return ToolResult::success([
             'message' => 'Skill executed',
@@ -161,7 +165,7 @@ class SkillTool extends Tool
     {
         $tags = $input['tags'] ?? [];
         
-        $filtered = self::$skills;
+        $filtered = $this->state()->get($this->name(), 'skills', []);
         
         if (!empty($tags)) {
             $filtered = array_filter($filtered, function($skill) use ($tags) {
@@ -194,11 +198,13 @@ class SkillTool extends Tool
             return ToolResult::error('Skill name is required.');
         }
 
-        if (!isset(self::$skills[$name])) {
+        $skills = $this->state()->get($this->name(), 'skills', []);
+
+        if (!isset($skills[$name])) {
             return ToolResult::error("Skill '{$name}' not found.");
         }
 
-        return ToolResult::success(self::$skills[$name]);
+        return ToolResult::success($skills[$name]);
     }
 
     private function removeSkill(array $input): ToolResult
@@ -209,11 +215,13 @@ class SkillTool extends Tool
             return ToolResult::error('Skill name is required.');
         }
 
-        if (!isset(self::$skills[$name])) {
+        $skills = $this->state()->get($this->name(), 'skills', []);
+
+        if (!isset($skills[$name])) {
             return ToolResult::error("Skill '{$name}' not found.");
         }
 
-        unset(self::$skills[$name]);
+        $this->state()->removeFrom($this->name(), 'skills', $name);
 
         return ToolResult::success([
             'message' => 'Skill removed successfully',
@@ -221,9 +229,9 @@ class SkillTool extends Tool
         ]);
     }
 
-    public static function clearSkills(): void
+    public function clearSkills(): void
     {
-        self::$skills = [];
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

@@ -7,8 +7,6 @@ use SuperAgent\Tools\ToolResult;
 
 class REPLTool extends Tool
 {
-    private static array $sessions = [];
-
     public function name(): string
     {
         return 'repl';
@@ -67,8 +65,12 @@ class REPLTool extends Tool
         }
 
         // Reset session if requested
-        if ($reset && isset(self::$sessions[$sessionId])) {
-            unset(self::$sessions[$sessionId]);
+        if ($reset) {
+            $sessions = $this->state()->get($this->name(), 'sessions', []);
+            if (isset($sessions[$sessionId])) {
+                unset($sessions[$sessionId]);
+                $this->state()->set($this->name(), 'sessions', $sessions);
+            }
         }
 
         try {
@@ -97,31 +99,34 @@ class REPLTool extends Tool
         $fullCode .= "ini_set('display_errors', 1);\n";
         
         // Load session state if exists
-        if (isset(self::$sessions[$sessionId]['php'])) {
-            $fullCode .= self::$sessions[$sessionId]['php'] . "\n";
+        $sessions = $this->state()->get($this->name(), 'sessions', []);
+        if (isset($sessions[$sessionId]['php'])) {
+            $fullCode .= $sessions[$sessionId]['php'] . "\n";
         }
-        
+
         $fullCode .= "\n// User code:\n";
         $fullCode .= $code;
-        
+
         file_put_contents($tempFile, $fullCode);
-        
+
         // Execute the PHP code
         $output = [];
         $returnVar = 0;
         exec('php ' . escapeshellarg($tempFile) . ' 2>&1', $output, $returnVar);
-        
+
         unlink($tempFile);
-        
+
         if ($returnVar !== 0) {
             throw new \Exception(implode("\n", $output));
         }
-        
+
         // Store session state
-        if (!isset(self::$sessions[$sessionId])) {
-            self::$sessions[$sessionId] = [];
+        $sessions = $this->state()->get($this->name(), 'sessions', []);
+        if (!isset($sessions[$sessionId])) {
+            $sessions[$sessionId] = [];
         }
-        self::$sessions[$sessionId]['php'] = (self::$sessions[$sessionId]['php'] ?? '') . "\n" . $code;
+        $sessions[$sessionId]['php'] = ($sessions[$sessionId]['php'] ?? '') . "\n" . $code;
+        $this->state()->set($this->name(), 'sessions', $sessions);
         
         return implode("\n", $output);
     }
@@ -135,36 +140,39 @@ class REPLTool extends Tool
         $fullCode = '';
         
         // Load session state if exists
-        if (isset(self::$sessions[$sessionId]['python'])) {
-            $fullCode .= self::$sessions[$sessionId]['python'] . "\n";
+        $sessions = $this->state()->get($this->name(), 'sessions', []);
+        if (isset($sessions[$sessionId]['python'])) {
+            $fullCode .= $sessions[$sessionId]['python'] . "\n";
         }
-        
+
         $fullCode .= "\n# User code:\n";
         $fullCode .= $code;
-        
+
         file_put_contents($tempFile, $fullCode);
-        
+
         // Execute the Python code
         $output = [];
         $returnVar = 0;
         exec('python3 ' . escapeshellarg($tempFile) . ' 2>&1', $output, $returnVar);
-        
+
         if ($returnVar !== 0 && empty($output)) {
             // Try python if python3 is not available
             exec('python ' . escapeshellarg($tempFile) . ' 2>&1', $output, $returnVar);
         }
-        
+
         unlink($tempFile);
-        
+
         if ($returnVar !== 0) {
             throw new \Exception(implode("\n", $output));
         }
-        
+
         // Store session state
-        if (!isset(self::$sessions[$sessionId])) {
-            self::$sessions[$sessionId] = [];
+        $sessions = $this->state()->get($this->name(), 'sessions', []);
+        if (!isset($sessions[$sessionId])) {
+            $sessions[$sessionId] = [];
         }
-        self::$sessions[$sessionId]['python'] = (self::$sessions[$sessionId]['python'] ?? '') . "\n" . $code;
+        $sessions[$sessionId]['python'] = ($sessions[$sessionId]['python'] ?? '') . "\n" . $code;
+        $this->state()->set($this->name(), 'sessions', $sessions);
         
         return implode("\n", $output);
     }
@@ -178,31 +186,34 @@ class REPLTool extends Tool
         $fullCode = '';
         
         // Load session state if exists
-        if (isset(self::$sessions[$sessionId]['node'])) {
-            $fullCode .= self::$sessions[$sessionId]['node'] . "\n";
+        $sessions = $this->state()->get($this->name(), 'sessions', []);
+        if (isset($sessions[$sessionId]['node'])) {
+            $fullCode .= $sessions[$sessionId]['node'] . "\n";
         }
-        
+
         $fullCode .= "\n// User code:\n";
         $fullCode .= $code;
-        
+
         file_put_contents($tempFile, $fullCode);
-        
+
         // Execute the Node.js code
         $output = [];
         $returnVar = 0;
         exec('node ' . escapeshellarg($tempFile) . ' 2>&1', $output, $returnVar);
-        
+
         unlink($tempFile);
-        
+
         if ($returnVar !== 0) {
             throw new \Exception(implode("\n", $output));
         }
-        
+
         // Store session state
-        if (!isset(self::$sessions[$sessionId])) {
-            self::$sessions[$sessionId] = [];
+        $sessions = $this->state()->get($this->name(), 'sessions', []);
+        if (!isset($sessions[$sessionId])) {
+            $sessions[$sessionId] = [];
         }
-        self::$sessions[$sessionId]['node'] = (self::$sessions[$sessionId]['node'] ?? '') . "\n" . $code;
+        $sessions[$sessionId]['node'] = ($sessions[$sessionId]['node'] ?? '') . "\n" . $code;
+        $this->state()->set($this->name(), 'sessions', $sessions);
         
         return implode("\n", $output);
     }
@@ -216,31 +227,34 @@ class REPLTool extends Tool
         $fullCode = '';
         
         // Load session state if exists
-        if (isset(self::$sessions[$sessionId]['ruby'])) {
-            $fullCode .= self::$sessions[$sessionId]['ruby'] . "\n";
+        $sessions = $this->state()->get($this->name(), 'sessions', []);
+        if (isset($sessions[$sessionId]['ruby'])) {
+            $fullCode .= $sessions[$sessionId]['ruby'] . "\n";
         }
-        
+
         $fullCode .= "\n# User code:\n";
         $fullCode .= $code;
-        
+
         file_put_contents($tempFile, $fullCode);
-        
+
         // Execute the Ruby code
         $output = [];
         $returnVar = 0;
         exec('ruby ' . escapeshellarg($tempFile) . ' 2>&1', $output, $returnVar);
-        
+
         unlink($tempFile);
-        
+
         if ($returnVar !== 0) {
             throw new \Exception(implode("\n", $output));
         }
-        
+
         // Store session state
-        if (!isset(self::$sessions[$sessionId])) {
-            self::$sessions[$sessionId] = [];
+        $sessions = $this->state()->get($this->name(), 'sessions', []);
+        if (!isset($sessions[$sessionId])) {
+            $sessions[$sessionId] = [];
         }
-        self::$sessions[$sessionId]['ruby'] = (self::$sessions[$sessionId]['ruby'] ?? '') . "\n" . $code;
+        $sessions[$sessionId]['ruby'] = ($sessions[$sessionId]['ruby'] ?? '') . "\n" . $code;
+        $this->state()->set($this->name(), 'sessions', $sessions);
         
         return implode("\n", $output);
     }
@@ -248,9 +262,9 @@ class REPLTool extends Tool
     /**
      * Clear all REPL sessions.
      */
-    public static function clearSessions(): void
+    public function clearSessions(): void
     {
-        self::$sessions = [];
+        $this->state()->clearTool($this->name());
     }
 
     public function isReadOnly(): bool

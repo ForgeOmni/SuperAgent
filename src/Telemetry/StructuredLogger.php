@@ -13,7 +13,7 @@ class StructuredLogger
     private string $sessionId;
     private string $requestId;
 
-    private function __construct()
+    public function __construct()
     {
         $this->enabled = config('superagent.telemetry.enabled', false)
             && config('superagent.telemetry.logging.enabled', false);
@@ -21,6 +21,9 @@ class StructuredLogger
         $this->requestId = uniqid('request_');
     }
 
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {

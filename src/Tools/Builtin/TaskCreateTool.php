@@ -8,6 +8,13 @@ use SuperAgent\Tools\ToolResult;
 
 class TaskCreateTool extends Tool
 {
+    private ?TaskManager $taskManager;
+
+    public function __construct(?TaskManager $taskManager = null)
+    {
+        $this->taskManager = $taskManager;
+    }
+
     public function name(): string
     {
         return 'task_create';
@@ -74,7 +81,7 @@ class TaskCreateTool extends Tool
             return ToolResult::error('Task description is required.');
         }
 
-        $taskManager = TaskManager::getInstance();
+        $taskManager = $this->taskManager ?? TaskManager::getInstance();
 
         try {
             $task = $taskManager->createTask([

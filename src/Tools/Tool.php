@@ -6,6 +6,27 @@ use SuperAgent\Contracts\ToolInterface;
 
 abstract class Tool implements ToolInterface
 {
+    private ?ToolStateManager $stateManager = null;
+
+    /**
+     * Set the shared state manager for this tool instance.
+     */
+    public function setStateManager(ToolStateManager $manager): void
+    {
+        $this->stateManager = $manager;
+    }
+
+    /**
+     * Get the shared state manager (creates a local fallback if none injected).
+     */
+    protected function state(): ToolStateManager
+    {
+        if ($this->stateManager === null) {
+            $this->stateManager = new ToolStateManager();
+        }
+        return $this->stateManager;
+    }
+
     /**
      * Get the name of this tool.
      * This is a convenience method that wraps name().

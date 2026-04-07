@@ -4,11 +4,26 @@ namespace SuperAgent\Tools\Builtin;
 
 use SuperAgent\Tools\Tool;
 use SuperAgent\Tools\ToolResult;
+use SuperAgent\Tools\ToolStateManager;
 
 class VerifyPlanExecutionTool extends Tool
 {
-    private static ?array $currentExecutionPlan = null;
-    private static array $executionHistory = [];
+    private const TOOL_KEY = 'verify_plan_execution';
+
+    private static ?ToolStateManager $sharedState = null;
+
+    private static function shared(): ToolStateManager
+    {
+        if (self::$sharedState === null) {
+            self::$sharedState = new ToolStateManager();
+        }
+        return self::$sharedState;
+    }
+
+    public static function setSharedStateManager(ToolStateManager $manager): void
+    {
+        self::$sharedState = $manager;
+    }
 
     public function name(): string
     {
@@ -58,6 +73,7 @@ class VerifyPlanExecutionTool extends Tool
 
     public function execute(array $input): ToolResult
     {
+        $s = self::shared();
         $stepNumber = $input['step_number'] ?? null;
         $tool = $input['tool'] ?? '';
         $result = $input['result'] ?? '';
@@ -72,20 +88,17 @@ class VerifyPlanExecutionTool extends Tool
             return ToolResult::error('Tool name is required.');
         }
 
-        if (self::$currentExecutionPlan === null) {
+        $plan = $s->get(self::TOOL_KEY, 'currentExecutionPlan');
+        if ($plan === null) {
             return ToolResult::error('No plan is currently being executed.');
         }
 
-        $plan = self::$currentExecutionPlan;
-        
-        // Check if step exists in plan
         if (!isset($plan['steps'][$stepNumber - 1])) {
             return ToolResult::error("Step {$stepNumber} not found in plan.");
         }
 
         $plannedStep = $plan['steps'][$stepNumber - 1];
-        
-        // Record execution
+
         $execution = [
             'step_number' => $stepNumber,
             'planned_tool' => $plannedStep['tool'] ?? 'unknown',
@@ -97,25 +110,21 @@ class VerifyPlanExecutionTool extends Tool
             'matches_plan' => ($plannedStep['tool'] ?? '') === $tool,
         ];
 
-        self::$executionHistory[] = $execution;
+        $s->push(self::TOOL_KEY, 'executionHistory', $execution);
+        $history = $s->get(self::TOOL_KEY, 'executionHistory', []);
 
-        // Check for deviations
         $deviations = [];
-        
         if (!$execution['matches_plan']) {
             $deviations[] = "Tool mismatch: expected '{$plannedStep['tool']}', got '{$tool}'";
         }
-        
         if ($result === 'failure') {
             $deviations[] = "Step failed";
         }
-        
         if ($deviation) {
             $deviations[] = $deviation;
         }
 
-        // Calculate progress
-        $completedSteps = count(array_filter(self::$executionHistory, fn($e) => $e['result'] === 'success'));
+        $completedSteps = count(array_filter($history, fn($e) => $e['result'] === 'success'));
         $totalSteps = count($plan['steps']);
         $progress = $totalSteps > 0 ? round(($completedSteps / $totalSteps) * 100) : 0;
 
@@ -131,7 +140,6 @@ class VerifyPlanExecutionTool extends Tool
             $response['deviations'] = $deviations;
         }
 
-        // Check if plan is complete
         if ($completedSteps >= $totalSteps) {
             $response['plan_complete'] = true;
             $response['summary'] = $this->generateExecutionSummary();
@@ -142,34 +150,35 @@ class VerifyPlanExecutionTool extends Tool
 
     private function generateExecutionSummary(): array
     {
-        $successful = count(array_filter(self::$executionHistory, fn($e) => $e['result'] === 'success'));
-        $failed = count(array_filter(self::$executionHistory, fn($e) => $e['result'] === 'failure'));
-        $skipped = count(array_filter(self::$executionHistory, fn($e) => $e['result'] === 'skipped'));
-        $deviations = count(array_filter(self::$executionHistory, fn($e) => !$e['matches_plan']));
+        $history = self::shared()->get(self::TOOL_KEY, 'executionHistory', []);
+        $successful = count(array_filter($history, fn($e) => $e['result'] === 'success'));
+        $failed = count(array_filter($history, fn($e) => $e['result'] === 'failure'));
+        $skipped = count(array_filter($history, fn($e) => $e['result'] === 'skipped'));
+        $deviations = count(array_filter($history, fn($e) => !$e['matches_plan']));
 
         return [
             'successful_steps' => $successful,
             'failed_steps' => $failed,
             'skipped_steps' => $skipped,
             'deviations' => $deviations,
-            'execution_time' => $this->calculateExecutionTime(),
+            'execution_time' => $this->calculateExecutionTime($history),
         ];
     }
 
-    private function calculateExecutionTime(): string
+    private function calculateExecutionTime(array $history): string
     {
-        if (empty(self::$executionHistory)) {
+        if (empty($history)) {
             return '0s';
         }
 
-        $first = reset(self::$executionHistory);
-        $last = end(self::$executionHistory);
-        
+        $first = reset($history);
+        $last = end($history);
+
         $start = strtotime($first['executed_at']);
         $end = strtotime($last['executed_at']);
-        
+
         $diff = $end - $start;
-        
+
         if ($diff < 60) {
             return "{$diff}s";
         } elseif ($diff < 3600) {
@@ -179,43 +188,38 @@ class VerifyPlanExecutionTool extends Tool
         }
     }
 
-    /**
-     * Store a plan for execution.
-     */
     public static function storePlan(array $plan): void
     {
-        self::$currentExecutionPlan = $plan;
-        self::$executionHistory = [];
+        $s = self::shared();
+        $s->set(self::TOOL_KEY, 'currentExecutionPlan', $plan);
+        $s->set(self::TOOL_KEY, 'executionHistory', []);
     }
 
-    /**
-     * Get current execution status.
-     */
     public static function getExecutionStatus(): array
     {
-        if (self::$currentExecutionPlan === null) {
+        $s = self::shared();
+        $plan = $s->get(self::TOOL_KEY, 'currentExecutionPlan');
+
+        if ($plan === null) {
             return ['status' => 'no_plan'];
         }
 
-        $totalSteps = count(self::$currentExecutionPlan['steps']);
-        $completedSteps = count(array_filter(self::$executionHistory, fn($e) => $e['result'] === 'success'));
+        $history = $s->get(self::TOOL_KEY, 'executionHistory', []);
+        $totalSteps = count($plan['steps']);
+        $completedSteps = count(array_filter($history, fn($e) => $e['result'] === 'success'));
 
         return [
             'status' => 'executing',
             'progress' => $totalSteps > 0 ? round(($completedSteps / $totalSteps) * 100) : 0,
             'completed' => $completedSteps,
             'total' => $totalSteps,
-            'history' => self::$executionHistory,
+            'history' => $history,
         ];
     }
 
-    /**
-     * Reset execution state (for testing).
-     */
     public static function reset(): void
     {
-        self::$currentExecutionPlan = null;
-        self::$executionHistory = [];
+        self::shared()->clearTool(self::TOOL_KEY);
     }
 
     public function isReadOnly(): bool

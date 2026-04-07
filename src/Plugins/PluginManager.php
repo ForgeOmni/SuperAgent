@@ -13,6 +13,9 @@ class PluginManager
     private array $enabled = [];
     private array $config = [];
     
+    /**
+     * @deprecated Use constructor injection instead.
+     */
     public static function getInstance(): self
     {
         if (self::$instance === null) {
@@ -21,7 +24,7 @@ class PluginManager
         return self::$instance;
     }
 
-    private function __construct()
+    public function __construct()
     {
         $this->loadConfiguration();
     }
