@@ -103,7 +103,7 @@ class HookMatcher
     private static function createHookFromConfig(array $config): ?HookInterface
     {
         $type = $config['type'] ?? null;
-        
+
         return match ($type) {
             'command' => new CommandHook(
                 command: $config['command'],
@@ -117,12 +117,31 @@ class HookMatcher
             ),
             'http' => new HttpHook(
                 url: $config['url'],
+                method: $config['method'] ?? 'POST',
                 headers: $config['headers'] ?? [],
                 allowedEnvVars: $config['allowedEnvVars'] ?? [],
                 timeout: $config['timeout'] ?? 30,
+                blockOnFailure: $config['blockOnFailure'] ?? false,
                 once: $config['once'] ?? false,
                 condition: $config['if'] ?? null,
+                matcher: $config['matcher'] ?? null,
                 statusMessage: $config['statusMessage'] ?? null,
+            ),
+            'prompt' => new PromptHook(
+                prompt: $config['prompt'],
+                model: $config['model'] ?? null,
+                timeout: $config['timeout'] ?? 30,
+                blockOnFailure: $config['blockOnFailure'] ?? true,
+                once: $config['once'] ?? false,
+                matcher: $config['matcher'] ?? null,
+            ),
+            'agent' => new AgentHook(
+                prompt: $config['prompt'],
+                model: $config['model'] ?? null,
+                timeout: $config['timeout'] ?? 60,
+                blockOnFailure: $config['blockOnFailure'] ?? true,
+                once: $config['once'] ?? false,
+                matcher: $config['matcher'] ?? null,
             ),
             default => null,
         };

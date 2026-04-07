@@ -12,7 +12,7 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 
 ## ✨ 核心特性
 
-### 🆕 v0.7.8 — Agent Harness 模式（5个新子系统，216个测试）
+### 🆕 v0.7.8 — Agent Harness 模式 + 企业级子系统（20个子系统，628个测试）
 - **持久化任务管理器** (`src/Tasks/PersistentTaskManager.php`) — 基于文件的任务持久化：JSON 索引 + 每任务输出日志。`appendOutput()` / `readOutput()` 日志流式读写，`watchProcess()` + `pollProcesses()` 非阻塞进程监控，重启时自动标记残留运行任务为失败，按天数自动清理。配置：`persistence.tasks`
 - **会话管理器** (`src/Session/SessionManager.php`) — 对话快照保存/加载/列表/删除到 `~/.superagent/sessions/`。`loadLatest()` 支持 CWD 过滤实现项目级恢复，自动提取摘要，Session ID 路径消毒，按数量+天数自动清理。配置：`persistence.sessions`
 - **StreamEvent 统一事件架构** (`src/Harness/`) — 9 种统一事件类型（`TextDelta`、`ThinkingDelta`、`TurnComplete`、`ToolStarted`、`ToolCompleted`、`Compaction`、`Status`、`Error`、`AgentComplete`）。`StreamEventEmitter` 多监听器分发 + `toStreamingHandler()` 桥接器，QueryEngine 零改动接入
@@ -23,6 +23,20 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 - **Worktree 管理器** (`src/Swarm/WorktreeManager.php`) — 独立的 git worktree 生命周期管理：创建时为大目录（node_modules、vendor、.venv）建立符号链接，元数据持久化，支持恢复和清理。从 ProcessBackend 提取复用
 - **Tmux 后端** (`src/Swarm/Backends/TmuxBackend.php`) — 可视化多 Agent 调试：每个 Agent 运行在 tmux 面板中。自动检测（`$TMUX` + `which tmux`），不可用时优雅降级。新增 `BackendType::TMUX` 枚举
 - **参数优于配置** — 所有新子系统的 `fromConfig()` 接受 `array $overrides` 参数，优先级：`$overrides` > 配置文件 > 默认值。可在调用处强制启用被配置禁用的功能
+- **API 重试中间件** (`src/Providers/RetryMiddleware.php`) — 指数退避+抖动，支持 `Retry-After` 头，错误分类（auth/rate_limit/transient/unrecoverable），可配置最大重试次数，重试日志追踪。`wrap()` 静态工厂
+- **iTerm2 后端** (`src/Swarm/Backends/ITermBackend.php`) — 基于 AppleScript 的面板式 Agent 调试，自动检测（`$ITERM_SESSION_ID`），优雅关闭+强制终止。`BackendType::ITERM2`
+- **插件系统** (`src/Plugins/`) — `PluginManifest`（从 `plugin.json` 解析）、`LoadedPlugin`（解析 skills/hooks/MCP）、`PluginLoader`（从 `~/.superagent/plugins/` 和 `.superagent/plugins/` 发现，启用/禁用，安装/卸载，跨所有启用插件收集）
+- **可观察应用状态** (`src/State/`) — `AppState` 不可变值对象，`with()` 部分更新。`AppStateStore` 可观察存储，`subscribe()` 返回取消订阅回调，状态变更自动通知监听器
+- **Hook 热重载** (`src/Hooks/HookReloader.php`) — 监控配置文件 mtime，变更时重载 `HookRegistry`。支持 JSON 和 PHP 配置格式。`forceReload()`、`hasChanged()`、`fromDefaults()` 工厂
+- **Prompt & Agent Hook** (`src/Hooks/PromptHook.php`, `AgentHook.php`) — 基于 LLM 的验证：发送带 `$ARGUMENTS` 注入的提示，期望 `{"ok": true/false, "reason": "..."}`。`AgentHook` 扩展上下文+60秒超时。均支持 `blockOnFailure` 和匹配器模式
+- **多通道网关** (`src/Channels/`) — `ChannelInterface`、`BaseChannel`（ACL 控制）、`MessageBus`（基于 SplQueue 的入站/出站）、`ChannelManager`（注册/分发）、`WebhookChannel`（HTTP webhook）、`InboundMessage`/`OutboundMessage` 值对象
+- **后端协议** (`src/Harness/BackendProtocol.php`, `FrontendRequest.php`) — JSON-lines 协议（`SAJSON:` 前缀）用于前后端通信。8 种事件发射器、`readRequest()`、`createStreamBridge()`。`FrontendRequest` 类型化请求解析
+- **OAuth 设备码流程** (`src/Auth/`) — RFC 8628 实现，自动打开浏览器。`CredentialStore` 基于文件的凭证存储（原子写入+0600权限）。`TokenResponse`/`DeviceCodeResponse` 不可变 DTO
+- **权限路径规则** (`src/Permissions/`) — `PathRule` 基于 glob 的允许/拒绝规则，`CommandDenyPattern` fnmatch 模式，`PathRuleEvaluator` 链式评估（拒绝优先）。`fromConfig()` 工厂
+- **协调器任务通知** (`src/Coordinator/TaskNotification.php`) — 子 Agent 完成的结构化 XML 通知，`toXml()`/`toText()`/`fromXml()`/`fromResult()`。XML 往返保真
+- **增强自动压缩器** — 动态阈值（`contextWindow - 20K - 13K`），token 估算填充（`raw * 4/3`），`contextWindowForModel()` 映射，`setContextWindow()` 覆盖
+- **增强并行工具执行** — 新增 `executeProcessParallel()` 通过 `proc_open` 实现真正 OS 级并行，`getStrategy()` 返回 `process`/`fiber`/`sequential`，配置：`performance.process_parallel_execution.enabled`
+- **会话项目隔离** — 会话存储在项目级子目录：`sessions/{basename}-{sha1[:12]}/`。向后兼容平铺布局会话
 
 ### 🆕 v0.7.7 — 可调试性与质量加固
 - **吞没异常日志修复** — 为24个文件中27个静默catch块添加 `error_log('[SuperAgent] ...')`（Performance、Optimization、ProcessBackend、MCPManager等）。此前生产环境中不可见的异常现在可通过 `[SuperAgent]` 日志前缀追踪

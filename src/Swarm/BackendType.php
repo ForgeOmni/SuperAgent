@@ -14,4 +14,5 @@ enum BackendType: string
     case TMUX = 'tmux';
     case DOCKER = 'docker';
     case REMOTE = 'remote';
+    case ITERM2 = 'iterm2';
 }

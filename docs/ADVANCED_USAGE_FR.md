@@ -61,7 +61,7 @@
 - [30. Garde-fous en Langage Naturel](#30-garde-fous-en-langage-naturel)
 - [31. Pipelines Auto-Réparateurs](#31-pipelines-auto-réparateurs)
 
-### Mode Agent Harness (v0.7.8)
+### Mode Agent Harness + Sous-systèmes Entreprise (v0.7.8)
 
 - [32. Gestionnaire de Tâches Persistant](#32-gestionnaire-de-tâches-persistant)
 - [33. Gestionnaire de Sessions](#33-gestionnaire-de-sessions)
@@ -71,6 +71,17 @@
 - [37. Framework de Scénarios E2E](#37-framework-de-scénarios-e2e)
 - [38. Gestionnaire de Worktrees](#38-gestionnaire-de-worktrees)
 - [39. Backend Tmux](#39-backend-tmux)
+- [40. Middleware de Retry API](#40-middleware-de-retry-api)
+- [41. Backend iTerm2](#41-backend-iterm2)
+- [42. Système de Plugins](#42-système-de-plugins)
+- [43. État d'Application Observable](#43-état-dapplication-observable)
+- [44. Rechargement à Chaud des Hooks](#44-rechargement-à-chaud-des-hooks)
+- [45. Hooks Prompt & Agent](#45-hooks-prompt--agent)
+- [46. Passerelle Multi-Canal](#46-passerelle-multi-canal)
+- [47. Protocole Backend](#47-protocole-backend)
+- [48. Flux OAuth Device Code](#48-flux-oauth-device-code)
+- [49. Règles de Permission par Chemin](#49-règles-de-permission-par-chemin)
+- [50. Notification de Tâche Coordinateur](#50-notification-de-tâche-coordinateur)
 
 ---
 
@@ -5930,3 +5941,440 @@ Ajoutez `BackendType::TMUX` à votre config swarm :
 **Backend non disponible.** TmuxBackend nécessite d'être dans une session tmux (variable `$TMUX`) et que `tmux` soit installé. Utilisez `detect()` pour vérifier avant de créer des agents.
 
 **Panneaux mal disposés.** Après la création de plusieurs agents, `select-layout tiled` est appelé automatiquement. Si la disposition est incorrecte, exécutez `tmux select-layout tiled` manuellement.
+
+---
+
+## 40. Middleware de Retry API
+
+> Ajouté en v0.7.8
+
+Enveloppe n'importe quel `LLMProvider` avec une logique de retry automatique incluant backoff exponentiel, jitter et classification intelligente des erreurs.
+
+### Utilisation
+
+```php
+use SuperAgent\Providers\RetryMiddleware;
+
+$resilientProvider = RetryMiddleware::wrap($provider, [
+    'max_retries' => 3,
+    'base_delay_ms' => 1000,
+    'max_delay_ms' => 30000,
+]);
+
+// Classification des erreurs
+// - auth (401/403) : pas de retry
+// - rate_limit (429) : retry, respecte Retry-After
+// - transient (500/502/503/529) : retry avec backoff
+// - unrecoverable : pas de retry
+
+$log = $resilientProvider->getRetryLog();
+foreach ($log as $entry) {
+    echo "{$entry['attempt']}: {$entry['error_type']} - attendu {$entry['delay_ms']}ms\n";
+}
+```
+
+### Formule de Backoff
+
+```
+delay = min(base_delay * 2^attempt, max_delay) + random(0, 25% du delay)
+```
+
+---
+
+## 41. Backend iTerm2
+
+> Ajouté en v0.7.8
+
+Backend de débogage visuel qui lance chaque agent dans un panneau iTerm2 séparé via AppleScript.
+
+### Utilisation
+
+```php
+use SuperAgent\Swarm\Backends\ITermBackend;
+
+$backend = new ITermBackend();
+
+if ($backend->isAvailable()) {
+    $result = $backend->spawn($agentConfig);
+    $backend->requestShutdown($agentId); // Ctrl+C
+    $backend->kill($agentId); // Ferme la session
+}
+```
+
+### Configuration
+
+```php
+'swarm' => [
+    'backend' => env('SUPERAGENT_SWARM_BACKEND', 'process'),
+    // 'iterm2' pour le débogage visuel
+],
+```
+
+---
+
+## 42. Système de Plugins
+
+> Ajouté en v0.7.8
+
+Architecture de plugins extensible pour distribuer skills, hooks et configs MCP.
+
+### Structure
+
+```
+my-plugin/
+├── plugin.json
+├── skills/
+│   └── my-skill.md
+├── hooks.json
+└── mcp.json
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Plugins\PluginLoader;
+
+$loader = PluginLoader::fromDefaults();
+$plugins = $loader->discover();
+
+$loader->enable('my-plugin');
+$loader->install('/path/to/my-plugin');
+
+$allSkills = $loader->collectSkills();
+$allHooks = $loader->collectHooks();
+$allMcp = $loader->collectMcpConfigs();
+```
+
+### Configuration
+
+```php
+'plugins' => [
+    'enabled' => env('SUPERAGENT_PLUGINS_ENABLED', false),
+    'enabled_plugins' => [],
+],
+```
+
+---
+
+## 43. État d'Application Observable
+
+> Ajouté en v0.7.8
+
+Gestion d'état réactive avec objets immuables et pattern observateur.
+
+### Utilisation
+
+```php
+use SuperAgent\State\AppState;
+use SuperAgent\State\AppStateStore;
+
+$state = new AppState(
+    model: 'claude-opus-4-6',
+    permissionMode: 'default',
+    provider: 'anthropic',
+    cwd: getcwd(),
+    turnCount: 0,
+    totalCostUsd: 0.0,
+);
+
+$newState = $state->with(turnCount: 1, totalCostUsd: 0.05);
+
+$store = new AppStateStore($state);
+
+$unsubscribe = $store->subscribe(function (AppState $newState, AppState $oldState) {
+    echo "Tours : {$oldState->turnCount} → {$newState->turnCount}\n";
+});
+
+$store->set($store->get()->with(turnCount: 1));
+$unsubscribe();
+```
+
+---
+
+## 44. Rechargement à Chaud des Hooks
+
+> Ajouté en v0.7.8
+
+Recharge automatiquement les configurations de hooks quand le fichier change.
+
+### Utilisation
+
+```php
+use SuperAgent\Hooks\HookReloader;
+
+$reloader = HookReloader::fromDefaults();
+
+if ($reloader->hasChanged()) {
+    $reloader->forceReload();
+}
+```
+
+Le rechargeur surveille le `mtime` du fichier de config et reconstruit le `HookRegistry` en cas de changement.
+
+---
+
+## 45. Hooks Prompt & Agent
+
+> Ajouté en v0.7.8
+
+Hooks basés sur LLM qui valident les actions via un modèle IA.
+
+### Prompt Hook
+
+```php
+use SuperAgent\Hooks\PromptHook;
+
+$hook = new PromptHook(
+    prompt: 'Cette modification est-elle sûre ? Fichier : $ARGUMENTS',
+    blockOnFailure: true,
+    matcher: ['event' => 'tool:edit_file'],
+);
+```
+
+### Agent Hook
+
+```php
+use SuperAgent\Hooks\AgentHook;
+
+$hook = new AgentHook(
+    prompt: 'Examinez les implications de sécurité : $ARGUMENTS',
+    blockOnFailure: true,
+    matcher: ['event' => 'tool:bash'],
+    timeout: 60,
+);
+```
+
+Les hooks agent fournissent un contexte étendu pour une validation plus éclairée.
+
+---
+
+## 46. Passerelle Multi-Canal
+
+> Ajouté en v0.7.8
+
+Couche d'abstraction de messagerie découplant la communication des plateformes.
+
+### Architecture
+
+```
+Plateforme → Channel → MessageBus (entrante) → Agent
+Agent → MessageBus (sortante) → ChannelManager → Channels → Plateformes
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Channels\ChannelManager;
+use SuperAgent\Channels\WebhookChannel;
+use SuperAgent\Channels\MessageBus;
+
+$bus = new MessageBus();
+$manager = new ChannelManager($bus);
+
+$webhook = new WebhookChannel('my-webhook', [
+    'url' => 'https://example.com/webhook',
+    'allowed_senders' => ['user-1', 'user-2'],
+]);
+$manager->register($webhook);
+$manager->startAll();
+
+$manager->dispatch(new OutboundMessage(
+    channel: 'my-webhook',
+    sessionKey: 'session-123',
+    content: 'Tâche terminée',
+));
+
+while ($message = $bus->dequeueInbound()) {
+    // Traiter $message->content
+}
+```
+
+### Configuration
+
+```php
+'channels' => [
+    'my-webhook' => [
+        'type' => 'webhook',
+        'url' => 'https://example.com/webhook',
+        'allowed_senders' => ['*'],
+    ],
+],
+```
+
+---
+
+## 47. Protocole Backend
+
+> Ajouté en v0.7.8
+
+Protocole JSON-lines pour la communication structurée frontend ↔ backend.
+
+### Format
+
+```
+SAJSON:{"type":"ready","data":{"version":"0.7.8"}}
+SAJSON:{"type":"assistant_delta","data":{"text":"Bonjour"}}
+SAJSON:{"type":"tool_started","data":{"tool":"read_file","input":{"path":"/src/Agent.php"}}}
+```
+
+### Types d'Événements
+
+| Événement | Description |
+|-----------|-------------|
+| `ready` | Backend initialisé |
+| `assistant_delta` | Fragment streaming |
+| `assistant_complete` | Réponse complète |
+| `tool_started` | Début d'outil |
+| `tool_completed` | Fin d'outil |
+| `status` | Mise à jour |
+| `error` | Erreur |
+| `modal_request` | Modal UI |
+
+### Utilisation
+
+```php
+use SuperAgent\Harness\BackendProtocol;
+use SuperAgent\Harness\FrontendRequest;
+
+$protocol = new BackendProtocol(STDOUT);
+$protocol->emitReady(['version' => '0.7.8']);
+$protocol->emitAssistantDelta('Bonjour, ');
+
+$request = FrontendRequest::readRequest(STDIN);
+$bridge = $protocol->createStreamBridge();
+```
+
+---
+
+## 48. Flux OAuth Device Code
+
+> Ajouté en v0.7.8
+
+Implémentation RFC 8628 pour l'authentification CLI.
+
+### Utilisation
+
+```php
+use SuperAgent\Auth\DeviceCodeFlow;
+use SuperAgent\Auth\CredentialStore;
+
+$flow = new DeviceCodeFlow(
+    clientId: 'your-client-id',
+    tokenEndpoint: 'https://auth.example.com/token',
+    deviceEndpoint: 'https://auth.example.com/device',
+);
+
+$deviceCode = $flow->requestDeviceCode(['openid', 'profile']);
+echo "Visitez {$deviceCode->verificationUri} et entrez : {$deviceCode->userCode}\n";
+
+$token = $flow->pollForToken($deviceCode);
+
+$store = new CredentialStore('~/.superagent/credentials');
+$store->save('provider-name', $token);
+
+$token = $store->load('provider-name');
+if ($token->isExpired()) {
+    $token = $flow->refreshToken($token->refreshToken);
+}
+```
+
+### Configuration
+
+```php
+'auth' => [
+    'credential_store_path' => env('SUPERAGENT_CREDENTIAL_STORE', null),
+    'device_code' => [
+        'provider-name' => [
+            'client_id' => env('PROVIDER_CLIENT_ID'),
+            'token_endpoint' => 'https://...',
+            'device_endpoint' => 'https://...',
+        ],
+    ],
+],
+```
+
+---
+
+## 49. Règles de Permission par Chemin
+
+> Ajouté en v0.7.8
+
+Règles basées sur glob pour le contrôle d'accès aux fichiers et commandes.
+
+### Utilisation
+
+```php
+use SuperAgent\Permissions\PathRule;
+use SuperAgent\Permissions\CommandDenyPattern;
+use SuperAgent\Permissions\PathRuleEvaluator;
+
+$rules = [
+    PathRule::allow('src/**/*.php'),
+    PathRule::deny('src/Auth/**'),
+    PathRule::allow('tests/**'),
+    PathRule::deny('.env*'),
+];
+
+$denyCommands = [
+    new CommandDenyPattern('rm -rf *'),
+    new CommandDenyPattern('DROP TABLE*'),
+];
+
+$evaluator = PathRuleEvaluator::fromConfig([
+    'path_rules' => $rules,
+    'denied_commands' => $denyCommands,
+]);
+
+$decision = $evaluator->evaluate('/src/Agent.php');
+// PermissionDecision::ALLOW
+
+$decision = $evaluator->evaluate('/src/Auth/Secret.php');
+// PermissionDecision::DENY
+
+$decision = $evaluator->evaluateCommand('rm -rf /');
+// PermissionDecision::DENY
+```
+
+### Configuration
+
+```php
+'permission_rules' => [
+    'path_rules' => [
+        ['pattern' => 'src/**/*.php', 'action' => 'allow'],
+        ['pattern' => '.env*', 'action' => 'deny'],
+    ],
+    'denied_commands' => [
+        'rm -rf *',
+        'DROP TABLE*',
+    ],
+],
+```
+
+---
+
+## 50. Notification de Tâche Coordinateur
+
+> Ajouté en v0.7.8
+
+Notifications XML structurées pour rapporter la complétion des sous-agents.
+
+### Utilisation
+
+```php
+use SuperAgent\Coordinator\TaskNotification;
+
+$notification = TaskNotification::fromResult(
+    taskId: 'task-abc-123',
+    status: 'completed',
+    summary: 'Fonctionnalité implémentée',
+    result: 'Créé 3 fichiers, modifié 2',
+    usage: ['input_tokens' => 5000, 'output_tokens' => 2000],
+    cost: 0.15,
+    toolsUsed: ['read_file', 'edit_file', 'bash'],
+    turnCount: 8,
+);
+
+$xml = $notification->toXml();
+$text = $notification->toText();
+$parsed = TaskNotification::fromXml($xml);
+```

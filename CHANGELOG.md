@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🚀 Summary
 
-Agent Harness mode — 5 new subsystems providing persistent background tasks, session save/resume, unified stream events, interactive REPL loop with slash commands, E2E scenario testing framework, auto-compaction integrated into the agentic loop, `continue_pending()` for interrupted tool loops, standalone WorktreeManager, and Tmux visual backend. All features default-off with parameter-overrides-config priority pattern. 216 new tests, 466 assertions.
+Agent Harness mode + enterprise subsystems — 20 subsystems providing persistent background tasks, session save/resume, unified stream events, interactive REPL loop with slash commands, E2E scenario testing framework, auto-compaction, API retry middleware, iTerm2 visual debugging backend, plugin ecosystem, multi-channel messaging gateway, OAuth device code authentication, permission path rules, observable app state, hook hot-reloading, prompt/agent LLM hooks, backend protocol, and coordinator task notifications. All features default-off with parameter-overrides-config priority pattern. 628 new tests, 1653 assertions.
 
 ### Added
 
@@ -84,6 +84,129 @@ Agent Harness mode — 5 new subsystems providing persistent background tasks, s
 - Priority chain: `$overrides` > config file > defaults
 - Enables force-enabling features at call site even when config has them disabled
 
+#### API Retry Middleware (`src/Providers/RetryMiddleware.php`)
+- Exponential backoff with jitter: `min(base * 2^attempt, maxDelay) + 0-25% jitter`
+- Respects `Retry-After` header from rate limit responses
+- Error classification: `auth` (401/403, not retried), `rate_limit` (429), `transient` (500/502/503/529, retried), `unrecoverable`
+- Configurable max retries (default 3), base delay, max delay
+- Retry log tracking for observability
+- `wrap()` static factory for wrapping any `LLMProvider`
+
+#### iTerm2 Backend (`src/Swarm/Backends/ITermBackend.php`)
+- New `BackendInterface` implementation for iTerm2 pane-based agent debugging
+- Auto-detection via `$ITERM_SESSION_ID` env var + `osascript` availability
+- Spawn agents in split panes via AppleScript
+- Graceful shutdown (Ctrl+C) and force kill (close session)
+- New `BackendType::ITERM2` enum value
+
+#### Plugin System (`src/Plugins/`)
+- `PluginManifest` — parsed from `plugin.json` with name, version, skills_dir, hooks_file, mcp_file
+- `LoadedPlugin` — resolved skills (.md), hooks (hooks.json), MCP configs (mcp.json)
+- `PluginLoader` — discover from `~/.superagent/plugins/` and `.superagent/plugins/`, enable/disable per plugin, install/uninstall, collect skills/hooks/MCP across all enabled plugins
+
+#### Observable App State (`src/State/`)
+- `AppState` — immutable value object (model, permissionMode, provider, cwd, turnCount, totalCostUsd, etc.) with `with()` for partial updates
+- `AppStateStore` — observable store with `get()`, `set()`, `subscribe()` (returns unsubscribe callable), auto-notifies all listeners on state change
+
+#### Hook Hot-Reloading (`src/Hooks/HookReloader.php`)
+- Monitors config file mtime, reloads `HookRegistry` when changed
+- Supports JSON and PHP config formats
+- `forceReload()` for manual refresh, `hasChanged()` for polling
+- `fromDefaults()` factory for standard config locations
+
+#### Prompt & Agent Hook Types (`src/Hooks/PromptHook.php`, `AgentHook.php`)
+- `PromptHook` — LLM-based validation: sends prompt with `$ARGUMENTS` injection, expects `{"ok": true/false, "reason": "..."}`
+- `AgentHook` — deeper LLM validation with extended context, higher default timeout (60s)
+- Both support `blockOnFailure`, matcher patterns, and `setProvider()`
+
+#### Multi-Channel Gateway (`src/Channels/`)
+- `ChannelInterface` — contract for messaging platforms (start, stop, send, isAllowed)
+- `BaseChannel` — abstract base with ACL (empty = deny, `['*']` = allow all, specific IDs)
+- `MessageBus` — SplQueue-based inbound/outbound message bus, decouples channels from agent core
+- `ChannelManager` — register, start/stop, dispatch outbound messages to channels
+- `WebhookChannel` — generic HTTP webhook channel for custom integrations
+- `InboundMessage` / `OutboundMessage` — value objects with session key routing
+
+#### Backend Protocol (`src/Harness/BackendProtocol.php`, `FrontendRequest.php`)
+- JSON-lines protocol (`SAJSON:` prefix) for frontend ↔ backend communication
+- 8 event emitters: ready, assistant_delta, assistant_complete, tool_started, tool_completed, status, error, modal_request
+- `readRequest()` / `readRequestWithTimeout()` for frontend input
+- `createStreamBridge()` maps all StreamEvent types to protocol events
+- `FrontendRequest` — typed request parsing (submit, permission, question, select)
+
+#### OAuth Device Code Flow (`src/Auth/`)
+- `DeviceCodeFlow` — RFC 8628 implementation: request device code, display to user, poll for token
+- Handles `authorization_pending`, `slow_down` (interval increase), `expired_token`, `access_denied`
+- Auto-opens browser on macOS/Linux/Windows
+- `CredentialStore` — file-based credential storage with atomic writes and 0600 permissions
+- `TokenResponse` / `DeviceCodeResponse` — immutable DTOs
+
+#### Permission Path Rules (`src/Permissions/`)
+- `PathRule` — glob-based file path rules with allow/deny, supports root-anchored, relative, and basename patterns
+- `CommandDenyPattern` — fnmatch patterns for denying shell commands
+- `PathRuleEvaluator` — chained evaluation: deny rules take precedence, returns `PermissionDecision`
+- `fromConfig()` factory for config-driven setup
+
+#### Coordinator Task Notification (`src/Coordinator/TaskNotification.php`)
+- Structured XML notification for sub-agent completion: task-id, status, summary, result, usage, cost, tools_used, turn_count
+- `toXml()` for coordinator conversation injection, `toText()` for compact logging
+- `fromXml()` parser and `fromResult()` factory
+- XML round-trip fidelity with proper escaping
+
+### Changed
+
+#### Enhanced Auto-Compactor (`src/Harness/AutoCompactor.php`)
+- Dynamic threshold: `contextWindow - 20000(reserved) - 13000(buffer)` instead of hardcoded values
+- Token estimation padding: `raw * 4/3` for conservative overhead
+- `contextWindowForModel()` — maps model names to context windows (200K, 1M for [1m] suffix, 128K for GPT)
+- `setContextWindow()` for runtime override
+
+#### Enhanced Parallel Tool Execution (`src/Performance/ParallelToolExecutor.php`)
+- New `executeProcessParallel()` for true OS-level parallelism via `proc_open`
+- `getStrategy()` returns `process`/`fiber`/`sequential` based on capabilities
+- `canUseProcessParallel()` checks, config: `performance.process_parallel_execution.enabled`
+- Fallback to Fiber-based execution when process parallel unavailable
+
+#### Session Project Isolation (`src/Session/SessionManager.php`)
+- Sessions now stored in project-scoped subdirectories: `sessions/{basename}-{sha1[:12]}/`
+- `projectHash()` deterministic directory naming from CWD
+- Backward compatibility: flat-layout sessions still found by all read operations
+- Per-project `latest.json` for scoped resume
+
+#### Enhanced Hook System
+- `HttpHook` — enhanced with configurable HTTP method, `blockOnFailure`, matcher, enriched payload
+- `HookMatcher::createHookFromConfig()` — now supports `prompt` and `agent` hook types
+- New `BackendType::ITERM2` enum value
+
+### Changed
+
+- `TaskManager::__construct()` visibility changed from `private` to `protected` (enables `PersistentTaskManager` subclass)
+- `Task::toArray()` date formatting now compatible with both Carbon and `DateTimeImmutable`
+- `TaskManager::injectTask()` added for restore-with-timestamps path
+
+#### Enhanced Auto-Compactor (`src/Harness/AutoCompactor.php`)
+- Dynamic threshold: `contextWindow - 20000(reserved) - 13000(buffer)` instead of hardcoded values
+- Token estimation padding: `raw * 4/3` for conservative overhead
+- `contextWindowForModel()` — maps model names to context windows (200K, 1M for [1m] suffix, 128K for GPT)
+- `setContextWindow()` for runtime override
+
+#### Enhanced Parallel Tool Execution (`src/Performance/ParallelToolExecutor.php`)
+- New `executeProcessParallel()` for true OS-level parallelism via `proc_open`
+- `getStrategy()` returns `process`/`fiber`/`sequential` based on capabilities
+- `canUseProcessParallel()` checks, config: `performance.process_parallel_execution.enabled`
+- Fallback to Fiber-based execution when process parallel unavailable
+
+#### Session Project Isolation (`src/Session/SessionManager.php`)
+- Sessions now stored in project-scoped subdirectories: `sessions/{basename}-{sha1[:12]}/`
+- `projectHash()` deterministic directory naming from CWD
+- Backward compatibility: flat-layout sessions still found by all read operations
+- Per-project `latest.json` for scoped resume
+
+#### Enhanced Hook System
+- `HttpHook` — enhanced with configurable HTTP method, `blockOnFailure`, matcher, enriched payload
+- `HookMatcher::createHookFromConfig()` — now supports `prompt` and `agent` hook types
+- New `BackendType::ITERM2` enum value
+
 ### Configuration
 
 #### New `persistence` config section (`config/superagent.php`)
@@ -96,20 +219,21 @@ Agent Harness mode — 5 new subsystems providing persistent background tasks, s
 ],
 ```
 
-### Tests
-- **216 new tests, 466 assertions** across 9 test files
-- `PersistentTaskManagerTest` (23 tests), `SessionManagerTest` (29 tests), `StreamEventTest` (28 tests), `AutoCompactorTest` (14 tests), `HarnessLoopTest` (32 tests), `ScenarioTest` (22 tests), `ContinuePendingTest` (9 tests), `WorktreeManagerTest` (24 tests), `TmuxBackendTest` (12 tests)
-- Zero regression on existing 1036 tests
+- New `plugins` section (enabled, enabled_plugins)
+- New `channels` section (per-channel config with ACL)
+- New `permission_rules` section (path_rules, denied_commands)
+- New `auth` section (credential_store_path, device_code providers)
+- New `performance.process_parallel_execution` toggle
 
-### Changed
-- `TaskManager::__construct()` visibility changed from `private` to `protected` (enables `PersistentTaskManager` subclass)
-- `Task::toArray()` date formatting now compatible with both Carbon and `DateTimeImmutable`
-- `TaskManager::injectTask()` added for restore-with-timestamps path
+### Tests
+- **628 new tests, 1653 assertions** across 23 test files
+- `PersistentTaskManagerTest` (23), `SessionManagerTest` (44 total), `StreamEventTest` (28), `AutoCompactorTest` (17 total), `HarnessLoopTest` (32), `ScenarioTest` (22), `ContinuePendingTest` (9), `WorktreeManagerTest` (24), `TmuxBackendTest` (12), `RetryMiddlewareTest` (30), `ITermBackendTest` (19), `ParallelToolProcessTest` (18), `BackendProtocolTest` (41), `ChannelTest` (30), `PluginLoaderTest` (27), `AppStateStoreTest` (13), `HookReloaderTest` (16), `HttpHookTest` (15), `PromptHookTest` (26), `BackendRegistryTest` (22), `AuthTest` (30), `PathRuleTest` (24), `TaskNotificationTest` (25)
+- Zero regression on existing tests
 
 ### Documentation
-- **README** (EN/CN/FR): version badge → 0.7.8; added v0.7.8 Agent Harness Mode feature section
+- **README** (EN/CN/FR): version badge → 0.7.8; added v0.7.8 feature section with all 20 subsystems
 - **INSTALL** (EN/CN/FR): added v0.7.8 compatibility matrix row
-- **ADVANCED_USAGE** (EN/CN/FR): added 8 new sections (32–39) covering Persistent Task Manager, Session Manager, Stream Event Architecture, Harness REPL Loop, Auto-Compactor, E2E Scenario Framework, Worktree Manager, Tmux Backend
+- **ADVANCED_USAGE** (EN/CN/FR): added 19 new sections (32–50) covering all Agent Harness + enterprise subsystems
 
 ## [0.7.7] - 2026-04-05
 

@@ -238,14 +238,16 @@ class SessionManagerTest extends TestCase
     public function testPruneByAge(): void
     {
         $manager = new SessionManager($this->tmpDir, pruneAfterDays: 1);
+        $cwd = '/test/prune-project';
 
         // Save a session, then manually backdate its updated_at
         $manager->save('sess-old', [
             ['role' => 'user', 'content' => 'Old session'],
-        ]);
+        ], ['cwd' => $cwd]);
 
-        // Rewrite with old timestamp
-        $path = $this->tmpDir . '/session-sess-old.json';
+        // Rewrite with old timestamp in project-scoped path
+        $projectHash = SessionManager::projectHash($cwd);
+        $path = $this->tmpDir . '/' . $projectHash . '/session-sess-old.json';
         $data = json_decode(file_get_contents($path), true);
         $data['updated_at'] = date('c', time() - 2 * 86400);
         file_put_contents($path, json_encode($data));
@@ -253,9 +255,9 @@ class SessionManagerTest extends TestCase
         // Save a recent session
         $manager->save('sess-new', [
             ['role' => 'user', 'content' => 'New session'],
-        ]);
+        ], ['cwd' => $cwd]);
 
-        $pruned = $manager->prune();
+        $pruned = $manager->prune($cwd);
         $this->assertEquals(1, $pruned);
         $this->assertNull($manager->loadById('sess-old'));
         $this->assertNotNull($manager->loadById('sess-new'));
@@ -395,6 +397,253 @@ class SessionManagerTest extends TestCase
     public function testGetStorageDir(): void
     {
         $this->assertEquals($this->tmpDir, $this->manager->getStorageDir());
+    }
+
+    // ── Project isolation: projectHash ───────────────────────────
+
+    public function testProjectHashDeterministic(): void
+    {
+        $hash1 = SessionManager::projectHash('/home/user/my-project');
+        $hash2 = SessionManager::projectHash('/home/user/my-project');
+        $this->assertSame($hash1, $hash2);
+    }
+
+    public function testProjectHashIncludesBasename(): void
+    {
+        $hash = SessionManager::projectHash('/home/user/my-project');
+        $this->assertStringStartsWith('my-project-', $hash);
+    }
+
+    public function testProjectHashUniqueForDifferentPaths(): void
+    {
+        $hash1 = SessionManager::projectHash('/home/user/project-a');
+        $hash2 = SessionManager::projectHash('/home/user/project-b');
+        $this->assertNotEquals($hash1, $hash2);
+    }
+
+    public function testProjectHashDifferentForSameBasenameInDifferentDirs(): void
+    {
+        $hash1 = SessionManager::projectHash('/home/alice/project');
+        $hash2 = SessionManager::projectHash('/home/bob/project');
+        $this->assertNotEquals($hash1, $hash2);
+        // Both start with same basename
+        $this->assertStringStartsWith('project-', $hash1);
+        $this->assertStringStartsWith('project-', $hash2);
+    }
+
+    public function testProjectHashSha1Is12Chars(): void
+    {
+        $hash = SessionManager::projectHash('/foo/bar');
+        // Format: basename-sha1[:12]
+        $parts = explode('-', $hash, 2);
+        $this->assertEquals('bar', $parts[0]);
+        $this->assertEquals(12, strlen($parts[1]));
+    }
+
+    // ── Project isolation: save/load scoping ─────────────────────
+
+    public function testSaveCreatesProjectScopedFile(): void
+    {
+        $cwd = '/test/my-project';
+        $this->manager->save('sess-scoped', [
+            ['role' => 'user', 'content' => 'Hello'],
+        ], ['cwd' => $cwd]);
+
+        $projectHash = SessionManager::projectHash($cwd);
+        $expectedDir = $this->tmpDir . '/' . $projectHash;
+        $this->assertDirectoryExists($expectedDir);
+        $this->assertFileExists($expectedDir . '/session-sess-scoped.json');
+    }
+
+    public function testSaveCreatesLatestInProjectDir(): void
+    {
+        $cwd = '/test/my-project';
+        $this->manager->save('sess-lat', [
+            ['role' => 'user', 'content' => 'Hello'],
+        ], ['cwd' => $cwd]);
+
+        $projectHash = SessionManager::projectHash($cwd);
+        $latestPath = $this->tmpDir . '/' . $projectHash . '/latest.json';
+        $this->assertFileExists($latestPath);
+
+        $data = json_decode(file_get_contents($latestPath), true);
+        $this->assertEquals('sess-lat', $data['session_id']);
+    }
+
+    public function testLoadByIdFindsProjectScopedSession(): void
+    {
+        $this->manager->save('sess-find', [
+            ['role' => 'user', 'content' => 'Find me'],
+        ], ['cwd' => '/projects/alpha']);
+
+        $data = $this->manager->loadById('sess-find');
+        $this->assertNotNull($data);
+        $this->assertEquals('sess-find', $data['session_id']);
+        $this->assertEquals('/projects/alpha', $data['cwd']);
+    }
+
+    public function testLoadLatestWithCwdReturnsProjectScopedSession(): void
+    {
+        $this->manager->save('sess-a', [
+            ['role' => 'user', 'content' => 'Alpha'],
+        ], ['cwd' => '/projects/alpha']);
+
+        $this->manager->save('sess-b', [
+            ['role' => 'user', 'content' => 'Beta'],
+        ], ['cwd' => '/projects/beta']);
+
+        $data = $this->manager->loadLatest('/projects/alpha');
+        $this->assertNotNull($data);
+        $this->assertEquals('sess-a', $data['session_id']);
+    }
+
+    public function testListSessionsWithCwdFiltersToProject(): void
+    {
+        $this->manager->save('sess-alpha-1', [
+            ['role' => 'user', 'content' => 'Alpha 1'],
+        ], ['cwd' => '/projects/alpha']);
+
+        $this->manager->save('sess-beta-1', [
+            ['role' => 'user', 'content' => 'Beta 1'],
+        ], ['cwd' => '/projects/beta']);
+
+        $this->manager->save('sess-alpha-2', [
+            ['role' => 'user', 'content' => 'Alpha 2'],
+        ], ['cwd' => '/projects/alpha']);
+
+        $sessions = $this->manager->listSessions(0, '/projects/alpha');
+        $this->assertCount(2, $sessions);
+
+        $ids = array_column($sessions, 'session_id');
+        $this->assertContains('sess-alpha-1', $ids);
+        $this->assertContains('sess-alpha-2', $ids);
+        $this->assertNotContains('sess-beta-1', $ids);
+    }
+
+    public function testListSessionsWithoutCwdReturnsAll(): void
+    {
+        $this->manager->save('sess-x', [
+            ['role' => 'user', 'content' => 'X'],
+        ], ['cwd' => '/projects/x']);
+
+        $this->manager->save('sess-y', [
+            ['role' => 'user', 'content' => 'Y'],
+        ], ['cwd' => '/projects/y']);
+
+        $sessions = $this->manager->listSessions(0);
+        $this->assertCount(2, $sessions);
+    }
+
+    public function testDeleteFindsSessionAcrossProjectDirs(): void
+    {
+        $this->manager->save('sess-cross', [
+            ['role' => 'user', 'content' => 'Cross'],
+        ], ['cwd' => '/projects/cross']);
+
+        $this->assertTrue($this->manager->delete('sess-cross'));
+        $this->assertNull($this->manager->loadById('sess-cross'));
+    }
+
+    // ── Backward compatibility with flat layout ──────────────────
+
+    public function testLoadByIdFindsFlatLayoutSession(): void
+    {
+        // Simulate old flat-layout file
+        $flatPath = $this->tmpDir . '/session-sess-legacy.json';
+        file_put_contents($flatPath, json_encode([
+            'session_id' => 'sess-legacy',
+            'cwd' => '/old/project',
+            'model' => 'claude-sonnet-4-6',
+            'messages' => [['role' => 'user', 'content' => 'Legacy']],
+            'message_count' => 1,
+            'created_at' => '2025-01-01T00:00:00+00:00',
+            'updated_at' => '2025-01-01T00:00:00+00:00',
+            'summary' => 'Legacy',
+        ]));
+
+        $data = $this->manager->loadById('sess-legacy');
+        $this->assertNotNull($data);
+        $this->assertEquals('sess-legacy', $data['session_id']);
+        $this->assertEquals('/old/project', $data['cwd']);
+    }
+
+    public function testLoadLatestByCwdFindsFlatLayoutSession(): void
+    {
+        // Simulate old flat-layout file
+        $flatPath = $this->tmpDir . '/session-sess-flat.json';
+        file_put_contents($flatPath, json_encode([
+            'session_id' => 'sess-flat',
+            'cwd' => '/old/flat-project',
+            'model' => 'claude-sonnet-4-6',
+            'messages' => [['role' => 'user', 'content' => 'Flat']],
+            'message_count' => 1,
+            'created_at' => '2025-01-01T00:00:00+00:00',
+            'updated_at' => '2025-01-01T00:00:00+00:00',
+            'summary' => 'Flat',
+        ]));
+
+        $data = $this->manager->loadLatest('/old/flat-project');
+        $this->assertNotNull($data);
+        $this->assertEquals('sess-flat', $data['session_id']);
+    }
+
+    public function testListSessionsIncludesFlatLayoutSessions(): void
+    {
+        // Flat-layout file
+        $flatPath = $this->tmpDir . '/session-sess-oldstyle.json';
+        file_put_contents($flatPath, json_encode([
+            'session_id' => 'sess-oldstyle',
+            'cwd' => '/old/path',
+            'model' => 'claude-sonnet-4-6',
+            'messages' => [],
+            'message_count' => 0,
+            'created_at' => '2025-01-01T00:00:00+00:00',
+            'updated_at' => '2025-01-01T00:00:00+00:00',
+            'summary' => '',
+        ]));
+
+        // New project-scoped file
+        $this->manager->save('sess-newstyle', [
+            ['role' => 'user', 'content' => 'New'],
+        ], ['cwd' => '/new/path']);
+
+        $sessions = $this->manager->listSessions(0);
+        $ids = array_column($sessions, 'session_id');
+        $this->assertContains('sess-oldstyle', $ids);
+        $this->assertContains('sess-newstyle', $ids);
+    }
+
+    public function testDeleteRemovesFlatLayoutSession(): void
+    {
+        $flatPath = $this->tmpDir . '/session-sess-delflag.json';
+        file_put_contents($flatPath, json_encode([
+            'session_id' => 'sess-delflag',
+            'cwd' => '/old/path',
+            'messages' => [],
+            'message_count' => 0,
+            'created_at' => '2025-01-01T00:00:00+00:00',
+            'updated_at' => '2025-01-01T00:00:00+00:00',
+        ]));
+
+        $this->assertTrue($this->manager->delete('sess-delflag'));
+        $this->assertFileDoesNotExist($flatPath);
+    }
+
+    public function testNewSessionsAlwaysUseProjectLayout(): void
+    {
+        $cwd = '/projects/scoped';
+        $this->manager->save('sess-new-layout', [
+            ['role' => 'user', 'content' => 'Test'],
+        ], ['cwd' => $cwd]);
+
+        // Should NOT exist in flat layout
+        $flatPath = $this->tmpDir . '/session-sess-new-layout.json';
+        $this->assertFileDoesNotExist($flatPath);
+
+        // Should exist in project-scoped dir
+        $projectHash = SessionManager::projectHash($cwd);
+        $scopedPath = $this->tmpDir . '/' . $projectHash . '/session-sess-new-layout.json';
+        $this->assertFileExists($scopedPath);
     }
 
     // ── Helper ────────────────────────────────────────────────────

@@ -62,7 +62,7 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
 
-### 🆕 v0.7.8 — Agent Harness Mode (5 new subsystems, 216 tests)
+### 🆕 v0.7.8 — Agent Harness Mode + Enterprise Subsystems (20 subsystems, 628 tests)
 - **Persistent Task Manager** (`src/Tasks/PersistentTaskManager.php`) — File-backed task persistence with JSON index + per-task output logs. `appendOutput()` / `readOutput()` for log streaming, `watchProcess()` + `pollProcesses()` for non-blocking process monitoring, auto-mark stale tasks as failed on restart, age-based pruning. Config: `persistence.tasks`
 - **Session Manager** (`src/Session/SessionManager.php`) — Save/load/list/delete conversation snapshots to `~/.superagent/sessions/`. `loadLatest()` with CWD filtering for project-scoped resume, auto-summary extraction, session ID sanitization, count + age-based pruning. Config: `persistence.sessions`
 - **Stream Event Architecture** (`src/Harness/`) — 9 unified event types (`TextDelta`, `ThinkingDelta`, `TurnComplete`, `ToolStarted`, `ToolCompleted`, `Compaction`, `Status`, `Error`, `AgentComplete`). `StreamEventEmitter` with multi-listener dispatch and `toStreamingHandler()` bridge for zero-change QueryEngine integration
@@ -73,6 +73,20 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Worktree Manager** (`src/Swarm/WorktreeManager.php`) — Standalone git worktree lifecycle: create with large-dir symlinks (node_modules, vendor, .venv), metadata persistence, resume existing, prune stale. Extracted from ProcessBackend for reuse
 - **Tmux Backend** (`src/Swarm/Backends/TmuxBackend.php`) — Visual multi-agent debugging: each agent runs in a tmux pane. Auto-detection (`$TMUX` + `which tmux`), graceful fallback when unavailable. `BackendType::TMUX` enum
 - **Parameter-Overrides-Config** — All new subsystems accept `array $overrides` in `fromConfig()` with priority: `$overrides` > config > defaults. Force-enable features at call site even when config has them disabled
+- **API Retry Middleware** (`src/Providers/RetryMiddleware.php`) — Exponential backoff with jitter, `Retry-After` header support, error classification (auth/rate_limit/transient/unrecoverable), configurable max retries, retry log for observability. `wrap()` static factory
+- **iTerm2 Backend** (`src/Swarm/Backends/ITermBackend.php`) — Pane-based agent debugging via AppleScript, auto-detection (`$ITERM_SESSION_ID`), graceful shutdown + force kill. `BackendType::ITERM2`
+- **Plugin System** (`src/Plugins/`) — `PluginManifest` (parsed from `plugin.json`), `LoadedPlugin` (resolved skills/hooks/MCP), `PluginLoader` (discover from `~/.superagent/plugins/` and `.superagent/plugins/`, enable/disable, install/uninstall, collect across all enabled plugins)
+- **Observable App State** (`src/State/`) — `AppState` immutable value object with `with()` partial updates. `AppStateStore` observable store with `subscribe()` (returns unsubscribe callable), auto-notifies listeners on change
+- **Hook Hot-Reloading** (`src/Hooks/HookReloader.php`) — Monitors config file mtime, reloads `HookRegistry` when changed. JSON and PHP config formats. `forceReload()`, `hasChanged()`, `fromDefaults()` factory
+- **Prompt & Agent Hooks** (`src/Hooks/PromptHook.php`, `AgentHook.php`) — LLM-based validation: sends prompt with `$ARGUMENTS` injection, expects `{"ok": true/false, "reason": "..."}`. `AgentHook` with extended context and 60s timeout. Both support `blockOnFailure` and matcher patterns
+- **Multi-Channel Gateway** (`src/Channels/`) — `ChannelInterface`, `BaseChannel` with ACL, `MessageBus` (SplQueue-based inbound/outbound), `ChannelManager` for registration/dispatch, `WebhookChannel` for HTTP webhooks, `InboundMessage`/`OutboundMessage` value objects
+- **Backend Protocol** (`src/Harness/BackendProtocol.php`, `FrontendRequest.php`) — JSON-lines protocol (`SAJSON:` prefix) for frontend ↔ backend communication. 8 event emitters, `readRequest()`, `createStreamBridge()`. `FrontendRequest` typed request parsing
+- **OAuth Device Code Flow** (`src/Auth/`) — RFC 8628 implementation with browser auto-open. `CredentialStore` file-based storage with atomic writes and 0600 permissions. `TokenResponse`/`DeviceCodeResponse` immutable DTOs
+- **Permission Path Rules** (`src/Permissions/`) — `PathRule` glob-based allow/deny rules, `CommandDenyPattern` fnmatch patterns, `PathRuleEvaluator` chained evaluation with deny-takes-precedence. `fromConfig()` factory
+- **Coordinator Task Notification** (`src/Coordinator/TaskNotification.php`) — Structured XML notification for sub-agent completion with `toXml()`/`toText()`/`fromXml()`/`fromResult()`. XML round-trip fidelity
+- **Enhanced Auto-Compactor** — Dynamic threshold (`contextWindow - 20K - 13K`), token estimation padding (`raw * 4/3`), `contextWindowForModel()` mapping, `setContextWindow()` override
+- **Enhanced Parallel Tool Execution** — New `executeProcessParallel()` for true OS-level parallelism via `proc_open`, `getStrategy()` returns `process`/`fiber`/`sequential`, config: `performance.process_parallel_execution.enabled`
+- **Session Project Isolation** — Sessions stored in project-scoped subdirectories: `sessions/{basename}-{sha1[:12]}/`. Backward compatible with flat-layout sessions
 
 ### 🆕 v0.7.7 — Debuggability & Quality Hardening
 - **Swallowed Exception Logging** — Added `error_log('[SuperAgent] ...')` to all 27 previously-silent catch blocks across 24 files (Performance, Optimization, ProcessBackend, MCPManager, etc.). Production issues that were invisible are now traceable via `[SuperAgent]` log prefix

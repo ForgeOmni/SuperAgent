@@ -9,48 +9,72 @@ use Illuminate\Support\Facades\Http;
 class HttpHook implements HookInterface
 {
     private bool $hasExecuted = false;
-    
+
     public function __construct(
         private string $url,
+        private string $method = 'POST',
         private array $headers = [],
         private array $allowedEnvVars = [],
         private int $timeout = 30,
+        private bool $blockOnFailure = false,
         private bool $once = false,
         private ?string $condition = null,
+        private ?string $matcher = null,
         private ?string $statusMessage = null,
     ) {}
-    
+
     public function execute(HookInput $input, ?int $timeout = null): HookResult
     {
         if ($this->once && $this->hasExecuted) {
             return HookResult::continue('Hook already executed (once=true)');
         }
-        
+
         try {
             $url = $this->interpolateUrl($this->url, $input);
             $headers = $this->interpolateHeaders($this->headers, $input);
             $actualTimeout = $timeout ?? $this->timeout;
-            
-            $response = Http::timeout($actualTimeout)
-                ->withHeaders($headers)
-                ->post($url, $input->toArray());
-            
+
+            // Build enriched payload
+            $payload = [
+                'event' => $input->hookEvent->value,
+                'session_id' => $input->sessionId,
+                'cwd' => $input->cwd,
+                'git_repo_root' => $input->gitRepoRoot,
+                'data' => $input->additionalData,
+                'timestamp' => date('c'),
+            ];
+
+            $httpClient = Http::timeout($actualTimeout)->withHeaders($headers);
+
+            $response = match (strtoupper($this->method)) {
+                'GET' => $httpClient->get($url, $payload),
+                'PUT' => $httpClient->put($url, $payload),
+                'PATCH' => $httpClient->patch($url, $payload),
+                'DELETE' => $httpClient->delete($url, $payload),
+                default => $httpClient->post($url, $payload),
+            };
+
             if (!$response->successful()) {
-                return HookResult::error(
-                    "HTTP hook failed: {$response->status()} - {$response->body()}",
-                );
+                $errorMsg = "HTTP hook failed: {$response->status()} - {$response->body()}";
+
+                if ($this->blockOnFailure) {
+                    return HookResult::stop($errorMsg);
+                }
+
+                error_log('[SuperAgent] ' . $errorMsg);
+                return HookResult::continue();
             }
-            
+
             $data = $response->json();
-            
+
             if ($data === null) {
                 // Non-JSON response, treat as success
                 $this->hasExecuted = true;
                 return HookResult::continue($response->body());
             }
-            
+
             $this->hasExecuted = true;
-            
+
             return new HookResult(
                 continue: $data['continue'] ?? true,
                 suppressOutput: $data['suppress_output'] ?? false,
@@ -61,53 +85,68 @@ class HttpHook implements HookInterface
                 watchPaths: $data['watch_paths'] ?? null,
             );
         } catch (\Exception $e) {
-            return HookResult::error("HTTP hook error: " . $e->getMessage());
+            $errorMsg = "HTTP hook error: " . $e->getMessage();
+
+            if ($this->blockOnFailure) {
+                return HookResult::error($errorMsg);
+            }
+
+            error_log('[SuperAgent] ' . $errorMsg);
+            return HookResult::continue();
         }
     }
-    
+
     public function getType(): HookType
     {
         return HookType::HTTP;
     }
-    
+
     public function matches(string $toolName = null, array $context = []): bool
     {
-        return true;
+        if ($this->matcher === null) {
+            return true;
+        }
+
+        if ($toolName === null) {
+            return false;
+        }
+
+        return fnmatch($this->matcher, $toolName);
     }
-    
+
     public function isAsync(): bool
     {
         return false; // HTTP hooks are synchronous
     }
-    
+
     public function isOnce(): bool
     {
         return $this->once;
     }
-    
+
     public function getCondition(): ?string
     {
-        return $this->condition;
+        return $this->condition ?? $this->matcher;
     }
-    
+
     private function interpolateUrl(string $url, HookInput $input): string
     {
         $variables = $this->getVariables($input);
         return strtr($url, $variables);
     }
-    
+
     private function interpolateHeaders(array $headers, HookInput $input): array
     {
         $variables = $this->getVariables($input);
-        
+
         $interpolated = [];
         foreach ($headers as $key => $value) {
             $interpolated[$key] = strtr($value, $variables);
         }
-        
+
         return $interpolated;
     }
-    
+
     private function getVariables(HookInput $input): array
     {
         $variables = [
@@ -116,18 +155,18 @@ class HttpHook implements HookInterface
             '$GIT_REPO_ROOT' => $input->gitRepoRoot ?? '',
             '$HOOK_EVENT' => $input->hookEvent->value,
         ];
-        
+
         // Add allowed environment variables
         foreach ($this->allowedEnvVars as $envVar) {
             $variables['$' . $envVar] = $_ENV[$envVar] ?? '';
         }
-        
+
         // Add specific variables from additional data
         foreach ($input->additionalData as $key => $value) {
             $varName = '$' . strtoupper($key);
             $variables[$varName] = is_array($value) ? json_encode($value) : (string)$value;
         }
-        
+
         return $variables;
     }
 }

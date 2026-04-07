@@ -907,7 +907,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
-| 0.7.8      | 10.x+   | 8.1+  | Agent Harness 模式：持久化任务与会话、StreamEvent 统一事件、REPL 交互循环（斜杠命令）、自动压缩器、E2E 场景测试框架、continue_pending()、WorktreeManager、TmuxBackend。216 个新测试 |
+| 0.7.8      | 10.x+   | 8.1+  | Agent Harness 模式 + 企业级子系统：持久化任务与会话、StreamEvent 统一事件、REPL 交互循环、自动压缩器、E2E 场景框架、API 重试中间件、iTerm2 后端、插件系统、可观察应用状态、Hook 热重载、Prompt/Agent Hook、多通道网关、后端协议、OAuth 设备码流程、权限路径规则、协调器任务通知。628 个新测试 |
 | 0.7.7      | 10.x+   | 8.1+  | 可调试性加固：27个吞没异常添加日志、Agent核心单元测试（31个测试）、docs/REVIEW.md代码审查框架 |
 | 0.7.6      | 10.x+   | 8.1+  | 6大创新子系统：Agent Replay时间旅行调试、对话分叉、Agent辩论协议、成本预测引擎、自然语言护栏、自愈流水线 |
 | 0.7.5      | 10.x+   | 8.1+  | Claude Code 工具名兼容：双向 ToolNameResolver，agent 定义和权限系统自动解析 |

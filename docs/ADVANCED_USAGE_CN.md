@@ -61,7 +61,7 @@
 - [30. 自然语言护栏](#30-自然语言护栏)
 - [31. 自愈流水线](#31-自愈流水线)
 
-### Agent Harness 模式 (v0.7.8)
+### Agent Harness 模式 + 企业级子系统 (v0.7.8)
 
 - [32. 持久化任务管理器](#32-持久化任务管理器)
 - [33. 会话管理器](#33-会话管理器)
@@ -71,6 +71,17 @@
 - [37. E2E 场景测试框架](#37-e2e-场景测试框架)
 - [38. Worktree 管理器](#38-worktree-管理器)
 - [39. Tmux 后端](#39-tmux-后端)
+- [40. API 重试中间件](#40-api-重试中间件)
+- [41. iTerm2 后端](#41-iterm2-后端)
+- [42. 插件系统](#42-插件系统)
+- [43. 可观察应用状态](#43-可观察应用状态)
+- [44. Hook 热重载](#44-hook-热重载)
+- [45. Prompt & Agent Hook](#45-prompt--agent-hook)
+- [46. 多通道网关](#46-多通道网关)
+- [47. 后端协议](#47-后端协议)
+- [48. OAuth 设备码流程](#48-oauth-设备码流程)
+- [49. 权限路径规则](#49-权限路径规则)
+- [50. 协调器任务通知](#50-协调器任务通知)
 
 ---
 
@@ -5341,3 +5352,519 @@ if ($backend->isAvailable()) {
 **后端不可用。** TmuxBackend 需要在 tmux 会话中运行（`$TMUX` 环境变量）且安装了 `tmux`。使用 `detect()` 在生成前检查。
 
 **面板排列不正确。** 生成多个 Agent 后会自动调用 `select-layout tiled`。如果布局有误，手动运行 `tmux select-layout tiled`。
+
+---
+
+## 40. API 重试中间件
+
+> v0.7.8 新增
+
+包装任何 `LLMProvider`，提供自动重试逻辑，包括指数退避、抖动和智能错误分类。
+
+### 用法
+
+```php
+use SuperAgent\Providers\RetryMiddleware;
+
+// 包装任何 provider
+$resilientProvider = RetryMiddleware::wrap($provider, [
+    'max_retries' => 3,
+    'base_delay_ms' => 1000,
+    'max_delay_ms' => 30000,
+]);
+
+// 错误分类
+// - auth (401/403)：不重试
+// - rate_limit (429)：重试，遵循 Retry-After 头
+// - transient (500/502/503/529)：退避重试
+// - unrecoverable：不重试
+
+// 获取重试日志用于可观察性
+$log = $resilientProvider->getRetryLog();
+foreach ($log as $entry) {
+    echo "{$entry['attempt']}: {$entry['error_type']} - 等待 {$entry['delay_ms']}ms\n";
+}
+```
+
+### 退避公式
+
+```
+delay = min(base_delay * 2^attempt, max_delay) + random(0, 25% of delay)
+```
+
+抖动组件防止多个 Agent 同时重试时的惊群效应。
+
+---
+
+## 41. iTerm2 后端
+
+> v0.7.8 新增
+
+可视化 Agent 调试后端，通过 AppleScript 将每个 Agent 生成在独立的 iTerm2 分割面板中。
+
+### 用法
+
+```php
+use SuperAgent\Swarm\Backends\ITermBackend;
+
+$backend = new ITermBackend();
+
+if ($backend->isAvailable()) {
+    $result = $backend->spawn($agentConfig);
+    // Agent 现在运行在可见的 iTerm2 面板中
+
+    // 优雅关闭
+    $backend->requestShutdown($agentId); // 发送 Ctrl+C
+
+    // 强制终止
+    $backend->kill($agentId); // 关闭会话
+}
+```
+
+### 自动检测
+
+ITermBackend 检查 `$ITERM_SESSION_ID` 环境变量和 `osascript` 可用性。在非 iTerm2 环境中 `isAvailable()` 返回 `false`。
+
+### 配置
+
+```php
+'swarm' => [
+    'backend' => env('SUPERAGENT_SWARM_BACKEND', 'process'),
+    // 设置为 'iterm2' 在 iTerm2 中进行可视化调试
+],
+```
+
+---
+
+## 42. 插件系统
+
+> v0.7.8 新增
+
+可扩展的插件架构，用于将技能、Hook 和 MCP 服务器配置作为可复用包分发。
+
+### 插件结构
+
+```
+my-plugin/
+├── plugin.json          # 清单文件
+├── skills/              # 技能 Markdown 文件
+│   └── my-skill.md
+├── hooks.json           # Hook 配置
+└── mcp.json             # MCP 服务器配置
+```
+
+### 插件清单 (`plugin.json`)
+
+```json
+{
+    "name": "my-plugin",
+    "version": "1.0.0",
+    "skills_dir": "skills",
+    "hooks_file": "hooks.json",
+    "mcp_file": "mcp.json"
+}
+```
+
+### 用法
+
+```php
+use SuperAgent\Plugins\PluginLoader;
+
+$loader = PluginLoader::fromDefaults();
+
+// 从 ~/.superagent/plugins/ 和 .superagent/plugins/ 发现
+$plugins = $loader->discover();
+
+// 启用/禁用
+$loader->enable('my-plugin');
+$loader->disable('my-plugin');
+
+// 安装/卸载
+$loader->install('/path/to/my-plugin');
+$loader->uninstall('my-plugin');
+
+// 收集所有启用插件的技能、Hook、MCP 配置
+$allSkills = $loader->collectSkills();
+$allHooks = $loader->collectHooks();
+$allMcp = $loader->collectMcpConfigs();
+```
+
+### 配置
+
+```php
+'plugins' => [
+    'enabled' => env('SUPERAGENT_PLUGINS_ENABLED', false),
+    'enabled_plugins' => [], // 要启用的插件名称列表
+],
+```
+
+---
+
+## 43. 可观察应用状态
+
+> v0.7.8 新增
+
+响应式应用状态管理，使用不可变状态对象和观察者模式。
+
+### 用法
+
+```php
+use SuperAgent\State\AppState;
+use SuperAgent\State\AppStateStore;
+
+// 创建初始状态
+$state = new AppState(
+    model: 'claude-opus-4-6',
+    permissionMode: 'default',
+    provider: 'anthropic',
+    cwd: getcwd(),
+    turnCount: 0,
+    totalCostUsd: 0.0,
+);
+
+// 不可变更新
+$newState = $state->with(turnCount: 1, totalCostUsd: 0.05);
+
+// 可观察存储
+$store = new AppStateStore($state);
+
+// 订阅变更
+$unsubscribe = $store->subscribe(function (AppState $newState, AppState $oldState) {
+    echo "轮次：{$oldState->turnCount} → {$newState->turnCount}\n";
+});
+
+$store->set($store->get()->with(turnCount: 1));
+// 输出：轮次：0 → 1
+
+// 完成后取消订阅
+$unsubscribe();
+```
+
+---
+
+## 44. Hook 热重载
+
+> v0.7.8 新增
+
+配置文件变更时自动重新加载 Hook 配置，无需重启应用。
+
+### 用法
+
+```php
+use SuperAgent\Hooks\HookReloader;
+
+// 从默认配置位置创建
+$reloader = HookReloader::fromDefaults();
+
+// 检查并在变更时重载（定期调用或每轮调用前调用）
+if ($reloader->hasChanged()) {
+    $reloader->forceReload();
+}
+
+// 支持 JSON 和 PHP 配置格式
+// ~/.superagent/hooks.json 或 config/superagent-hooks.php
+```
+
+### 工作原理
+
+重载器监控配置文件的 `mtime`。检测到变更时，重新解析配置并使用更新后的 Hook 重建 `HookRegistry`。
+
+---
+
+## 45. Prompt & Agent Hook
+
+> v0.7.8 新增
+
+基于 LLM 的 Hook 类型，通过向 AI 模型发送提示来验证操作。
+
+### Prompt Hook
+
+```php
+use SuperAgent\Hooks\PromptHook;
+
+$hook = new PromptHook(
+    prompt: '这个文件修改安全吗？文件：$ARGUMENTS',
+    blockOnFailure: true,
+    matcher: ['event' => 'tool:edit_file'],
+);
+
+// Hook 发送提示（$ARGUMENTS 替换为实际参数）
+// 到配置的 LLM provider 并期望：
+// {"ok": true} 或 {"ok": false, "reason": "解释"}
+```
+
+### Agent Hook
+
+```php
+use SuperAgent\Hooks\AgentHook;
+
+$hook = new AgentHook(
+    prompt: '审查此操作的安全影响：$ARGUMENTS',
+    blockOnFailure: true,
+    matcher: ['event' => 'tool:bash'],
+    timeout: 60, // 更深入分析的扩展超时
+);
+```
+
+Agent Hook 提供扩展上下文（对话历史、工具调用上下文），用于更明智的验证。
+
+---
+
+## 46. 多通道网关
+
+> v0.7.8 新增
+
+消息抽象层，将 Agent 通信与特定平台解耦。
+
+### 架构
+
+```
+外部平台 → Channel → MessageBus（入站队列）→ Agent 核心
+Agent 核心 → MessageBus（出站队列）→ ChannelManager → Channels → 外部平台
+```
+
+### 用法
+
+```php
+use SuperAgent\Channels\ChannelManager;
+use SuperAgent\Channels\WebhookChannel;
+use SuperAgent\Channels\MessageBus;
+
+$bus = new MessageBus();
+$manager = new ChannelManager($bus);
+
+// 注册 webhook 通道
+$webhook = new WebhookChannel('my-webhook', [
+    'url' => 'https://example.com/webhook',
+    'allowed_senders' => ['user-1', 'user-2'], // ACL
+]);
+$manager->register($webhook);
+
+// 启动所有通道
+$manager->startAll();
+
+// 发送出站消息
+$manager->dispatch(new OutboundMessage(
+    channel: 'my-webhook',
+    sessionKey: 'session-123',
+    content: '任务完成',
+));
+
+// 读取入站消息
+while ($message = $bus->dequeueInbound()) {
+    // 处理 $message->content
+}
+```
+
+### 配置
+
+```php
+'channels' => [
+    'my-webhook' => [
+        'type' => 'webhook',
+        'url' => 'https://example.com/webhook',
+        'allowed_senders' => ['*'], // 允许所有
+    ],
+],
+```
+
+---
+
+## 47. 后端协议
+
+> v0.7.8 新增
+
+基于 JSON-lines 的协议，用于前端 UI 和 SuperAgent 后端之间的结构化通信。
+
+### 协议格式
+
+消息以 `SAJSON:` 为前缀，后跟 JSON 对象：
+
+```
+SAJSON:{"type":"ready","data":{"version":"0.7.8"}}
+SAJSON:{"type":"assistant_delta","data":{"text":"你好"}}
+SAJSON:{"type":"tool_started","data":{"tool":"read_file","input":{"path":"/src/Agent.php"}}}
+```
+
+### 事件类型
+
+| 事件 | 描述 |
+|------|------|
+| `ready` | 后端初始化完成 |
+| `assistant_delta` | 流式文本块 |
+| `assistant_complete` | 完整响应完成 |
+| `tool_started` | 工具开始执行 |
+| `tool_completed` | 工具执行完成 |
+| `status` | 状态更新 |
+| `error` | 发生错误 |
+| `modal_request` | 需要 UI 弹窗（权限等） |
+
+### 用法
+
+```php
+use SuperAgent\Harness\BackendProtocol;
+use SuperAgent\Harness\FrontendRequest;
+
+$protocol = new BackendProtocol(STDOUT);
+
+// 发射事件
+$protocol->emitReady(['version' => '0.7.8']);
+$protocol->emitAssistantDelta('你好，');
+$protocol->emitToolStarted('read_file', ['path' => '/src/Agent.php']);
+
+// 读取前端请求
+$request = FrontendRequest::readRequest(STDIN);
+// $request->type: 'submit', 'permission', 'question', 'select'
+
+// 桥接 StreamEvent 到协议
+$bridge = $protocol->createStreamBridge();
+// 自动将所有 StreamEvent 类型映射到协议事件
+```
+
+---
+
+## 48. OAuth 设备码流程
+
+> v0.7.8 新增
+
+符合 RFC 8628 的设备授权流程，用于基于 CLI 的身份验证。
+
+### 用法
+
+```php
+use SuperAgent\Auth\DeviceCodeFlow;
+use SuperAgent\Auth\CredentialStore;
+
+$flow = new DeviceCodeFlow(
+    clientId: 'your-client-id',
+    tokenEndpoint: 'https://auth.example.com/token',
+    deviceEndpoint: 'https://auth.example.com/device',
+);
+
+// 步骤 1：请求设备码
+$deviceCode = $flow->requestDeviceCode(['openid', 'profile']);
+echo "访问 {$deviceCode->verificationUri} 并输入：{$deviceCode->userCode}\n";
+
+// 步骤 2：轮询 token（自动在 macOS/Linux/Windows 打开浏览器）
+$token = $flow->pollForToken($deviceCode);
+
+// 步骤 3：安全存储凭证
+$store = new CredentialStore('~/.superagent/credentials');
+$store->save('provider-name', $token);
+
+// 之后：获取
+$token = $store->load('provider-name');
+if ($token->isExpired()) {
+    $token = $flow->refreshToken($token->refreshToken);
+}
+```
+
+### 配置
+
+```php
+'auth' => [
+    'credential_store_path' => env('SUPERAGENT_CREDENTIAL_STORE', null),
+    'device_code' => [
+        'provider-name' => [
+            'client_id' => env('PROVIDER_CLIENT_ID'),
+            'token_endpoint' => 'https://...',
+            'device_endpoint' => 'https://...',
+        ],
+    ],
+],
+```
+
+---
+
+## 49. 权限路径规则
+
+> v0.7.8 新增
+
+基于 glob 的文件路径和命令权限规则，用于细粒度访问控制。
+
+### 用法
+
+```php
+use SuperAgent\Permissions\PathRule;
+use SuperAgent\Permissions\CommandDenyPattern;
+use SuperAgent\Permissions\PathRuleEvaluator;
+
+// 定义路径规则
+$rules = [
+    PathRule::allow('src/**/*.php'),         // 允许 src/ 下所有 PHP 文件
+    PathRule::deny('src/Auth/**'),           // 但拒绝 Auth 目录
+    PathRule::allow('tests/**'),             // 允许所有测试文件
+    PathRule::deny('.env*'),                 // 拒绝 env 文件
+];
+
+// 定义命令拒绝模式
+$denyCommands = [
+    new CommandDenyPattern('rm -rf *'),
+    new CommandDenyPattern('DROP TABLE*'),
+];
+
+// 评估
+$evaluator = PathRuleEvaluator::fromConfig([
+    'path_rules' => $rules,
+    'denied_commands' => $denyCommands,
+]);
+
+$decision = $evaluator->evaluate('/src/Agent.php');
+// PermissionDecision::ALLOW
+
+$decision = $evaluator->evaluate('/src/Auth/Secret.php');
+// PermissionDecision::DENY（拒绝规则优先）
+
+$decision = $evaluator->evaluateCommand('rm -rf /');
+// PermissionDecision::DENY
+```
+
+### 配置
+
+```php
+'permission_rules' => [
+    'path_rules' => [
+        ['pattern' => 'src/**/*.php', 'action' => 'allow'],
+        ['pattern' => '.env*', 'action' => 'deny'],
+    ],
+    'denied_commands' => [
+        'rm -rf *',
+        'DROP TABLE*',
+    ],
+],
+```
+
+---
+
+## 50. 协调器任务通知
+
+> v0.7.8 新增
+
+结构化 XML 通知，用于向协调器报告子 Agent 任务完成情况。
+
+### 用法
+
+```php
+use SuperAgent\Coordinator\TaskNotification;
+
+// 从 Agent 结果创建
+$notification = TaskNotification::fromResult(
+    taskId: 'task-abc-123',
+    status: 'completed',
+    summary: '实现了新功能',
+    result: '创建了3个文件，修改了2个文件',
+    usage: ['input_tokens' => 5000, 'output_tokens' => 2000],
+    cost: 0.15,
+    toolsUsed: ['read_file', 'edit_file', 'bash'],
+    turnCount: 8,
+);
+
+// 注入协调器对话作为 XML
+$xml = $notification->toXml();
+
+// 紧凑文本格式用于日志
+$text = $notification->toText();
+
+// 从 XML 解析（往返安全）
+$parsed = TaskNotification::fromXml($xml);
+```

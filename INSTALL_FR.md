@@ -897,7 +897,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
-| 0.7.8      | 10.x+   | 8.1+  | Mode Agent Harness : tâches & sessions persistantes, événements stream, boucle REPL avec commandes slash, auto-compacteur, framework de scénarios E2E, continue_pending(), WorktreeManager, TmuxBackend. 216 nouveaux tests |
+| 0.7.8      | 10.x+   | 8.1+  | Mode Agent Harness + sous-systèmes entreprise : tâches & sessions persistantes, événements stream, boucle REPL, auto-compacteur, scénarios E2E, middleware retry API, backend iTerm2, système de plugins, état d'app observable, rechargement à chaud des hooks, hooks prompt/agent, passerelle multi-canal, protocole backend, flux OAuth device code, règles de permission par chemin, notifications coordinateur. 628 nouveaux tests |
 | 0.7.7      | 10.x+   | 8.1+  | Renforcement déboguabilité : journalisation de 27 exceptions silencieuses, tests unitaires Agent (31 tests), framework de revue de code docs/REVIEW.md |
 | 0.7.6      | 10.x+   | 8.1+  | 6 sous-systèmes innovants : Replay d'Agent & Débogage Temporel, Fork de Conversation, Protocole de Débat, Prédiction de Coûts, Garde-fous en Langage Naturel, Pipelines Auto-Réparateurs |
 | 0.7.5      | 10.x+   | 8.1+  | Compatibilité noms d'outils Claude Code : ToolNameResolver bidirectionnel, résolution auto dans définitions d'agents et système de permissions |

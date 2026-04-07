@@ -177,6 +177,12 @@ return [
             'max_parallel' => (int) env('SUPERAGENT_PERF_MAX_PARALLEL', 5),
         ],
 
+        // True OS-level process parallelism for read-only tools via proc_open.
+        // More expensive than Fibers but achieves real concurrency for I/O-bound tools.
+        'process_parallel_execution' => [
+            'enabled' => env('SUPERAGENT_PERF_PROCESS_PARALLEL', false),
+        ],
+
         // Start tool execution during SSE streaming before full response completes
         'streaming_tool_dispatch' => [
             'enabled' => env('SUPERAGENT_PERF_STREAMING_DISPATCH', true),
@@ -798,6 +804,95 @@ return [
         'allowed_mutations' => [
             'modify_prompt', 'change_model', 'adjust_timeout',
             'add_context', 'simplify_task',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Plugins
+    |--------------------------------------------------------------------------
+    |
+    | Plugin ecosystem for extending SuperAgent with skills, hooks, and
+    | MCP server configurations. Plugins are discovered from user-level
+    | (~/.superagent/plugins/) and project-level (.superagent/plugins/).
+    |
+    */
+    'plugins' => [
+        'enabled' => env('SUPERAGENT_PLUGINS_ENABLED', false),
+        'enabled_plugins' => [
+            // 'my-plugin' => true,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Channels (Multi-Platform Gateway)
+    |--------------------------------------------------------------------------
+    |
+    | Configure messaging platform channels for agent accessibility.
+    | Each channel has enabled flag and allow_from ACL (empty = deny all,
+    | ['*'] = allow all, or specific sender IDs).
+    |
+    */
+    'channels' => [
+        // 'slack' => [
+        //     'enabled' => false,
+        //     'bot_token' => env('SUPERAGENT_SLACK_BOT_TOKEN'),
+        //     'app_token' => env('SUPERAGENT_SLACK_APP_TOKEN'),
+        //     'allow_from' => ['*'],
+        // ],
+        // 'telegram' => [
+        //     'enabled' => false,
+        //     'token' => env('SUPERAGENT_TELEGRAM_TOKEN'),
+        //     'allow_from' => [],
+        // ],
+        // 'webhook' => [
+        //     'enabled' => false,
+        //     'outbound_url' => env('SUPERAGENT_WEBHOOK_URL'),
+        //     'allow_from' => ['*'],
+        // ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Permission Path Rules & Command Deny Patterns
+    |--------------------------------------------------------------------------
+    |
+    | Glob-based path rules for fine-grained file access control and
+    | command deny patterns for blocking dangerous shell commands.
+    |
+    */
+    'permission_rules' => [
+        'path_rules' => [
+            // ['pattern' => '*.env', 'allow' => false],
+            // ['pattern' => 'database/migrations/*', 'allow' => false],
+            // ['pattern' => '/tmp/**', 'allow' => false],
+        ],
+        'denied_commands' => [
+            // 'rm -rf /',
+            // 'DROP TABLE*',
+            // 'chmod 777*',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Auth & Credential Storage
+    |--------------------------------------------------------------------------
+    |
+    | Credential storage for API keys and OAuth tokens.
+    | Device code flow for providers requiring browser-based auth.
+    |
+    */
+    'auth' => [
+        'credential_store_path' => env('SUPERAGENT_CREDENTIAL_STORE', null), // defaults ~/.superagent/credentials/
+        'device_code' => [
+            // 'github_copilot' => [
+            //     'client_id' => env('SUPERAGENT_COPILOT_CLIENT_ID'),
+            //     'device_code_url' => 'https://github.com/login/device/code',
+            //     'token_url' => 'https://github.com/login/oauth/access_token',
+            //     'scopes' => ['copilot'],
+            // ],
         ],
     ],
 

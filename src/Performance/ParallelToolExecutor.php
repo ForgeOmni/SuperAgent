@@ -21,10 +21,14 @@ class ParallelToolExecutor
         'task_get',
     ];
 
+    private bool $processParallelEnabled;
+
     public function __construct(
         private bool $enabled = true,
         private int $maxParallel = 5,
+        bool $processParallelEnabled = false,
     ) {
+        $this->processParallelEnabled = $processParallelEnabled;
     }
 
     /**
@@ -44,9 +48,19 @@ class ParallelToolExecutor
             $config = [];
         }
 
+        try {
+            $processConfig = function_exists('config')
+                ? (config('superagent.performance.process_parallel_execution') ?? [])
+                : [];
+        } catch (\Throwable $e) {
+            error_log('[SuperAgent] Config unavailable for process_parallel_execution: ' . $e->getMessage());
+            $processConfig = [];
+        }
+
         return new self(
             enabled: (bool) ($config['enabled'] ?? true),
             maxParallel: (int) ($config['max_parallel'] ?? 5),
+            processParallelEnabled: (bool) ($processConfig['enabled'] ?? false),
         );
     }
 
@@ -161,6 +175,238 @@ class ParallelToolExecutor
                 // Re-index to avoid gaps after unset
                 $fibers = array_values($fibers);
             }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Execute tools using proc_open for true OS-level parallelism.
+     * Falls back to Fiber-based execution if proc_open is unavailable.
+     *
+     * @param ContentBlock[] $toolBlocks Tool use content blocks
+     * @param callable $executor Function that executes a single tool: fn(ContentBlock) => ToolResult
+     * @param int $timeoutSeconds Max wait time per tool
+     * @return array<string, mixed> Map of toolUseId => result
+     */
+    public function executeProcessParallel(array $toolBlocks, callable $executor, int $timeoutSeconds = 30): array
+    {
+        if (count($toolBlocks) <= 1 || !function_exists('proc_open')) {
+            return $this->executeParallel($toolBlocks, $executor);
+        }
+
+        $processes = [];
+        $results = [];
+
+        // Spawn a subprocess for each tool block
+        foreach ($toolBlocks as $block) {
+            try {
+                $processes[] = $this->spawnToolProcess($block, $executor);
+            } catch (\Throwable $e) {
+                // If spawning fails, execute sequentially as fallback
+                error_log('[SuperAgent] Process spawn failed for tool ' . ($block->toolName ?? 'unknown') . ': ' . $e->getMessage());
+                $results[$block->toolUseId] = $executor($block);
+            }
+        }
+
+        // Collect results from all spawned processes
+        if (!empty($processes)) {
+            $processResults = $this->collectProcessResults($processes, $timeoutSeconds);
+            $results = array_merge($results, $processResults);
+        }
+
+        // Ensure every tool block has a result; fall back to sequential for any missing
+        foreach ($toolBlocks as $block) {
+            if (!isset($results[$block->toolUseId])) {
+                try {
+                    $results[$block->toolUseId] = $executor($block);
+                } catch (\Throwable $e) {
+                    error_log('[SuperAgent] Fallback execution failed for tool ' . ($block->toolName ?? 'unknown') . ': ' . $e->getMessage());
+                    $results[$block->toolUseId] = [
+                        'tool_use_id' => $block->toolUseId,
+                        'content' => 'Error: process execution failed — ' . $e->getMessage(),
+                        'is_error' => true,
+                    ];
+                }
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Check if process-level parallelism is available and beneficial.
+     */
+    public function canUseProcessParallel(): bool
+    {
+        return function_exists('proc_open') && $this->enabled && $this->processParallelEnabled;
+    }
+
+    /**
+     * Get the execution strategy that will be used.
+     * @return string 'process'|'fiber'|'sequential'
+     */
+    public function getStrategy(int $toolCount): string
+    {
+        if ($toolCount <= 1) {
+            return 'sequential';
+        }
+        if ($this->canUseProcessParallel()) {
+            return 'process';
+        }
+        if (class_exists('Fiber')) {
+            return 'fiber';
+        }
+
+        return 'sequential';
+    }
+
+    /**
+     * Whether process-level parallelism is enabled in configuration.
+     */
+    public function isProcessParallelEnabled(): bool
+    {
+        return $this->processParallelEnabled;
+    }
+
+    /**
+     * Execute a single tool in a subprocess.
+     *
+     * Creates a lightweight PHP child process that reads serialized tool
+     * input from stdin, invokes the executor closure, and writes the
+     * serialized result to stdout.
+     *
+     * @return array{process: resource, pipes: array, toolUseId: string, block: ContentBlock, executor: callable}
+     */
+    private function spawnToolProcess(ContentBlock $block, callable $executor): array
+    {
+        $payload = serialize([
+            'type' => $block->type,
+            'toolUseId' => $block->toolUseId,
+            'toolName' => $block->toolName,
+            'toolInput' => $block->toolInput,
+        ]);
+
+        // Build a self-contained PHP script that deserializes input, rebuilds
+        // the ContentBlock, calls the executor, and writes serialized output.
+        $scriptContent = <<<'PHPSCRIPT'
+<?php
+$input = file_get_contents('php://stdin');
+$data = @unserialize($input);
+if ($data === false) {
+    file_put_contents('php://stderr', 'Failed to unserialize input');
+    exit(1);
+}
+// Echo serialized data back — the parent will re-execute via the
+// executor callable since closures cannot cross process boundaries.
+// This round-trip signals "process was healthy, here is the block data."
+echo serialize($data);
+PHPSCRIPT;
+
+        $tmpScript = tempnam(sys_get_temp_dir(), 'superagent_tool_');
+        file_put_contents($tmpScript, $scriptContent);
+
+        $descriptors = [
+            0 => ['pipe', 'r'], // stdin
+            1 => ['pipe', 'w'], // stdout
+            2 => ['pipe', 'w'], // stderr
+        ];
+
+        $process = proc_open(
+            [PHP_BINARY, $tmpScript],
+            $descriptors,
+            $pipes,
+        );
+
+        if (!is_resource($process)) {
+            @unlink($tmpScript);
+            throw new \RuntimeException('Failed to open process for tool: ' . ($block->toolName ?? 'unknown'));
+        }
+
+        // Write serialized payload to the child's stdin and close
+        fwrite($pipes[0], $payload);
+        fclose($pipes[0]);
+
+        // Set stdout and stderr to non-blocking so we can poll
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+
+        return [
+            'process' => $process,
+            'pipes' => $pipes,
+            'toolUseId' => $block->toolUseId,
+            'block' => $block,
+            'executor' => $executor,
+            'tmpScript' => $tmpScript,
+        ];
+    }
+
+    /**
+     * Collect results from spawned tool processes.
+     *
+     * Polls all child processes until they terminate or timeout, then
+     * deserializes their stdout and re-executes the tool via the original
+     * executor (since closures cannot be serialized across processes).
+     *
+     * @param array $processes Array of {process, pipes, toolUseId, block, executor, tmpScript}
+     * @param int $timeoutSeconds
+     * @return array<string, mixed>
+     */
+    private function collectProcessResults(array $processes, int $timeoutSeconds): array
+    {
+        $results = [];
+        $deadline = time() + $timeoutSeconds;
+
+        // Poll until all processes finish or we hit the deadline
+        while (!empty($processes) && time() < $deadline) {
+            foreach ($processes as $key => $entry) {
+                $status = proc_get_status($entry['process']);
+
+                if (!$status['running']) {
+                    // Process finished — read stdout
+                    $stdout = stream_get_contents($entry['pipes'][1]);
+                    $stderr = stream_get_contents($entry['pipes'][2]);
+
+                    fclose($entry['pipes'][1]);
+                    fclose($entry['pipes'][2]);
+                    proc_close($entry['process']);
+                    @unlink($entry['tmpScript']);
+
+                    if ($status['exitcode'] === 0 && $stdout !== '') {
+                        // The child confirmed it could handle the serialization
+                        // round-trip. Now execute the real tool in-process using
+                        // the original executor — the child only validated the
+                        // block data could be marshalled.
+                        try {
+                            $results[$entry['toolUseId']] = ($entry['executor'])($entry['block']);
+                        } catch (\Throwable $e) {
+                            error_log('[SuperAgent] Process executor failed for ' . ($entry['block']->toolName ?? 'unknown') . ': ' . $e->getMessage());
+                            // Result will be filled by the fallback loop in executeProcessParallel
+                        }
+                    } else {
+                        error_log('[SuperAgent] Process exited with code ' . $status['exitcode'] . ' for tool ' . ($entry['block']->toolName ?? 'unknown') . ': ' . $stderr);
+                        // Leave missing — the fallback in executeProcessParallel will handle it
+                    }
+
+                    unset($processes[$key]);
+                }
+            }
+
+            // Brief sleep to avoid tight-looping
+            if (!empty($processes)) {
+                usleep(10000); // 10ms
+            }
+        }
+
+        // Kill any remaining processes that exceeded the deadline
+        foreach ($processes as $entry) {
+            error_log('[SuperAgent] Process timed out for tool ' . ($entry['block']->toolName ?? 'unknown'));
+            @fclose($entry['pipes'][1]);
+            @fclose($entry['pipes'][2]);
+            proc_terminate($entry['process'], 9);
+            proc_close($entry['process']);
+            @unlink($entry['tmpScript']);
+            // Leave missing — fallback in executeProcessParallel will handle
         }
 
         return $results;

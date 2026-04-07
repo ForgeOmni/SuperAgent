@@ -23,12 +23,19 @@ use SuperAgent\Messages\ToolResultMessage;
  */
 class AutoCompactor
 {
+    private const AUTOCOMPACT_BUFFER_TOKENS = 13000;
+    private const RESERVED_OUTPUT_TOKENS = 20000;
+    private const TOKEN_ESTIMATION_PADDING = 4 / 3;
+
     private TokenEstimator $estimator;
     private ?ContextManager $contextManager;
     private ?StreamEventEmitter $emitter;
 
     private bool $enabled;
     private string $model;
+
+    /** Context window size in tokens (overridable per-model) */
+    private int $contextWindow = 200000;
 
     /** Number of recent tool results to preserve (tier 1) */
     private int $preserveRecentResults;
@@ -237,6 +244,43 @@ class AutoCompactor
         $this->model = $model;
     }
 
+    public function setContextWindow(int $tokens): void
+    {
+        $this->contextWindow = $tokens;
+    }
+
+    /**
+     * Calculate the dynamic auto-compact threshold based on context window.
+     *
+     * threshold = contextWindow - reservedOutput - buffer
+     */
+    public function getAutoCompactThreshold(): int
+    {
+        return max(0, $this->contextWindow - self::RESERVED_OUTPUT_TOKENS - self::AUTOCOMPACT_BUFFER_TOKENS);
+    }
+
+    /**
+     * Return the known context window size for a given model identifier.
+     */
+    public static function contextWindowForModel(string $model): int
+    {
+        // Models with [1m] suffix get 1M context
+        if (str_contains($model, '[1m]')) {
+            return 1_000_000;
+        }
+
+        // Normalise: strip date suffixes for matching (e.g. claude-sonnet-4-6-20250514 → claude-sonnet-4-6)
+        $base = preg_replace('/-\d{8}$/', '', $model);
+
+        return match (true) {
+            in_array($base, ['claude-opus-4-6', 'claude-sonnet-4-6'], true) => 200_000,
+            $base === 'claude-haiku-4-5' => 200_000,
+            str_starts_with($base, 'gpt-4o') => 128_000,
+            str_starts_with($base, 'gpt-4.5') => 128_000,
+            default => 200_000,
+        };
+    }
+
     public function getTotalTokensSaved(): int
     {
         return $this->totalTokensSaved;
@@ -256,17 +300,18 @@ class AutoCompactor
 
     private function shouldCompact(array $messages): bool
     {
-        return $this->estimator->shouldAutoCompact(
-            $this->messagesToArrays($messages),
-            $this->model,
-        );
+        $estimated = $this->estimateTokens($messages);
+
+        return $estimated >= $this->getAutoCompactThreshold();
     }
 
     private function estimateTokens(array $messages): int
     {
-        return $this->estimator->estimateMessagesTokens(
+        $raw = $this->estimator->estimateMessagesTokens(
             $this->messagesToArrays($messages),
         );
+
+        return (int) ceil($raw * self::TOKEN_ESTIMATION_PADDING);
     }
 
     private function messagesToArrays(array $messages): array
