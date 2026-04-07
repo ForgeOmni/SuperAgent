@@ -1,6 +1,6 @@
 # SuperAgent Code Review & Architecture Assessment
 
-> **Version:** 0.7.6 | **Review Date:** 2026-04-05 | **Reviewer:** Automated deep scan + manual analysis  
+> **Version:** 0.7.8 | **Review Date:** 2026-04-06 | **Reviewer:** Automated deep scan + manual analysis  
 > **Purpose:** Periodic assessment of project scale, architecture, code quality, risks, and development priorities.
 
 ---
@@ -24,31 +24,46 @@
 
 ### Codebase Size
 
-| Metric | Value |
-|--------|-------|
-| Source code (src/) | 70,411 lines / 429 files |
-| Test code (tests/) | 22,968 lines / 91 files |
-| Code-to-test ratio | 3.07:1 |
-| Test functions | 714+ |
-| Config options (env vars) | 139 |
-| Built-in tools | 64 |
-| LLM providers | 5 (Anthropic, OpenAI, Bedrock, OpenRouter, Ollama) |
-| Major subsystems | 33 directories under src/ |
+| Metric | Value | Δ from v0.7.6 |
+|--------|-------|----------------|
+| Source code (src/) | 78,095 lines / 482 files | +7,684 lines / +53 files |
+| Test code (tests/) | 31,637 lines / 116 files | +8,669 lines / +25 files |
+| Code-to-test ratio | 2.47:1 | Improved from 3.07:1 |
+| Test functions | 1,649+ | +935 |
+| Config options (env vars) | 155 | +16 |
+| Built-in tools | 64 | — |
+| LLM providers | 5 (Anthropic, OpenAI, Bedrock, OpenRouter, Ollama) | — |
+| Major subsystems | 58 directories under src/ | +25 |
 
 ### Top Subsystems by Size
 
 | Subsystem | Files | Lines | Role |
 |-----------|-------|-------|------|
 | Tools/Builtin | 73 | 11,065 | 64 built-in tools |
-| Swarm | 28 | 6,034 | Multi-agent orchestration |
+| Swarm | 33 | 7,161 | Multi-agent orchestration + visual backends |
 | Pipeline | 24 | 3,764 | Workflow engine |
-| Providers | 8 | 3,172 | LLM provider integrations |
+| Providers | 9 | 3,421 | LLM provider integrations + retry middleware |
+| Permissions | 17 | 2,547 | Permission, bash security (23-point), path rules |
 | Memory | 10 | 2,449 | Multi-tier memory system |
+| Hooks | 15 | 2,443 | Lifecycle hooks + prompt/agent LLM hooks + hot-reload |
 | Context | 10 | 2,411 | Context management |
+| Harness | 21 | 2,351 | REPL loop, auto-compactor, stream events, backend protocol |
+| MCP | 13 | 2,334 | Model Context Protocol |
 | Guardrails | 28 | 2,325 | Security & constraint enforcement |
-| Permissions | 14 | 2,323 | Permission & bash security (23-point) |
 | Telemetry | 8 | 2,136 | Observability & tracking |
 | Bridge | 20 | 2,100 | OpenAI-compatible HTTP proxy |
+| Performance | 8 | 1,779 | Parallel execution, adaptive tokens, prefetch |
+
+### New Subsystems in v0.7.7–v0.7.8
+
+| Subsystem | Files | Lines | Added in |
+|-----------|-------|-------|----------|
+| Auth | 5 | ~500 | v0.7.8 — OAuth device code flow, credential store |
+| Channels | 7 | ~600 | v0.7.8 — Multi-channel messaging gateway |
+| Plugins | 3 | ~400 | v0.7.8 — Plugin ecosystem (manifest, loader) |
+| State | 2 | ~250 | v0.7.8 — Observable app state store |
+| Coordinator | 1 | ~200 | v0.7.8 — Task notification for sub-agents |
+| Harness (new) | +4 | ~800 | v0.7.8 — BackendProtocol, FrontendRequest, enhanced AutoCompactor |
 
 ### Version Growth
 
@@ -59,28 +74,33 @@
 | 0.7.0 | 13-strategy performance optimization suite | ~5,000 |
 | 0.7.5 | ToolNameResolver bidirectional mapping | ~400 |
 | 0.7.6 | Replay, Fork, Debate, CostPrediction, NL Guardrails, Self-Healing | ~4,900 |
+| 0.7.7 | Exception logging (27 catch blocks), Agent unit tests, REVIEW.md | ~600 |
+| 0.7.8 | Agent Harness mode + 15 enterprise subsystems (20 total) | ~7,700 |
 
 ---
 
 ## 2. Architecture Strengths
 
-### Dual-Backend Parallelism
-ProcessBackend (`proc_open`, true OS parallelism) with InProcessBackend (Fiber) fallback. 5 agents × 500ms each = 544ms total (4.6x speedup verified). Architecturally elegant and pragmatic.
+### Dual-Backend Parallelism (Enhanced)
+ProcessBackend (`proc_open`, true OS parallelism) with InProcessBackend (Fiber) fallback. **New in v0.7.8:** `executeProcessParallel()` in `ParallelToolExecutor` adds OS-level parallel tool execution alongside agent parallelism. Three visual debugging backends: TmuxBackend, ITermBackend (AppleScript), and BackendRegistry for auto-detection.
 
-### Multi-Provider Abstraction
-Clean `LLMProvider` interface (49 lines) enables 5 providers. `ModelResolver` handles alias expansion. Provider config auto-propagates to sub-agents. Extensible without modifying core.
+### Multi-Provider Abstraction (Enhanced)
+Clean `LLMProvider` interface (49 lines) enables 5 providers. **New in v0.7.8:** `RetryMiddleware::wrap()` adds exponential backoff, jitter, Retry-After header support, and 4-category error classification to any provider without modifying the provider itself. Decorator pattern — clean separation.
 
-### Security Framework
-BashSecurityValidator with 23-point injection/obfuscation detection. Guardrails DSL with composable conditions. NL Guardrails for non-technical stakeholders. 6 permission modes. Best-in-class for agentic tool execution.
+### Security Framework (Enhanced)
+BashSecurityValidator with 23-point injection/obfuscation detection. Guardrails DSL with composable conditions. NL Guardrails for non-technical stakeholders. 6 permission modes. **New in v0.7.8:** `PathRuleEvaluator` adds glob-based file path allow/deny rules and `CommandDenyPattern` for fnmatch-based command restrictions, with deny-takes-precedence semantics.
 
 ### Context Intelligence
-SmartContextManager dynamically allocates thinking vs context tokens. LazyContext defers expensive loading. IncrementalContext transmits only diffs. Three complementary strategies working together.
+SmartContextManager dynamically allocates thinking vs context tokens. LazyContext defers expensive loading. IncrementalContext transmits only diffs. **New in v0.7.8:** AutoCompactor enhanced with dynamic threshold (`contextWindow - 20K - 13K`), `contextWindowForModel()` mapping including 1M context models.
 
-### Feature Richness
-64 built-in tools, 6 step types in Pipeline DSL, 3 debate modes, checkpoint/resume, skill distillation, adaptive feedback, knowledge graph, cost autopilot. Comprehensive and cohesive feature set.
+### Plugin & Extensibility Architecture (New)
+**v0.7.8:** Plugin system (`PluginManifest` → `LoadedPlugin` → `PluginLoader`) enables third-party skill/hook/MCP distribution as reusable packages. Hook hot-reloading via `HookReloader` (mtime-based). Prompt/Agent hooks add LLM-based validation gates. Observable `AppStateStore` with subscribe/unsubscribe pattern. Clean separation of concerns.
+
+### Enterprise Communication (New)
+**v0.7.8:** Multi-channel gateway (`ChannelInterface` → `BaseChannel` → `ChannelManager` → `MessageBus`) decouples agent messaging from platforms. `BackendProtocol` provides JSON-lines frontend ↔ backend communication with 8 event types. OAuth Device Code Flow (RFC 8628) for CLI authentication. Coordinator `TaskNotification` for structured sub-agent completion reporting.
 
 ### Modern PHP
-Strict types everywhere, readonly properties, enums, named arguments, match expressions, Fiber support. All public methods properly typed. Professional code organization with clear namespace hierarchy.
+Strict types everywhere, readonly properties, enums, named arguments, match expressions, Fiber support. All public methods properly typed. Professional code organization with clear namespace hierarchy. **58 namespaced subsystems** with consistent patterns.
 
 ---
 
@@ -88,49 +108,39 @@ Strict types everywhere, readonly properties, enums, named arguments, match expr
 
 ### Issue 1: QueryEngine God Class
 
-**File:** `src/QueryEngine.php` (875 lines, 18 methods)  
-**Severity:** HIGH
+**File:** `src/QueryEngine.php` (930 lines, ~20 methods)  
+**Severity:** HIGH | **Status: UNCHANGED from v0.7.6**
 
-The central agentic loop class has accumulated ~95 dependencies:
-- Message history & turn counting
-- Tool execution & caching
-- Hook registry & stop hooks pipeline
-- Token budget tracking
-- Checkpoint management
-- SmartContext, CostAutopilot, Error recovery
-- 5 optimization modules + 5 performance modules
-- Guardrails enforcement
+Now 930 lines (was 875). Continues to accumulate responsibilities. The Harness subsystem (`HarnessLoop`, `AutoCompactor`, `BackendProtocol`) provides a parallel entry point that somewhat mitigates this by not going through QueryEngine for all operations, but the core loop class remains monolithic.
 
-Constructor has 13+ parameters. Adding any new subsystem requires modifying this class. Violates Single Responsibility Principle.
-
-**Recommendation:** Extract `OptimizationPipeline`, `PerformanceManager`, and use Observer pattern for hooks. Inject a `SubsystemRegistry` rather than individual services.
+**Recommendation (unchanged):** Extract `OptimizationPipeline`, `PerformanceManager`, and use Observer pattern for hooks.
 
 ### Issue 2: Static Singleton Overuse
 
-**Count:** 22 classes using `getInstance()` pattern  
-**Key offenders:** `ParallelAgentCoordinator`, `FileSnapshotManager`, `TaskManager`, `BashSecurityValidator`
+**Count:** 36 classes using `getInstance()` pattern (was 22)  
+**Severity:** HIGH | **Status: WORSENED**
 
-Breaks dependency injection and testability. In multi-process Swarm mode, singletons create separate instances per process — state is NOT shared, causing silent desynchronization.
+New singletons added in Harness and State subsystems. `AppStateStore` is not a singleton itself (good), but other patterns continue the trend.
 
-**Recommendation:** Replace with constructor injection. Use Laravel container for shared instances. Mark `getInstance()` as deprecated.
+**Recommendation (unchanged):** Replace with constructor injection. Use Laravel container for shared instances.
 
 ### Issue 3: Static State in Built-in Tools
 
-**Count:** 8+ tools with `private static` arrays/flags  
-**Key offenders:** `EnterPlanModeTool` ($inPlanMode, $currentPlan), `SkillTool` ($skills), `TodoWriteTool` ($todos), `MonitorTool` ($monitors)
+**Count:** 87 `private static` declarations across src/ (was 8+ flagged)  
+**Severity:** MEDIUM | **Status: UNCHANGED**
 
-When agents fork via ProcessBackend, static state resets in child processes. Plan mode, todo lists, and skill registries silently lose state without any error.
-
-**Recommendation:** Move to instance-level state with injectable state manager. Or use file/Redis-backed persistence for process-safe sharing.
+Same issue persists. The new subsystems (Plugins, Channels, Auth) largely avoid static state (good pattern).
 
 ### Issue 4: Circular Dependencies
 
-Identified cycles:
-- `Agent` → `QueryEngine` → `Tools/Hooks` → back to orchestrator state
-- `Pipeline` → `AgentRunner callback` → creates new pipeline steps
-- `Hooks` → `Tools` → `Hooks`
+**Status: UNCHANGED**. Same cycles exist. New subsystems are well-decoupled from the core loop.
 
-Not fatal but indicates tight coupling. Makes independent testing and refactoring harder.
+### Issue 5: SessionManager Complexity (New)
+
+**File:** `src/Session/SessionManager.php` (631 lines)  
+**Severity:** MEDIUM
+
+SessionManager grew significantly with project isolation (`projectHash()`, scoped subdirectories, backward-compatible flat-layout reads). The class now handles: save/load/list/delete + pruning + project scoping + latest tracking + summary extraction. Could benefit from extracting `SessionStorage` and `SessionPruner`.
 
 ---
 
@@ -138,40 +148,37 @@ Not fatal but indicates tight coupling. Makes independent testing and refactorin
 
 ### God Classes (> 500 lines)
 
-| File | Lines | Issue |
-|------|-------|-------|
-| `QueryEngine.php` | 875 | Central orchestrator, too many concerns |
-| `BashSecurityValidator.php` | 873 | 23 security checks in one class |
-| `FileSnapshotManager.php` | 781 | LRU cache + file ops + memory tracking |
-| `PipelineEngine.php` | 639 | Complex DAG execution with recursion |
-| `MCPManager.php` | 617 | Protocol implementation, monolithic |
-| `AgentTool.php` | 578 | Sub-agent spawning, process/fiber mgmt |
-| `AutoDreamConsolidator.php` | 563 | 4-phase memory consolidation |
-| `SessionMemoryCompressor.php` | 557 | Context compression strategies |
-| `ProcessBackend.php` | 556 | OS-level process management |
-| `AgentPool.php` | 552 | Agent lifecycle + coordination |
+| File | Lines | Issue | Δ |
+|------|-------|-------|---|
+| `QueryEngine.php` | 930 | Central orchestrator, too many concerns | +55 |
+| `BashSecurityValidator.php` | 873 | 23 security checks in one class | — |
+| `FileSnapshotManager.php` | 781 | LRU cache + file ops + memory tracking | — |
+| `PipelineEngine.php` | 639 | Complex DAG execution with recursion | — |
+| `SessionManager.php` | 631 | Session CRUD + project isolation + pruning | **NEW** |
+| `MCPManager.php` | 619 | Protocol implementation, monolithic | — |
+| `PersistentTaskManager.php` | 607 | File-backed task index + output logs | **NEW** |
+| `AgentTool.php` | 578 | Sub-agent spawning, process/fiber mgmt | — |
+| `AutoDreamConsolidator.php` | 563 | 4-phase memory consolidation | — |
+| `SessionMemoryCompressor.php` | 557 | Context compression strategies | — |
+| `ProcessBackend.php` | 556 | OS-level process management | — |
+| `AgentPool.php` | 552 | Agent lifecycle + coordination | — |
+| `SendMessageTool.php` | 528 | Inter-agent messaging | — |
+| `DistributedBackend.php` | 510 | Distributed agent execution | — |
 
 ### Swallowed Exceptions
 
-10+ catch blocks that suppress errors without logging:
+**Status: SIGNIFICANTLY IMPROVED** (P0 #2 from v0.7.6 review)
 
-| File | Count | Risk |
-|------|-------|------|
-| `ProcessBackend.php` | 4 | Silent process failures in Swarm mode |
-| `DiagnosticAgent.php` | 1 | Silent LLM diagnosis failure |
-| `ToolLoader.php` | 1 | Silent tool loading failure |
-| `ExperimentalFeatures.php` | 1 | Silent config failure |
-| `Optimization/*.php` | 3 | Silent optimization failures |
-
-**Impact:** Production bugs become impossible to diagnose. Each should at minimum log a warning.
+v0.7.7 added `error_log('[SuperAgent] ...')` to 27 previously-silent catch blocks across 24 files. **48 total `[SuperAgent]` log calls** now exist in the codebase. Remaining silent catches are mostly in tool execution (ListMcpResourcesTool, REPLTool, WebFetchTool, etc.) where returning error messages to the user IS the handling.
 
 ### Positive Findings
 
 - **Type hints:** Excellent. All public/protected methods properly typed
 - **Naming conventions:** Consistent PascalCase classes, camelCase methods, snake_case config
-- **Documentation:** Good inline comments explaining complex logic
+- **New subsystem quality:** Auth, Channels, Plugins, State, Permissions — all follow clean patterns: immutable DTOs, `fromConfig()` factories, injectable dependencies, no singletons
 - **Trait usage:** Clean cross-cutting concerns (ErrorRecoveryTrait, CachedToolExecutionTrait)
-- **Static methods:** 267 total, but most are appropriate factory methods (`fromArray()`, `success()`, `create()`)
+- **Test density improvement:** Code-to-test ratio improved from 3.07:1 to 2.47:1
+- **228 total JSON encode/decode calls** — no pathological patterns, NDJSON streaming efficient
 
 ---
 
@@ -179,31 +186,43 @@ Not fatal but indicates tight coupling. Makes independent testing and refactorin
 
 ### Well-Tested Subsystems
 
-| Subsystem | Test File | Lines |
-|-----------|-----------|-------|
-| Pipeline | PipelineEngineTest | 754 |
-| LoopStep | LoopStepTest | 685 |
-| Swarm | Phase7SwarmTest | 541 |
-| Skills | SkillsTest | 433 |
-| Memory | Phase6MemoryTest | 393 |
-| Telemetry | TelemetryTest | 383 |
-| Tasks | TasksTest | 368 |
-| v0.7.6 Features | InnovativeFeaturesSmokeTest | 76 tests, 435 assertions |
+| Subsystem | Test File | Tests/Lines |
+|-----------|-----------|-------------|
+| Pipeline | PipelineEngineTest | 754 lines |
+| LoopStep | LoopStepTest | 685 lines |
+| SessionManager | SessionManagerTest | 671 lines, 44 tests |
+| RetryMiddleware | RetryMiddlewareTest | 580 lines, 30 tests |
+| Channels | ChannelTest | 549 lines, 30 tests |
+| Swarm | Phase7SwarmTest | 541 lines |
+| BackendProtocol | BackendProtocolTest | 538 lines, 41 tests |
+| Agent (core) | AgentTest | 512 lines, 31 tests |
+| Skills | SkillsTest | 433 lines |
+| HarnessLoop | HarnessLoopTest | 468 lines, 32 tests |
+| v0.7.6 Features | InnovativeFeaturesSmokeTest | 1436 lines, 76 tests |
+| Plugins | PluginLoaderTest | 423 lines, 27 tests |
+| Auth | AuthTest | 402 lines, 30 tests |
 
-### Critical Coverage Gaps
+### Coverage Gaps Resolved Since v0.7.6
+
+| Gap (v0.7.6) | Status | Resolution |
+|--------------|--------|------------|
+| Agent (core API!) — None | **RESOLVED** | AgentTest: 31 tests, 44 assertions (v0.7.7) |
+| Swallowed exceptions — 10+ silent catches | **RESOLVED** | 27 catch blocks now log `[SuperAgent]` prefix (v0.7.7) |
+
+### Remaining Coverage Gaps
 
 | Subsystem | Tests? | Risk |
 |-----------|--------|------|
-| Agent (core API!) | None | Refactoring Agent.php is high risk |
-| ErrorRecovery | None | Error recovery logic untested |
-| Config system | None | Configuration loading/validation untested |
-| Context strategies | None | LazyContext, IncrementalContext untested directly |
+| ErrorRecovery | 1 file | Error recovery logic needs more unit tests |
+| Config system | Indirect | Configuration loading/validation untested directly |
+| Context strategies | Indirect | LazyContext, IncrementalContext via integration tests only |
 | Fork (v0.7.6) | Smoke only | No unit tests for ForkExecutor process logic |
 | Debate (v0.7.6) | Smoke only | No unit tests for DebateProtocol flow details |
 | CostPrediction (v0.7.6) | Smoke only | No unit tests for historical prediction accuracy |
 | Replay (v0.7.6) | Smoke only | No unit tests for edge cases |
+| Coordinator | 1 file (TaskNotification) | No test for coordinator orchestration flow |
 
-**Estimated overall coverage:** ~45-50% (line-based estimate from test density)
+**Estimated overall coverage:** ~55-60% (line-based estimate from test density). Improved from ~45-50% in v0.7.6 thanks to 935 new test functions.
 
 ---
 
@@ -211,46 +230,46 @@ Not fatal but indicates tight coupling. Makes independent testing and refactorin
 
 ### File I/O in Hot Paths
 
-`FileSnapshotManager` creates a snapshot on **every tool execution** — `file_get_contents()` + `sha1()` + write. An agent with 50 tool calls = 50 disk writes. On slow storage or NFS, adds 100ms+ latency per turn.
+**Status: UNCHANGED**. `FileSnapshotManager` still creates snapshot on every tool execution. Now `PersistentTaskManager` adds another I/O layer (JSON index + log files), though it uses atomic writes and is off by default.
 
-**Recommendation:** Batch snapshots (every N calls) or add async mode.
+**Recommendation (unchanged):** Batch snapshots (every N calls) or add async mode.
 
 ### Memory Growth in Long Sessions
 
-- `AutoDreamConsolidator::gather()` loads all daily logs into memory without bounds
-- `AgentPool` maintains all spawned agents in memory
-- `FileSnapshotManager` tracks 100+ snapshots in-memory
+**Status: PARTIALLY IMPROVED**. `AutoCompactor` now has dynamic threshold (`contextWindow - 20K - 13K`) and `contextWindowForModel()` mapping, which helps manage context growth. `SessionManager` has count + age-based pruning. But `AutoDreamConsolidator` and `AgentPool` still lack memory bounds.
 
-**Risk:** Long-running agents (1000+ turns) could exhaust memory.
+### Process Parallel Execution (New Concern)
 
-**Recommendation:** Add memory limits, sliding window consolidation, and LRU eviction.
+`ParallelToolExecutor::executeProcessParallel()` spawns OS processes via `proc_open` for parallel tool execution. Each process has its own memory space. With many parallel tools, this could create process storms on resource-constrained systems.
+
+**Recommendation:** Add configurable max concurrent process count and queuing.
 
 ### JSON Serialization
 
-199 total `json_encode`/`json_decode` calls across the codebase. No pathological patterns detected (no JSON in tight loops). Replay NDJSON streaming is efficient (line-by-line).
-
-### Regex in Security Validation
-
-BashSecurityValidator runs ~23 regex checks per command. Adds ~2-5ms per tool call. Acceptable for security.
+228 total `json_encode`/`json_decode` calls (was 199). Growth is proportional to new subsystems. No pathological patterns. `BackendProtocol` uses JSON-lines (efficient for streaming).
 
 ---
 
 ## 7. Security Assessment
 
-### Strengths
+### Strengths (Enhanced)
 
-- **BashSecurityValidator:** 23-point detection (command substitution, IFS injection, Unicode whitespace, Zsh attacks, obfuscated flags, parser differentials)
-- **Process spawning:** `escapeshellarg()` used consistently in `ForkExecutor` and `ProcessBackend`
-- **Permission system:** 6 modes with deny-by-default option
+- **BashSecurityValidator:** 23-point detection (unchanged, best-in-class)
+- **Process spawning:** `escapeshellarg()` used consistently
+- **Permission system:** 6 modes + **new** `PathRuleEvaluator` with glob-based allow/deny and deny-takes-precedence
 - **Guardrails DSL:** Composable conditions with 8 action types
-- **No eval/exec from user input:** Command construction uses safe parameterization
+- **Credential storage:** `CredentialStore` uses atomic writes + 0600 permissions (new)
+- **LLM-based validation:** `PromptHook`/`AgentHook` enable AI-powered security gates (new)
+- **Command deny patterns:** `CommandDenyPattern` for fnmatch-based shell command restrictions (new)
 
 ### Areas to Monitor
 
-- **ForkExecutor:** `$agentRunnerPath` should be validated to exist and match expected file before `proc_open`
-- **ReplayStore:** JSON deserialization from files trusts content structure; add schema validation for defense-in-depth
-- **ProcessBackend:** Temp files for inter-process communication should use restrictive permissions (0600)
-- **NL Guardrails:** Parser is regex-based and conservative, but ambiguous rules could produce unexpected allow/deny decisions
+- **ForkExecutor:** `$agentRunnerPath` validation (unchanged from v0.7.6)
+- **ReplayStore:** JSON schema validation needed (unchanged)
+- **PluginLoader:** Plugins from `~/.superagent/plugins/` execute hooks and MCP configs — ensure plugin source trust. No code signing or integrity verification yet
+- **PromptHook injection:** `$ARGUMENTS` substitution into LLM prompts could be manipulated by adversarial tool inputs. Consider sanitization
+- **DeviceCodeFlow:** Token polling interval respects `slow_down` response, but no maximum poll duration enforced client-side
+- **WebhookChannel:** ACL is based on sender IDs — no cryptographic verification of sender identity
 
 ---
 
@@ -258,30 +277,34 @@ BashSecurityValidator runs ~23 regex checks per command. Adds ~2-5ms per tool ca
 
 ### P0 — Critical (Next Sprint)
 
-| # | Item | Impact | Effort |
-|---|------|--------|--------|
-| 1 | **Split QueryEngine** into OptimizationPipeline, PerformanceManager, SubsystemRegistry | Testability, maintainability | Large |
-| 2 | **Add logging to all swallowed exceptions** (10+ locations in ProcessBackend, Optimization, etc.) | Debuggability | Small |
-| 3 | **Add unit tests for Agent.php** — initialization, provider routing, tool loading, error paths | Safety net for refactoring | Medium |
+| # | Item | Impact | Effort | Status |
+|---|------|--------|--------|--------|
+| 1 | **Split QueryEngine** (930 lines) into OptimizationPipeline, PerformanceManager, SubsystemRegistry | Testability, maintainability | Large | 🔴 Not started |
+| 2 | ~~Add logging to all swallowed exceptions~~ | ~~Debuggability~~ | ~~Small~~ | ✅ Done (v0.7.7) |
+| 3 | ~~Add unit tests for Agent.php~~ | ~~Safety net for refactoring~~ | ~~Medium~~ | ✅ Done (v0.7.7) |
+| 4 | **Add plugin integrity verification** — hash/signature check before loading third-party plugins | Security | Medium | 🔴 New |
 
 ### P1 — Important (Next 2 Sprints)
 
-| # | Item | Impact | Effort |
-|---|------|--------|--------|
-| 4 | **Replace getInstance() singletons** with constructor injection (22 classes) | Testability, process safety | Large |
-| 5 | **Extract static state from built-in tools** into injectable state managers | Correctness in Swarm mode | Medium |
-| 6 | **Add unit tests for ErrorRecovery, Config, Context** subsystems | Coverage from ~45% → ~60% | Medium |
-| 7 | **Add unit tests for v0.7.6 features** (Fork, Debate, CostPrediction, Replay) beyond smoke tests | Regression safety | Medium |
+| # | Item | Impact | Effort | Status |
+|---|------|--------|--------|--------|
+| 5 | **Replace getInstance() singletons** with constructor injection (36 classes, was 22) | Testability, process safety | Large | 🔴 Worsened |
+| 6 | **Extract static state from built-in tools** into injectable state managers | Correctness in Swarm mode | Medium | 🔴 Not started |
+| 7 | **Add unit tests for v0.7.6 features** (Fork, Debate, CostPrediction, Replay) beyond smoke tests | Regression safety | Medium | 🔴 Not started |
+| 8 | **Extract SessionStorage/SessionPruner** from SessionManager (631 lines) | Maintainability | Small | 🔴 New |
+| 9 | **Add max concurrent process limit** to `ParallelToolExecutor::executeProcessParallel()` | Resource safety | Small | 🔴 New |
 
 ### P2 — Improvement (Backlog)
 
-| # | Item | Impact | Effort |
-|---|------|--------|--------|
-| 8 | **Batch FileSnapshotManager I/O** (snapshot every N calls, not every call) | Performance | Small |
-| 9 | **Add memory bounds to AutoDreamConsolidator** (sliding window, max daily log retention) | Memory safety | Small |
-| 10 | **Decompose BashSecurityValidator** into composable validator chain | Maintainability | Medium |
-| 11 | **Add JSON schema validation** to ReplayStore and ForkExecutor deserialization | Defense-in-depth | Small |
-| 12 | **Document dependency graph** visually (Mermaid diagram) | Onboarding | Small |
+| # | Item | Impact | Effort | Status |
+|---|------|--------|--------|--------|
+| 10 | **Batch FileSnapshotManager I/O** | Performance | Small | 🔴 Not started |
+| 11 | **Add memory bounds to AutoDreamConsolidator** | Memory safety | Small | 🔴 Not started |
+| 12 | **Decompose BashSecurityValidator** into composable validator chain | Maintainability | Medium | 🔴 Not started |
+| 13 | **Add JSON schema validation** to ReplayStore and ForkExecutor | Defense-in-depth | Small | 🔴 Not started |
+| 14 | **Document dependency graph** visually (Mermaid diagram) | Onboarding | Small | 🔴 Not started |
+| 15 | **Sanitize $ARGUMENTS in PromptHook** against adversarial injection | Security | Small | 🔴 New |
+| 16 | **Add WebhookChannel sender authentication** (HMAC signature) | Security | Medium | 🔴 New |
 
 ### Future Feature Priorities
 
@@ -289,32 +312,35 @@ BashSecurityValidator runs ~23 regex checks per command. Adds ~2-5ms per tool ca
 |----------|---------|-----------|
 | High | RAG / Embeddings integration | Most-requested capability gap for document-heavy workflows |
 | High | Agent A/B testing framework | Leverage Fork infrastructure for systematic prompt optimization |
-| Medium | Distributed agent backend (Redis/RabbitMQ) | Scale beyond single-machine proc_open |
+| Medium | Plugin marketplace / registry | Leverage new Plugin system for community-driven ecosystem |
 | Medium | Visual agent graph dashboard | Extend WebSocket monitoring with interactive graph visualization |
+| Medium | Frontend UI (web-based) | Leverage BackendProtocol for building a web UI |
 | Low | Multi-modal input (images/audio) | Provider-dependent; wait for broader model support |
-| Low | Agent personas/personality system | Nice-to-have for specialized deployments |
 
 ---
 
 ## 9. Overall Scores
 
-| Dimension | Score | Notes |
-|-----------|-------|-------|
-| **Code Quality** | 7.5/10 | Modern PHP, excellent typing, but god class and singleton debt |
-| **Architecture** | 7/10 | Innovative patterns (dual backend, context intelligence), but circular deps and tight coupling in core |
-| **Test Coverage** | 6/10 | Good integration tests (714 functions), but critical unit test gaps (Agent, ErrorRecovery, Config) |
-| **Security** | 8.5/10 | Best-in-class bash security, comprehensive permission system, NL guardrails |
-| **Performance** | 7.5/10 | Verified 4.6x parallelism, 13 optimization strategies, but FileSnapshotManager I/O concern |
-| **Documentation** | 8/10 | 3-language docs (EN/CN/FR), 31 advanced usage chapters, inline comments |
-| **Production Readiness** | 7.5/10 | Production-ready with caveats: fix swallowed exceptions, add monitoring on I/O paths |
-| **Feature Completeness** | 9/10 | 64 tools, 5 providers, 6 pipeline step types, 3 debate modes, cost prediction, self-healing |
+| Dimension | Score | Δ | Notes |
+|-----------|-------|---|-------|
+| **Code Quality** | 7.5/10 | — | Modern PHP, excellent typing. God class and singleton debt persist but new subsystems follow clean patterns |
+| **Architecture** | 7.5/10 | +0.5 | New subsystems (Auth, Channels, Plugins, State, Permissions) are well-decoupled. Plugin/hook extensibility adds architectural maturity. QueryEngine still monolithic |
+| **Test Coverage** | 7.5/10 | +1.5 | 1,649 test functions (was 714). Code-to-test ratio 2.47:1 (was 3.07:1). Agent core tested. Estimated 55-60% coverage |
+| **Security** | 9/10 | +0.5 | PathRuleEvaluator, CredentialStore (0600), LLM-based PromptHook/AgentHook validation, CommandDenyPattern. Plugin trust is new attack surface |
+| **Performance** | 7.5/10 | — | Process-level parallel tool execution added. Dynamic auto-compactor thresholds. FileSnapshotManager I/O concern unchanged |
+| **Documentation** | 8.5/10 | +0.5 | 3-language docs (EN/CN/FR), 50 advanced usage chapters (was 31), periodic code reviews |
+| **Production Readiness** | 8/10 | +0.5 | Exception logging resolved. Session project isolation. Retry middleware for API reliability. Still needs QueryEngine refactor |
+| **Feature Completeness** | 9.5/10 | +0.5 | 64 tools, 5 providers, plugin system, multi-channel gateway, OAuth auth, backend protocol, 4 visual debugging backends |
 
-**Overall: 7.6/10 — Production-ready with targeted improvements needed**
+**Overall: 8.1/10 — Production-ready with strong enterprise capabilities. Key debt: QueryEngine refactor, singleton cleanup**
+
+Previous: 7.6/10 (v0.7.6) → **8.1/10 (v0.7.8)** (+0.5)
 
 ---
 
 ## Review History
 
-| Date | Version | Reviewer | Key Findings |
-|------|---------|----------|-------------|
-| 2026-04-05 | 0.7.6 | Automated deep scan | Initial review: 70K LOC, 33 subsystems, 10 god classes, 22 singletons, 45% test coverage. Top priorities: QueryEngine refactor, singleton removal, exception logging |
+| Date | Version | Reviewer | Key Findings | Score |
+|------|---------|----------|-------------|-------|
+| 2026-04-05 | 0.7.6 | Automated deep scan | Initial review: 70K LOC, 33 subsystems, 10 god classes, 22 singletons, 45% test coverage. Top priorities: QueryEngine refactor, singleton removal, exception logging | 7.6/10 |
+| 2026-04-06 | 0.7.8 | Automated deep scan | 78K LOC (+11%), 58 subsystems, 1649 tests (+131%). P0 #2 (exception logging) and #3 (Agent tests) resolved. New: 20 enterprise subsystems, plugin system, multi-channel gateway, OAuth auth, backend protocol, permission path rules. Test ratio improved 3.07→2.47:1. New concerns: 36 singletons (was 22), plugin trust, PromptHook injection. QueryEngine still monolithic (930 lines) | 8.1/10 |

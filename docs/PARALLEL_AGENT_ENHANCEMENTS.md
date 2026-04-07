@@ -1,5 +1,7 @@
 # Parallel Agent Tracking - Advanced Features
 
+> **v0.7.8 Additions:** New visual debugging backends — iTerm2 Backend (`src/Swarm/Backends/ITermBackend.php`), Tmux Backend (`src/Swarm/Backends/TmuxBackend.php`), and BackendRegistry (`src/Swarm/BackendRegistry.php`) for dynamic backend discovery and selection.
+
 ## Completed Enhancements
 
 All planned future enhancements have been successfully implemented. SuperAgent now provides enterprise-grade multi-agent orchestration capabilities comparable to Claude Code and beyond.
@@ -142,7 +144,7 @@ $storage->export('/backup/agents.json');
 ┌────▼─────────▼────────────────────▼─────────────▼──────────┐
 │                    Backend Layer                            │
 ├──────────────────────────────────────────────────────────────┤
-│ InProcessBackend │ DistributedBackend │ CustomBackends      │
+│ InProcessBackend │ DistributedBackend │ ITermBackend │ TmuxBackend │
 └──────────────────────────────────────────────────────────────┘
 ```
 

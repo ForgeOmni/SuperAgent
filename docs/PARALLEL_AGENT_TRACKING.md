@@ -103,6 +103,7 @@ $display->display();
 | Activity descriptions | ✅ | ✅ | Human-readable tool descriptions |
 | Token tracking | ✅ | ✅ | Input/output/cache tokens |
 | Concurrent execution | ✅ | ✅ | PHP Fibers for parallelism |
+| Process-level parallelism | ✅ | ✅ | ProcessBackend (default) |
 
 ## Testing
 
@@ -123,15 +124,16 @@ php examples/parallel_agents_demo.php
 3. **Extensibility**: Easy to add new tracking metrics or display formats
 4. **Compatibility**: Works with existing InProcessBackend without breaking changes
 5. **Testability**: Each component can be tested in isolation
+6. **Visual Debugging (v0.7.8)**: iTerm2 Backend and BackendRegistry enable visual debugging of parallel agent execution
 
 ## Future Enhancements
 
-- [ ] WebSocket support for real-time browser display
-- [ ] Agent communication protocols
-- [ ] Performance metrics and profiling
-- [ ] Agent dependency management
-- [ ] Distributed backend support
-- [ ] Persistent progress storage
+- [x] WebSocket support for real-time browser display (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
+- [x] Agent communication protocols (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
+- [x] Performance metrics and profiling (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
+- [x] Agent dependency management (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
+- [x] Distributed backend support (DistributedBackend) (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
+- [x] Persistent progress storage (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
 
 ## Migration Guide
 
