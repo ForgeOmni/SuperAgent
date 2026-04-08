@@ -38,6 +38,7 @@
 - pcntl       # Process control (multi-agent collaboration)
 - yaml        # YAML configuration files
 - zip         # File compression
+- pdo_sqlite  # SQLite session storage with FTS5 search (v0.8.0+)
 ```
 
 ### Environment Check
@@ -1267,6 +1268,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.8.0      | 10.x+   | 8.1+ | 19 improvements: SQLite+FTS5 session storage (with encryption), unified context compression, prompt injection detection (auto-integrated into prompt builder), credential pool (auto-integrated into provider registry), query complexity routing, path-level write conflict detection, memory provider interface (vector + episodic implementations), SecurityCheckChain (composable bash validation), skill progressive disclosure, safe stdio writer, batched FileSnapshot I/O, AutoDreamConsolidator memory bounds, ReplayStore schema validation, PromptHook argument sanitization, architecture Mermaid diagram. 18 test fixes. 1687 tests, 0 failures |
 | 0.7.8      | 10.x+   | 8.1+ | Agent Harness mode + enterprise subsystems: persistent tasks & sessions, stream events, REPL loop, auto-compactor, E2E scenarios, API retry middleware, iTerm2 backend, plugin system, observable app state, hook hot-reloading, prompt/agent hooks, multi-channel gateway, backend protocol, OAuth device code flow, permission path rules, coordinator task notifications. 628 new tests |
 | 0.7.7      | 10.x+   | 8.1+ | Debuggability hardening: error logging for 27 swallowed exceptions, Agent unit tests (31 tests), docs/REVIEW.md code review framework |
 | 0.7.6      | 10.x+   | 8.1+ | 6 innovative subsystems: Agent Replay & Time-Travel Debugging, Conversation Forking, Agent Debate Protocol, Cost Prediction Engine, Natural Language Guardrails, Self-Healing Pipelines |

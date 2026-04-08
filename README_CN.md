@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.7.9-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.8.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,21 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.8.0 — Hermes-Agent 启发的架构升级（19项改进，74个新测试）
+- **SQLite 会话存储 + FTS5 搜索** (`src/Session/SqliteSessionStorage.php`) — SQLite WAL 模式后端，FTS5 全文搜索跨所有会话消息。随机抖动重试避免锁竞争，被动 WAL 检查点，可选 SQLCipher 静态加密。`SessionManager::search()` 跨会话搜索 API。双写模式兼容文件回退
+- **统一上下文压缩** (`src/Optimization/ContextCompression/ContextCompressor.php`) — 4阶段分层压缩：裁剪旧工具结果 → 保护头尾 → LLM 总结中间 → 迭代更新摘要。Token 预算尾部保护（默认 8K），结构化5节摘要模板
+- **Prompt 注入检测** (`src/Guardrails/PromptInjectionDetector.php`) — 7类威胁模式检测（指令覆盖、系统提示提取、数据外泄、角色混淆、不可见Unicode、隐藏HTML、编码逃逸）。4级严重度，文件扫描，不可见字符清理。自动集成到 `SystemPromptBuilder::withContextFiles()` — 高/严重威胁排除，中等威胁清理
+- **凭证池** (`src/Providers/CredentialPool.php`) — 同 Provider 多凭证故障转移，4种轮转策略。逐凭证状态追踪，自动冷却。自动集成到 `ProviderRegistry::create()` 实现透明密钥轮转
+- **查询复杂度路由** (`src/Optimization/QueryComplexityRouter.php`) — 基于内容的模型路由：检测代码、URL、复杂度关键词、多步骤指令。简单查询自动路由到快速模型
+- **路径级写冲突检测** — `ParallelToolExecutor::classify()` 升级：写入不同路径的工具现可并行执行；重叠路径强制串行。破坏性 bash 命令检测
+- **Memory Provider 接口** (`src/Memory/Contracts/MemoryProviderInterface.php`) — 可插拔记忆提供者，10个生命周期钩子。两个实现：`VectorMemoryProvider`（余弦相似度嵌入搜索）和 `EpisodicMemoryProvider`（时间情景记忆+近因评分）。错误隔离
+- **SecurityCheckChain** (`src/Permissions/SecurityCheckChain.php`) — 可组合安全检查链，包裹 23 项 BashSecurityValidator 检查。`SecurityCheck` 接口 + `LegacyValidatorCheck` 适配器。支持 `add()`、`insertAt()`、`disableById()` 自定义安全策略
+- **Skill 渐进式披露** (`src/Tools/Builtin/SkillCatalogTool.php`) — 两阶段技能加载：第1阶段（仅元数据）→ 第2阶段（按需加载完整指令）
+- **安全流写入器** (`src/Output/SafeStreamWriter.php`) — 管道断开保护，适用于守护进程/容器场景
+- **架构加固** — FileSnapshotManager 批量 I/O（默认批次=5），AutoDreamConsolidator 内存上限（gather 500/consolidate 1000），ReplayStore JSON schema 验证，PromptHook $ARGUMENTS 注入消毒
+- **架构图** (`docs/ARCHITECTURE.md`) — 80+ 节点 Mermaid 依赖图，数据流序列图，子系统统计
+- **18项测试修复** — 修复全部预存测试失败。完整套件：**1687 测试，4713 断言，0 失败**
 
 ### 🆕 v0.7.9 — 依赖注入与架构加固（63个新单元测试）
 - **单例 → 构造函数注入** — 19个单例类（`AgentManager`、`TaskManager`、`MCPManager`、`ParallelAgentCoordinator`、`EventDispatcher`、`CostTracker` 等）现已具有公开构造函数，`getInstance()` 标记为 `@deprecated`。25个调用点更新为接受注入依赖并保持向后兼容降级。支持正确的测试隔离和进程安全的 Swarm 执行

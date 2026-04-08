@@ -242,13 +242,20 @@ class Phase1ToolsTest extends TestCase
     {
         $tool = new WebSearchTool();
 
-        // Test without API key (should fail)
+        // Test without API key — falls back to WebFetch/DuckDuckGo which may also fail
         $result = $tool->execute([
             'query' => 'test query',
         ]);
 
+        // Without API key, search either fails or falls back to web fetch
         $this->assertFalse($result->isSuccess());
-        $this->assertStringContainsString('API key not configured', $result->error);
+        $output = $result->error ?? $result->contentAsString();
+        $this->assertTrue(
+            str_contains($output, 'API key')
+            || str_contains($output, 'Search failed')
+            || str_contains($output, 'SEARCH_API_KEY'),
+            "Expected search failure message, got: {$output}"
+        );
     }
 
     public function testWebFetchToolMocked(): void

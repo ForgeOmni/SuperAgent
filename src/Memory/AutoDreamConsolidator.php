@@ -175,12 +175,19 @@ class AutoDreamConsolidator
 
         $dailyLogs = $this->dailyLog->getLogsSince($since);
 
+        $maxGatherEntries = 500; // Prevent unbounded memory growth
         foreach ($dailyLogs as $date => $content) {
             if (empty(trim($content))) {
                 continue;
             }
             $extracted = $this->extractFromLog($content);
             $newInfo = array_merge($newInfo, $extracted);
+            if (count($newInfo) >= $maxGatherEntries) {
+                $this->logger->warning('AutoDream gather phase hit memory limit', [
+                    'limit' => $maxGatherEntries,
+                ]);
+                break;
+            }
             $this->logger->debug("Extracted from daily log {$date}", [
                 'entries_found' => count($extracted),
             ]);
@@ -219,9 +226,16 @@ class AutoDreamConsolidator
                 }
             }
             
-            // Add as new memory if not merged
+            // Add as new memory if not merged (with limit)
             if (!$merged) {
-                $consolidated[] = $info;
+                if (count($consolidated) < 1000) {
+                    $consolidated[] = $info;
+                } else {
+                    $this->logger->warning('AutoDream consolidation hit memory limit', [
+                        'limit' => 1000,
+                        'skipped' => $info->name ?? 'unknown',
+                    ]);
+                }
             }
         }
         

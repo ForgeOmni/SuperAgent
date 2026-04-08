@@ -306,9 +306,11 @@ class AgentPerformanceProfiler
      */
     private function getCpuUsage(): float
     {
-        // In a real implementation, would use system calls
-        // For now, return simulated value based on load
-        return sys_getloadavg()[0] ?? 0.0;
+        // sys_getloadavg() is not available on Windows
+        if (function_exists('sys_getloadavg')) {
+            return sys_getloadavg()[0] ?? 0.0;
+        }
+        return 0.0;
     }
     
     /**

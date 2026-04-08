@@ -21,6 +21,20 @@ class ParallelToolExecutor
         'task_get',
     ];
 
+    /**
+     * Destructive command patterns for bash tool conflict detection.
+     */
+    private const DESTRUCTIVE_PATTERNS = [
+        '/\brm\s+-rf?\b/i',
+        '/\bmv\s+/i',
+        '/\bchmod\s+/i',
+        '/\bchown\s+/i',
+        '/\bgit\s+(push|reset|checkout|clean)\b/i',
+        '/\bkill\s+/i',
+        '/\bdrop\s+(table|database)\b/i',
+        '/\btruncate\s+/i',
+    ];
+
     private bool $processParallelEnabled;
 
     public function __construct(
@@ -72,11 +86,11 @@ class ParallelToolExecutor
     /**
      * Classify tool blocks into groups that can run in parallel vs sequentially.
      *
-     * Tools with side effects (Write, Edit, Bash, etc.) must run sequentially.
-     * Read-only tools (Read, Grep, Glob, WebSearch, etc.) can run in parallel.
-     *
-     * If there is only one block, or all blocks require sequential execution,
-     * everything is returned in the sequential group.
+     * Uses path-level write conflict detection (inspired by hermes-agent):
+     *   - Read-only tools can always run in parallel
+     *   - Write tools targeting different paths can run in parallel
+     *   - Write tools targeting overlapping paths must run sequentially
+     *   - Bash tools with destructive commands always run sequentially
      *
      * @param  ContentBlock[]  $toolBlocks
      * @return array{parallel: ContentBlock[], sequential: ContentBlock[]}
@@ -89,11 +103,33 @@ class ParallelToolExecutor
 
         $parallel = [];
         $sequential = [];
+        $writePaths = []; // Track paths being written to for conflict detection
 
         foreach ($toolBlocks as $block) {
             if (in_array($block->toolName, self::READ_ONLY_TOOLS, true)) {
                 $parallel[] = $block;
+                continue;
+            }
+
+            // Check for destructive bash commands — always sequential
+            if ($block->toolName === 'bash' && $this->isDestructiveCommand($block)) {
+                $sequential[] = $block;
+                continue;
+            }
+
+            // Path-level write conflict detection
+            $targetPath = $this->extractTargetPath($block);
+            if ($targetPath !== null) {
+                if ($this->hasPathConflict($targetPath, $writePaths)) {
+                    // Overlapping path — must be sequential
+                    $sequential[] = $block;
+                } else {
+                    // Non-overlapping write — can run in parallel with other writes
+                    $writePaths[] = $targetPath;
+                    $parallel[] = $block;
+                }
             } else {
+                // Can't determine path — be safe, run sequentially
                 $sequential[] = $block;
             }
         }
@@ -104,6 +140,109 @@ class ParallelToolExecutor
         }
 
         return ['parallel' => $parallel, 'sequential' => $sequential];
+    }
+
+    /**
+     * Extract the target file path from a tool block's input.
+     */
+    private function extractTargetPath(ContentBlock $block): ?string
+    {
+        $input = $block->toolInput ?? [];
+
+        // Common path parameter names across write tools
+        $pathKeys = ['file_path', 'path', 'filepath', 'filename', 'file'];
+        foreach ($pathKeys as $key) {
+            if (isset($input[$key]) && is_string($input[$key])) {
+                return $this->normalizePath($input[$key]);
+            }
+        }
+
+        // For bash tool, try to extract the target path from the command
+        if ($block->toolName === 'bash' && isset($input['command'])) {
+            return $this->extractPathFromCommand($input['command']);
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if a target path conflicts with any existing write paths.
+     * A conflict exists when one path is a prefix of another (overlapping directories).
+     */
+    private function hasPathConflict(string $targetPath, array $writePaths): bool
+    {
+        foreach ($writePaths as $existingPath) {
+            // Exact match
+            if ($targetPath === $existingPath) {
+                return true;
+            }
+
+            // One is a prefix of the other (parent/child directory)
+            if (str_starts_with($targetPath, $existingPath . '/')
+                || str_starts_with($existingPath, $targetPath . '/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if a bash command contains destructive operations.
+     */
+    private function isDestructiveCommand(ContentBlock $block): bool
+    {
+        $command = $block->toolInput['command'] ?? '';
+        if (empty($command)) {
+            return false;
+        }
+
+        foreach (self::DESTRUCTIVE_PATTERNS as $pattern) {
+            if (preg_match($pattern, $command)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Try to extract a file path from a bash command string.
+     */
+    private function extractPathFromCommand(string $command): ?string
+    {
+        // Match common file-writing patterns: > file, >> file, tee file
+        if (preg_match('/(?:>+|tee\s+)([^\s|;&]+)/', $command, $matches)) {
+            return $this->normalizePath($matches[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Normalize a file path for comparison.
+     */
+    private function normalizePath(string $path): string
+    {
+        // Resolve relative paths and normalize separators
+        $path = str_replace('\\', '/', $path);
+        $path = rtrim($path, '/');
+
+        // Remove . and .. components
+        $parts = explode('/', $path);
+        $normalized = [];
+        foreach ($parts as $part) {
+            if ($part === '' || $part === '.') {
+                continue;
+            }
+            if ($part === '..') {
+                array_pop($normalized);
+            } else {
+                $normalized[] = $part;
+            }
+        }
+
+        return '/' . implode('/', $normalized);
     }
 
     /**

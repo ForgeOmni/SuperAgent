@@ -38,6 +38,7 @@
 - pcntl       # 进程控制（多智能体协作）
 - yaml        # YAML配置文件
 - zip         # 文件压缩
+- pdo_sqlite  # SQLite 会话存储与 FTS5 搜索（v0.8.0+）
 ```
 
 ### 环境检查
@@ -921,6 +922,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | 说明 |
 |------------|---------|-------|------|
+| 0.8.0      | 10.x+   | 8.1+ | 19项改进：SQLite+FTS5 会话存储（含加密）、统一上下文压缩、Prompt 注入检测（集成 prompt builder）、凭证池（集成 provider registry）、查询复杂度路由、路径级写冲突检测、Memory Provider（向量+情景）、SecurityCheckChain、Skill 渐进式披露、安全流写入、批量 FileSnapshot I/O、内存限制、ReplayStore 验证、PromptHook 消毒、架构图。18项测试修复。1687 测试，0 失败 |
 | 0.7.8      | 10.x+   | 8.1+  | Agent Harness 模式 + 企业级子系统：持久化任务与会话、StreamEvent 统一事件、REPL 交互循环、自动压缩器、E2E 场景框架、API 重试中间件、iTerm2 后端、插件系统、可观察应用状态、Hook 热重载、Prompt/Agent Hook、多通道网关、后端协议、OAuth 设备码流程、权限路径规则、协调器任务通知。628 个新测试 |
 | 0.7.7      | 10.x+   | 8.1+  | 可调试性加固：27个吞没异常添加日志、Agent核心单元测试（31个测试）、docs/REVIEW.md代码审查框架 |
 | 0.7.6      | 10.x+   | 8.1+  | 6大创新子系统：Agent Replay时间旅行调试、对话分叉、Agent辩论协议、成本预测引擎、自然语言护栏、自愈流水线 |

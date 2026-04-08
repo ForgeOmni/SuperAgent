@@ -66,12 +66,20 @@ final class ReplayStore
         $events = [];
 
         // Read events line by line
+        $lineNum = 1;
         while (($line = fgets($handle)) !== false) {
+            $lineNum++;
             $line = trim($line);
             if ($line === '') {
                 continue;
             }
             $eventData = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
+
+            // Validate required fields
+            if (!$this->validateEventSchema($eventData, $lineNum)) {
+                continue; // Skip malformed events
+            }
+
             $events[] = ReplayEvent::fromArray($eventData);
         }
 
@@ -158,6 +166,50 @@ final class ReplayStore
     public function exists(string $sessionId): bool
     {
         return file_exists($this->getFilePath($sessionId));
+    }
+
+    /**
+     * Validate that an event has all required fields and correct types.
+     */
+    private function validateEventSchema(array $data, int $lineNum): bool
+    {
+        $requiredFields = ['step', 'type', 'agent_id', 'timestamp', 'duration_ms'];
+        $validTypes = [
+            ReplayEvent::TYPE_LLM_CALL,
+            ReplayEvent::TYPE_TOOL_CALL,
+            ReplayEvent::TYPE_AGENT_SPAWN,
+            ReplayEvent::TYPE_AGENT_MESSAGE,
+            ReplayEvent::TYPE_STATE_SNAPSHOT,
+        ];
+
+        foreach ($requiredFields as $field) {
+            if (!array_key_exists($field, $data)) {
+                error_log("[SuperAgent] ReplayStore: missing field '{$field}' at line {$lineNum}, skipping event");
+                return false;
+            }
+        }
+
+        if (!is_int($data['step']) || $data['step'] < 0) {
+            error_log("[SuperAgent] ReplayStore: invalid 'step' value at line {$lineNum}");
+            return false;
+        }
+
+        if (!in_array($data['type'], $validTypes, true)) {
+            error_log("[SuperAgent] ReplayStore: unknown event type '{$data['type']}' at line {$lineNum}");
+            return false;
+        }
+
+        if (!is_string($data['agent_id']) || empty($data['agent_id'])) {
+            error_log("[SuperAgent] ReplayStore: invalid 'agent_id' at line {$lineNum}");
+            return false;
+        }
+
+        if (!is_numeric($data['duration_ms']) || $data['duration_ms'] < 0) {
+            error_log("[SuperAgent] ReplayStore: invalid 'duration_ms' at line {$lineNum}");
+            return false;
+        }
+
+        return true;
     }
 
     private function getFilePath(string $sessionId): string

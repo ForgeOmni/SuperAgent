@@ -41,4 +41,30 @@ class AgentSpawnConfig
     {
         return $this->forkContext !== null;
     }
+
+    /**
+     * Serialize to array for cross-process/network transport.
+     */
+    public function toArray(): array
+    {
+        return [
+            'name' => $this->name,
+            'prompt' => $this->prompt,
+            'team_name' => $this->teamName,
+            'model' => $this->model,
+            'system_prompt' => $this->systemPrompt,
+            'permission_mode' => $this->permissionMode?->value,
+            'backend' => $this->backend?->value,
+            'isolation' => $this->isolation?->value,
+            'run_in_background' => $this->runInBackground,
+            'allowed_tools' => $this->allowedTools,
+            'denied_tools' => $this->deniedTools,
+            'working_directory' => $this->workingDirectory,
+            'environment' => $this->environment,
+            'color' => $this->color,
+            'plan_mode_required' => $this->planModeRequired,
+            'read_only' => $this->readOnly,
+            'provider_config' => $this->providerConfig,
+        ];
+    }
 }

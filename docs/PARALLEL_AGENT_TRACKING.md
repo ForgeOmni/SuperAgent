@@ -125,6 +125,7 @@ php examples/parallel_agents_demo.php
 4. **Compatibility**: Works with existing InProcessBackend without breaking changes
 5. **Testability**: Each component can be tested in isolation
 6. **Visual Debugging (v0.7.8)**: iTerm2 Backend and BackendRegistry enable visual debugging of parallel agent execution
+7. **Path-Aware Parallelism (v0.8.0)**: `ParallelToolExecutor::classify()` uses path-level write conflict detection — write tools targeting different files can run in parallel, overlapping paths forced sequential. Destructive bash commands (rm -rf, git push, DROP TABLE) always sequential
 
 ## Future Enhancements
 
@@ -134,6 +135,9 @@ php examples/parallel_agents_demo.php
 - [x] Agent dependency management (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
 - [x] Distributed backend support (DistributedBackend) (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
 - [x] Persistent progress storage (see [PARALLEL_AGENT_ENHANCEMENTS.md](PARALLEL_AGENT_ENHANCEMENTS.md))
+- [x] Path-level write conflict detection (v0.8.0)
+- [x] Destructive command detection for bash tools (v0.8.0)
+- [x] Multi-credential pool for provider resilience (v0.8.0 — see `CredentialPool`)
 
 ## Migration Guide
 

@@ -230,6 +230,10 @@ PHP
      */
     public function testKillAgent(): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('Process kill behavior differs on Windows.');
+        }
+
         // Script that sleeps forever
         $scriptPath = sys_get_temp_dir() . '/superagent_test_kill_' . uniqid() . '.php';
         file_put_contents($scriptPath, <<<'PHP'

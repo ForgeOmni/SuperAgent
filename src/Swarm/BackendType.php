@@ -15,4 +15,5 @@ enum BackendType: string
     case DOCKER = 'docker';
     case REMOTE = 'remote';
     case ITERM2 = 'iterm2';
+    case DISTRIBUTED = 'distributed';
 }

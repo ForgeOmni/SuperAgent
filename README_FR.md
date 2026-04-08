@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.9-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,21 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.8.0 — Mise à Niveau Architecturale Inspirée de Hermes-Agent (19 améliorations, 74 nouveaux tests)
+- **Stockage SQLite + Recherche FTS5** (`src/Session/SqliteSessionStorage.php`) — Backend SQLite WAL avec recherche plein texte FTS5. Retry avec jitter, checkpointing WAL passif, chiffrement SQLCipher optionnel. `SessionManager::search()` pour recherche inter-sessions. Double écriture avec fallback fichier
+- **Compression de Contexte Unifiée** (`src/Optimization/ContextCompression/ContextCompressor.php`) — Compression hiérarchique en 4 phases : élaguer → protéger tête/queue → résumé LLM → mises à jour itératives. Protection queue par budget de tokens (8K), résumé structuré 5 sections
+- **Détection d'Injection de Prompt** (`src/Guardrails/PromptInjectionDetector.php`) — 7 catégories de menaces, 4 niveaux de sévérité, scan de fichiers, nettoyage Unicode invisible. Auto-intégré dans `SystemPromptBuilder::withContextFiles()` — menaces haute/critique exclues, moyennes nettoyées
+- **Pool de Credentials** (`src/Providers/CredentialPool.php`) — Failover multi-credentials, 4 stratégies de rotation. Suivi d'état par credential, cooldown automatique. Auto-intégré dans `ProviderRegistry::create()` pour rotation transparente des clés
+- **Routeur de Complexité de Requête** (`src/Optimization/QueryComplexityRouter.php`) — Routage basé sur le contenu : détecte code, URLs, mots-clés de complexité. Requêtes simples vers modèle rapide
+- **Détection de Conflits d'Écriture par Chemin** — Outils d'écriture sur chemins différents en parallèle ; chemins chevauchants en séquentiel. Détection de commandes bash destructives
+- **Interface Memory Provider** (`src/Memory/Contracts/MemoryProviderInterface.php`) — Fournisseur de mémoire enfichable, 10 hooks. Deux implémentations : `VectorMemoryProvider` (similarité cosinus) et `EpisodicMemoryProvider` (mémoire épisodique temporelle). Isolation des erreurs
+- **SecurityCheckChain** (`src/Permissions/SecurityCheckChain.php`) — Chaîne de vérification composable enveloppant les 23 checks BashSecurityValidator. Interface `SecurityCheck` + adaptateur `LegacyValidatorCheck`. `add()`, `insertAt()`, `disableById()` pour politiques personnalisées
+- **Divulgation Progressive de Skills** (`src/Tools/Builtin/SkillCatalogTool.php`) — Chargement en deux phases : métadonnées → instructions complètes à la demande
+- **Écriture Stream Sécurisée** (`src/Output/SafeStreamWriter.php`) — Protection pipes cassés pour daemon/conteneur
+- **Renforcement Architectural** — FileSnapshotManager I/O par lots (batch=5), limites mémoire AutoDreamConsolidator (500 gather / 1000 consolidate), validation JSON ReplayStore, sanitization $ARGUMENTS PromptHook
+- **Diagramme d'Architecture** (`docs/ARCHITECTURE.md`) — Graphe Mermaid 80+ nœuds, diagramme de flux, statistiques sous-systèmes
+- **18 Corrections de Tests** — Suite complète : **1687 tests, 4713 assertions, 0 échec**
 
 ### 🆕 v0.7.9 — Injection de Dépendances & Renforcement Architectural (63 nouveaux tests unitaires)
 - **Singleton → Injection par Constructeur** — 19 classes singleton (`AgentManager`, `TaskManager`, `MCPManager`, `ParallelAgentCoordinator`, `EventDispatcher`, `CostTracker`, etc.) ont maintenant des constructeurs publics avec `getInstance()` marqué `@deprecated`. 25 sites d'appel mis à jour pour accepter les dépendances injectées avec fallback rétrocompatible. Permet l'isolation correcte des tests et l'exécution Swarm sûre pour les processus

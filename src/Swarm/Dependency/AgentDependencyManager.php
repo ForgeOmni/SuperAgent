@@ -216,8 +216,18 @@ class AgentDependencyManager
     {
         $stages = [];
         $processed = [];
-        $remaining = array_keys($this->dependencies);
-        
+
+        // Collect ALL agent IDs — both dependents and their dependencies
+        $allAgents = array_keys($this->dependencies);
+        foreach ($this->dependencies as $deps) {
+            foreach ($deps as $dep) {
+                if (!in_array($dep, $allAgents, true)) {
+                    $allAgents[] = $dep;
+                }
+            }
+        }
+        $remaining = $allAgents;
+
         while (!empty($remaining)) {
             $stage = [];
             

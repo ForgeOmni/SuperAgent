@@ -25,6 +25,11 @@ class FileSnapshotManager
     /** LRU limit for message-level snapshots */
     private const MAX_MESSAGE_SNAPSHOTS = 100;
 
+    /** Batch size for disk writes (flush every N snapshots) */
+    private int $batchSize = 5;
+    private int $pendingWrites = 0;
+    private array $pendingSnapshots = [];
+
     /** Set of tracked file paths (relative for space efficiency) */
     private Collection $trackedFiles;
 
@@ -85,8 +90,13 @@ class FileSnapshotManager
             ]
         );
 
-        // Save snapshot to disk
-        $this->saveSnapshot($snapshot);
+        // Batch disk writes for performance
+        $this->pendingSnapshots[] = $snapshot;
+        $this->pendingWrites++;
+
+        if ($this->pendingWrites >= $this->batchSize) {
+            $this->flushPendingSnapshots();
+        }
 
         // Track in memory
         if (!$this->snapshots->has($filePath)) {
@@ -104,6 +114,33 @@ class FileSnapshotManager
         $this->cleanupOldSnapshots($filePath);
 
         return $snapshotId;
+    }
+
+    /**
+     * Flush any pending snapshots to disk.
+     * Called automatically when batch size is reached or on destruction.
+     */
+    public function flushPendingSnapshots(): void
+    {
+        foreach ($this->pendingSnapshots as $snapshot) {
+            $this->saveSnapshot($snapshot);
+        }
+        $this->pendingSnapshots = [];
+        $this->pendingWrites = 0;
+    }
+
+    /**
+     * Set the batch size for disk writes.
+     * Higher values improve performance but risk data loss on crash.
+     */
+    public function setBatchSize(int $size): void
+    {
+        $this->batchSize = max(1, $size);
+    }
+
+    public function __destruct()
+    {
+        $this->flushPendingSnapshots();
     }
 
     /**
@@ -278,8 +315,13 @@ class FileSnapshotManager
      */
     private function loadSnapshot(string $snapshotId): ?FileSnapshot
     {
+        // Ensure pending writes are flushed before reading from disk
+        if (!empty($this->pendingSnapshots)) {
+            $this->flushPendingSnapshots();
+        }
+
         $path = $this->getSnapshotPath($snapshotId);
-        
+
         if (!file_exists($path)) {
             return null;
         }

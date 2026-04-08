@@ -33,6 +33,13 @@ use SuperAgent\CostPrediction\CostHistoryStore;
 use SuperAgent\CostPrediction\CostPredictor;
 use SuperAgent\Guardrails\NaturalLanguage\NLGuardrailCompiler;
 use SuperAgent\Pipeline\SelfHealing\SelfHealingStrategy;
+use SuperAgent\Guardrails\PromptInjectionDetector;
+use SuperAgent\Providers\CredentialPool;
+use SuperAgent\Optimization\QueryComplexityRouter;
+use SuperAgent\Optimization\ContextCompression\ContextCompressor;
+use SuperAgent\Memory\MemoryProviderManager;
+use SuperAgent\Memory\BuiltinMemoryProvider;
+use SuperAgent\Memory\Contracts\MemoryProviderInterface;
 
 class SuperAgentServiceProvider extends ServiceProvider
 {
@@ -300,6 +307,53 @@ class SuperAgentServiceProvider extends ServiceProvider
             }
 
             return $compiler;
+        });
+
+        // Register PromptInjectionDetector singleton
+        $this->app->singleton(PromptInjectionDetector::class, function ($app) {
+            return new PromptInjectionDetector();
+        });
+
+        // Register CredentialPool singleton and integrate with ProviderRegistry
+        $this->app->singleton(CredentialPool::class, function ($app) {
+            $config = $app['config']->get('superagent.credential_pool', []);
+            $pool = CredentialPool::fromConfig($config);
+
+            // Integrate with ProviderRegistry for automatic key rotation
+            if (!empty($config)) {
+                \SuperAgent\Providers\ProviderRegistry::setCredentialPool($pool);
+            }
+
+            return $pool;
+        });
+
+        // Register QueryComplexityRouter singleton when enabled
+        $this->app->singleton(QueryComplexityRouter::class, function ($app) {
+            $config = $app['config']->get('superagent.optimization.query_complexity_routing', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            $currentModel = $app['config']->get('superagent.model', 'claude-sonnet-4-6');
+            return QueryComplexityRouter::fromConfig($currentModel);
+        });
+
+        // Register ContextCompressor singleton when enabled
+        $this->app->singleton(ContextCompressor::class, function ($app) {
+            $config = $app['config']->get('superagent.optimization.context_compression', []);
+
+            if (empty($config['enabled'])) {
+                return null;
+            }
+
+            return ContextCompressor::fromConfig();
+        });
+
+        // Register MemoryProviderManager singleton
+        $this->app->singleton(MemoryProviderManager::class, function ($app) {
+            $builtinProvider = new BuiltinMemoryProvider();
+            return new MemoryProviderManager($builtinProvider);
         });
 
         // Register SelfHealingStrategy singleton when enabled

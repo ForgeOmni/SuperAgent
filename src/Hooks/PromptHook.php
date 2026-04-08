@@ -34,9 +34,10 @@ class PromptHook implements HookInterface
         }
 
         try {
-            // Inject $ARGUMENTS into prompt template
+            // Inject $ARGUMENTS into prompt template with sanitization
             $arguments = json_encode($input->additionalData, JSON_UNESCAPED_UNICODE);
-            $resolvedPrompt = str_replace('$ARGUMENTS', $arguments, $this->prompt);
+            $sanitizedArguments = $this->sanitizeArguments($arguments);
+            $resolvedPrompt = str_replace('$ARGUMENTS', $sanitizedArguments, $this->prompt);
 
             // Also support individual variable interpolation
             $resolvedPrompt = $this->interpolateVariables($resolvedPrompt, $input);
@@ -168,6 +169,40 @@ class PromptHook implements HookInterface
         }
 
         return HookResult::continue();
+    }
+
+    /**
+     * Sanitize arguments to prevent prompt injection via tool inputs.
+     *
+     * Removes patterns that could confuse the LLM into changing behavior:
+     * - Instruction override attempts ("ignore previous", "new instructions")
+     * - System prompt markers ("[SYSTEM]", "<|system|>")
+     * - Invisible Unicode characters (zero-width, bidirectional overrides)
+     */
+    private function sanitizeArguments(string $arguments): string
+    {
+        // Remove instruction override patterns
+        $arguments = preg_replace(
+            '/(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|rules?|context)/i',
+            '[FILTERED]',
+            $arguments
+        ) ?? $arguments;
+
+        // Remove system prompt markers
+        $arguments = preg_replace(
+            '/\[SYSTEM\]|<\|system\|>|<\|im_start\|>system/i',
+            '[FILTERED]',
+            $arguments
+        ) ?? $arguments;
+
+        // Remove invisible Unicode (zero-width chars, bidirectional overrides)
+        $arguments = preg_replace(
+            '/[\x{200B}\x{200C}\x{200D}\x{2060}\x{FEFF}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u',
+            '',
+            $arguments
+        ) ?? $arguments;
+
+        return $arguments;
     }
 
     private function interpolateVariables(string $text, HookInput $input): string

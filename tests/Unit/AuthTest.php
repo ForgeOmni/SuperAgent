@@ -234,6 +234,10 @@ class AuthTest extends TestCase
 
     public function testCredentialStoreFilePermissions(): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('Unix file permissions not supported on Windows.');
+        }
+
         $store = new CredentialStore($this->tmpDir);
         $store->store('github', 'access_token', 'secret');
 

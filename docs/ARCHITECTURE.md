@@ -2,6 +2,8 @@
 
 > **Version:** 0.8.0 | **Auto-generated:** 2026-04-08
 
+> **Language**: [English](ARCHITECTURE.md) | [中文](ARCHITECTURE_CN.md) | [Français](ARCHITECTURE_FR.md)
+
 ## Core System Dependencies
 
 ```mermaid

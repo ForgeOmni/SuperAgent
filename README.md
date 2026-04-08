@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.9-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.0-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -61,6 +61,21 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.8.0 — Hermes-Agent Inspired Architecture Upgrade (19 improvements, 74 new tests)
+- **SQLite Session Storage + FTS5 Search** (`src/Session/SqliteSessionStorage.php`) — SQLite WAL mode backend with FTS5 full-text search across all session messages. Random-jitter retry on lock contention, passive WAL checkpointing, optional SQLCipher encryption at rest. `SessionManager::search()` for cross-session search. Dual-write with file fallback. Config: `persistence.sessions`
+- **Unified Context Compression** (`src/Optimization/ContextCompression/ContextCompressor.php`) — 4-phase hierarchical compression: prune old tool results → protect head/tail → LLM summarize middle → iterative summary updates. Token-budget tail protection (default 8K), structured 5-section summary template. Config: `optimization.context_compression`
+- **Prompt Injection Detection** (`src/Guardrails/PromptInjectionDetector.php`) — Pattern-based detection for 7 threat categories (instruction override, system prompt extraction, data exfiltration, role confusion, invisible Unicode, hidden HTML, encoding evasion). 4 severity levels, file scanning, invisible character sanitization. Auto-integrated into `SystemPromptBuilder::withContextFiles()` — high/critical threats excluded, medium threats sanitized
+- **Credential Pool** (`src/Providers/CredentialPool.php`) — Multi-credential failover with 4 rotation strategies (`fill_first`, `round_robin`, `random`, `least_used`). Per-credential status tracking, automatic cooldown on rate limits (1h) and errors (24h). Auto-integrated into `ProviderRegistry::create()` for transparent key rotation. Config: `credential_pool`
+- **Query Complexity Router** (`src/Optimization/QueryComplexityRouter.php`) — Content-based model routing: detects code, URLs, complexity keywords, multi-step instructions. Simple queries auto-route to fast model. Config: `optimization.query_complexity_routing`
+- **Path-Level Write Conflict Detection** — `ParallelToolExecutor::classify()` upgraded: write tools targeting different paths can now run in parallel; overlapping paths forced sequential. Destructive bash command detection (rm -rf, git push, DROP TABLE)
+- **Memory Provider Interface** (`src/Memory/Contracts/MemoryProviderInterface.php`) — Pluggable memory provider with 10 lifecycle hooks. `MemoryProviderManager` orchestrates builtin + one external provider. Two implementations: `VectorMemoryProvider` (cosine similarity with embeddings) and `EpisodicMemoryProvider` (temporal episodes with recency scoring). Context wrapped in `<recalled-memory>` XML tags. Error-isolated
+- **Skill Progressive Disclosure** (`src/Tools/Builtin/SkillCatalogTool.php`) — Two-phase skill loading: Phase 1 (metadata only) → Phase 2 (full instructions on demand). YAML frontmatter parsing, keyword search, auto-discovery from skills directories
+- **SecurityCheckChain** (`src/Permissions/SecurityCheckChain.php`) — Composable security check chain wrapping the 23-check BashSecurityValidator. `SecurityCheck` interface + `LegacyValidatorCheck` adapter for zero-migration upgrade. `add()`, `insertAt()`, `disableById()` for custom security policies
+- **Safe Stream Writer** (`src/Output/SafeStreamWriter.php`) — Broken pipe protection for daemon/container scenarios. Static factories `stdout()` / `stderr()`
+- **Architecture Hardening** — Batched FileSnapshotManager I/O (default batch=5), AutoDreamConsolidator memory bounds (500 gather / 1000 consolidate), ReplayStore JSON schema validation, PromptHook $ARGUMENTS sanitization against adversarial injection
+- **Architecture Diagram** (`docs/ARCHITECTURE.md`) — Mermaid dependency graph with 80+ nodes, data flow sequence diagram, subsystem counts
+- **18 Test Fixes** — Fixed all pre-existing test failures: Windows compatibility (bash, permissions, symlinks, process kill), missing BackendType::DISTRIBUTED enum, AgentSpawnConfig::toArray(), PluginManager config safety, AgentDependencyManager root node inclusion, sys_getloadavg() guard. Full suite: **1687 tests, 4713 assertions, 0 failures**
 
 ### 🆕 v0.7.9 — Dependency Injection & Architecture Hardening (63 new unit tests)
 - **Singleton → Constructor Injection** — 19 singleton classes (`AgentManager`, `TaskManager`, `MCPManager`, `ParallelAgentCoordinator`, `EventDispatcher`, `CostTracker`, etc.) now have public constructors with `getInstance()` marked `@deprecated`. 25 call sites updated to accept injected dependencies with backward-compatible fallback. Enables proper test isolation and process-safe Swarm execution

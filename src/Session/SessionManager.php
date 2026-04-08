@@ -27,6 +27,9 @@ class SessionManager
     private SessionStorage $storage;
     private SessionPruner $pruner;
     private LoggerInterface $logger;
+    private ?SqliteSessionStorage $sqlite = null;
+    private int $maxSessions;
+    private int $pruneAfterDays;
 
     public function __construct(
         string $storageDir,
@@ -37,6 +40,18 @@ class SessionManager
         $this->logger = $logger ?? new NullLogger();
         $this->storage = new SessionStorage($storageDir);
         $this->pruner = new SessionPruner($this->storage, $maxSessions, $pruneAfterDays, $this->logger);
+        $this->maxSessions = $maxSessions;
+        $this->pruneAfterDays = $pruneAfterDays;
+
+        // Initialize SQLite backend (with FTS5 search support)
+        try {
+            $dbPath = rtrim($storageDir, '/') . '/sessions.db';
+            $this->sqlite = new SqliteSessionStorage($dbPath, $this->logger);
+        } catch (\Throwable $e) {
+            $this->logger->warning('SQLite session storage unavailable, using file fallback', [
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
@@ -128,6 +143,15 @@ class SessionManager
             'message_count' => count($messages),
             'project_dir' => $projectDir,
         ]);
+
+        // Mirror to SQLite for search support
+        if ($this->sqlite !== null) {
+            try {
+                $this->sqlite->save($sessionId, $snapshot);
+            } catch (\Throwable $e) {
+                $this->logger->warning('SQLite session save failed', ['error' => $e->getMessage()]);
+            }
+        }
 
         // Auto-prune if over limit
         $this->pruner->maybePrune($cwd);
@@ -283,6 +307,36 @@ class SessionManager
         }
 
         return $sessions;
+    }
+
+    // ── Search (FTS5) ─────────────────────────────────────────────
+
+    /**
+     * Full-text search across all session messages.
+     * Requires the SQLite backend (falls back to empty results).
+     *
+     * @return array[] Matching sessions with snippets and relevance
+     */
+    public function search(string $query, int $limit = 10): array
+    {
+        if ($this->sqlite === null) {
+            return [];
+        }
+
+        try {
+            return $this->sqlite->search($query, $limit);
+        } catch (\Throwable $e) {
+            $this->logger->warning('Session search failed', ['error' => $e->getMessage()]);
+            return [];
+        }
+    }
+
+    /**
+     * Get the SQLite storage backend (if available).
+     */
+    public function getSqliteStorage(): ?SqliteSessionStorage
+    {
+        return $this->sqlite;
     }
 
     // ── Delete ─────────────────────────────────────────────────────

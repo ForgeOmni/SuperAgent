@@ -219,8 +219,13 @@ class PluginManager
      */
     private function loadConfiguration(): void
     {
-        if (function_exists('config')) {
-            $this->config = config('superagent.plugins', []);
+        try {
+            if (function_exists('config')) {
+                $this->config = config('superagent.plugins', []);
+            }
+        } catch (\Throwable $e) {
+            // No Laravel config available (e.g., unit tests without full app)
+            $this->config = [];
         }
     }
 

@@ -108,6 +108,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Credential Pool
+    |--------------------------------------------------------------------------
+    | Multi-credential failover with rotation strategies and cooldown.
+    | Configure multiple API keys per provider for load distribution.
+    |
+    | Strategies: fill_first, round_robin, random, least_used
+    | Cooldown: seconds to wait after rate limit (429) or other errors
+    */
+    'credential_pool' => [
+        // 'anthropic' => [
+        //     'strategy' => 'round_robin',
+        //     'keys' => [env('ANTHROPIC_API_KEY'), env('ANTHROPIC_API_KEY_2')],
+        //     'cooldown_429' => 3600,
+        //     'cooldown_error' => 86400,
+        // ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Agent Defaults
     |--------------------------------------------------------------------------
     */
@@ -158,6 +177,24 @@ return [
         'prompt_cache_pinning' => [
             'enabled' => env('SUPERAGENT_OPT_CACHE_PINNING', true),
             'min_static_length' => (int) env('SUPERAGENT_OPT_CACHE_MIN_LENGTH', 500),
+        ],
+
+        // Unified hierarchical context compression (prune → protect → summarize)
+        'context_compression' => [
+            'enabled' => env('SUPERAGENT_OPT_CONTEXT_COMPRESSION', true),
+            'tail_budget_tokens' => (int) env('SUPERAGENT_OPT_TAIL_BUDGET', 8000),
+            'max_tool_result_length' => (int) env('SUPERAGENT_OPT_MAX_TOOL_RESULT', 200),
+            'preserve_head_messages' => (int) env('SUPERAGENT_OPT_PRESERVE_HEAD', 2),
+            'target_token_budget' => (int) env('SUPERAGENT_OPT_TOKEN_BUDGET', 80000),
+        ],
+
+        // Route simple queries to cheaper models based on content complexity analysis
+        'query_complexity_routing' => [
+            'enabled' => env('SUPERAGENT_OPT_QUERY_ROUTING', true),
+            'fast_model' => env('SUPERAGENT_OPT_QUERY_FAST_MODEL', 'claude-haiku-4-5-20251001'),
+            'max_simple_chars' => (int) env('SUPERAGENT_OPT_QUERY_MAX_CHARS', 200),
+            'max_simple_words' => (int) env('SUPERAGENT_OPT_QUERY_MAX_WORDS', 40),
+            'max_simple_newlines' => (int) env('SUPERAGENT_OPT_QUERY_MAX_NEWLINES', 2),
         ],
     ],
 

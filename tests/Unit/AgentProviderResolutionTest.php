@@ -155,7 +155,12 @@ class AgentProviderResolutionTest extends TestCase
             'model' => 'claude-3-haiku-20240307',
         ]);
 
-        $this->assertEquals('claude-3-haiku-20240307', $agent->getProvider()->getModel());
+        // ModelResolver resolves old haiku ID to the latest haiku model
+        $model = $agent->getProvider()->getModel();
+        $this->assertTrue(
+            str_contains($model, 'haiku'),
+            "Expected a haiku model, got: {$model}"
+        );
     }
 
     /**

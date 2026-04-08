@@ -4,12 +4,13 @@ namespace SuperAgent\Providers;
 
 use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\Exceptions\ProviderException;
+use SuperAgent\Providers\CredentialPool;
 
 class ProviderRegistry
 {
     /**
      * Registered provider classes.
-     * 
+     *
      * @var array<string, class-string<LLMProvider>>
      */
     protected static array $providers = [
@@ -22,10 +23,15 @@ class ProviderRegistry
 
     /**
      * Provider instances cache.
-     * 
+     *
      * @var array<string, LLMProvider>
      */
     protected static array $instances = [];
+
+    /**
+     * Credential pool for multi-key rotation and failover.
+     */
+    protected static ?CredentialPool $credentialPool = null;
 
     /**
      * Default configurations for providers.
@@ -80,7 +86,26 @@ class ProviderRegistry
     }
 
     /**
+     * Set the credential pool for multi-key rotation and failover.
+     */
+    public static function setCredentialPool(CredentialPool $pool): void
+    {
+        self::$credentialPool = $pool;
+    }
+
+    /**
+     * Get the current credential pool (if any).
+     */
+    public static function getCredentialPool(): ?CredentialPool
+    {
+        return self::$credentialPool;
+    }
+
+    /**
      * Create a provider instance.
+     *
+     * When a CredentialPool is configured and the provider has pooled keys,
+     * the pool's next available key is used instead of the config key.
      */
     public static function create(string $name, array $config = []): LLMProvider
     {
@@ -95,11 +120,50 @@ class ProviderRegistry
         $defaultConfig = self::$defaultConfigs[$name] ?? [];
         $config = array_merge($defaultConfig, $config);
 
+        // If a credential pool is configured, try to get a key from the pool
+        if (self::$credentialPool !== null && !isset($config['_skip_pool'])) {
+            $poolKey = self::$credentialPool->getKey($name);
+            if ($poolKey !== null) {
+                $config['api_key'] = $poolKey;
+                $config['_pool_key'] = $poolKey; // Track which key was used for reporting
+            }
+        }
+
         // Validate required config based on provider
         self::validateConfig($name, $config);
 
         $providerClass = self::$providers[$name];
         return new $providerClass($config);
+    }
+
+    /**
+     * Report a successful API call to the credential pool.
+     */
+    public static function reportSuccess(string $providerName, array $config): void
+    {
+        if (self::$credentialPool !== null && isset($config['_pool_key'])) {
+            self::$credentialPool->reportSuccess($providerName, $config['_pool_key']);
+        }
+    }
+
+    /**
+     * Report a rate limit (429) to the credential pool.
+     */
+    public static function reportRateLimit(string $providerName, array $config): void
+    {
+        if (self::$credentialPool !== null && isset($config['_pool_key'])) {
+            self::$credentialPool->reportRateLimit($providerName, $config['_pool_key']);
+        }
+    }
+
+    /**
+     * Report an error to the credential pool.
+     */
+    public static function reportError(string $providerName, array $config): void
+    {
+        if (self::$credentialPool !== null && isset($config['_pool_key'])) {
+            self::$credentialPool->reportError($providerName, $config['_pool_key']);
+        }
     }
 
     /**
@@ -117,11 +181,12 @@ class ProviderRegistry
     }
 
     /**
-     * Clear cached instances.
+     * Clear cached instances and credential pool.
      */
     public static function clearCache(): void
     {
         self::$instances = [];
+        self::$credentialPool = null;
     }
 
     /**

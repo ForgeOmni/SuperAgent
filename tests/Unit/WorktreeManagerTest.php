@@ -175,6 +175,10 @@ class WorktreeManagerTest extends TestCase
 
     public function testCreateWorktreeWithSymlinks(): void
     {
+        if (PHP_OS_FAMILY === 'Windows') {
+            $this->markTestSkipped('Symlink creation requires elevated privileges on Windows.');
+        }
+
         $repoDir = $this->createTempGitRepo();
 
         // Create a node_modules dir in the repo

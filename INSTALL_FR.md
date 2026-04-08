@@ -38,6 +38,7 @@
 - pcntl       # Contrôle de processus (collaboration multi-agents)
 - yaml        # Fichiers de configuration YAML
 - zip         # Compression de fichiers
+- pdo_sqlite  # Stockage de sessions SQLite avec recherche FTS5 (v0.8.0+)
 ```
 
 ### Vérification de l'Environnement
@@ -911,6 +912,7 @@ php artisan optimize:clear
 
 | SuperAgent | Laravel | PHP   | Notes |
 |------------|---------|-------|-------|
+| 0.8.0      | 10.x+   | 8.1+ | 19 améliorations : SQLite+FTS5 (avec chiffrement), compression contexte unifiée, détection injection prompt (intégrée au prompt builder), pool credentials (intégrée au provider registry), routage complexité, détection conflits écriture, interface memory provider (vector + épisodique), SecurityCheckChain (validation bash composable), divulgation skills, écriture stream sécurisée, I/O FileSnapshot par lots, limites mémoire AutoDream, validation ReplayStore, sanitization PromptHook, diagramme Mermaid. 18 corrections tests. 1687 tests, 0 échec |
 | 0.7.8      | 10.x+   | 8.1+  | Mode Agent Harness + sous-systèmes entreprise : tâches & sessions persistantes, événements stream, boucle REPL, auto-compacteur, scénarios E2E, middleware retry API, backend iTerm2, système de plugins, état d'app observable, rechargement à chaud des hooks, hooks prompt/agent, passerelle multi-canal, protocole backend, flux OAuth device code, règles de permission par chemin, notifications coordinateur. 628 nouveaux tests |
 | 0.7.7      | 10.x+   | 8.1+  | Renforcement déboguabilité : journalisation de 27 exceptions silencieuses, tests unitaires Agent (31 tests), framework de revue de code docs/REVIEW.md |
 | 0.7.6      | 10.x+   | 8.1+  | 6 sous-systèmes innovants : Replay d'Agent & Débogage Temporel, Fork de Conversation, Protocole de Débat, Prédiction de Coûts, Garde-fous en Langage Naturel, Pipelines Auto-Réparateurs |

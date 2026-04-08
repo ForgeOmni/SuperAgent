@@ -131,7 +131,6 @@ class DistributedBackend implements BackendInterface
                 success: true,
                 agentId: $agentId,
                 taskId: $taskId,
-                metadata: ['node' => $node['id']],
             );
             
         } catch (\Exception $e) {

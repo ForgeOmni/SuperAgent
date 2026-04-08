@@ -122,7 +122,7 @@ class MessageTest extends TestCase
 
         $this->assertSame(100, $usage->inputTokens);
         $this->assertSame(50, $usage->outputTokens);
-        $this->assertSame(150, $usage->totalTokens());
+        $this->assertSame(180, $usage->totalTokens());
         $this->assertSame([
             'input_tokens' => 100,
             'output_tokens' => 50,

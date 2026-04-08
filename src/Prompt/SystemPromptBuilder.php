@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Prompt;
 
+use SuperAgent\Guardrails\PromptInjectionDetector;
+use SuperAgent\Guardrails\PromptInjectionResult;
 use SuperAgent\MCP\MCPManager;
 
 /**
@@ -34,9 +36,15 @@ class SystemPromptBuilder
     /** @var string[] enabled tool names */
     private array $enabledTools = [];
 
+    private ?PromptInjectionDetector $injectionDetector = null;
+
+    /** @var PromptInjectionResult[] threats found during context file scanning */
+    private array $detectedThreats = [];
+
     public static function create(): self
     {
         $builder = new self();
+        $builder->injectionDetector = new PromptInjectionDetector();
         $builder->registerDefaultSections();
         return $builder;
     }
@@ -141,6 +149,95 @@ class SystemPromptBuilder
             );
         }
 
+        return $this;
+    }
+
+    /**
+     * Scan context files for prompt injection before including them.
+     *
+     * Scans each file with PromptInjectionDetector and:
+     * - Files with critical/high threats: excluded, warning injected
+     * - Files with medium threats: included with warning
+     * - Files with low/no threats: included normally
+     *
+     * @param string[] $filePaths Context files to scan (CLAUDE.md, .cursorrules, etc.)
+     * @return self
+     */
+    public function withContextFiles(array $filePaths): self
+    {
+        if ($this->injectionDetector === null) {
+            // No detector — include files without scanning
+            foreach ($filePaths as $path) {
+                if (file_exists($path) && is_readable($path)) {
+                    $content = file_get_contents($path);
+                    if ($content !== false && trim($content) !== '') {
+                        $name = 'context_' . basename($path, '.md');
+                        $this->dynamicSections[$name] = new PromptSection($name, $content);
+                    }
+                }
+            }
+            return $this;
+        }
+
+        $warnings = [];
+
+        foreach ($filePaths as $path) {
+            if (!file_exists($path) || !is_readable($path)) {
+                continue;
+            }
+
+            $content = file_get_contents($path);
+            if ($content === false || trim($content) === '') {
+                continue;
+            }
+
+            $result = $this->injectionDetector->scan($content, $path);
+            $name = 'context_' . basename($path, '.md');
+
+            if ($result->hasThreat) {
+                $this->detectedThreats[] = $result;
+                $maxSeverity = $result->getMaxSeverity();
+
+                if ($maxSeverity === 'critical' || $maxSeverity === 'high') {
+                    // Exclude high/critical threat files, add warning
+                    $warnings[] = "WARNING: Context file '{$path}' excluded — {$result->getSummary()}";
+                    continue;
+                }
+
+                // Medium/low threats: include with sanitization
+                $content = $this->injectionDetector->sanitizeInvisible($content);
+                $warnings[] = "NOTICE: Context file '{$path}' included with sanitization — {$result->getSummary()}";
+            }
+
+            $this->dynamicSections[$name] = new PromptSection($name, $content);
+        }
+
+        if (!empty($warnings)) {
+            $this->dynamicSections['context_warnings'] = new PromptSection(
+                'context_warnings',
+                "# Context File Security Notices\n\n" . implode("\n", $warnings),
+            );
+        }
+
+        return $this;
+    }
+
+    /**
+     * Get any prompt injection threats detected during context file scanning.
+     *
+     * @return PromptInjectionResult[]
+     */
+    public function getDetectedThreats(): array
+    {
+        return $this->detectedThreats;
+    }
+
+    /**
+     * Set a custom PromptInjectionDetector (for testing or configuration).
+     */
+    public function withInjectionDetector(?PromptInjectionDetector $detector): self
+    {
+        $this->injectionDetector = $detector;
         return $this;
     }
 

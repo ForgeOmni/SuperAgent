@@ -1,6 +1,7 @@
 # Parallel Agent Tracking - Advanced Features
 
-> **v0.7.8 Additions:** New visual debugging backends — iTerm2 Backend (`src/Swarm/Backends/ITermBackend.php`), Tmux Backend (`src/Swarm/Backends/TmuxBackend.php`), and BackendRegistry (`src/Swarm/BackendRegistry.php`) for dynamic backend discovery and selection.
+> **v0.7.8 Additions:** Visual debugging backends — iTerm2 Backend, Tmux Backend, BackendRegistry for dynamic discovery.  
+> **v0.8.0 Additions:** Path-level write conflict detection in parallel tool execution, destructive command detection, `BackendType::DISTRIBUTED` enum, `AgentSpawnConfig::toArray()`, `AgentDependencyManager` root node inclusion fix.
 
 ## Completed Enhancements
 
@@ -260,3 +261,90 @@ SuperAgent now provides a complete, production-ready multi-agent orchestration p
 ✅ **Persistent State** - Fault-tolerant with auto-recovery
 
 The implementation matches and exceeds Claude Code's capabilities, providing enterprise-grade features for managing complex multi-agent systems at scale.
+
+---
+
+## v0.8.0 Enhancements
+
+### 7. ✅ Path-Level Write Conflict Detection
+**File:** `src/Performance/ParallelToolExecutor.php`
+
+Upgraded `classify()` to use path-aware conflict detection instead of simple read-only checks:
+- **Path Extraction**: Extracts target file paths from tool inputs (`file_path`, `path`) and bash commands (redirects, tee)
+- **Conflict Detection**: Write tools targeting different files can run in parallel; overlapping paths (same file or parent/child directory) forced sequential
+- **Destructive Command Detection**: Regex patterns detect dangerous bash commands (rm -rf, git push/reset/checkout, DROP TABLE, TRUNCATE, kill, chmod, chown) — always sequential
+- **Path Normalization**: Cross-platform path comparison with `.`/`..` resolution
+
+```php
+$executor = new ParallelToolExecutor();
+
+// These write to different files — can run in parallel
+$result = $executor->classify([
+    ContentBlock::toolUse('t1', 'write', ['file_path' => '/src/a.php']),
+    ContentBlock::toolUse('t2', 'write', ['file_path' => '/src/b.php']),
+]);
+// parallel: [t1, t2], sequential: []
+
+// These write to the same file — forced sequential
+$result = $executor->classify([
+    ContentBlock::toolUse('t1', 'write', ['file_path' => '/src/a.php']),
+    ContentBlock::toolUse('t2', 'edit',  ['file_path' => '/src/a.php']),
+]);
+// parallel: [t1], sequential: [t2]
+```
+
+### 8. ✅ BackendType::DISTRIBUTED Enum + AgentSpawnConfig::toArray()
+**Files:** `src/Swarm/BackendType.php`, `src/Swarm/AgentSpawnConfig.php`
+
+- Added `DISTRIBUTED = 'distributed'` case to `BackendType` enum for `DistributedBackend` support
+- Added `AgentSpawnConfig::toArray()` for cross-process/network serialization of spawn configurations
+- Fixed `DistributedBackend::spawn()` to use valid `AgentSpawnResult` constructor parameters
+
+### 9. ✅ AgentDependencyManager Root Node Fix
+**File:** `src/Swarm/Dependency/AgentDependencyManager.php`
+
+`getExecutionStages()` now collects ALL agent IDs — both registered dependents and their dependency targets — ensuring root nodes (agents referenced as dependencies but never registered themselves) appear in the correct execution stage.
+
+```php
+$depManager->registerDependencies('stage2_a', ['stage1']);
+$depManager->registerDependencies('stage2_b', ['stage1']);
+$depManager->registerDependencies('stage3', ['stage2_a', 'stage2_b']);
+
+$stages = $depManager->getExecutionStages();
+// Stage 0: ['stage1']           ← root node now correctly included
+// Stage 1: ['stage2_a', 'stage2_b']
+// Stage 2: ['stage3']
+```
+
+### 10. ✅ Multi-Credential Pool for Provider Resilience
+**File:** `src/Providers/CredentialPool.php`
+
+While not directly a parallel agent feature, the `CredentialPool` enhances multi-agent reliability by distributing API key usage across multiple credentials per provider. In high-concurrency scenarios with many parallel agents, this prevents rate limit cascades.
+
+```php
+$pool = CredentialPool::fromConfig([
+    'anthropic' => [
+        'strategy' => 'round_robin',
+        'keys' => ['sk-ant-1', 'sk-ant-2', 'sk-ant-3'],
+        'cooldown_429' => 3600,
+    ],
+]);
+
+// Each parallel agent gets a different key
+$key1 = $pool->getKey('anthropic'); // sk-ant-1
+$key2 = $pool->getKey('anthropic'); // sk-ant-2
+$key3 = $pool->getKey('anthropic'); // sk-ant-3
+```
+
+### Test Results (v0.8.0)
+
+All parallel agent tracking tests pass:
+```
+Tests: 1687, Assertions: 4713, Warnings: 32, Skipped: 22.
+OK (0 errors, 0 failures)
+```
+
+Key test files for v0.8.0 parallel features:
+- `tests/Unit/Performance/ParallelToolPathConflictTest.php` — 8 tests for path conflict detection
+- `tests/Unit/Providers/CredentialPoolTest.php` — 10 tests for credential rotation
+- `tests/Unit/EnhancementsTest.php` — Updated for dependency manager and distributed backend fixes
