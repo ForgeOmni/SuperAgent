@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /c/Users/mlizp/SuperAgent/src/*.php)",
+      "Bash(grep -r \"class.*extends\\\\|interface.*implements\" /c/Users/mlizp/SuperAgent/src/Providers/*.php)",
+      "Bash(find /c/Users/mlizp/SuperAgent/src -name \"*.php\" -exec wc -l {} +)",
+      "Bash(php vendor/bin/phpunit --no-coverage)",
+      "Bash(ls phpunit*)",
+      "Bash(php -l src/Session/SqliteSessionStorage.php)",
+      "Bash(php -l src/Output/SafeStreamWriter.php)",
+      "Bash(php -l src/Optimization/ContextCompression/ContextCompressor.php)",
+      "Bash(php -l src/Guardrails/PromptInjectionDetector.php)",
+      "Bash(php -l src/Guardrails/PromptInjectionResult.php)",
+      "Bash(php -l tests/Unit/Session/SqliteSessionStorageTest.php)",
+      "Bash(php -l tests/Unit/Guardrails/PromptInjectionDetectorTest.php)",
+      "Bash(php -l tests/Unit/Providers/CredentialPoolTest.php)",
+      "Bash(php -l tests/Unit/Optimization/QueryComplexityRouterTest.php)",
+      "Bash(php -l tests/Unit/Optimization/ContextCompressorTest.php)",
+      "Read(//mnt/c/Users/mlizp/**)",
+      "Bash(composer install:*)",
+      "Bash(vendor/bin/phpunit:*)",
+      "Bash(grep -B0 \"Test\\\\\\\\|Failed\\\\\\\\|Error\")",
+      "Bash(tee /tmp/phpunit_full.txt)",
+      "Bash(grep -v \"^\\\\-\\\\-$\")",
+      "Bash(find src/ -name \"*.php\" -exec cat {} +)",
+      "Bash(find tests/ -name \"*.php\" -exec cat {} +)",
+      "Read(//c/Users/mlizp/SuperAgent/**)",
+      "Bash(find src/ -name \"*.php\" -exec wc -l {} +)",
+      "Bash(ls src/Providers/*Provider.php)",
+      "Bash(php -l src/Providers/ProviderRegistry.php)",
+      "Bash(php -l src/Prompt/SystemPromptBuilder.php)",
+      "Bash(php -l src/SuperAgentServiceProvider.php)",
+      "Bash(php -l src/Permissions/SecurityCheck.php)",
+      "Bash(php -l src/Permissions/SecurityCheckChain.php)",
+      "Bash(php -l src/Permissions/LegacyValidatorCheck.php)",
+      "Bash(php -l src/FileHistory/FileSnapshotManager.php)",
+      "Bash(php -l src/Memory/AutoDreamConsolidator.php)",
+      "Bash(php -l src/Replay/ReplayStore.php)",
+      "Bash(php -l src/Hooks/PromptHook.php)",
+      "Bash(php -l src/Memory/Providers/VectorMemoryProvider.php)"
+    ]
+  }
+}
