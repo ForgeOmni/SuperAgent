@@ -37,7 +37,11 @@
       "Bash(php -l src/Memory/AutoDreamConsolidator.php)",
       "Bash(php -l src/Replay/ReplayStore.php)",
       "Bash(php -l src/Hooks/PromptHook.php)",
-      "Bash(php -l src/Memory/Providers/VectorMemoryProvider.php)"
+      "Bash(php -l src/Memory/Providers/VectorMemoryProvider.php)",
+      "Bash(ls:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
