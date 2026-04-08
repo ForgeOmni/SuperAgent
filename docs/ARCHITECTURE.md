@@ -7,6 +7,7 @@
 ## Core System Dependencies
 
 ```mermaid
+%%{init: {'flowchart': {'rankSpacing': 60, 'nodeSpacing': 30}}}%%
 graph TB
     subgraph Entry["Entry Points"]
         Agent["Agent.php"]

@@ -7,6 +7,7 @@
 ## Dépendances du Système Principal
 
 ```mermaid
+%%{init: {'flowchart': {'rankSpacing': 60, 'nodeSpacing': 30}}}%%
 graph TB
     subgraph Entry["Points d'Entrée"]
         Agent["Agent.php"]

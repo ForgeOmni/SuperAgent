@@ -7,6 +7,7 @@
 ## 核心系统依赖
 
 ```mermaid
+%%{init: {'flowchart': {'rankSpacing': 60, 'nodeSpacing': 30}}}%%
 graph TB
     subgraph Entry["入口点"]
         Agent["Agent.php"]
