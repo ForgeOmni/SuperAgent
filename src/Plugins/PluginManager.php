@@ -3,6 +3,9 @@
 namespace SuperAgent\Plugins;
 
 use SuperAgent\Agent;
+use SuperAgent\Middleware\MiddlewareInterface;
+use SuperAgent\Middleware\MiddlewarePipeline;
+use SuperAgent\Providers\ProviderRegistry;
 use SuperAgent\Tools\ToolRegistry;
 
 class PluginManager
@@ -238,6 +241,46 @@ class PluginManager
         
         if (isset($this->plugins[$name])) {
             $this->plugins[$name]->setConfig($config);
+        }
+    }
+
+    /**
+     * Collect all middleware from enabled plugins.
+     *
+     * @return MiddlewareInterface[]
+     */
+    public function collectMiddleware(): array
+    {
+        $middleware = [];
+        foreach ($this->getEnabled() as $plugin) {
+            foreach ($plugin->middleware() as $mw) {
+                $middleware[] = $mw;
+            }
+        }
+        return $middleware;
+    }
+
+    /**
+     * Register all middleware from enabled plugins into a pipeline.
+     */
+    public function registerMiddleware(MiddlewarePipeline $pipeline): void
+    {
+        foreach ($this->collectMiddleware() as $mw) {
+            if (!$pipeline->has($mw->name())) {
+                $pipeline->use($mw);
+            }
+        }
+    }
+
+    /**
+     * Register all providers from enabled plugins into the registry.
+     */
+    public function registerProviders(): void
+    {
+        foreach ($this->getEnabled() as $plugin) {
+            foreach ($plugin->providers() as $name => $providerClass) {
+                ProviderRegistry::register($name, $providerClass);
+            }
         }
     }
 

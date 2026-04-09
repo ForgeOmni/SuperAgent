@@ -196,6 +196,40 @@ return [
             'max_simple_words' => (int) env('SUPERAGENT_OPT_QUERY_MAX_WORDS', 40),
             'max_simple_newlines' => (int) env('SUPERAGENT_OPT_QUERY_MAX_NEWLINES', 2),
         ],
+
+        // Per-tool result caching for read-only tools
+        'tool_cache' => [
+            'enabled' => env('SUPERAGENT_OPT_TOOL_CACHE', true),
+            'default_ttl' => (int) env('SUPERAGENT_OPT_TOOL_CACHE_TTL', 300),
+            'max_entries' => (int) env('SUPERAGENT_OPT_TOOL_CACHE_MAX', 1000),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Middleware Pipeline
+    |--------------------------------------------------------------------------
+    | Composable middleware chain for LLM requests. Middleware run in priority
+    | order (highest first) and can intercept, modify, or short-circuit calls.
+    */
+    'middleware' => [
+        'rate_limit' => [
+            'enabled' => env('SUPERAGENT_MW_RATE_LIMIT', false),
+            'max_tokens' => (float) env('SUPERAGENT_MW_RATE_MAX', 10.0),
+            'refill_rate' => (float) env('SUPERAGENT_MW_RATE_REFILL', 1.0),
+        ],
+        'cost_tracking' => [
+            'enabled' => env('SUPERAGENT_MW_COST_TRACKING', false),
+            'budget_usd' => (float) env('SUPERAGENT_MW_COST_BUDGET', 0.0),
+        ],
+        'retry' => [
+            'enabled' => env('SUPERAGENT_MW_RETRY', true),
+            'max_retries' => (int) env('SUPERAGENT_MW_RETRY_MAX', 3),
+            'base_delay_ms' => (int) env('SUPERAGENT_MW_RETRY_DELAY', 1000),
+        ],
+        'logging' => [
+            'enabled' => env('SUPERAGENT_MW_LOGGING', false),
+        ],
     ],
 
     /*

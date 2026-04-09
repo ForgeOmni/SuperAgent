@@ -60,4 +60,14 @@ abstract class BasePlugin implements PluginInterface
     {
         return true;
     }
+
+    public function middleware(): array
+    {
+        return [];
+    }
+
+    public function providers(): array
+    {
+        return [];
+    }
 }

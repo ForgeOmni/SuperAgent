@@ -95,6 +95,12 @@
 - [58. 向量与情景记忆提供者](#58-向量与情景记忆提供者)
 - [59. 架构图](#59-架构图)
 
+### 中间件、缓存与错误 (v0.8.1)
+
+- [60. 中间件管道](#60-中间件管道)
+- [61. 工具级结果缓存](#61-工具级结果缓存)
+- [62. 结构化输出](#62-结构化输出)
+
 ---
 
 ## 1. 流水线 DSL
@@ -6101,3 +6107,135 @@ $episodicProvider = new EpisodicMemoryProvider(
 ## 59. 架构图
 
 参见 [`docs/ARCHITECTURE_CN.md`](ARCHITECTURE_CN.md) — 包含 80+ 节点 Mermaid 依赖图和数据流序列图。
+
+## 60. 中间件管道
+
+可组合的洋葱模型中间件链，支持优先级排序。
+
+### 配置
+
+```php
+// config/superagent.php
+'middleware' => [
+    'rate_limit' => ['enabled' => true, 'max_tokens' => 10.0, 'refill_rate' => 1.0],
+    'cost_tracking' => ['enabled' => true, 'budget_usd' => 5.0],
+    'retry' => ['enabled' => true, 'max_retries' => 3, 'base_delay_ms' => 1000],
+    'logging' => ['enabled' => true],
+],
+```
+
+### 用法
+
+```php
+use SuperAgent\Middleware\MiddlewarePipeline;
+use SuperAgent\Middleware\Builtin\RateLimitMiddleware;
+use SuperAgent\Middleware\Builtin\RetryMiddleware;
+use SuperAgent\Middleware\Builtin\CostTrackingMiddleware;
+use SuperAgent\Middleware\Builtin\LoggingMiddleware;
+use SuperAgent\Middleware\Builtin\GuardrailMiddleware;
+
+$pipeline = new MiddlewarePipeline();
+$pipeline->use(new RateLimitMiddleware(maxTokens: 10.0, refillRate: 1.0));
+$pipeline->use(new RetryMiddleware(maxRetries: 3, baseDelayMs: 1000));
+$pipeline->use(new CostTrackingMiddleware(budgetUsd: 5.0));
+$pipeline->use(new LoggingMiddleware($logger));
+$pipeline->use(new GuardrailMiddleware());
+
+// Custom middleware
+$pipeline->use(new class implements \SuperAgent\Middleware\MiddlewareInterface {
+    public function name(): string { return 'custom'; }
+    public function priority(): int { return 50; }
+    public function handle($ctx, $next) {
+        // Pre-processing
+        $result = $next($ctx);
+        // Post-processing
+        return $result;
+    }
+});
+
+// Middleware from plugins
+$pluginManager->registerMiddleware($pipeline);
+```
+
+### 内置中间件
+
+| 中间件 | 优先级 | 描述 |
+|--------|--------|------|
+| `RateLimitMiddleware` | 100 | 令牌桶限流 |
+| `RetryMiddleware` | 90 | 指数退避+抖动重试 |
+| `CostTrackingMiddleware` | 80 | 累计成本追踪+预算执行 |
+| `GuardrailMiddleware` | 70 | 输入/输出验证 |
+| `LoggingMiddleware` | -100 | 结构化请求/响应日志 |
+
+## 61. 工具级结果缓存
+
+带 TTL 的内存缓存，用于只读工具结果。
+
+### 配置
+
+```php
+'optimization' => [
+    'tool_cache' => [
+        'enabled' => true,
+        'default_ttl' => 300,    // 5 minutes
+        'max_entries' => 1000,
+    ],
+],
+```
+
+### 用法
+
+```php
+use SuperAgent\Tools\ToolResultCache;
+
+$cache = new ToolResultCache(defaultTtlSeconds: 300, maxEntries: 1000);
+
+// Cache a result
+$cache->set('read_file', ['path' => '/src/Agent.php'], $result);
+
+// Retrieve (returns null on miss or expiry)
+$cached = $cache->get('read_file', ['path' => '/src/Agent.php']);
+
+// Invalidate when files change
+$cache->invalidate('read_file');         // All read_file entries
+$cache->invalidateByPath('/src/Agent.php'); // Entries referencing path
+
+// Statistics
+$stats = $cache->getStats();
+// ['entries' => 42, 'hits' => 120, 'misses' => 30, 'hit_rate' => 0.8]
+```
+
+## 62. 结构化输出
+
+强制 LLM 以 JSON 格式响应，支持可选的 Schema 验证。
+
+### 用法
+
+```php
+use SuperAgent\Providers\ResponseFormat;
+
+// Plain text (default)
+$format = ResponseFormat::text();
+
+// JSON mode (no schema)
+$format = ResponseFormat::json();
+
+// JSON with schema validation
+$format = ResponseFormat::jsonSchema([
+    'type' => 'object',
+    'properties' => [
+        'answer' => ['type' => 'string'],
+        'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
+    ],
+    'required' => ['answer', 'confidence'],
+], 'analysis_result');
+
+// Pass to provider via options
+$provider->chat($messages, $tools, $systemPrompt, [
+    'response_format' => $format,
+]);
+
+// Provider-specific conversion
+$format->toAnthropicFormat(); // Anthropic tool_use trick
+$format->toOpenAIFormat();    // OpenAI native json_schema
+```

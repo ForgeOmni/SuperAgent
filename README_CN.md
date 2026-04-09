@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.8.0-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.8.1-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,14 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.8.1 — 中间件管道、类型化错误与工具缓存（6项改进，32个新测试）
+- **中间件管道** (`src/Middleware/`) — 可组合的洋葱模型中间件链。`MiddlewareInterface` 支持优先级排序。5个内置中间件：`RateLimitMiddleware`（令牌桶限流）、`RetryMiddleware`（指数退避+抖动重试）、`CostTrackingMiddleware`（预算执行）、`LoggingMiddleware`（结构化日志）、`GuardrailMiddleware`（输入/输出验证）。配置：`middleware`
+- **结构化输出** (`src/Providers/ResponseFormat.php`) — `ResponseFormat` 值对象，强制 LLM 返回 JSON。支持 `text()`、`json()`、`jsonSchema()` 模式，按提供者格式转换（`toAnthropicFormat()`、`toOpenAIFormat()`）
+- **工具级结果缓存** (`src/Tools/ToolResultCache.php`) — 带 TTL 的内存缓存，用于只读工具结果。输入排序无关哈希、按工具名或文件路径定向失效、LRU 淘汰、错误结果不缓存。配置：`optimization.tool_cache`
+- **增强异常层次** — `SuperAgentException` 新增 `context` 数组、`isRetryable()`、`toArray()`。`ProviderException` 新增 `retryable`、`retryAfterSeconds`、`fromHttpStatus()` 工厂方法。`ToolException` 新增 `toolInput`。新增：`BudgetExceededException`、`ContextOverflowException`、`ValidationException`
+- **主动上下文压缩** — `ContextCompressor::compressIfNeeded()` 自动检查 token 预算并仅在超出时压缩。新增 `estimateTokenCount()`、`getCompressionStats()` 支持逐消息集成
+- **插件中间件与提供者扩展** — `PluginInterface` 现支持 `middleware()` 和 `providers()` 方法。插件可注册中间件到管道和自定义 LLM 提供者驱动。`PluginManager::collectMiddleware()`、`registerMiddleware()`、`registerProviders()`
 
 ### 🆕 v0.8.0 — Hermes-Agent 启发的架构升级（19项改进，74个新测试）
 - **SQLite 会话存储 + FTS5 搜索** (`src/Session/SqliteSessionStorage.php`) — SQLite WAL 模式后端，FTS5 全文搜索跨所有会话消息。随机抖动重试避免锁竞争，被动 WAL 检查点，可选 SQLCipher 静态加密。`SessionManager::search()` 跨会话搜索 API。双写模式兼容文件回退

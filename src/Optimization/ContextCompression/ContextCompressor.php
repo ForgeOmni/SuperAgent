@@ -63,6 +63,66 @@ class ContextCompressor
     }
 
     /**
+     * Proactively check if messages need compression and compress if so.
+     *
+     * Unlike compress() which always runs the pipeline, this method only
+     * triggers compression when estimated tokens exceed the budget.
+     * Designed to be called on every message addition for automatic management.
+     *
+     * @param Message[] $messages
+     * @param callable|null $summarizer fn(string $text, ?string $previousSummary): string
+     * @return array{0: Message[], 1: bool} [messages, wasCompressed]
+     */
+    public function compressIfNeeded(array $messages, ?callable $summarizer = null): array
+    {
+        if (!$this->enabled) {
+            return [$messages, false];
+        }
+
+        $estimatedTokens = $this->estimateTokens($messages);
+        if ($estimatedTokens <= $this->targetTokenBudget) {
+            return [$messages, false];
+        }
+
+        return [$this->compress($messages, $summarizer), true];
+    }
+
+    /**
+     * Get the current token budget.
+     */
+    public function getTargetTokenBudget(): int
+    {
+        return $this->targetTokenBudget;
+    }
+
+    /**
+     * Estimate token count for a set of messages.
+     */
+    public function estimateTokenCount(array $messages): int
+    {
+        return $this->estimateTokens($messages);
+    }
+
+    /**
+     * Get compression ratio: how much the last compression saved.
+     */
+    public function getCompressionStats(array $original, array $compressed): array
+    {
+        $originalTokens = $this->estimateTokens($original);
+        $compressedTokens = $this->estimateTokens($compressed);
+        $saved = $originalTokens - $compressedTokens;
+
+        return [
+            'original_tokens' => $originalTokens,
+            'compressed_tokens' => $compressedTokens,
+            'tokens_saved' => $saved,
+            'ratio' => $originalTokens > 0 ? round($compressedTokens / $originalTokens, 3) : 1.0,
+            'messages_before' => count($original),
+            'messages_after' => count($compressed),
+        ];
+    }
+
+    /**
      * Compress messages to fit within token budget.
      *
      * Returns the compressed message array. If a summarizer callable is provided,

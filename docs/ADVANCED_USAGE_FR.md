@@ -95,6 +95,12 @@
 - [58. Fournisseurs de Mémoire Vector & Épisodique](#58-fournisseurs-de-mémoire-vector--épisodique)
 - [59. Diagramme d'Architecture](#59-diagramme-darchitecture)
 
+### Middleware, Cache & Erreurs (v0.8.1)
+
+- [60. Pipeline Middleware](#60-pipeline-middleware)
+- [61. Cache de Résultats par Outil](#61-cache-de-résultats-par-outil)
+- [62. Sortie Structurée](#62-sortie-structurée)
+
 ---
 
 ## 1. Pipeline DSL
@@ -6598,3 +6604,135 @@ $episodicProvider = new EpisodicMemoryProvider(
 ## 59. Diagramme d'Architecture
 
 Voir [`docs/ARCHITECTURE_FR.md`](ARCHITECTURE_FR.md) — graphe Mermaid 80+ nœuds et diagramme de flux de données.
+
+## 60. Pipeline Middleware
+
+Chaîne middleware composable en modèle oignon pour les requêtes LLM avec ordonnancement par priorité.
+
+### Configuration
+
+```php
+// config/superagent.php
+'middleware' => [
+    'rate_limit' => ['enabled' => true, 'max_tokens' => 10.0, 'refill_rate' => 1.0],
+    'cost_tracking' => ['enabled' => true, 'budget_usd' => 5.0],
+    'retry' => ['enabled' => true, 'max_retries' => 3, 'base_delay_ms' => 1000],
+    'logging' => ['enabled' => true],
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Middleware\MiddlewarePipeline;
+use SuperAgent\Middleware\Builtin\RateLimitMiddleware;
+use SuperAgent\Middleware\Builtin\RetryMiddleware;
+use SuperAgent\Middleware\Builtin\CostTrackingMiddleware;
+use SuperAgent\Middleware\Builtin\LoggingMiddleware;
+use SuperAgent\Middleware\Builtin\GuardrailMiddleware;
+
+$pipeline = new MiddlewarePipeline();
+$pipeline->use(new RateLimitMiddleware(maxTokens: 10.0, refillRate: 1.0));
+$pipeline->use(new RetryMiddleware(maxRetries: 3, baseDelayMs: 1000));
+$pipeline->use(new CostTrackingMiddleware(budgetUsd: 5.0));
+$pipeline->use(new LoggingMiddleware($logger));
+$pipeline->use(new GuardrailMiddleware());
+
+// Custom middleware
+$pipeline->use(new class implements \SuperAgent\Middleware\MiddlewareInterface {
+    public function name(): string { return 'custom'; }
+    public function priority(): int { return 50; }
+    public function handle($ctx, $next) {
+        // Pre-processing
+        $result = $next($ctx);
+        // Post-processing
+        return $result;
+    }
+});
+
+// Middleware from plugins
+$pluginManager->registerMiddleware($pipeline);
+```
+
+### Middleware Intégrés
+
+| Middleware | Priorité | Description |
+|-----------|----------|-------------|
+| `RateLimitMiddleware` | 100 | Limiteur de débit par seau de jetons |
+| `RetryMiddleware` | 90 | Backoff exponentiel avec gigue |
+| `CostTrackingMiddleware` | 80 | Suivi cumulatif des coûts + application du budget |
+| `GuardrailMiddleware` | 70 | Validation entrée/sortie |
+| `LoggingMiddleware` | -100 | Journalisation structurée requête/réponse |
+
+## 61. Cache de Résultats par Outil
+
+Cache en mémoire avec TTL pour les résultats d'outils en lecture seule.
+
+### Configuration
+
+```php
+'optimization' => [
+    'tool_cache' => [
+        'enabled' => true,
+        'default_ttl' => 300,    // 5 minutes
+        'max_entries' => 1000,
+    ],
+],
+```
+
+### Utilisation
+
+```php
+use SuperAgent\Tools\ToolResultCache;
+
+$cache = new ToolResultCache(defaultTtlSeconds: 300, maxEntries: 1000);
+
+// Cache a result
+$cache->set('read_file', ['path' => '/src/Agent.php'], $result);
+
+// Retrieve (returns null on miss or expiry)
+$cached = $cache->get('read_file', ['path' => '/src/Agent.php']);
+
+// Invalidate when files change
+$cache->invalidate('read_file');         // All read_file entries
+$cache->invalidateByPath('/src/Agent.php'); // Entries referencing path
+
+// Statistics
+$stats = $cache->getStats();
+// ['entries' => 42, 'hits' => 120, 'misses' => 30, 'hit_rate' => 0.8]
+```
+
+## 62. Sortie Structurée
+
+Forcer le LLM à répondre en JSON valide avec validation optionnelle du schéma.
+
+### Utilisation
+
+```php
+use SuperAgent\Providers\ResponseFormat;
+
+// Plain text (default)
+$format = ResponseFormat::text();
+
+// JSON mode (no schema)
+$format = ResponseFormat::json();
+
+// JSON with schema validation
+$format = ResponseFormat::jsonSchema([
+    'type' => 'object',
+    'properties' => [
+        'answer' => ['type' => 'string'],
+        'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
+    ],
+    'required' => ['answer', 'confidence'],
+], 'analysis_result');
+
+// Pass to provider via options
+$provider->chat($messages, $tools, $systemPrompt, [
+    'response_format' => $format,
+]);
+
+// Provider-specific conversion
+$format->toAnthropicFormat(); // Anthropic tool_use trick
+$format->toOpenAIFormat();    // OpenAI native json_schema
+```

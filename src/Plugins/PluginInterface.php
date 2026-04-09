@@ -63,4 +63,19 @@ interface PluginInterface
      * Check if the plugin is compatible with the current agent.
      */
     public function isCompatible(Agent $agent): bool;
+
+    /**
+     * Get middleware provided by this plugin.
+     *
+     * @return \SuperAgent\Middleware\MiddlewareInterface[]
+     */
+    public function middleware(): array;
+
+    /**
+     * Get LLM provider drivers provided by this plugin.
+     * Keys are provider names, values are fully qualified class names.
+     *
+     * @return array<string, class-string<\SuperAgent\Contracts\LLMProvider>>
+     */
+    public function providers(): array;
 }

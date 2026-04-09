@@ -40,6 +40,8 @@ use SuperAgent\Optimization\ContextCompression\ContextCompressor;
 use SuperAgent\Memory\MemoryProviderManager;
 use SuperAgent\Memory\BuiltinMemoryProvider;
 use SuperAgent\Memory\Contracts\MemoryProviderInterface;
+use SuperAgent\Middleware\MiddlewarePipeline;
+use SuperAgent\Tools\ToolResultCache;
 
 class SuperAgentServiceProvider extends ServiceProvider
 {
@@ -354,6 +356,21 @@ class SuperAgentServiceProvider extends ServiceProvider
         $this->app->singleton(MemoryProviderManager::class, function ($app) {
             $builtinProvider = new BuiltinMemoryProvider();
             return new MemoryProviderManager($builtinProvider);
+        });
+
+        // Register MiddlewarePipeline singleton
+        $this->app->singleton(MiddlewarePipeline::class, function ($app) {
+            return new MiddlewarePipeline();
+        });
+
+        // Register ToolResultCache singleton
+        $this->app->singleton(ToolResultCache::class, function ($app) {
+            $config = $app['config']->get('superagent.optimization.tool_cache', []);
+
+            return new ToolResultCache(
+                defaultTtlSeconds: (int) ($config['default_ttl'] ?? 300),
+                maxEntries: (int) ($config['max_entries'] ?? 1000),
+            );
         });
 
         // Register SelfHealingStrategy singleton when enabled

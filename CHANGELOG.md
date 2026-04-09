@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-08
+
+### Added
+
+#### Middleware Pipeline (`src/Middleware/`)
+- Composable onion-model middleware pipeline for LLM requests (`MiddlewarePipeline`)
+- `MiddlewareInterface` with priority-based ordering and named identification
+- `MiddlewareContext` / `MiddlewareResult` value objects for type-safe data flow
+- Built-in middleware: `RateLimitMiddleware` (token-bucket), `RetryMiddleware` (exponential backoff + jitter), `CostTrackingMiddleware` (budget enforcement), `LoggingMiddleware` (structured request/response logging), `GuardrailMiddleware` (input/output validators)
+- Registered as singleton in ServiceProvider, configurable via `config.middleware`
+
+#### Structured Output (`src/Providers/ResponseFormat.php`)
+- `ResponseFormat` value object for forcing LLM JSON output
+- Supports: `text()`, `json()`, `jsonSchema(schema, name)` modes
+- Provider-specific format conversion: `toAnthropicFormat()`, `toOpenAIFormat()`
+- Passable via provider `$options['response_format']`
+
+#### Per-Tool Result Cache (`src/Tools/ToolResultCache.php`)
+- In-memory cache with TTL expiration for read-only tool results
+- Key generation: tool name + sorted input hash (order-independent)
+- `invalidate(toolName)` and `invalidateByPath(path)` for targeted cache clearing
+- Error results never cached; LRU eviction at capacity
+- Statistics: hit/miss counts and hit rate
+- Config: `optimization.tool_cache.enabled`, `default_ttl`, `max_entries`
+
+### Changed
+
+#### Enhanced Exception Hierarchy (`src/Exceptions/`)
+- `SuperAgentException` now carries `context` array and `isRetryable()` / `toArray()` methods
+- `ProviderException` gains `retryable`, `retryAfterSeconds` fields and `fromHttpStatus()` factory
+- `ToolException` gains `toolInput` array for debugging context
+- New: `BudgetExceededException`, `ContextOverflowException`, `ValidationException`, `RateLimitException`
+- All exceptions serialize to structured arrays for telemetry
+
+#### Proactive Context Compression (`src/Optimization/ContextCompression/ContextCompressor.php`)
+- New `compressIfNeeded()` — auto-checks token budget and compresses only when exceeded
+- New `estimateTokenCount()`, `getTargetTokenBudget()`, `getCompressionStats()` public methods
+- Designed for per-message-add integration (proactive vs batch)
+
+#### Plugin System Extension (`src/Plugins/`)
+- `PluginInterface` now requires `middleware()` and `providers()` methods
+- Plugins can register middleware into the pipeline and LLM provider drivers
+- `PluginManager::collectMiddleware()`, `registerMiddleware()`, `registerProviders()`
+
 ## [0.8.0] - 2026-04-08
 
 ### 🚀 Summary

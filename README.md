@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.0-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.1-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -61,6 +61,14 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.8.1 — Middleware Pipeline, Typed Errors & Tool Caching (6 improvements, 32 new tests)
+- **Middleware Pipeline** (`src/Middleware/`) — Composable onion-model middleware chain for LLM requests. `MiddlewareInterface` with priority-based ordering. 5 built-in middleware: `RateLimitMiddleware` (token-bucket), `RetryMiddleware` (exponential backoff + jitter), `CostTrackingMiddleware` (budget enforcement), `LoggingMiddleware` (structured logging), `GuardrailMiddleware` (input/output validators). Config: `middleware`
+- **Structured Output** (`src/Providers/ResponseFormat.php`) — `ResponseFormat` value object for forcing JSON output from LLMs. Supports `text()`, `json()`, `jsonSchema()` modes with provider-specific format conversion (`toAnthropicFormat()`, `toOpenAIFormat()`)
+- **Per-Tool Result Cache** (`src/Tools/ToolResultCache.php`) — In-memory TTL cache for read-only tool results. Order-independent input hashing, targeted invalidation by tool name or file path, LRU eviction, error exclusion. Config: `optimization.tool_cache`
+- **Enhanced Exception Hierarchy** — `SuperAgentException` gains `context` array, `isRetryable()`, `toArray()`. `ProviderException` adds `retryable`, `retryAfterSeconds`, `fromHttpStatus()` factory. `ToolException` adds `toolInput`. New: `BudgetExceededException`, `ContextOverflowException`, `ValidationException`
+- **Proactive Context Compression** — `ContextCompressor::compressIfNeeded()` auto-checks token budget and compresses only when exceeded. New `estimateTokenCount()`, `getCompressionStats()` for per-message-add integration
+- **Plugin Middleware & Provider Extension** — `PluginInterface` now supports `middleware()` and `providers()` methods. Plugins can register middleware into the pipeline and custom LLM provider drivers. `PluginManager::collectMiddleware()`, `registerMiddleware()`, `registerProviders()`
 
 ### 🆕 v0.8.0 — Hermes-Agent Inspired Architecture Upgrade (19 improvements, 74 new tests)
 - **SQLite Session Storage + FTS5 Search** (`src/Session/SqliteSessionStorage.php`) — SQLite WAL mode backend with FTS5 full-text search across all session messages. Random-jitter retry on lock contention, passive WAL checkpointing, optional SQLCipher encryption at rest. `SessionManager::search()` for cross-session search. Dual-write with file fallback. Config: `persistence.sessions`
