@@ -17,64 +17,104 @@ class AgentMailbox
     private LoggerInterface $logger;
     private array $messageCache = [];
     private int $maxMessages = 100;
-    
+
+    /** @var array<string, bool> Tracks agents with unflushed writes */
+    private array $dirty = [];
+
+    /** Number of buffered writes before auto-flushing to disk */
+    private int $flushInterval = 10;
+
+    /** @var array<string, int> Buffered write count per agent since last flush */
+    private array $pendingWrites = [];
+
     public function __construct(
         ?string $mailboxDir = null,
-        ?LoggerInterface $logger = null
+        ?LoggerInterface $logger = null,
+        int $flushInterval = 10,
     ) {
         $this->mailboxDir = $mailboxDir ?? sys_get_temp_dir() . '/superagent_mailboxes';
         $this->logger = $logger ?? new NullLogger();
-        
+        $this->flushInterval = max(1, $flushInterval);
+
         // Ensure mailbox directory exists
         if (!is_dir($this->mailboxDir)) {
             mkdir($this->mailboxDir, 0755, true);
         }
     }
+
+    /**
+     * Flush dirty caches to disk. Called automatically at flush intervals.
+     * Should also be called before process exit for durability.
+     */
+    public function flush(?string $agentId = null): void
+    {
+        $agents = $agentId !== null ? [$agentId] : array_keys($this->dirty);
+
+        foreach ($agents as $id) {
+            if (!isset($this->dirty[$id])) {
+                continue;
+            }
+            $mailboxPath = $this->getMailboxPath($id);
+            $messages = $this->messageCache[$id] ?? [];
+            $json = json_encode($messages, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            file_put_contents($mailboxPath, $json, LOCK_EX);
+            unset($this->dirty[$id], $this->pendingWrites[$id]);
+        }
+    }
+
+    public function __destruct()
+    {
+        $this->flush();
+    }
     
     /**
      * Write a message to an agent's mailbox.
+     *
+     * Writes are buffered in memory and flushed to disk every $flushInterval
+     * messages (or on explicit flush/destruct) to avoid O(n^2) I/O.
      */
     public function writeMessage(string $agentId, AgentMessage $message): bool
     {
         try {
-            $mailboxPath = $this->getMailboxPath($agentId);
-            
-            // Load existing messages
+            // Load existing messages (from cache or disk)
             $messages = $this->readMessages($agentId);
-            
+
             // Add new message with type serialized
             $messageData = $message->toArray();
             if (isset($message->type)) {
                 $messageData['type'] = $message->type instanceof MessageType ? $message->type->value : $message->type;
             }
             $messages[] = $messageData;
-            
+
             // Trim to max messages (keep only recent)
             if (count($messages) > $this->maxMessages) {
                 $messages = array_slice($messages, -$this->maxMessages);
             }
-            
-            // Write to file
-            $json = json_encode($messages, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-            file_put_contents($mailboxPath, $json, LOCK_EX);
-            
-            // Update cache
+
+            // Update in-memory cache
             $this->messageCache[$agentId] = $messages;
-            
+            $this->dirty[$agentId] = true;
+            $this->pendingWrites[$agentId] = ($this->pendingWrites[$agentId] ?? 0) + 1;
+
+            // Auto-flush to disk at configured interval
+            if ($this->pendingWrites[$agentId] >= $this->flushInterval) {
+                $this->flush($agentId);
+            }
+
             $this->logger->debug("Message written to mailbox", [
                 'agent_id' => $agentId,
                 'from' => $message->from,
                 'summary' => $message->summary,
             ]);
-            
+
             return true;
-            
+
         } catch (\Exception $e) {
             $this->logger->error("Failed to write to mailbox", [
                 'agent_id' => $agentId,
                 'error' => $e->getMessage(),
             ]);
-            
+
             return false;
         }
     }
@@ -113,12 +153,15 @@ class AgentMailbox
      */
     public function consumeMessages(string $agentId, ?int $limit = null): array
     {
+        // Flush any buffered writes first for consistency
+        $this->flush($agentId);
+
         $messages = $this->readMessages($agentId);
-        
+
         if (empty($messages)) {
             return [];
         }
-        
+
         // Take messages up to limit
         if ($limit !== null && $limit > 0) {
             $consumed = array_slice($messages, 0, $limit);
@@ -127,7 +170,7 @@ class AgentMailbox
             $consumed = $messages;
             $remaining = [];
         }
-        
+
         // Update mailbox with remaining messages
         if (empty($remaining)) {
             $this->clearMailbox($agentId);
@@ -139,6 +182,7 @@ class AgentMailbox
                 LOCK_EX
             );
             $this->messageCache[$agentId] = $remaining;
+            unset($this->dirty[$agentId], $this->pendingWrites[$agentId]);
         }
         
         // Convert to AgentMessage objects
@@ -193,13 +237,13 @@ class AgentMailbox
     public function clearMailbox(string $agentId): void
     {
         $mailboxPath = $this->getMailboxPath($agentId);
-        
+
         if (file_exists($mailboxPath)) {
             unlink($mailboxPath);
         }
-        
-        unset($this->messageCache[$agentId]);
-        
+
+        unset($this->messageCache[$agentId], $this->dirty[$agentId], $this->pendingWrites[$agentId]);
+
         $this->logger->debug("Mailbox cleared", [
             'agent_id' => $agentId,
         ]);
@@ -211,13 +255,15 @@ class AgentMailbox
     public function clearAllMailboxes(): void
     {
         $files = glob($this->mailboxDir . '/*.mailbox');
-        
+
         foreach ($files as $file) {
             unlink($file);
         }
-        
+
         $this->messageCache = [];
-        
+        $this->dirty = [];
+        $this->pendingWrites = [];
+
         $this->logger->info("All mailboxes cleared");
     }
     

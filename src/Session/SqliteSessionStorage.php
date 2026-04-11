@@ -120,11 +120,11 @@ class SqliteSessionStorage
         if ($cwd !== null) {
             $projectHash = SessionManager::projectHash($cwd);
             $stmt = $this->db->prepare(
-                'SELECT * FROM sessions WHERE cwd = :cwd OR cwd LIKE :hash ORDER BY updated_at DESC LIMIT 1'
+                'SELECT * FROM sessions WHERE cwd = :cwd OR cwd LIKE :hash ORDER BY updated_at DESC, rowid DESC LIMIT 1'
             );
             $stmt->execute([':cwd' => $cwd, ':hash' => '%' . $projectHash . '%']);
         } else {
-            $stmt = $this->db->query('SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 1');
+            $stmt = $this->db->query('SELECT * FROM sessions ORDER BY updated_at DESC, rowid DESC LIMIT 1');
         }
 
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

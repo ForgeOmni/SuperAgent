@@ -31,6 +31,19 @@ final class TaskAnalyzer
             'all files', 'every file', 'across.*codebase', 'entire project',
             'batch', 'multiple files', 'everywhere',
         ],
+        TaskProfile::TYPE_SYNTHESIS => [
+            'synthesize', 'combine', 'merge.*findings', 'summarize.*all',
+            'overall.*conclusion', 'bring.*together', 'consolidate',
+            'compile.*results', 'aggregate',
+        ],
+        TaskProfile::TYPE_RESEARCH => [
+            'research', 'investigate', 'look into', 'find out', 'gather',
+            'explore', 'survey', 'discover', 'look up', 'search for',
+        ],
+        TaskProfile::TYPE_COORDINATION => [
+            'coordinate', 'orchestrate', 'delegate', 'assign', 'manage',
+            'plan.*approach', 'break.*down', 'divide.*work',
+        ],
     ];
 
     private const COMPLEXITY_INDICATORS = [

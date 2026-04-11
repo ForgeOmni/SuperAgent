@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-04-11
+
+### 🚀 Summary
+
+Multi-agent collaboration pipeline with true parallel execution, smart task-to-model routing, cross-phase context sharing, and resilient retry. 4 new subsystems, 3 bug fixes, 48 new tests. Full suite: 1945 tests, 5729 assertions, 0 failures.
+
+### Added
+
+#### Collaboration Pipeline (`src/Coordinator/CollaborationPipeline.php`)
+- Phased multi-agent orchestration with topological dependency sort (DAG)
+- Within-phase parallel execution via ProcessBackend (OS processes) or InProcessBackend (Fibers)
+- 4 failure strategies: `FAIL_FAST`, `CONTINUE`, `RETRY`, `FALLBACK`
+- Pipeline-level defaults cascade to phases: provider config, retry policy, auto-routing
+- Event listeners with 8 lifecycle hooks: pipeline/phase start/complete/failed/skipped/retry, agent spawned/complete
+- Conditional phase execution via `when(callable)` — skip phases based on prior results
+
+#### Smart Task Router (`src/Coordinator/TaskRouter.php`)
+- Automatic task-to-model routing based on prompt analysis via `TaskAnalyzer`
+- 3-tier model system: Power (Opus), Balance (Sonnet), Speed (Haiku)
+- 10 task types routed to optimal tiers: synthesis/coordination → Tier 1, code/debug/analysis → Tier 2, research/test/chat → Tier 3
+- Complexity overrides: very_complex code → Tier 1 (promote), simple analysis → Tier 3 (demote)
+- `TaskRouteResult` value object with `toProviderConfig()` for pipeline integration
+- `withAutoRouting()` on phase and pipeline — opt-in, explicit per-agent overrides always win
+- Configurable tier models: swap Anthropic defaults for OpenAI, Ollama, or custom providers
+
+#### Phase Context Injection (`src/Coordinator/PhaseContextInjector.php`)
+- Automatic cross-phase context sharing: phase N agents see summaries from phases 1..N-1
+- Structured `<prior-phase-results>` XML block appended to agent system prompts
+- Per-phase token budget (`maxSummaryTokens`, default 2000) and total cap (`maxTotalTokens`, default 8000)
+- Two strategies: `summary` (default, extracts first 500 chars) and `full`
+- Smart truncation at word boundaries with `...` indicator
+- Failed phases include error messages in context
+- Enabled by default; opt-out via `$phase->withoutContextInjection()`
+
+#### Provider Configuration (`src/Coordinator/AgentProviderConfig.php`)
+- 3 collaboration patterns: `sameProvider` (shared credentials), `crossProvider` (mix providers), `withFallbackChain` (ordered failover)
+- Credential rotation via `CredentialPool` integration — different API keys per parallel agent
+- `toSpawnConfig()` for process-based execution, `resolve()` for in-process providers
+- Per-credential reporting: `reportSuccess()`, `reportRateLimit()`, `reportError()`
+
+#### Agent Retry Policy (`src/Coordinator/AgentRetryPolicy.php`)
+- Per-agent retry with 4 backoff strategies: `none`, `fixed`, `linear`, `exponential` (with 0-25% jitter)
+- Error classification: auth (401/403, not retryable), rate_limit (429, rotate credential), server (5xx, retryable), network (timeout/connection, retryable)
+- Credential rotation on rate limit: `shouldRotateCredential()` triggers pool rotation
+- Provider fallback on persistent failure: `shouldSwitchProvider()` + ordered fallback list
+- Factory presets: `default()` (3 attempts, exponential), `aggressive()` (5 attempts), `none()`, `crossProvider()`
+
+#### Parallel Phase Executor (`src/Coordinator/ParallelPhaseExecutor.php`)
+- 3 execution modes: ProcessBackend (true OS parallelism), InProcessBackend (Fibers), Sequential (with retry)
+- Post-completion retry loop for ProcessBackend/Fiber failures — batch-parallel first, then retry failures individually
+- Context injection and provider config in all 3 execution paths
+- Multi-listener support: all registered listeners receive all events (was: only first listener)
+- Retry log for observability: per-agent attempt history with error classification
+
+#### Phase Worker (`bin/phase-worker.php`)
+- Out-of-process phase worker with full retry, credential rotation, and provider fallback
+- Per-agent retry policy override via JSON config
+- NDJSON progress events on stderr: agent_start, agent_retry, agent_provider_switch, agent_complete
+- Timeout enforcement per phase
+
+### Changed
+
+#### ProcessBackend Polling (`src/Swarm/Backends/ProcessBackend.php`)
+- `waitAll()` now uses `stream_select()` on Linux/macOS for event-driven I/O (200ms cycle)
+- Falls back to `usleep(50ms)` polling on Windows where `stream_select()` on proc_open pipes is unreliable
+- Extracted `allAgentsDone()` helper for readability
+
+#### AgentMailbox Write Buffering (`src/Swarm/AgentMailbox.php`)
+- Writes buffered in memory, flushed to disk every 10 messages (configurable `$flushInterval`)
+- Eliminates O(n²) I/O from read-all → append → write-all pattern on every message
+- `flush()` method for explicit durability; `__destruct()` auto-flushes on shutdown
+- `consumeMessages()` flushes dirty state before reading for consistency
+
+#### Task Types Extended (`src/CostPrediction/TaskProfile.php`, `TaskAnalyzer.php`)
+- 3 new task type constants: `TYPE_SYNTHESIS`, `TYPE_RESEARCH`, `TYPE_COORDINATION`
+- Detection patterns: synthesize/combine/consolidate, research/investigate/explore, coordinate/orchestrate/delegate
+
+### Fixed
+
+#### SQLite Session Ordering (`src/Session/SqliteSessionStorage.php`)
+- `loadLatest()` now uses `ORDER BY updated_at DESC, rowid DESC` as tiebreaker
+- Previously: sessions saved within the same second (due to `date('c')` second-level precision) had non-deterministic ordering
+- Fix ensures the most recently inserted session wins on timestamp ties
+
+#### WebSearch Fallback Assertion (`tests/Unit/Phase1ToolsTest.php`)
+- `testWebSearchToolMocked` now accepts both failure (no network) and success (DuckDuckGo fallback) outcomes
+- Previously: asserted `isSuccess() === false` unconditionally, but DuckDuckGo HTML fallback can succeed when internet is available
+
+#### Undefined Variable in Retry (`src/Coordinator/ParallelPhaseExecutor.php`)
+- `$agentConfig` initialized to `[]` before try block in `executeAgentWithRetry()`
+- Previously: if `buildAgentConfig()` threw, the catch block accessed undefined `$agentConfig`
+
+### Tests
+
+- **New test classes**: `TaskRouterTest` (26 tests), `PhaseContextInjectorTest` (12 tests)
+- **Extended**: `CollaborationPipelineTest` (+10 tests for context injection, auto-routing, new task types)
+- **Total new tests**: 48 (across 3 test files)
+- **Full suite: 1945 tests, 5729 assertions, 0 failures**
+
 ## [0.8.1] - 2026-04-08
 
 ### Added

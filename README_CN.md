@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.8.1-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.8.2-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,18 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.8.2 — 多智能体协作管道、智能路由与并行执行（10项改进，48个新测试）
+- **协作管道** (`src/Coordinator/`) — 分阶段多智能体编排，拓扑依赖 DAG 排序，4种失败策略（快速失败、继续、重试、降级），条件化阶段执行，8事件生命周期监听器。阶段内智能体通过 ProcessBackend（OS 进程）或 InProcessBackend（Fiber）真并行执行
+- **智能任务路由** (`src/Coordinator/TaskRouter.php`) — 自动任务→模型路由：研究/对话 → Tier 3（Haiku，低成本），代码/调试/分析 → Tier 2（Sonnet，平衡），综合/协调 → Tier 1（Opus，强推理）。复杂度覆盖：极复杂代码生成升级到 Tier 1，简单分析降级到 Tier 3。`withAutoRouting()` 在管道或阶段级启用。显式 `withAgentProvider()` 始终优先
+- **阶段上下文注入** (`src/Coordinator/PhaseContextInjector.php`) — 跨阶段上下文共享：阶段 N 的智能体自动接收阶段 1..N-1 的结果摘要，通过 `<prior-phase-results>` 注入系统提示。按阶段 token 预算（2K）和总上限（8K），智能截断。避免重复发现，节约 token
+- **Provider 模式** — 3种协作模式：`sameProvider`（共享凭证 + CredentialPool 轮转），`crossProvider`（同一管道混用 Anthropic/OpenAI/Ollama），`withFallbackChain`（有序 Provider 降级）
+- **智能体重试策略** — 逐智能体指数/线性/固定退避 + 抖动。错误分类（认证/限速/服务器/网络）。429 时凭证轮转，持续失败时 Provider 切换。预设工厂：`default()`、`aggressive()`、`none()`、`crossProvider()`
+- **ProcessBackend 重试** — 并行批量执行失败的智能体现在逐个重试，支持完整的凭证轮转和 Provider 降级。Process 和 Fiber 路径共享 `retryFailedAgents()`
+- **stream_select 轮询** — ProcessBackend 在 Linux/macOS 使用 `stream_select()` 事件驱动 I/O（原：50ms 忙等待）。Windows 自动回退到 usleep 轮询
+- **AgentMailbox 写缓冲** — 写入在内存缓冲，每 10 条消息刷盘。消除批量消息的 O(n²) 磁盘 I/O
+- **3个Bug修复** — SQLite 会话 `loadLatest()` 排序（rowid 副键），WebSearch 降级断言（接受 DuckDuckGo 成功），重试 catch 块中未定义 `$agentConfig`
+- **48个新测试** — `TaskRouterTest`(26)、`PhaseContextInjectorTest`(12)、`CollaborationPipelineTest`(+10)。完整套件：**1945 测试，5729 断言，0 失败**
 
 ### 🆕 v0.8.1 — 中间件管道、类型化错误与工具缓存（6项改进，32个新测试）
 - **中间件管道** (`src/Middleware/`) — 可组合的洋葱模型中间件链。`MiddlewareInterface` 支持优先级排序。5个内置中间件：`RateLimitMiddleware`（令牌桶限流）、`RetryMiddleware`（指数退避+抖动重试）、`CostTrackingMiddleware`（预算执行）、`LoggingMiddleware`（结构化日志）、`GuardrailMiddleware`（输入/输出验证）。配置：`middleware`

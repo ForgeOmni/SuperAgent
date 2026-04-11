@@ -341,6 +341,20 @@ $agent->enableAutoMode();
 $result = $agent->run("Tâche complexe en plusieurs étapes...");
 ```
 
+### Pipeline de Collaboration Multi-Agents (v0.8.2)
+
+```php
+// Pipeline de Collaboration Multi-Agents (v0.8.2)
+'task_routing' => [
+    'enabled' => env('SUPERAGENT_TASK_ROUTING', true),
+    'tier_models' => [
+        1 => ['provider' => 'anthropic', 'model' => 'claude-opus-4'],   // Tier Puissance
+        2 => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4'], // Tier Équilibre
+        3 => ['provider' => 'anthropic', 'model' => 'claude-haiku-4'],  // Tier Vitesse
+    ],
+],
+```
+
 ### Configuration Manuelle d'Équipes d'Agents
 
 ```php

@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.1-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.2-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,18 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.8.2 — Pipeline de Collaboration Multi-Agents, Routage Intelligent & Exécution Parallèle (10 améliorations, 48 nouveaux tests)
+- **Pipeline de Collaboration** (`src/Coordinator/`) — Orchestration multi-agents par phases avec tri topologique DAG, 4 stratégies d'échec (fail-fast, continue, retry, fallback), exécution conditionnelle de phases, et 8 événements de cycle de vie. Les agents d'une phase s'exécutent en vrai parallèle via ProcessBackend (processus OS) ou InProcessBackend (Fibres)
+- **Routeur de Tâches Intelligent** (`src/Coordinator/TaskRouter.php`) — Routage automatique tâche→modèle : recherche/chat → Tier 3 (Haiku, économique), code/debug/analyse → Tier 2 (Sonnet, équilibré), synthèse/coordination → Tier 1 (Opus, puissant). Surcharges de complexité : très complexe promu, simple rétrogradé. `withAutoRouting()` sur pipeline ou phase. `withAgentProvider()` explicite toujours prioritaire
+- **Injection de Contexte Inter-Phases** (`src/Coordinator/PhaseContextInjector.php`) — Partage de contexte : les agents de la phase N reçoivent automatiquement les résumés des phases 1..N-1 via `<prior-phase-results>` dans le prompt système. Budget tokens par phase (2K) et total (8K) avec troncature intelligente. Économise les tokens en évitant la redécouverte
+- **Patterns de Fournisseurs** — 3 modes de collaboration : `sameProvider` (credentials partagés + rotation CredentialPool), `crossProvider` (mélange Anthropic/OpenAI/Ollama dans un pipeline), `withFallbackChain` (failover ordonné)
+- **Politique de Retry par Agent** — Backoff exponentiel/linéaire/fixe avec jitter par agent. Classification d'erreurs (auth/rate-limit/serveur/réseau). Rotation de credentials sur 429. Changement de fournisseur sur échec persistant. Presets : `default()`, `aggressive()`, `none()`, `crossProvider()`
+- **Retry ProcessBackend** — Les agents échoués en exécution parallèle sont maintenant réessayés individuellement avec rotation complète de credentials et fallback de fournisseur
+- **Polling stream_select** — ProcessBackend utilise `stream_select()` sur Linux/macOS pour I/O événementiel (avant : boucle active 50ms). Fallback automatique usleep sur Windows
+- **Buffering AgentMailbox** — Écritures tamponnées en mémoire, flush disque tous les 10 messages. Élimine les I/O disque O(n²) pour les messages en masse
+- **3 Corrections de Bugs** — Tri `loadLatest()` SQLite (clé secondaire rowid), assertion WebSearch fallback (accepte succès DuckDuckGo), `$agentConfig` non défini dans le bloc catch retry
+- **48 Nouveaux Tests** — `TaskRouterTest` (26), `PhaseContextInjectorTest` (12), `CollaborationPipelineTest` (+10). Suite complète : **1945 tests, 5729 assertions, 0 échec**
 
 ### 🆕 v0.8.1 — Pipeline Middleware, Erreurs Typées & Cache d'Outils (6 améliorations, 32 nouveaux tests)
 - **Pipeline Middleware** (`src/Middleware/`) — Chaîne middleware composable modèle oignon pour requêtes LLM. `MiddlewareInterface` avec tri par priorité. 5 middleware intégrés : `RateLimitMiddleware` (seau à jetons), `RetryMiddleware` (backoff exponentiel + jitter), `CostTrackingMiddleware` (application du budget), `LoggingMiddleware` (journalisation structurée), `GuardrailMiddleware` (validateurs entrée/sortie). Config : `middleware`

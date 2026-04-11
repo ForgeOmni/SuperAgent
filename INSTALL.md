@@ -444,6 +444,15 @@ $config = Config::fromArray([
         'auto_mode' => true,
         'max_concurrent' => 10,
     ],
+    // Multi-Agent Collaboration Pipeline (v0.8.2)
+    'task_routing' => [
+        'enabled' => env('SUPERAGENT_TASK_ROUTING', true),
+        'tier_models' => [
+            1 => ['provider' => 'anthropic', 'model' => 'claude-opus-4'],   // Power tier
+            2 => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4'], // Balance tier
+            3 => ['provider' => 'anthropic', 'model' => 'claude-haiku-4'],  // Speed tier
+        ],
+    ],
 ]);
 
 $agent = new Agent($provider, $config);

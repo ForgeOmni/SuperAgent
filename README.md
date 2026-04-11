@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.1-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.2-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -61,6 +61,18 @@ SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that enables Clau
 - **Remote Agent Tasks** - Out-of-process agent execution via API triggers with cron scheduling
 - **Plan V2 Interview Phase** - Iterative pair-planning with structured plan files, periodic reminders, and user approval before execution
 - **Claude Code Compatibility** - Auto-load skills, agents, and MCP configs from Claude Code directories
+
+### 🆕 v0.8.2 — Multi-Agent Collaboration Pipeline, Smart Routing & Parallel Execution (10 improvements, 48 new tests)
+- **Collaboration Pipeline** (`src/Coordinator/`) — Phased multi-agent orchestration with topological dependency DAG, 4 failure strategies (fail-fast, continue, retry, fallback), conditional phase execution, and 8-event lifecycle listeners. Agents within a phase execute in true parallel via ProcessBackend (OS processes) or InProcessBackend (Fibers)
+- **Smart Task Router** (`src/Coordinator/TaskRouter.php`) — Automatic task-to-model routing: research/chat → Tier 3 (Haiku, cheap), code/debug/analysis → Tier 2 (Sonnet, balanced), synthesis/coordination → Tier 1 (Opus, powerful). Complexity overrides promote/demote between tiers. `withAutoRouting()` on pipeline or phase. Explicit per-agent `withAgentProvider()` always overrides
+- **Phase Context Injection** (`src/Coordinator/PhaseContextInjector.php`) — Cross-phase context sharing: phase N agents automatically receive summaries from phases 1..N-1 via `<prior-phase-results>` in system prompt. Token-budgeted per-phase (2K) and total (8K) with smart truncation. Saves tokens by preventing re-discovery
+- **Provider Patterns** — 3 collaboration modes: `sameProvider` (shared credentials with CredentialPool rotation), `crossProvider` (mix Anthropic/OpenAI/Ollama in one pipeline), `withFallbackChain` (ordered provider failover)
+- **Agent Retry Policy** — Per-agent exponential/linear/fixed backoff with jitter. Error classification (auth/rate-limit/server/network). Credential rotation on 429. Provider switch on persistent failure. Factory presets: `default()`, `aggressive()`, `none()`, `crossProvider()`
+- **ProcessBackend Retry** — Failed agents from parallel batch execution now retry individually with full credential rotation and provider fallback. Shared `retryFailedAgents()` for both Process and Fiber paths
+- **stream_select Polling** — ProcessBackend uses `stream_select()` on Linux/macOS for efficient event-driven I/O (was: 50ms busy-loop). Windows auto-falls back to usleep polling
+- **AgentMailbox Buffering** — Writes buffered in memory, flushed every 10 messages. Eliminates O(n²) disk I/O for bulk messaging
+- **3 Bug Fixes** — SQLite session `loadLatest()` ordering (rowid tiebreaker), WebSearch fallback assertion (accepts DuckDuckGo success), undefined `$agentConfig` in retry catch block
+- **48 New Tests** — `TaskRouterTest` (26), `PhaseContextInjectorTest` (12), `CollaborationPipelineTest` (+10). Full suite: **1945 tests, 5729 assertions, 0 failures**
 
 ### 🆕 v0.8.1 — Middleware Pipeline, Typed Errors & Tool Caching (6 improvements, 32 new tests)
 - **Middleware Pipeline** (`src/Middleware/`) — Composable onion-model middleware chain for LLM requests. `MiddlewareInterface` with priority-based ordering. 5 built-in middleware: `RateLimitMiddleware` (token-bucket), `RetryMiddleware` (exponential backoff + jitter), `CostTrackingMiddleware` (budget enforcement), `LoggingMiddleware` (structured logging), `GuardrailMiddleware` (input/output validators). Config: `middleware`

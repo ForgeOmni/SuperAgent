@@ -316,6 +316,20 @@ SUPERAGENT_WEBSOCKET_MONITORING=true
 SUPERAGENT_WEBSOCKET_PORT=8080
 ```
 
+### 多智能体协作管道配置（v0.8.2新功能）
+
+```php
+// 多智能体协作管道 (v0.8.2)
+'task_routing' => [
+    'enabled' => env('SUPERAGENT_TASK_ROUTING', true),
+    'tier_models' => [
+        1 => ['provider' => 'anthropic', 'model' => 'claude-opus-4'],   // 强力层
+        2 => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4'], // 平衡层
+        3 => ['provider' => 'anthropic', 'model' => 'claude-haiku-4'],  // 速度层
+    ],
+],
+```
+
 ### 基本多智能体用法
 
 ```php

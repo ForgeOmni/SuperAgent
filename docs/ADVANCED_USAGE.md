@@ -90,6 +90,13 @@ This document consolidates all advanced feature documentation for SuperAgent int
 - [61. Per-Tool Result Cache](#61-per-tool-result-cache)
 - [62. Structured Output](#62-structured-output)
 
+### Multi-Agent Collaboration Pipeline (v0.8.2)
+
+- [63. Collaboration Pipeline](#63-collaboration-pipeline)
+- [64. Smart Task Router](#64-smart-task-router)
+- [65. Phase Context Injection](#65-phase-context-injection)
+- [66. Agent Retry Policy](#66-agent-retry-policy)
+
 ---
 
 ## 1. Pipeline DSL
@@ -5442,4 +5449,257 @@ $provider->chat($messages, $tools, $systemPrompt, [
 // Provider-specific conversion
 $format->toAnthropicFormat(); // Anthropic tool_use trick
 $format->toOpenAIFormat();    // OpenAI native json_schema
+```
+
+---
+
+## 63. Collaboration Pipeline
+
+> Orchestrate multi-agent workflows through phased pipelines with dependency resolution, parallel execution, failure strategies, and cross-provider support.
+
+### Overview
+
+`CollaborationPipeline` executes agents in dependency-ordered phases. Within each phase, agents run in true parallel (via ProcessBackend or Fibers). Phases form a DAG — circular dependencies are detected at build time.
+
+### Usage
+
+```php
+use SuperAgent\Coordinator\CollaborationPipeline;
+use SuperAgent\Coordinator\CollaborationPhase;
+use SuperAgent\Coordinator\AgentProviderConfig;
+use SuperAgent\Coordinator\AgentRetryPolicy;
+use SuperAgent\Coordinator\FailureStrategy;
+use SuperAgent\Providers\CredentialPool;
+use SuperAgent\Swarm\AgentSpawnConfig;
+
+// Credential pool for key rotation across parallel agents
+$pool = CredentialPool::fromConfig([
+    'anthropic' => ['strategy' => 'round_robin', 'keys' => ['key1', 'key2', 'key3']],
+]);
+
+$result = CollaborationPipeline::create()
+    ->withDefaultProvider(AgentProviderConfig::sameProvider('anthropic', $pool))
+    ->withDefaultRetryPolicy(AgentRetryPolicy::default())
+    ->withAutoRouting() // Smart task→model routing
+
+    ->phase('research', function (CollaborationPhase $phase) {
+        // Both agents run in parallel, auto-routed to Haiku (research task)
+        $phase->addAgent(new AgentSpawnConfig(name: 'api-researcher', prompt: 'Research the Redis API...'));
+        $phase->addAgent(new AgentSpawnConfig(name: 'doc-researcher', prompt: 'Search documentation for...'));
+    })
+
+    ->phase('implement', function (CollaborationPhase $phase) {
+        $phase->dependsOn('research'); // Waits for research to complete
+        $phase->onFailure(FailureStrategy::RETRY);
+        $phase->withRetries(2);
+        // Auto-routed to Sonnet (code generation)
+        $phase->addAgent(new AgentSpawnConfig(name: 'coder', prompt: 'Implement the feature...'));
+    })
+
+    ->phase('review', function (CollaborationPhase $phase) {
+        $phase->dependsOn('implement');
+        // Mix providers: use OpenAI for structured review
+        $phase->withAgentProvider('reviewer',
+            AgentProviderConfig::crossProvider('openai', ['model' => 'gpt-4o'])
+        );
+        $phase->addAgent(new AgentSpawnConfig(name: 'reviewer', prompt: 'Review the code...'));
+    })
+
+    ->run();
+
+echo $result->summary();
+// Pipeline completed: 3/3 phases completed, 4 agents, $0.0234 total cost
+```
+
+### Failure Strategies
+
+| Strategy | Behavior |
+|----------|----------|
+| `FAIL_FAST` | Stop entire pipeline on first phase failure (default) |
+| `CONTINUE` | Log failure and proceed with remaining phases |
+| `RETRY` | Retry the failed phase up to `maxRetries` times |
+| `FALLBACK` | Execute a designated fallback phase |
+
+### Provider Patterns
+
+```php
+// Pattern 1: Same provider, rotate credentials
+AgentProviderConfig::sameProvider('anthropic', $credentialPool);
+
+// Pattern 2: Cross provider per agent
+AgentProviderConfig::crossProvider('openai', ['model' => 'gpt-4o']);
+
+// Pattern 3: Fallback chain
+AgentProviderConfig::withFallbackChain(['anthropic', 'openai', 'ollama']);
+```
+
+### Event Listeners
+
+```php
+$pipeline->addListener(new class extends AbstractPipelineListener {
+    public function onPhaseStart(string $name, int $agentCount): void {
+        echo "Starting phase '{$name}' with {$agentCount} agents\n";
+    }
+    public function onPhaseFailed(string $name, string $error, FailureStrategy $strategy): void {
+        echo "Phase '{$name}' failed: {$error} (strategy: {$strategy->value})\n";
+    }
+});
+```
+
+---
+
+## 64. Smart Task Router
+
+> Automatically route tasks to optimal model tiers based on prompt content analysis, balancing capability and cost.
+
+### Model Tiers
+
+| Tier | Name | Default Model | Cost Multiplier | Use Cases |
+|------|------|--------------|-----------------|-----------|
+| 1 | Power | claude-opus-4 | 5.0x | Synthesis, coordination, architecture |
+| 2 | Balance | claude-sonnet-4 | 1.0x | Code writing, debugging, analysis |
+| 3 | Speed | claude-haiku-4 | 0.27x | Research, extraction, testing, chat |
+
+### Routing Rules
+
+Tasks are classified via `TaskAnalyzer` (keyword + pattern matching) and mapped to tiers:
+
+| Task Type | Base Tier | Complexity Override |
+|-----------|-----------|-------------------|
+| `synthesis` | 1 (Power) | — |
+| `coordination` | 1 (Power) | — |
+| `code_generation` | 2 (Balance) | very_complex → 1 |
+| `refactoring` | 2 (Balance) | very_complex → 1 |
+| `debugging` | 2 (Balance) | — |
+| `analysis` | 2 (Balance) | simple → 3 |
+| `testing` | 3 (Speed) | complex+ → 2 |
+| `research` | 3 (Speed) | complex+ → 2 |
+| `chat` | 3 (Speed) | complex → 2 |
+
+### Usage
+
+```php
+use SuperAgent\Coordinator\TaskRouter;
+
+// Standalone routing
+$router = TaskRouter::withDefaults();
+$route = $router->route('Research the latest API docs for Redis');
+// → tier: 3, model: claude-haiku-4, reason: "Task type 'research' → Tier 3 (Speed)"
+
+// Custom tier models (use OpenAI instead of Anthropic)
+$router = TaskRouter::fromConfig([
+    'tier_models' => [
+        1 => ['provider' => 'openai', 'model' => 'gpt-4o'],
+        2 => ['provider' => 'openai', 'model' => 'gpt-4o'],
+        3 => ['provider' => 'openai', 'model' => 'gpt-4o-mini'],
+    ],
+]);
+
+// Pipeline-level auto-routing
+$pipeline = CollaborationPipeline::create()
+    ->withAutoRouting($router)
+    ->phase('research', function ($phase) {
+        $phase->addAgent(new AgentSpawnConfig(name: 'a', prompt: 'Research...'));
+        // Automatically routed to gpt-4o-mini (Tier 3)
+    });
+```
+
+### Priority Order
+
+1. Explicit `$phase->withAgentProvider('name', $config)` — always wins
+2. Auto-routing via `TaskRouter` — based on prompt analysis
+3. Phase-level default `$phase->withProvider($config)`
+4. Pipeline-level default `$pipeline->withDefaultProvider($config)`
+
+---
+
+## 65. Phase Context Injection
+
+> Automatically share prior phase results with downstream agents to prevent re-discovery and save tokens.
+
+### How It Works
+
+When phase B depends on phase A, agents in phase B receive a structured summary of phase A's outputs in their system prompt:
+
+```xml
+<prior-phase-results>
+### Phase: research (completed, 2 agents)
+[api-researcher] Found 3 key APIs: SET, GET, EXPIRE. Rate limits are...
+[doc-researcher] Security review complete. TLS required for production...
+
+### Phase: design (completed, 1 agent)
+[architect] Recommended pattern: Repository with Redis adapter...
+</prior-phase-results>
+```
+
+### Configuration
+
+```php
+// Default: enabled with 2K tokens per phase, 8K total
+$phase->withContextInjection(
+    maxTokensPerPhase: 2000,  // Per-phase summary limit
+    maxTotalTokens: 8000,     // Total injection cap
+    strategy: 'summary',      // 'summary' (first 500 chars) or 'full'
+);
+
+// Disable for a specific phase
+$phase->withoutContextInjection();
+```
+
+### Token Budget
+
+- Each phase summary is truncated at `maxSummaryTokens` (default 2000 tokens ≈ 8000 chars)
+- Total injection across all prior phases capped at `maxTotalTokens` (default 8000 tokens)
+- Failed phases include their error message instead of agent outputs
+- Empty agent outputs show `(no output)` marker
+
+---
+
+## 66. Agent Retry Policy
+
+> Configure per-agent retry behavior with intelligent error classification, credential rotation, and provider fallback.
+
+### Error Classification
+
+| Error Type | HTTP Code | Retryable | Action |
+|-----------|-----------|-----------|--------|
+| Auth | 401, 403 | No | Switch provider immediately |
+| Rate Limit | 429 | Yes | Rotate credential + backoff |
+| Server Error | 5xx | Yes | Backoff retry |
+| Network | timeout, connection | Yes | Backoff retry |
+| Overloaded | 529 | Yes | Backoff retry |
+| Programming | TypeError, LogicException | No | Fail immediately |
+
+### Backoff Strategies
+
+```php
+use SuperAgent\Coordinator\AgentRetryPolicy;
+
+// Exponential: 1s, 2s, 4s, 8s... (with 0-25% jitter)
+AgentRetryPolicy::default(); // 3 attempts, exponential, jitter, credential rotation
+
+// Aggressive: more attempts, longer waits
+AgentRetryPolicy::aggressive(); // 5 attempts, 2s base, 60s cap
+
+// No retries
+AgentRetryPolicy::none(); // 1 attempt
+
+// Cross-provider: switch provider on failure
+AgentRetryPolicy::crossProvider(['openai', 'ollama']);
+
+// Custom
+$policy = AgentRetryPolicy::default()
+    ->withMaxAttempts(5)
+    ->withBackoff('linear', 500, 10000)  // 500ms, 1000ms, 1500ms...
+    ->withJitter(false)
+    ->withCredentialRotation(true)
+    ->withProviderFallback('openai', ['model' => 'gpt-4o'])
+    ->withProviderFallback('ollama');
+```
+
+### Per-Agent Override
+
+```php
+$phase->withRetryPolicy(AgentRetryPolicy::default()); // Phase default
+$phase->withAgentRetryPolicy('critical-agent', AgentRetryPolicy::aggressive()); // Override
 ```

@@ -13,6 +13,9 @@ final class TaskProfile
     public const TYPE_ANALYSIS = 'analysis';
     public const TYPE_CHAT = 'chat';
     public const TYPE_MULTI_FILE = 'multi_file';
+    public const TYPE_SYNTHESIS = 'synthesis';
+    public const TYPE_RESEARCH = 'research';
+    public const TYPE_COORDINATION = 'coordination';
 
     public const COMPLEXITY_SIMPLE = 'simple';
     public const COMPLEXITY_MODERATE = 'moderate';

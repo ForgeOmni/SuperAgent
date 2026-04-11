@@ -101,6 +101,13 @@
 - [61. 工具级结果缓存](#61-工具级结果缓存)
 - [62. 结构化输出](#62-结构化输出)
 
+### 多智能体协作管道 (v0.8.2)
+
+- [63. 协作管道](#63-协作管道)
+- [64. 智能任务路由](#64-智能任务路由)
+- [65. 阶段上下文注入](#65-阶段上下文注入)
+- [66. 智能体重试策略](#66-智能体重试策略)
+
 ---
 
 ## 1. 流水线 DSL
@@ -6238,4 +6245,199 @@ $provider->chat($messages, $tools, $systemPrompt, [
 // Provider-specific conversion
 $format->toAnthropicFormat(); // Anthropic tool_use trick
 $format->toOpenAIFormat();    // OpenAI native json_schema
+```
+
+---
+
+## 63. 协作管道
+
+> 通过分阶段管道编排多智能体工作流，支持依赖解析、并行执行、失败策略和跨 Provider 协作。
+
+### 概述
+
+`CollaborationPipeline` 按依赖拓扑顺序执行阶段。每个阶段内的智能体通过 ProcessBackend（OS 进程）或 Fiber 真并行执行。阶段构成 DAG — 构建时检测循环依赖。
+
+### 用法
+
+```php
+use SuperAgent\Coordinator\CollaborationPipeline;
+use SuperAgent\Coordinator\CollaborationPhase;
+use SuperAgent\Coordinator\AgentProviderConfig;
+use SuperAgent\Coordinator\AgentRetryPolicy;
+use SuperAgent\Coordinator\FailureStrategy;
+use SuperAgent\Providers\CredentialPool;
+use SuperAgent\Swarm\AgentSpawnConfig;
+
+$pool = CredentialPool::fromConfig([
+    'anthropic' => ['strategy' => 'round_robin', 'keys' => ['key1', 'key2']],
+]);
+
+$result = CollaborationPipeline::create()
+    ->withDefaultProvider(AgentProviderConfig::sameProvider('anthropic', $pool))
+    ->withAutoRouting() // 智能任务→模型路由
+
+    ->phase('research', function (CollaborationPhase $phase) {
+        // 两个智能体并行执行，自动路由到 Haiku（研究任务）
+        $phase->addAgent(new AgentSpawnConfig(name: 'api-researcher', prompt: '研究 Redis API...'));
+        $phase->addAgent(new AgentSpawnConfig(name: 'doc-researcher', prompt: '搜索文档...'));
+    })
+
+    ->phase('implement', function (CollaborationPhase $phase) {
+        $phase->dependsOn('research');
+        $phase->onFailure(FailureStrategy::RETRY);
+        $phase->withRetries(2);
+        $phase->addAgent(new AgentSpawnConfig(name: 'coder', prompt: '实现功能...'));
+    })
+
+    ->phase('review', function (CollaborationPhase $phase) {
+        $phase->dependsOn('implement');
+        $phase->withAgentProvider('reviewer',
+            AgentProviderConfig::crossProvider('openai', ['model' => 'gpt-4o'])
+        );
+        $phase->addAgent(new AgentSpawnConfig(name: 'reviewer', prompt: '审查代码...'));
+    })
+
+    ->run();
+
+echo $result->summary();
+```
+
+### 失败策略
+
+| 策略 | 行为 |
+|------|------|
+| `FAIL_FAST` | 首个阶段失败时停止整个管道（默认） |
+| `CONTINUE` | 记录失败，继续执行后续阶段 |
+| `RETRY` | 重试失败阶段，最多 `maxRetries` 次 |
+| `FALLBACK` | 执行指定的降级阶段 |
+
+### Provider 模式
+
+```php
+// 模式1：同 Provider，轮转凭证
+AgentProviderConfig::sameProvider('anthropic', $credentialPool);
+
+// 模式2：跨 Provider
+AgentProviderConfig::crossProvider('openai', ['model' => 'gpt-4o']);
+
+// 模式3：降级链
+AgentProviderConfig::withFallbackChain(['anthropic', 'openai', 'ollama']);
+```
+
+---
+
+## 64. 智能任务路由
+
+> 根据 prompt 内容分析，自动将任务路由到最优模型层级，平衡能力与成本。
+
+### 模型层级
+
+| 层级 | 名称 | 默认模型 | 成本倍率 | 用途 |
+|------|------|---------|---------|------|
+| 1 | 强力 | claude-opus-4 | 5.0x | 综合、协调、架构设计 |
+| 2 | 平衡 | claude-sonnet-4 | 1.0x | 代码编写、调试、分析 |
+| 3 | 速度 | claude-haiku-4 | 0.27x | 研究、提取、测试、对话 |
+
+### 路由规则
+
+| 任务类型 | 基础层级 | 复杂度覆盖 |
+|---------|---------|-----------|
+| `synthesis` | 1（强力） | — |
+| `coordination` | 1（强力） | — |
+| `code_generation` | 2（平衡） | 极复杂 → 1 |
+| `refactoring` | 2（平衡） | 极复杂 → 1 |
+| `analysis` | 2（平衡） | 简单 → 3 |
+| `testing` | 3（速度） | 复杂+ → 2 |
+| `research` | 3（速度） | 复杂+ → 2 |
+| `chat` | 3（速度） | 复杂 → 2 |
+
+### 用法
+
+```php
+use SuperAgent\Coordinator\TaskRouter;
+
+$router = TaskRouter::withDefaults();
+$route = $router->route('研究最新的 Redis API 文档');
+// → tier: 3, model: claude-haiku-4
+
+// 管道级自动路由
+$pipeline = CollaborationPipeline::create()
+    ->withAutoRouting()
+    ->phase('research', function ($phase) {
+        $phase->addAgent(new AgentSpawnConfig(name: 'a', prompt: '研究...'));
+        // 自动路由到 Haiku（Tier 3）
+    });
+```
+
+### 优先级
+
+1. 显式 `withAgentProvider()` — 始终优先
+2. `TaskRouter` 自动路由 — 基于 prompt 分析
+3. 阶段级默认 `withProvider()`
+4. 管道级默认 `withDefaultProvider()`
+
+---
+
+## 65. 阶段上下文注入
+
+> 自动将前置阶段的结果共享给下游智能体，避免重复发现，节约 token。
+
+### 工作原理
+
+当阶段 B 依赖阶段 A 时，阶段 B 的智能体会在系统提示中收到阶段 A 的结构化摘要：
+
+```xml
+<prior-phase-results>
+### Phase: research (completed, 2 agents)
+[api-researcher] 发现 3 个关键 API：SET、GET、EXPIRE...
+[doc-researcher] 安全审查完成，生产环境需要 TLS...
+</prior-phase-results>
+```
+
+### 配置
+
+```php
+$phase->withContextInjection(
+    maxTokensPerPhase: 2000,  // 每阶段摘要上限
+    maxTotalTokens: 8000,     // 总注入上限
+    strategy: 'summary',      // 'summary'（前500字符）或 'full'
+);
+
+$phase->withoutContextInjection(); // 禁用
+```
+
+---
+
+## 66. 智能体重试策略
+
+> 配置逐智能体的重试行为，含智能错误分类、凭证轮转和 Provider 降级。
+
+### 错误分类
+
+| 错误类型 | HTTP 状态码 | 可重试 | 行为 |
+|---------|-----------|--------|------|
+| 认证 | 401, 403 | 否 | 立即切换 Provider |
+| 限速 | 429 | 是 | 轮转凭证 + 退避 |
+| 服务器错误 | 5xx | 是 | 退避重试 |
+| 网络 | timeout, connection | 是 | 退避重试 |
+
+### 退避策略
+
+```php
+use SuperAgent\Coordinator\AgentRetryPolicy;
+
+AgentRetryPolicy::default();    // 3次，指数退避，抖动，凭证轮转
+AgentRetryPolicy::aggressive(); // 5次，2s基础，60s上限
+AgentRetryPolicy::none();       // 不重试
+AgentRetryPolicy::crossProvider(['openai', 'ollama']); // 失败时切换 Provider
+
+// 自定义
+$policy = AgentRetryPolicy::default()
+    ->withMaxAttempts(5)
+    ->withBackoff('linear', 500, 10000)
+    ->withProviderFallback('openai', ['model' => 'gpt-4o']);
+
+// 逐智能体覆盖
+$phase->withRetryPolicy(AgentRetryPolicy::default());
+$phase->withAgentRetryPolicy('critical-agent', AgentRetryPolicy::aggressive());
 ```

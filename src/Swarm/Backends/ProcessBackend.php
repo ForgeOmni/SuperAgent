@@ -314,25 +314,33 @@ class ProcessBackend implements BackendInterface
     /**
      * Block until all currently tracked agents finish.
      *
+     * On Linux/macOS, uses stream_select() for efficient event-driven IO.
+     * On Windows, falls back to usleep() polling (stream_select on proc_open
+     * pipes is unreliable on Windows).
+     *
      * @param int $timeoutSeconds Maximum wait time (default: 5 minutes).
      * @return array<string, array|null> agentId → parsed JSON result.
      */
     public function waitAll(int $timeoutSeconds = 300): array
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            return $this->waitAllPolling($timeoutSeconds);
+        }
+
+        return $this->waitAllStreamSelect($timeoutSeconds);
+    }
+
+    /**
+     * Polling-based wait (Windows fallback).
+     */
+    private function waitAllPolling(int $timeoutSeconds): array
     {
         $deadline = time() + $timeoutSeconds;
 
         while (time() < $deadline) {
             $this->poll();
 
-            $allDone = true;
-            foreach ($this->statuses as $status) {
-                if ($status === AgentStatus::RUNNING || $status === AgentStatus::PENDING) {
-                    $allDone = false;
-                    break;
-                }
-            }
-
-            if ($allDone) {
+            if ($this->allAgentsDone()) {
                 break;
             }
 
@@ -340,6 +348,66 @@ class ProcessBackend implements BackendInterface
         }
 
         return $this->results;
+    }
+
+    /**
+     * stream_select-based wait (Linux/macOS).
+     *
+     * Instead of blind 50ms sleeps, waits for actual pipe activity.
+     * Falls back to polling if stream_select is not supported.
+     */
+    private function waitAllStreamSelect(int $timeoutSeconds): array
+    {
+        $deadline = time() + $timeoutSeconds;
+
+        while (time() < $deadline) {
+            // Collect readable pipe resources from active processes
+            $readStreams = [];
+            foreach ($this->processes as $agentId => $info) {
+                if ($this->statuses[$agentId] !== AgentStatus::RUNNING) {
+                    continue;
+                }
+                if (is_resource($info['pipes'][1])) {
+                    $readStreams[] = $info['pipes'][1];
+                }
+                if (is_resource($info['pipes'][2])) {
+                    $readStreams[] = $info['pipes'][2];
+                }
+            }
+
+            if (empty($readStreams)) {
+                // No active streams — poll once to catch any final status changes
+                $this->poll();
+                break;
+            }
+
+            // Wait for pipe activity (up to 200ms per cycle)
+            $write = null;
+            $except = null;
+            @stream_select($readStreams, $write, $except, 0, 200_000);
+
+            // Always poll to check process status and drain buffers
+            $this->poll();
+
+            if ($this->allAgentsDone()) {
+                break;
+            }
+        }
+
+        return $this->results;
+    }
+
+    /**
+     * Check if all agents are done (not running or pending).
+     */
+    private function allAgentsDone(): bool
+    {
+        foreach ($this->statuses as $status) {
+            if ($status === AgentStatus::RUNNING || $status === AgentStatus::PENDING) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
