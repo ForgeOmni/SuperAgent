@@ -43,7 +43,15 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(php vendor/bin/phpunit tests/Unit/Middleware/MiddlewarePipelineTest.php tests/Unit/Exceptions/ExceptionHierarchyTest.php tests/Unit/Tools/ToolResultCacheTest.php --no-configuration --bootstrap vendor/autoload.php)",
-      "Bash(php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php tests/Unit/)"
+      "Bash(php vendor/bin/phpunit --no-configuration --bootstrap vendor/autoload.php tests/Unit/)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)",
+      "Bash(git clean:*)",
+      "Bash(git reset:*)",
+      "Bash(wc:*)",
+      "Bash(php:*)",
+      "Bash(grep -E \"\\\\.\\(md|txt\\)$\")",
+      "Bash(xargs grep:*)"
     ]
   }
 }
