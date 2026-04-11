@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.2-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-v0.8.2-purple)](https://github.com/xiyanyang/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
