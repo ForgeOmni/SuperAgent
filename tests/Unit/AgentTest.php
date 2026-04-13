@@ -33,8 +33,8 @@ class AgentTest extends TestCase
 
     public function test_construct_with_invalid_provider_throws(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Unsupported provider driver');
+        $this->expectException(\SuperAgent\Exceptions\ProviderException::class);
+        $this->expectExceptionMessage('Unknown provider');
 
         new Agent(['provider' => 'nonexistent_driver_xyz']);
     }

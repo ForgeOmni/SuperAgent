@@ -131,8 +131,8 @@ class AgentProviderResolutionTest extends TestCase
      */
     public function test_unsupported_driver_throws_exception(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Unsupported provider driver: nonexistent');
+        $this->expectException(\SuperAgent\Exceptions\ProviderException::class);
+        $this->expectExceptionMessage('Unknown provider: nonexistent');
 
         new TestableAgent([
             'provider' => 'custom',

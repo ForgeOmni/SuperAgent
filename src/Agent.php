@@ -8,12 +8,8 @@ use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\Message;
 use SuperAgent\Bridge\BridgeFactory;
 use SuperAgent\Config\ExperimentalFeatures;
-use SuperAgent\Providers\AnthropicProvider;
-use SuperAgent\Providers\BedrockProvider;
 use SuperAgent\Providers\ModelResolver;
-use SuperAgent\Providers\OllamaProvider;
-use SuperAgent\Providers\OpenAIProvider;
-use SuperAgent\Providers\OpenRouterProvider;
+use SuperAgent\Providers\ProviderRegistry;
 use SuperAgent\AutoMode\TaskAnalyzer;
 use SuperAgent\AutoMode\AutoModeAgent;
 use SuperAgent\Tools\ToolLoader;
@@ -395,14 +391,7 @@ class Agent
         // This allows named instances like 'anthropic-proxy' with driver 'anthropic'.
         $driver = $providerConfig['driver'] ?? $providerName;
 
-        $provider = match ($driver) {
-            'anthropic' => new AnthropicProvider($providerConfig),
-            'openai' => new OpenAIProvider($providerConfig),
-            'openrouter' => new OpenRouterProvider($providerConfig),
-            'bedrock' => new BedrockProvider($providerConfig),
-            'ollama' => new OllamaProvider($providerConfig),
-            default => throw new \InvalidArgumentException("Unsupported provider driver: {$driver}"),
-        };
+        $provider = ProviderRegistry::create($driver, $providerConfig);
 
         return $this->maybeWrapWithBridge($provider, $config);
     }
