@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace SuperAgent\Memory;
 
-use Carbon\Carbon;
+use SuperAgent\Support\DateTime as Carbon;
 
 class Memory
 {
     public readonly Carbon $createdAt;
     public readonly Carbon $updatedAt;
     private ?Carbon $accessedAt = null;
-    
+
     public function __construct(
         public readonly string $id,
         public readonly string $name,
@@ -19,12 +19,23 @@ class Memory
         public readonly MemoryType $type,
         public readonly string $content,
         public readonly MemoryScope $scope = MemoryScope::PRIVATE,
-        ?Carbon $createdAt = null,
-        ?Carbon $updatedAt = null,
+        Carbon|\DateTimeInterface|null $createdAt = null,
+        Carbon|\DateTimeInterface|null $updatedAt = null,
         public readonly array $metadata = [],
     ) {
-        $this->createdAt = $createdAt ?? Carbon::now();
-        $this->updatedAt = $updatedAt ?? Carbon::now();
+        $this->createdAt = self::ensureDateTime($createdAt);
+        $this->updatedAt = self::ensureDateTime($updatedAt);
+    }
+
+    private static function ensureDateTime(Carbon|\DateTimeInterface|null $dt): Carbon
+    {
+        if ($dt === null) {
+            return Carbon::now();
+        }
+        if ($dt instanceof Carbon) {
+            return $dt;
+        }
+        return Carbon::parse($dt->format('Y-m-d H:i:s.u'));
     }
     
     /**

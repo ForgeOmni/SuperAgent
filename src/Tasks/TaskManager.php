@@ -3,7 +3,6 @@
 namespace SuperAgent\Tasks;
 
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 
 class TaskManager
 {
@@ -251,7 +250,7 @@ class TaskManager
      */
     private function generateTaskId(): string
     {
-        return 't' . Str::random(8);
+        return 't' . bin2hex(random_bytes(4));
     }
 
     /**

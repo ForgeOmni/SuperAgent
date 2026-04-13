@@ -1,0 +1,68 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * SuperAgent CLI — Local AI Coding Assistant
+ *
+ * Usage:
+ *   superagent                          Interactive REPL mode
+ *   superagent "fix the login bug"      One-shot task execution
+ *   superagent init                     Initialize configuration
+ *   superagent --model sonnet           Specify model
+ *   superagent --provider ollama        Use local model
+ *   superagent --version                Show version
+ */
+
+// Find Composer autoloader
+$autoloadPaths = [
+    __DIR__ . '/../vendor/autoload.php',          // Development (cloned repo)
+    __DIR__ . '/../../../autoload.php',            // Installed as Composer dependency
+    __DIR__ . '/../../autoload.php',               // PHAR or global install
+];
+
+$autoloaderFound = false;
+foreach ($autoloadPaths as $autoloadPath) {
+    if (file_exists($autoloadPath)) {
+        require_once $autoloadPath;
+        $autoloaderFound = true;
+        break;
+    }
+}
+
+if (! $autoloaderFound) {
+    fwrite(STDERR, "Error: Could not find Composer autoloader.\n");
+    fwrite(STDERR, "Run 'composer install' or install via 'composer global require forgeomni/superagent'.\n");
+    exit(1);
+}
+
+// Check if running inside a Laravel application
+$laravelApp = null;
+$cwd = getcwd();
+$laravelBootstrap = $cwd . '/bootstrap/app.php';
+
+if (file_exists($laravelBootstrap) && file_exists($cwd . '/vendor/autoload.php')) {
+    // Inside a Laravel project — let Laravel handle everything
+    try {
+        require_once $cwd . '/vendor/autoload.php';
+        $laravelApp = require_once $laravelBootstrap;
+        if ($laravelApp instanceof \Illuminate\Contracts\Foundation\Application) {
+            $kernel = $laravelApp->make(\Illuminate\Contracts\Console\Kernel::class);
+            $kernel->bootstrap();
+        }
+    } catch (\Throwable) {
+        $laravelApp = null;
+    }
+}
+
+// If not in Laravel, bootstrap standalone
+if ($laravelApp === null) {
+    \SuperAgent\Foundation\Application::bootstrap($cwd);
+}
+
+// Launch CLI application
+$app = new \SuperAgent\CLI\SuperAgentApplication();
+$exitCode = $app->run();
+
+exit($exitCode);

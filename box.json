@@ -1,0 +1,44 @@
+{
+    "main": "bin/superagent",
+    "output": "build/superagent.phar",
+    "directories": [
+        "src",
+        "config"
+    ],
+    "files": [
+        "composer.json"
+    ],
+    "finder": [
+        {
+            "name": "*.php",
+            "in": "vendor",
+            "exclude": [
+                "Tests",
+                "tests",
+                "test",
+                "doc",
+                "docs",
+                "examples"
+            ]
+        }
+    ],
+    "compression": "GZ",
+    "compactors": [
+        "KevinGH\\Box\\Compactor\\Php"
+    ],
+    "chmod": "0755",
+    "stub": true,
+    "banner": [
+        "SuperAgent CLI — AI Coding Assistant",
+        "",
+        "This file is part of the SuperAgent project.",
+        "https://github.com/forgeomni/superagent",
+        "",
+        "(c) ForgeOmni",
+        "MIT License"
+    ],
+    "metadata": {
+        "name": "superagent",
+        "description": "Local AI Coding Assistant"
+    }
+}

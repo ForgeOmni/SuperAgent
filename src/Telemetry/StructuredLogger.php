@@ -2,8 +2,9 @@
 
 namespace SuperAgent\Telemetry;
 
-use Illuminate\Support\Facades\Log;
-use Carbon\Carbon;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use SuperAgent\Support\DateTime as Carbon;
 
 class StructuredLogger
 {
@@ -12,13 +13,29 @@ class StructuredLogger
     private array $globalContext = [];
     private string $sessionId;
     private string $requestId;
+    private LoggerInterface $logger;
 
-    public function __construct()
+    public function __construct(?LoggerInterface $logger = null)
     {
         $this->enabled = config('superagent.telemetry.enabled', false)
             && config('superagent.telemetry.logging.enabled', false);
         $this->sessionId = uniqid('session_');
         $this->requestId = uniqid('request_');
+        $this->logger = $logger ?? $this->resolveLogger();
+    }
+
+    private function resolveLogger(): LoggerInterface
+    {
+        // Use Laravel Log facade if available
+        if (class_exists(\Illuminate\Support\Facades\Log::class)) {
+            try {
+                return \Illuminate\Support\Facades\Log::getLogger();
+            } catch (\Throwable) {
+                // Facade not booted
+            }
+        }
+
+        return new NullLogger();
     }
 
     /**
@@ -80,7 +97,7 @@ class StructuredLogger
         ]);
 
         // Log request details
-        Log::info('LLM Request', $context);
+        $this->logger->info('LLM Request', $context);
 
         // Log messages (with truncation for large content)
         foreach ($messages as $index => $message) {
@@ -92,7 +109,7 @@ class StructuredLogger
                 'content_length' => strlen(json_encode($message['content'] ?? '')),
                 'content_preview' => $this->truncate($message['content'] ?? '', 200),
             ]);
-            Log::debug('LLM Message', $messageContext);
+            $this->logger->debug('LLM Message', $messageContext);
         }
 
         // Log response if present
@@ -104,7 +121,7 @@ class StructuredLogger
                 'finish_reason' => $response['finish_reason'] ?? null,
                 'response_length' => strlen(json_encode($response)),
             ]);
-            Log::info('LLM Response', $responseContext);
+            $this->logger->info('LLM Response', $responseContext);
         }
     }
 
@@ -134,10 +151,10 @@ class StructuredLogger
         ]);
 
         $level = $success ? 'info' : 'error';
-        Log::$level("Tool Execution: {$toolName}", $context);
+        $this->logger->$level("Tool Execution: {$toolName}", $context);
 
         // Log input details at debug level
-        Log::debug("Tool Input: {$toolName}", $this->buildContext([
+        $this->logger->debug("Tool Input: {$toolName}", $this->buildContext([
             'type' => 'tool_input',
             'tool' => $toolName,
             'input' => $this->sanitizeForLogging($input),
@@ -145,7 +162,7 @@ class StructuredLogger
 
         // Log result if present
         if ($result !== null) {
-            Log::debug("Tool Result: {$toolName}", $this->buildContext([
+            $this->logger->debug("Tool Result: {$toolName}", $this->buildContext([
                 'type' => 'tool_result',
                 'tool' => $toolName,
                 'result_preview' => $this->truncate(json_encode($result), 500),
@@ -181,7 +198,7 @@ class StructuredLogger
             ];
         }
 
-        Log::error($message, $errorContext);
+        $this->logger->error($message, $errorContext);
     }
 
     /**
@@ -199,7 +216,7 @@ class StructuredLogger
             'duration_ms' => $duration,
         ], $metadata));
 
-        Log::info("Performance: {$operation}", $context);
+        $this->logger->info("Performance: {$operation}", $context);
     }
 
     /**
@@ -215,7 +232,7 @@ class StructuredLogger
             'type' => 'session_start',
         ], $metadata));
 
-        Log::info('Session Started', $context);
+        $this->logger->info('Session Started', $context);
     }
 
     /**
@@ -232,7 +249,7 @@ class StructuredLogger
             'summary' => $summary,
         ], []));
 
-        Log::info('Session Ended', $context);
+        $this->logger->info('Session Ended', $context);
     }
 
     /**

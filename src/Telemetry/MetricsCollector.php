@@ -3,7 +3,6 @@
 namespace SuperAgent\Telemetry;
 
 use Illuminate\Support\Collection;
-use Carbon\Carbon;
 
 class MetricsCollector
 {
@@ -301,7 +300,7 @@ class MetricsCollector
             'name' => $name,
             'value' => $value,
             'labels' => $labels,
-            'timestamp' => Carbon::now()->toIso8601String(),
+            'timestamp' => date('c'),
         ];
 
         $this->metrics->push($metric);

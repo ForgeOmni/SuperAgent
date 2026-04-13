@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Hooks;
 
-use Illuminate\Support\Facades\Http;
+use GuzzleHttp\Client;
 
 class HttpHook implements HookInterface
 {
@@ -44,18 +44,23 @@ class HttpHook implements HookInterface
                 'timestamp' => date('c'),
             ];
 
-            $httpClient = Http::timeout($actualTimeout)->withHeaders($headers);
+            $httpClient = new Client([
+                'timeout' => $actualTimeout,
+                'headers' => $headers,
+                'http_errors' => false,
+            ]);
 
-            $response = match (strtoupper($this->method)) {
-                'GET' => $httpClient->get($url, $payload),
-                'PUT' => $httpClient->put($url, $payload),
-                'PATCH' => $httpClient->patch($url, $payload),
-                'DELETE' => $httpClient->delete($url, $payload),
-                default => $httpClient->post($url, $payload),
-            };
+            $method = strtoupper($this->method);
+            $options = $method === 'GET'
+                ? ['query' => $payload]
+                : ['json' => $payload];
 
-            if (!$response->successful()) {
-                $errorMsg = "HTTP hook failed: {$response->status()} - {$response->body()}";
+            $response = $httpClient->request($method, $url, $options);
+            $statusCode = $response->getStatusCode();
+            $body = (string) $response->getBody();
+
+            if ($statusCode >= 400) {
+                $errorMsg = "HTTP hook failed: {$statusCode} - {$body}";
 
                 if ($this->blockOnFailure) {
                     return HookResult::stop($errorMsg);
@@ -65,12 +70,12 @@ class HttpHook implements HookInterface
                 return HookResult::continue();
             }
 
-            $data = $response->json();
+            $data = json_decode($body, true);
 
             if ($data === null) {
                 // Non-JSON response, treat as success
                 $this->hasExecuted = true;
-                return HookResult::continue($response->body());
+                return HookResult::continue($body);
             }
 
             $this->hasExecuted = true;

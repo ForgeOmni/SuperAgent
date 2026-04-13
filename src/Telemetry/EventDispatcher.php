@@ -3,7 +3,6 @@
 namespace SuperAgent\Telemetry;
 
 use Illuminate\Support\Collection;
-use Carbon\Carbon;
 
 class EventDispatcher
 {
@@ -83,7 +82,7 @@ class EventDispatcher
         $eventData = [
             'event' => $event,
             'data' => $data,
-            'timestamp' => Carbon::now()->toIso8601String(),
+            'timestamp' => date('c'),
             'dispatched_at' => microtime(true),
         ];
 

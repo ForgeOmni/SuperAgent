@@ -393,7 +393,7 @@ class PersistentTaskManager extends TaskManager
         }
 
         $task = new Task(
-            id: $data['id'] ?? ('t' . \Illuminate\Support\Str::random(8)),
+            id: $data['id'] ?? ('t' . bin2hex(random_bytes(4))),
             subject: $data['subject'],
             description: $data['description'],
             status: $status,

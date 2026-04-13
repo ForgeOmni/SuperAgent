@@ -13,7 +13,6 @@ use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\SpanExporter\ConsoleSpanExporter;
 use OpenTelemetry\SDK\Common\Attribute\Attributes;
 use Illuminate\Support\Collection;
-use Carbon\Carbon;
 
 class TracingManager
 {
@@ -118,7 +117,7 @@ class TracingManager
             ->setSpanKind(SpanKind::KIND_SERVER)
             ->setAttributes(Attributes::create(array_merge([
                 'span.type' => 'interaction',
-                'interaction.timestamp' => Carbon::now()->toIso8601String(),
+                'interaction.timestamp' => date('c'),
                 'interaction.id' => uniqid('interaction_'),
             ], $attributes)))
             ->startSpan();
@@ -156,7 +155,7 @@ class TracingManager
                 'span.type' => 'llm_request',
                 'llm.model' => $model,
                 'llm.message_count' => count($messages),
-                'llm.timestamp' => Carbon::now()->toIso8601String(),
+                'llm.timestamp' => date('c'),
             ], $attributes)))
             ->startSpan();
 
@@ -203,7 +202,7 @@ class TracingManager
                 'span.type' => 'tool',
                 'tool.name' => $toolName,
                 'tool.input_size' => strlen(json_encode($input)),
-                'tool.timestamp' => Carbon::now()->toIso8601String(),
+                'tool.timestamp' => date('c'),
             ], $attributes)))
             ->startSpan();
 

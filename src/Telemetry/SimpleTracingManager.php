@@ -3,7 +3,6 @@
 namespace SuperAgent\Telemetry;
 
 use Illuminate\Support\Collection;
-use Carbon\Carbon;
 
 /**
  * Simplified tracing manager without OpenTelemetry dependency.

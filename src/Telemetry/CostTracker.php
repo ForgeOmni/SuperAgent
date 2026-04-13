@@ -3,7 +3,7 @@
 namespace SuperAgent\Telemetry;
 
 use Illuminate\Support\Collection;
-use Carbon\Carbon;
+use SuperAgent\Support\DateTime as Carbon;
 
 class CostTracker
 {
@@ -69,7 +69,7 @@ class CostTracker
         $cost = $this->calculateLLMCost($model, $inputTokens, $outputTokens);
 
         $record = [
-            'timestamp' => Carbon::now()->toIso8601String(),
+            'timestamp' => date('c'),
             'type' => 'llm',
             'model' => $model,
             'input_tokens' => $inputTokens,
@@ -125,7 +125,7 @@ class CostTracker
 
         if ($cost > 0) {
             $record = [
-                'timestamp' => Carbon::now()->toIso8601String(),
+                'timestamp' => date('c'),
                 'type' => 'tool',
                 'tool' => $toolName,
                 'execution_time_ms' => $executionTime,
@@ -277,7 +277,7 @@ class CostTracker
     public function export(string $format = 'json'): string
     {
         $data = [
-            'export_timestamp' => Carbon::now()->toIso8601String(),
+            'export_timestamp' => date('c'),
             'costs' => $this->costs->toArray(),
             'session_costs' => $this->sessionCosts->toArray(),
             'summary' => $this->getCostSummary(),

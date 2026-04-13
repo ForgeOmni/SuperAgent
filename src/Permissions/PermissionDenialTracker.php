@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Permissions;
 
-use Carbon\Carbon;
+use SuperAgent\Support\DateTime as Carbon;
 
 class PermissionDenialTracker
 {

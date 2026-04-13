@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Memory;
 
-use Carbon\Carbon;
+use SuperAgent\Support\DateTime as Carbon;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use SuperAgent\LLM\ProviderInterface;
