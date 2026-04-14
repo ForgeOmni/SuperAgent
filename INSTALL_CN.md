@@ -1,4 +1,4 @@
-# SuperAgent 安装手册
+# SuperAgent 安装手册（v0.8.5）
 
 > **🌍 语言**: [English](INSTALL.md) | [中文](INSTALL_CN.md) | [Français](INSTALL_FR.md)  
 > **📖 文档**: [README](README.md) | [README 中文](README_CN.md) | [README Français](README_FR.md)
@@ -292,8 +292,88 @@ return [
         'driver' => env('CACHE_DRIVER', 'file'),
         'ttl' => env('SUPERAGENT_CACHE_TTL', 3600),
     ],
+    // Memory Palace（v0.8.5，默认开启）
+    'palace' => [
+        'enabled' => env('SUPERAGENT_PALACE_ENABLED', true),
+        'base_path' => env('SUPERAGENT_PALACE_PATH'),          // 默认：{memory}/palace
+        'default_wing' => env('SUPERAGENT_PALACE_DEFAULT_WING'),
+        'vector' => [
+            'enabled' => env('SUPERAGENT_PALACE_VECTOR_ENABLED', false),
+            'embed_fn' => null,                                // 传入 callable(string): float[]
+        ],
+        'dedup' => [
+            'enabled' => env('SUPERAGENT_PALACE_DEDUP_ENABLED', true),
+            'threshold' => (float) env('SUPERAGENT_PALACE_DEDUP_THRESHOLD', 0.85),
+        ],
+        'scoring' => [
+            'keyword' => 1.0,
+            'vector'  => 2.0,
+            'recency' => 0.5,
+            'access'  => 0.3,
+        ],
+    ],
 ];
 ```
+
+### 记忆宫殿（v0.8.5 新功能，默认开启）
+
+受 MemPalace 启发的分层记忆系统（LongMemEval 96.6%）。通过现有 `MemoryProviderManager`
+作为外部 Provider 插入，**不替换**内置的 `MEMORY.md` 流程。
+
+```env
+# 记忆宫殿总开关（默认：true）
+SUPERAGENT_PALACE_ENABLED=true
+
+# 可选：为 Wing 路由锁定默认 Wing
+# SUPERAGENT_PALACE_DEFAULT_WING=wing_myproject
+
+# 可选：向量评分（需要在运行时注入 embed_fn 回调）
+# SUPERAGENT_PALACE_VECTOR_ENABLED=false
+
+# 可选：调整近似去重阈值（5-gram Jaccard）
+# SUPERAGENT_PALACE_DEDUP_THRESHOLD=0.85
+```
+
+磁盘存储布局：
+
+```
+{memory_path}/palace/
+  identity.txt                         # L0 身份（~50 tok，始终加载）
+  critical_facts.md                    # L1 关键事实（~120 tok）
+  wings.json                           # Wing 注册表
+  tunnels.json                         # 跨 Wing 链接
+  wings/{wing_slug}/
+    wing.json
+    halls/{hall}/rooms/{room_slug}/
+      room.json
+      closet.json
+      drawers/{drawer_id}.md           # 原始逐字内容
+      drawers/{drawer_id}.emb          # 可选嵌入 sidecar
+```
+
+**Wake-Up CLI** —— 无需全量加载即可加载 L0+L1（~600–900 tok）：
+
+```bash
+php artisan superagent:wake-up
+php artisan superagent:wake-up --wing=wing_myproject
+php artisan superagent:wake-up --wing=wing_myproject --search="auth decisions"
+php artisan superagent:wake-up --stats
+```
+
+**启用向量评分** —— 在运行时注入嵌入回调（例如在 `MemoryProviderManager`
+构建之后的 Service Provider 中）：
+
+```php
+use SuperAgent\Memory\Palace\PalaceBundle;
+
+$bundle = app(PalaceBundle::class);
+// 提供你自己的嵌入函数：fn(string $text): float[]
+// （例如封装 OpenAI 或本地嵌入端点）
+```
+
+**明确跳过的部分**：AAAK 方言 —— MemPalace 自己的 README 承认 AAAK 在
+LongMemEval 上相对原始模式回退 12.4 分。SuperAgent 的 Palace 使用原始逐字存储
+—— 这正是 96.6% 基准数字的来源 —— 不引入有损压缩层。
 
 ## 多智能体设置
 

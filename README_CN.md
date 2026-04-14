@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.8.2-purple)](https://github.com/xiyanyang/superagent)
+[![版本](https://img.shields.io/badge/version-0.8.5-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,18 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.8.5 — 记忆宫殿：MemPalace 启发的分层记忆（默认开启，6 个新测试）
+- **Memory Palace**（`src/Memory/Palace/`）— 受 MemPalace（LongMemEval 96.6%）启发的分层记忆模块。Wing（人/项目/智能体）→ Hall（5 条记忆类型走廊）→ Room（话题）→ Drawer（原始逐字内容）。同一 Room 出现在不同 Wing 时自动建立 Tunnel 跨 Wing 桥接。通过现有 `MemoryProviderManager` 作为外部 Provider 插入，**不替换**内置 `MEMORY.md` 流程
+- **Wing + Room 过滤**（`PalaceRetriever`）— 结构化元数据驱动检索；MemPalace 基准将 +34% R@10 归功于此。混合评分：关键词重叠 + 可选余弦相似度 + 时效衰减 + 访问次数加权。基于生成器流式迭代 Drawer，不一次性加载全部内存
+- **4 层记忆栈**（`Layers/MemoryLayer`, `LayerManager`）— L0 身份（~50 tok）+ L1 关键事实（~120 tok）始终加载；L2 房间召回 + L3 深度搜索按需加载。`wakeUp()` 发送 ~600–900 tok 的会话启动载荷
+- **时序知识图** — `KnowledgeEdge` 新增 `validFrom` / `validUntil`；`KnowledgeGraph` 新增 `addTriple()`、`invalidate()`、`queryEntity($entity, asOf:)`、`timeline()`。新增 `NodeType::ENTITY` + `EdgeType::RELATES_TO`。完全向后兼容（字段默认为空）
+- **智能体日记**（`Diary/AgentDiary.php`）— 每个智能体获得一个 AGENT 类型专属 Wing，内含 `hall_events/diary` Room。每个专家智能体（reviewer、architect、ops…）在共享记忆之外维护自己的短条目历史
+- **事实检查器**（`FactChecker.php`）— 基于知识图的矛盾检测，3 种严重级别（`attribution_conflict`、`stale`、`unsupported`）。**无 LLM 调用** —— 纯图遍历
+- **近似去重**（`MemoryDeduplicator.php`）— 内容哈希精确匹配 + 5-gram Jaccard 瓦片重叠（默认阈值 0.85），默认按 Room 范围去重，因为上下文很重要
+- **Wake-Up CLI**（`php artisan superagent:wake-up [--wing=] [--search=]`）— 加载 L0+L1 并可选按 Wing 范围搜索 Drawer。用于在不做全量记忆加载的情况下启动外部 AI 会话
+- **可选向量评分** — `palace.vector.enabled` + 一个 `embed_fn` 回调。未开启时，检索器完全离线运行，仅用关键词 + 时效 + 访问次数
+- **默认开启** — `palace.enabled=true`。存储布局：`{memory}/palace/wings/{slug}/halls/{hall}/rooms/{room}/drawers/*.md`。全量用例：**1851 tests, 5234 assertions, 0 failures**
 
 ### 🆕 v0.8.2 — 多智能体协作管道、智能路由与并行执行（10项改进，48个新测试）
 - **协作管道** (`src/Coordinator/`) — 分阶段多智能体编排，拓扑依赖 DAG 排序，4种失败策略（快速失败、继续、重试、降级），条件化阶段执行，8事件生命周期监听器。阶段内智能体通过 ProcessBackend（OS 进程）或 InProcessBackend（Fiber）真并行执行
@@ -593,11 +605,10 @@ SuperAgent是基于[MIT许可证](LICENSE)的开源软件。
 
 ## 🔗 相关链接
 
-- [GitHub仓库](https://github.com/xiyanyang/superagent)
-- [官方文档](https://superagent.xiyanyang.com)
+- [GitHub仓库](https://github.com/forgeomni/superagent)
 - [Discord社区](https://discord.gg/superagent)
-- [示例项目](https://github.com/xiyanyang/superagent-examples)
+- [示例项目](https://github.com/forgeomni/superagent-examples)
 
 ---
 
-由SuperAgent团队用❤️制作 | [English](README.md) | [报告问题](https://github.com/xiyanyang/superagent/issues)
+由SuperAgent团队用❤️制作 | [English](README.md) | [报告问题](https://github.com/forgeomni/superagent/issues)

@@ -1,7 +1,7 @@
-# SuperAgent Installation Guide
+# SuperAgent Installation Guide (v0.8.5)
 
-> **🌍 Language**: [English](INSTALL.md) | [中文](INSTALL_CN.md)  
-> **📖 Documentation**: [README](README.md) | [README 中文](README_CN.md)
+> **🌍 Language**: [English](INSTALL.md) | [中文](INSTALL_CN.md) | [Français](INSTALL_FR.md)  
+> **📖 Documentation**: [README](README.md) | [README 中文](README_CN.md) | [README Français](README_FR.md)
 
 ## Table of Contents
 - [System Requirements](#system-requirements)
@@ -407,6 +407,68 @@ $agent = new Agent([
 
 Set via environment: `MAX_THINKING_TOKENS=20000`
 
+### Memory Palace (NEW in v0.8.5, enabled by default)
+
+Hierarchical memory inspired by MemPalace (96.6% LongMemEval). Plugs into the
+existing `MemoryProviderManager` as an external provider — **does not replace**
+the builtin `MEMORY.md` flow.
+
+```env
+# Memory Palace master switch (default: true)
+SUPERAGENT_PALACE_ENABLED=true
+
+# Optional: pin the default wing for wing routing
+# SUPERAGENT_PALACE_DEFAULT_WING=wing_myproject
+
+# Optional vector scoring (requires an embed_fn callable injected at runtime)
+# SUPERAGENT_PALACE_VECTOR_ENABLED=false
+
+# Optional: tune near-duplicate detection (5-gram Jaccard)
+# SUPERAGENT_PALACE_DEDUP_THRESHOLD=0.85
+```
+
+Storage layout on disk:
+
+```
+{memory_path}/palace/
+  identity.txt                         # L0 identity (~50 tok, always loaded)
+  critical_facts.md                    # L1 critical facts (~120 tok)
+  wings.json                           # wing registry
+  tunnels.json                         # cross-wing links
+  wings/{wing_slug}/
+    wing.json
+    halls/{hall}/rooms/{room_slug}/
+      room.json
+      closet.json
+      drawers/{drawer_id}.md           # raw verbatim content
+      drawers/{drawer_id}.emb          # optional embedding sidecar
+```
+
+**Wake-up CLI** — load L0+L1 (~600–900 tok) without a full memory scan:
+
+```bash
+php artisan superagent:wake-up
+php artisan superagent:wake-up --wing=wing_myproject
+php artisan superagent:wake-up --wing=wing_myproject --search="auth decisions"
+php artisan superagent:wake-up --stats
+```
+
+**Enabling vector scoring** — inject an embedding callable at runtime
+(e.g. in a service provider after the MemoryProviderManager is built):
+
+```php
+use SuperAgent\Memory\Palace\PalaceBundle;
+
+$bundle = app(PalaceBundle::class);
+// Provide your own embed function: fn(string $text): float[]
+// (e.g. wrap the OpenAI or local embedding endpoint of your choice)
+```
+
+**What's explicitly NOT included**: the AAAK dialect — MemPalace's own README
+states AAAK currently regresses 12.4 points on LongMemEval vs raw mode.
+SuperAgent's palace uses raw verbatim storage — the source of the 96.6%
+benchmark number — without the lossy compression layer.
+
 ## Multi-Agent Setup
 
 ### Auto Mode Configuration (NEW in v0.6.7)
@@ -451,6 +513,26 @@ $config = Config::fromArray([
             1 => ['provider' => 'anthropic', 'model' => 'claude-opus-4'],   // Power tier
             2 => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4'], // Balance tier
             3 => ['provider' => 'anthropic', 'model' => 'claude-haiku-4'],  // Speed tier
+        ],
+    ],
+    // Memory Palace (v0.8.5) — enabled by default
+    'palace' => [
+        'enabled' => env('SUPERAGENT_PALACE_ENABLED', true),
+        'base_path' => env('SUPERAGENT_PALACE_PATH'),          // default: {memory}/palace
+        'default_wing' => env('SUPERAGENT_PALACE_DEFAULT_WING'),
+        'vector' => [
+            'enabled' => env('SUPERAGENT_PALACE_VECTOR_ENABLED', false),
+            'embed_fn' => null,                                // pass a callable(string): float[]
+        ],
+        'dedup' => [
+            'enabled' => env('SUPERAGENT_PALACE_DEDUP_ENABLED', true),
+            'threshold' => (float) env('SUPERAGENT_PALACE_DEDUP_THRESHOLD', 0.85),
+        ],
+        'scoring' => [
+            'keyword' => 1.0,
+            'vector' => 2.0,
+            'recency' => 0.5,
+            'access' => 0.3,
         ],
     ],
 ]);

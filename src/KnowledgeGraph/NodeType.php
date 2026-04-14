@@ -23,4 +23,7 @@ enum NodeType: string
 
     /** A tool that was used. */
     case TOOL = 'tool';
+
+    /** A generic entity (person, project, concept) used by temporal triples. */
+    case ENTITY = 'entity';
 }

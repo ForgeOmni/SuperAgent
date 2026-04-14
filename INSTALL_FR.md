@@ -1,4 +1,4 @@
-# Guide d'Installation SuperAgent
+# Guide d'Installation SuperAgent (v0.8.5)
 
 > **🌍 Langue**: [English](INSTALL.md) | [中文](INSTALL_CN.md) | [Français](INSTALL_FR.md)  
 > **📖 Documentation**: [README](README.md) | [README 中文](README_CN.md) | [README Français](README_FR.md)
@@ -292,8 +292,91 @@ return [
         'driver' => env('CACHE_DRIVER', 'file'),
         'ttl' => env('SUPERAGENT_CACHE_TTL', 3600),
     ],
+    // Memory Palace (v0.8.5, activé par défaut)
+    'palace' => [
+        'enabled' => env('SUPERAGENT_PALACE_ENABLED', true),
+        'base_path' => env('SUPERAGENT_PALACE_PATH'),          // par défaut : {memory}/palace
+        'default_wing' => env('SUPERAGENT_PALACE_DEFAULT_WING'),
+        'vector' => [
+            'enabled' => env('SUPERAGENT_PALACE_VECTOR_ENABLED', false),
+            'embed_fn' => null,                                // passez un callable(string): float[]
+        ],
+        'dedup' => [
+            'enabled' => env('SUPERAGENT_PALACE_DEDUP_ENABLED', true),
+            'threshold' => (float) env('SUPERAGENT_PALACE_DEDUP_THRESHOLD', 0.85),
+        ],
+        'scoring' => [
+            'keyword' => 1.0,
+            'vector'  => 2.0,
+            'recency' => 0.5,
+            'access'  => 0.3,
+        ],
+    ],
 ];
 ```
+
+### Memory Palace (NOUVEAU dans v0.8.5, activé par défaut)
+
+Mémoire hiérarchique inspirée de MemPalace (96,6% LongMemEval). Se branche dans
+le `MemoryProviderManager` existant comme provider externe — **ne remplace pas**
+le flux intégré `MEMORY.md`.
+
+```env
+# Interrupteur principal Memory Palace (par défaut : true)
+SUPERAGENT_PALACE_ENABLED=true
+
+# Optionnel : fixer le Wing par défaut pour le routage
+# SUPERAGENT_PALACE_DEFAULT_WING=wing_myproject
+
+# Optionnel : score vectoriel (nécessite un callable embed_fn injecté à l'exécution)
+# SUPERAGENT_PALACE_VECTOR_ENABLED=false
+
+# Optionnel : ajuster le seuil de détection de quasi-doublons (Jaccard 5-grammes)
+# SUPERAGENT_PALACE_DEDUP_THRESHOLD=0.85
+```
+
+Disposition sur disque :
+
+```
+{memory_path}/palace/
+  identity.txt                         # L0 identité (~50 tok, toujours chargé)
+  critical_facts.md                    # L1 faits critiques (~120 tok)
+  wings.json                           # registre des Wings
+  tunnels.json                         # liens inter-Wings
+  wings/{wing_slug}/
+    wing.json
+    halls/{hall}/rooms/{room_slug}/
+      room.json
+      closet.json
+      drawers/{drawer_id}.md           # contenu verbatim brut
+      drawers/{drawer_id}.emb          # sidecar d'embedding optionnel
+```
+
+**CLI Wake-Up** — charger L0+L1 (~600–900 tok) sans scan complet :
+
+```bash
+php artisan superagent:wake-up
+php artisan superagent:wake-up --wing=wing_myproject
+php artisan superagent:wake-up --wing=wing_myproject --search="auth decisions"
+php artisan superagent:wake-up --stats
+```
+
+**Activer le score vectoriel** — injectez un callable d'embedding à
+l'exécution (par exemple dans un Service Provider après la construction du
+`MemoryProviderManager`) :
+
+```php
+use SuperAgent\Memory\Palace\PalaceBundle;
+
+$bundle = app(PalaceBundle::class);
+// Fournissez votre propre fonction d'embedding : fn(string $text): float[]
+// (par ex. encapsulez un endpoint OpenAI ou local de votre choix)
+```
+
+**Ce qui est explicitement NON inclus** : le dialecte AAAK — le propre README
+de MemPalace indique qu'AAAK régresse actuellement de 12,4 points sur
+LongMemEval vs mode brut. Le Palace de SuperAgent utilise le stockage verbatim
+brut — la source du chiffre de 96,6% — sans la couche de compression avec perte.
 
 ## Configuration Multi-Agents
 

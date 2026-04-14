@@ -174,6 +174,157 @@ class KnowledgeGraph
         ));
     }
 
+    // ── Temporal Triples (MemPalace-style) ─────────────────────────
+
+    /**
+     * Add an entity-relationship triple with an optional validity window.
+     * Convenience wrapper: creates ENTITY nodes if missing, picks an
+     * EdgeType from a relation string (custom types are stored in metadata
+     * under "relation" when they do not map to a known EdgeType).
+     */
+    public function addTriple(
+        string $subject,
+        string $relation,
+        string $object,
+        ?string $validFrom = null,
+        ?string $validUntil = null,
+        string $agentName = '',
+        array $metadata = [],
+    ): KnowledgeEdge {
+        $subjectNode = $this->addNode(NodeType::ENTITY, $subject);
+        $objectNode = $this->addNode(NodeType::ENTITY, $object);
+
+        $edgeType = $this->resolveEdgeType($relation);
+        if ($edgeType === null) {
+            $edgeType = EdgeType::RELATES_TO;
+            $metadata['relation'] = $relation;
+        }
+
+        $edge = new KnowledgeEdge(
+            sourceId: $subjectNode->id,
+            targetId: $objectNode->id,
+            type: $edgeType,
+            agentName: $agentName,
+            createdAt: date('c'),
+            metadata: $metadata,
+            validFrom: $validFrom ?? '',
+            validUntil: $validUntil ?? '',
+        );
+
+        $key = $edge->getKey() . '|' . ($metadata['relation'] ?? '');
+        foreach ($this->edges as $i => $existing) {
+            $existingKey = $existing->getKey() . '|' . ($existing->metadata['relation'] ?? '');
+            if ($existingKey === $key && !$existing->isInvalidated()) {
+                $this->edges[$i] = $edge;
+                $this->save();
+
+                return $edge;
+            }
+        }
+
+        $this->edges[] = $edge;
+        $this->save();
+
+        return $edge;
+    }
+
+    /**
+     * Close an existing triple by setting validUntil. The original edge is
+     * preserved for history; new additions with the same (subject,relation,
+     * object) start a fresh validity window.
+     */
+    public function invalidate(
+        string $subject,
+        string $relation,
+        string $object,
+        ?string $endedAt = null,
+    ): bool {
+        $subjectId = KnowledgeNode::makeId(NodeType::ENTITY, $subject);
+        $objectId = KnowledgeNode::makeId(NodeType::ENTITY, $object);
+        $endedAt ??= date('c');
+        $edgeType = $this->resolveEdgeType($relation);
+
+        $found = false;
+        foreach ($this->edges as $i => $edge) {
+            if ($edge->sourceId !== $subjectId || $edge->targetId !== $objectId) {
+                continue;
+            }
+            $matchesType = ($edgeType !== null && $edge->type === $edgeType)
+                || (($edge->metadata['relation'] ?? null) === $relation);
+            if (!$matchesType) {
+                continue;
+            }
+            if ($edge->isInvalidated()) {
+                continue;
+            }
+            $this->edges[$i] = new KnowledgeEdge(
+                sourceId: $edge->sourceId,
+                targetId: $edge->targetId,
+                type: $edge->type,
+                agentName: $edge->agentName,
+                createdAt: $edge->createdAt,
+                metadata: $edge->metadata,
+                validFrom: $edge->validFrom,
+                validUntil: $endedAt,
+            );
+            $found = true;
+        }
+        if ($found) {
+            $this->save();
+        }
+
+        return $found;
+    }
+
+    /**
+     * Return all edges attached to an entity that were valid at a given time.
+     *
+     * @return KnowledgeEdge[]
+     */
+    public function queryEntity(string $entity, ?string $asOf = null): array
+    {
+        $id = KnowledgeNode::makeId(NodeType::ENTITY, $entity);
+
+        return array_values(array_filter(
+            $this->edges,
+            fn (KnowledgeEdge $e) =>
+                ($e->sourceId === $id || $e->targetId === $id) && $e->isValidAt($asOf),
+        ));
+    }
+
+    /**
+     * Chronological timeline for an entity (all edges, sorted by validFrom).
+     *
+     * @return KnowledgeEdge[]
+     */
+    public function timeline(string $entity): array
+    {
+        $id = KnowledgeNode::makeId(NodeType::ENTITY, $entity);
+        $edges = array_values(array_filter(
+            $this->edges,
+            fn (KnowledgeEdge $e) => $e->sourceId === $id || $e->targetId === $id,
+        ));
+        usort($edges, function (KnowledgeEdge $a, KnowledgeEdge $b) {
+            $af = $a->validFrom !== '' ? $a->validFrom : $a->createdAt;
+            $bf = $b->validFrom !== '' ? $b->validFrom : $b->createdAt;
+
+            return strcmp($af, $bf);
+        });
+
+        return $edges;
+    }
+
+    private function resolveEdgeType(string $relation): ?EdgeType
+    {
+        foreach (EdgeType::cases() as $case) {
+            if (strtolower($case->value) === strtolower($relation)) {
+                return $case;
+            }
+        }
+
+        return null;
+    }
+
     // ── Query API ──────────────────────────────────────────────────
 
     /**
