@@ -57,7 +57,7 @@ class InitCommand
         // Provider selection
         $renderer->info('Select your default AI provider:');
         $renderer->line('  1) anthropic  (Claude — recommended)');
-        $renderer->line('  2) openai     (GPT-4o)');
+        $renderer->line('  2) openai     (GPT-5.4)');
         $renderer->line('  3) ollama     (Local models)');
         $renderer->line('  4) openrouter (Multi-model)');
         $renderer->newLine();
