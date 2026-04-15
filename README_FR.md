@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.2-purple)](https://github.com/xiyanyang/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.5-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,18 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.8.5 — Memory Palace : Mémoire Hiérarchique Inspirée de MemPalace (activé par défaut, 6 nouveaux tests)
+- **Memory Palace** (`src/Memory/Palace/`) — Module de mémoire hiérarchique inspiré de MemPalace (96,6% LongMemEval). Wings (personnes / projets / agents) → Halls (5 corridors de types de mémoire) → Rooms (sujets) → Drawers (contenu verbatim brut). Des Tunnels automatiques relient la même Room entre différents Wings. Se branche dans le `MemoryProviderManager` existant comme provider externe sans remplacer le flux `MEMORY.md` intégré
+- **Filtrage Wing + Room** (`PalaceRetriever`) — Les filtres de métadonnées structurés pilotent le retrieveur ; les benchmarks MemPalace attribuent +34% R@10 à ce pattern. Score hybride : recouvrement de mots-clés + similarité cosinus optionnelle + décroissance de récence + boost par nombre d'accès. Itération des Drawers basée sur générateur — pas de chargement intégral en mémoire
+- **Pile de Mémoire à 4 Couches** (`Layers/MemoryLayer`, `LayerManager`) — L0 Identité (~50 tok) et L1 Faits Critiques (~120 tok) toujours chargés ; L2 Rappel de Room et L3 Recherche Profonde à la demande. `wakeUp()` émet une charge de démarrage de session de ~600–900 tok
+- **Graphe de Connaissances Temporel** — `KnowledgeEdge` gagne `validFrom` / `validUntil` ; `KnowledgeGraph` gagne `addTriple()`, `invalidate()`, `queryEntity($entity, asOf:)`, `timeline()`. Nouveaux `NodeType::ENTITY` + `EdgeType::RELATES_TO`. Entièrement rétrocompatible (champs vides par défaut)
+- **Journaux d'Agents** (`Diary/AgentDiary.php`) — Wing dédié de type AGENT avec une Room `hall_events/diary` par agent. Chaque agent spécialiste (reviewer, architect, ops…) maintient son propre historique séparé de la mémoire partagée
+- **Vérificateur de Faits** (`FactChecker.php`) — Détection de contradictions basée sur le KG avec 3 sévérités (`attribution_conflict`, `stale`, `unsupported`). **Aucun appel LLM** — pure traversée de graphe
+- **Détection de Quasi-Doublons** (`MemoryDeduplicator.php`) — Correspondance exacte par hash + recouvrement Jaccard de 5-grammes (seuil par défaut 0,85), dédupliqué par Room par défaut car le contexte compte
+- **CLI Wake-Up** (`php artisan superagent:wake-up [--wing=] [--search=]`) — Charge L0+L1 plus une recherche Drawer optionnelle limitée à un Wing. Conçu pour amorcer des sessions IA externes sans chargement complet de la mémoire
+- **Score Vectoriel Opt-In** — `palace.vector.enabled` + un callable `embed_fn`. Sans cela, le retrieveur fonctionne entièrement hors-ligne sur mots-clés + récence + nombre d'accès
+- **Activé par Défaut** — `palace.enabled=true`. Disposition du stockage : `{memory}/palace/wings/{slug}/halls/{hall}/rooms/{room}/drawers/*.md`. Suite complète : **1851 tests, 5234 assertions, 0 échecs**
 
 ### 🆕 v0.8.2 — Pipeline de Collaboration Multi-Agents, Routage Intelligent & Exécution Parallèle (10 améliorations, 48 nouveaux tests)
 - **Pipeline de Collaboration** (`src/Coordinator/`) — Orchestration multi-agents par phases avec tri topologique DAG, 4 stratégies d'échec (fail-fast, continue, retry, fallback), exécution conditionnelle de phases, et 8 événements de cycle de vie. Les agents d'une phase s'exécutent en vrai parallèle via ProcessBackend (processus OS) ou InProcessBackend (Fibres)

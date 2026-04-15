@@ -32,4 +32,7 @@ enum EdgeType: string
 
     /** Symbol is defined in a file. */
     case DEFINED_IN = 'defined_in';
+
+    /** Generic relation — the specific verb is stored in metadata["relation"]. */
+    case RELATES_TO = 'relates_to';
 }

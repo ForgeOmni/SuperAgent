@@ -25,77 +25,78 @@ This document consolidates all advanced feature documentation for SuperAgent int
 - [12. Skill Distillation](#12-skill-distillation)
 - [13. Memory System](#13-memory-system)
 - [14. Knowledge Graph](#14-knowledge-graph)
-- [15. Extended Thinking](#15-extended-thinking)
+- [15. Memory Palace (v0.8.5)](#15-memory-palace-v085)
+- [16. Extended Thinking](#16-extended-thinking)
 
 ### Infrastructure & Integration
-- [16. MCP Protocol Integration](#16-mcp-protocol-integration)
-- [17. Bridge Mode](#17-bridge-mode)
-- [18. Telemetry & Observability](#18-telemetry--observability)
-- [19. Tool Search & Deferred Loading](#19-tool-search--deferred-loading)
-- [20. Incremental & Lazy Context](#20-incremental--lazy-context)
+- [17. MCP Protocol Integration](#17-mcp-protocol-integration)
+- [18. Bridge Mode](#18-bridge-mode)
+- [19. Telemetry & Observability](#19-telemetry--observability)
+- [20. Tool Search & Deferred Loading](#20-tool-search--deferred-loading)
+- [21. Incremental & Lazy Context](#21-incremental--lazy-context)
 
 ### Development Workflow
-- [21. Plan V2 Interview Phase](#21-plan-v2-interview-phase)
-- [22. Checkpoint & Resume](#22-checkpoint--resume)
-- [23. File History](#23-file-history)
+- [22. Plan V2 Interview Phase](#22-plan-v2-interview-phase)
+- [23. Checkpoint & Resume](#23-checkpoint--resume)
+- [24. File History](#24-file-history)
 
 ### Performance & Logging (v0.7.0)
-- [24. Performance Optimization](#24-performance-optimization)
-- [25. NDJSON Structured Logging](#25-ndjson-structured-logging)
+- [25. Performance Optimization](#25-performance-optimization)
+- [26. NDJSON Structured Logging](#26-ndjson-structured-logging)
 
 ### Innovative Intelligence (v0.7.6)
-- [26. Agent Replay & Time-Travel Debugging](#26-agent-replay--time-travel-debugging)
-- [27. Conversation Forking](#27-conversation-forking)
-- [28. Agent Debate Protocol](#28-agent-debate-protocol)
-- [29. Cost Prediction Engine](#29-cost-prediction-engine)
-- [30. Natural Language Guardrails](#30-natural-language-guardrails)
-- [31. Self-Healing Pipelines](#31-self-healing-pipelines)
+- [27. Agent Replay & Time-Travel Debugging](#27-agent-replay--time-travel-debugging)
+- [28. Conversation Forking](#28-conversation-forking)
+- [29. Agent Debate Protocol](#29-agent-debate-protocol)
+- [30. Cost Prediction Engine](#30-cost-prediction-engine)
+- [31. Natural Language Guardrails](#31-natural-language-guardrails)
+- [32. Self-Healing Pipelines](#32-self-healing-pipelines)
 
 ### Agent Harness Mode + Enterprise Subsystems (v0.7.8)
-- [32. Persistent Task Manager](#32-persistent-task-manager)
-- [33. Session Manager](#33-session-manager)
-- [34. Stream Event Architecture](#34-stream-event-architecture)
-- [35. Harness REPL Loop](#35-harness-repl-loop)
-- [36. Auto-Compactor](#36-auto-compactor)
-- [37. E2E Scenario Framework](#37-e2e-scenario-framework)
-- [38. Worktree Manager](#38-worktree-manager)
-- [39. Tmux Backend](#39-tmux-backend)
-- [40. API Retry Middleware](#40-api-retry-middleware)
-- [41. iTerm2 Backend](#41-iterm2-backend)
-- [42. Plugin System](#42-plugin-system)
-- [43. Observable App State](#43-observable-app-state)
-- [44. Hook Hot-Reloading](#44-hook-hot-reloading)
-- [45. Prompt & Agent Hooks](#45-prompt--agent-hooks)
-- [46. Multi-Channel Gateway](#46-multi-channel-gateway)
-- [47. Backend Protocol](#47-backend-protocol)
-- [48. OAuth Device Code Flow](#48-oauth-device-code-flow)
-- [49. Permission Path Rules](#49-permission-path-rules)
-- [50. Coordinator Task Notification](#50-coordinator-task-notification)
+- [33. Persistent Task Manager](#33-persistent-task-manager)
+- [34. Session Manager](#34-session-manager)
+- [35. Stream Event Architecture](#35-stream-event-architecture)
+- [36. Harness REPL Loop](#36-harness-repl-loop)
+- [37. Auto-Compactor](#37-auto-compactor)
+- [38. E2E Scenario Framework](#38-e2e-scenario-framework)
+- [39. Worktree Manager](#39-worktree-manager)
+- [40. Tmux Backend](#40-tmux-backend)
+- [41. API Retry Middleware](#41-api-retry-middleware)
+- [42. iTerm2 Backend](#42-iterm2-backend)
+- [43. Plugin System](#43-plugin-system)
+- [44. Observable App State](#44-observable-app-state)
+- [45. Hook Hot-Reloading](#45-hook-hot-reloading)
+- [46. Prompt & Agent Hooks](#46-prompt--agent-hooks)
+- [47. Multi-Channel Gateway](#47-multi-channel-gateway)
+- [48. Backend Protocol](#48-backend-protocol)
+- [49. OAuth Device Code Flow](#49-oauth-device-code-flow)
+- [50. Permission Path Rules](#50-permission-path-rules)
+- [51. Coordinator Task Notification](#51-coordinator-task-notification)
 
 ### Security & Resilience (v0.8.0)
 
-- [51. Prompt Injection Detection](#51-prompt-injection-detection)
-- [52. Credential Pool](#52-credential-pool)
-- [53. Unified Context Compression](#53-unified-context-compression)
-- [54. Query Complexity Routing](#54-query-complexity-routing)
-- [55. Memory Provider Interface](#55-memory-provider-interface)
-- [56. SQLite Session Storage](#56-sqlite-session-storage)
-- [57. SecurityCheckChain](#57-securitycheckchain)
-- [58. Vector & Episodic Memory Providers](#58-vector--episodic-memory-providers)
-- [59. Architecture Diagram](#59-architecture-diagram)
+- [52. Prompt Injection Detection](#52-prompt-injection-detection)
+- [53. Credential Pool](#53-credential-pool)
+- [54. Unified Context Compression](#54-unified-context-compression)
+- [55. Query Complexity Routing](#55-query-complexity-routing)
+- [56. Memory Provider Interface](#56-memory-provider-interface)
+- [57. SQLite Session Storage](#57-sqlite-session-storage)
+- [58. SecurityCheckChain](#58-securitycheckchain)
+- [59. Vector & Episodic Memory Providers](#59-vector--episodic-memory-providers)
+- [60. Architecture Diagram](#60-architecture-diagram)
 
 ### Middleware, Caching & Errors (v0.8.1)
 
-- [60. Middleware Pipeline](#60-middleware-pipeline)
-- [61. Per-Tool Result Cache](#61-per-tool-result-cache)
-- [62. Structured Output](#62-structured-output)
+- [61. Middleware Pipeline](#61-middleware-pipeline)
+- [62. Per-Tool Result Cache](#62-per-tool-result-cache)
+- [63. Structured Output](#63-structured-output)
 
 ### Multi-Agent Collaboration Pipeline (v0.8.2)
 
-- [63. Collaboration Pipeline](#63-collaboration-pipeline)
-- [64. Smart Task Router](#64-smart-task-router)
-- [65. Phase Context Injection](#65-phase-context-injection)
-- [66. Agent Retry Policy](#66-agent-retry-policy)
+- [64. Collaboration Pipeline](#64-collaboration-pipeline)
+- [65. Smart Task Router](#65-smart-task-router)
+- [66. Phase Context Injection](#66-phase-context-injection)
+- [67. Agent Retry Policy](#67-agent-retry-policy)
 
 ---
 
@@ -2492,9 +2493,177 @@ $summary = $graph->getSummary();
 
 **Graph grows too large** -- The collector limits Grep/Glob results to 20 files per call. Periodically export and clear.
 
+### Temporal Triples (v0.8.5+)
+
+`KnowledgeGraph` also supports MemPalace-style temporal triples with validity windows. Use them for facts that change over time — team assignments, employment, project ownership.
+
+```php
+// Record a triple with a validity window
+$graph->addTriple('Kai', 'works_on', 'Orion', validFrom: '2025-06-01T00:00:00+00:00');
+$graph->addTriple('Maya', 'assigned_to', 'auth-migration', validFrom: '2026-01-15T00:00:00+00:00');
+
+// Close a fact when it stops being true (the record stays for history)
+$graph->invalidate('Kai', 'works_on', 'Orion', endedAt: '2026-03-01T00:00:00+00:00');
+
+// Time-travel query: what was true on a given date?
+$edges = $graph->queryEntity('Kai', asOf: '2025-12-01T00:00:00+00:00');
+
+// Chronological timeline of every edge for an entity
+$timeline = $graph->timeline('auth-migration');
+```
+
+Temporal fields (`validFrom`, `validUntil`) default to empty, so existing graphs continue to work untouched.
+
 ---
 
-## 15. Extended Thinking
+## 15. Memory Palace (v0.8.5)
+
+> Hierarchical memory module inspired by MemPalace (96.6% LongMemEval). Plugs into the existing `MemoryProviderManager` as an external provider — **does not replace** the builtin `MEMORY.md` flow.
+
+### Overview
+
+The palace organises memory as a three-tier hierarchy:
+
+- **Wing** — one subject per wing (person / project / topic / agent / general)
+- **Hall** — five typed corridors inside each wing: `facts`, `events`, `discoveries`, `preferences`, `advice`
+- **Room** — a named topic inside a hall (e.g. `auth-migration`, `graphql-switch`)
+- **Drawer** — raw verbatim content inside a room (the source of the 96.6% benchmark number)
+- **Closet** — optional summary that points at the drawers in a room
+- **Tunnel** — an auto-created link when the same room slug appears in two wings
+
+On top of that, a 4-layer memory stack drives how content is loaded at runtime:
+
+| Layer | What | Tokens | When |
+|-------|------|--------|------|
+| L0 | Identity | ~50 | always loaded |
+| L1 | Critical facts | ~120 | always loaded |
+| L2 | Room recall | on demand | when the topic appears |
+| L3 | Deep drawer search | on demand | when explicitly asked |
+
+### Configuration
+
+```php
+// config/superagent.php
+'palace' => [
+    'enabled' => env('SUPERAGENT_PALACE_ENABLED', true),
+    'base_path' => env('SUPERAGENT_PALACE_PATH'),          // default: {memory}/palace
+    'default_wing' => env('SUPERAGENT_PALACE_DEFAULT_WING'),
+    'vector' => [
+        'enabled' => env('SUPERAGENT_PALACE_VECTOR_ENABLED', false),
+        'embed_fn' => null,                                 // fn(string): float[]
+    ],
+    'dedup' => [
+        'enabled' => env('SUPERAGENT_PALACE_DEDUP_ENABLED', true),
+        'threshold' => (float) env('SUPERAGENT_PALACE_DEDUP_THRESHOLD', 0.85),
+    ],
+    'scoring' => [
+        'keyword' => 1.0,
+        'vector'  => 2.0,
+        'recency' => 0.5,
+        'access'  => 0.3,
+    ],
+],
+```
+
+When `palace.enabled=true`, the `SuperAgentServiceProvider` auto-attaches a `PalaceMemoryProvider` to the `MemoryProviderManager` as the external provider. The builtin `MEMORY.md` provider remains the primary.
+
+### Usage
+
+```php
+use SuperAgent\Memory\Palace\PalaceBundle;
+use SuperAgent\Memory\Palace\Hall;
+
+// Grab the assembled bundle from the container
+$palace = app(PalaceBundle::class);
+
+// File a new drawer under an auto-detected wing and room
+$palace->provider->onMemoryWrite('decision', 'We chose Clerk over Auth0 for DX');
+
+// Explicit wing routing
+$wing = $palace->detector->detect('Driftwood team finished the OAuth migration');
+// $wing->slug === 'wing_driftwood' (if that wing exists and matched)
+
+// Search drawers with structured filters
+$hits = $palace->retriever->search('auth decisions', 5, [
+    'wing' => 'wing_driftwood',
+    'hall' => Hall::FACTS,
+    'follow_tunnels' => true,    // also pull matching rooms from tunneled wings
+]);
+
+foreach ($hits as $hit) {
+    echo $hit['drawer']->content, "\n";
+    // $hit['score'], $hit['breakdown'] (keyword / vector / recency / access)
+}
+
+// Wake-up payload (L0 + L1 + a wing brief), ~600–900 tokens
+$context = $palace->layers->wakeUp('wing_driftwood');
+
+// Agent diary — per-agent dedicated wing
+$palace->diary->write('reviewer', 'PR#42 missing middleware check', ['severity' => 'high']);
+$recent = $palace->diary->read('reviewer', 10);
+
+// Near-duplicate detection
+if ($palace->dedup->isDuplicate($candidateDrawer)) {
+    // ...already filed
+}
+```
+
+### Wake-Up CLI
+
+```bash
+php artisan superagent:wake-up
+php artisan superagent:wake-up --wing=wing_myproject
+php artisan superagent:wake-up --wing=wing_myproject --search="auth decisions"
+php artisan superagent:wake-up --stats
+```
+
+### Enabling Vector Scoring
+
+Vector scoring is **opt-in** — without it, the retriever runs fully offline on keyword + recency + access-count. To enable it, inject an embedding callable into the palace config at boot time:
+
+```php
+// e.g. in a service provider's register()
+$this->app['config']->set('superagent.palace.vector.enabled', true);
+$this->app['config']->set('superagent.palace.vector.embed_fn', function (string $text): array {
+    // Your embedding provider of choice — OpenAI, a local model, etc.
+    return $openai->embeddings($text);
+});
+```
+
+### Storage Layout
+
+```
+{memory_path}/palace/
+  identity.txt                         # L0 identity
+  critical_facts.md                    # L1 critical facts
+  wings.json                           # wing registry
+  tunnels.json                         # cross-wing links
+  wings/{wing_slug}/
+    wing.json
+    halls/{hall}/rooms/{room_slug}/
+      room.json
+      closet.json
+      drawers/{drawer_id}.md           # raw verbatim content
+      drawers/{drawer_id}.emb          # optional embedding sidecar
+```
+
+### What's Explicitly Not Included
+
+**AAAK dialect**: MemPalace's own README states AAAK currently regresses 12.4 points on LongMemEval vs raw mode (84.2% vs 96.6%). SuperAgent's palace uses raw verbatim storage — the source of the 96.6% number — without the lossy compression layer.
+
+### Troubleshooting
+
+**Palace is not running** — Verify `SUPERAGENT_PALACE_ENABLED=true` and that `MemoryProviderManager::getExternalProvider()` returns the `palace` provider.
+
+**Vector scoring has no effect** — Confirm both `palace.vector.enabled=true` and `palace.vector.embed_fn` is a callable returning a `float[]`.
+
+**Duplicates slip through** — Lower the `palace.dedup.threshold` (default `0.85`). Very high thresholds only catch near-identical text.
+
+**Too many auto-tunnels** — Rename overlapping rooms with more specific slugs. Auto-tunnels fire whenever the same slug exists in two wings.
+
+---
+
+## 16. Extended Thinking
 
 > Adaptive, enabled, or disabled thinking modes with ultrathink keyword trigger, model capability detection, and budget token management.
 
@@ -2538,7 +2707,7 @@ $param = $config->toApiParameter('claude-sonnet-4-20260401');
 
 ---
 
-## 16. MCP Protocol Integration
+## 17. MCP Protocol Integration
 
 > Connect SuperAgent to external tool servers using the Model Context Protocol (MCP), with support for stdio, HTTP, and SSE transports, automatic tool discovery, server instruction injection, and a TCP bridge that shares stdio connections with child processes.
 
@@ -2610,7 +2779,7 @@ Bridge info is written to `/tmp/superagent_mcp_bridges_<pid>.json`.
 
 ---
 
-## 17. Bridge Mode
+## 18. Bridge Mode
 
 > Transparently enhance non-Anthropic LLM providers (OpenAI, Ollama, Bedrock, OpenRouter) with SuperAgent's optimized system prompts, bash security validation, context compaction, cost tracking, and more.
 
@@ -2658,7 +2827,7 @@ $enhanced = new EnhancedProvider(
 
 ---
 
-## 18. Telemetry & Observability
+## 19. Telemetry & Observability
 
 > Full observability stack with a master switch and independent per-subsystem controls for tracing, structured logging, metrics collection, cost tracking, event dispatching, and per-event-type sampling.
 
@@ -2718,7 +2887,7 @@ $sampler = new EventSampler([
 
 ---
 
-## 19. Tool Search & Deferred Loading
+## 20. Tool Search & Deferred Loading
 
 > Fuzzy keyword search with weighted scoring, direct selection mode, and automatic deferred loading when tool definitions exceed 10% of the context window. Includes task-based prediction for preloading relevant tools.
 
@@ -2768,7 +2937,7 @@ $shouldDefer = ToolSearchTool::shouldDeferTools(totalToolTokens: 20000, contextW
 
 ---
 
-## 20. Incremental & Lazy Context
+## 21. Incremental & Lazy Context
 
 > Delta-based context synchronization with automatic checkpoints and compression, plus lazy fragment loading with relevance scoring, TTL cache, LRU eviction, and a `getSmartWindow` API that fits the most relevant context into a token budget.
 
@@ -2837,7 +3006,7 @@ $window = $lazy->getSmartWindow(maxTokens: 8000, focusArea: 'auth');
 
 ---
 
-## 21. Plan V2 Interview Phase
+## 22. Plan V2 Interview Phase
 
 > Iterative pair-planning workflow where the agent explores the codebase collaboratively with the user, builds a structured plan file incrementally, and requires explicit approval before any code modifications begin. Includes periodic reminders and post-execution verification.
 
@@ -2941,7 +3110,7 @@ Execution summary                   |
 
 ---
 
-## 22. Checkpoint & Resume
+## 23. Checkpoint & Resume
 
 > Periodic state snapshots that allow an agent to resume from where it left off after a crash, timeout, or interruption -- instead of starting over from scratch.
 
@@ -3031,7 +3200,7 @@ php artisan superagent:checkpoint stats
 
 ---
 
-## 23. File History
+## 24. File History
 
 > Per-file snapshot system with LRU-evicted per-message snapshots (100 max), per-message rewind, diff stats, snapshot inheritance for unchanged files, undo/redo stack, git attribution, and sensitive file protection.
 
@@ -3135,7 +3304,7 @@ Secret detection patterns: `api_key`, `aws_key`, `private_key` (PEM headers), `t
 
 ---
 
-## 24. Performance Optimization
+## 25. Performance Optimization
 
 > 13 configurable strategies that reduce token consumption (30-50%), lower cost (40-60%), improve cache hit rates (~90%), and speed up tool execution through parallelism.
 
@@ -3429,7 +3598,7 @@ SUPERAGENT_PERF_ZERO_COPY=false
 
 ---
 
-## 25. NDJSON Structured Logging
+## 26. NDJSON Structured Logging
 
 > Claude Code-compatible NDJSON (Newline Delimited JSON) logging for real-time process monitoring. Emits the same event format as CC's `stream-json` output.
 
@@ -3571,7 +3740,7 @@ Child agent processes (`agent-runner.php`) automatically emit NDJSON on stderr. 
 
 ---
 
-## 26. Agent Replay & Time-Travel Debugging
+## 27. Agent Replay & Time-Travel Debugging
 
 > Record complete execution traces and replay them step-by-step for debugging complex multi-agent interactions. Inspect agent state at any point, search events, fork from any step, and visualize timelines with cumulative cost tracking.
 
@@ -3666,7 +3835,7 @@ $forkedTrace = $player->fork(10);   // Get trace up to step 10 for replay with d
 
 ---
 
-## 27. Conversation Forking
+## 28. Conversation Forking
 
 > Branch a conversation at any point to explore multiple approaches in parallel, then automatically select the best result using built-in or custom scoring strategies.
 
@@ -3762,7 +3931,7 @@ foreach ($ranked as $branch) {
 
 ---
 
-## 28. Agent Debate Protocol
+## 29. Agent Debate Protocol
 
 > Three structured multi-agent collaboration modes -- Debate, Red Team, and Ensemble -- that improve output quality through adversarial or independent-then-merge approaches.
 
@@ -3863,7 +4032,7 @@ echo $result->recommendation;     // Actionable recommendation
 
 ---
 
-## 29. Cost Prediction Engine
+## 30. Cost Prediction Engine
 
 > Estimate task cost before execution using historical data and prompt complexity analysis. Compare costs across models instantly.
 
@@ -3933,7 +4102,7 @@ $predictor->recordExecution($taskHash, 'sonnet', $actualCost, $actualTokens, $ac
 
 ---
 
-## 30. Natural Language Guardrails
+## 31. Natural Language Guardrails
 
 > Define guardrail rules in plain English instead of YAML. Zero-cost compilation (no LLM calls) via deterministic pattern matching.
 
@@ -4011,7 +4180,7 @@ echo $rule->needsReview;   // false
 
 ---
 
-## 31. Self-Healing Pipelines
+## 32. Self-Healing Pipelines
 
 > When pipeline steps fail, automatically diagnose root cause, create a healing plan, apply intelligent mutations, and retry -- going beyond simple retry with real adaptation.
 
@@ -4122,7 +4291,7 @@ steps:
 
 ---
 
-## 32. Persistent Task Manager
+## 33. Persistent Task Manager
 
 > File-backed task persistence with JSON index, per-task output logs, and non-blocking process monitoring.
 
@@ -4178,7 +4347,7 @@ $manager->prune(days: 30);
 
 ---
 
-## 33. Session Manager
+## 34. Session Manager
 
 > Save, load, list, and delete conversation snapshots with project-scoped resume and auto-pruning.
 
@@ -4232,7 +4401,7 @@ $manager->delete($sessionId);
 
 ---
 
-## 34. Stream Event Architecture
+## 35. Stream Event Architecture
 
 > Unified event hierarchy with 9 event types and multi-listener dispatch for real-time agent monitoring.
 
@@ -4274,7 +4443,7 @@ $engine->prompt($message, streamingHandler: $handler);
 
 ---
 
-## 35. Harness REPL Loop
+## 36. Harness REPL Loop
 
 > Interactive agent loop with 10 built-in slash commands, busy lock, and session auto-save.
 
@@ -4322,7 +4491,7 @@ $loop->run();
 
 ---
 
-## 36. Auto-Compactor
+## 37. Auto-Compactor
 
 > Two-tier compaction composable for the agentic loop with circuit breaker.
 
@@ -4351,7 +4520,7 @@ Auto-compactor respects the existing `context_management` config section. The `f
 
 ---
 
-## 37. E2E Scenario Framework
+## 38. E2E Scenario Framework
 
 > Structured scenario definitions with fluent builder, temp workspaces, and 3-dimensional validation.
 
@@ -4384,7 +4553,7 @@ echo $runner->summary($results); // pass/fail/error counts
 
 ---
 
-## 38. Worktree Manager
+## 39. Worktree Manager
 
 > Standalone git worktree lifecycle manager with symlinks, metadata persistence, and pruning.
 
@@ -4419,7 +4588,7 @@ $manager->prune();
 
 ---
 
-## 39. Tmux Backend
+## 40. Tmux Backend
 
 > Visual multi-agent debugging with each agent running in a tmux pane.
 
@@ -4465,7 +4634,7 @@ Add `BackendType::TMUX` to your swarm config:
 
 ---
 
-## 40. API Retry Middleware
+## 41. API Retry Middleware
 
 > Added in v0.7.8
 
@@ -4506,7 +4675,7 @@ The jitter component prevents thundering herd when multiple agents retry simulta
 
 ---
 
-## 41. iTerm2 Backend
+## 42. iTerm2 Backend
 
 > Added in v0.7.8
 
@@ -4546,7 +4715,7 @@ ITermBackend checks for `$ITERM_SESSION_ID` environment variable and `osascript`
 
 ---
 
-## 42. Plugin System
+## 43. Plugin System
 
 > Added in v0.7.8
 
@@ -4610,7 +4779,7 @@ $allMcp = $loader->collectMcpConfigs();
 
 ---
 
-## 43. Observable App State
+## 44. Observable App State
 
 > Added in v0.7.8
 
@@ -4652,7 +4821,7 @@ $unsubscribe();
 
 ---
 
-## 44. Hook Hot-Reloading
+## 45. Hook Hot-Reloading
 
 > Added in v0.7.8
 
@@ -4681,7 +4850,7 @@ The reloader monitors the config file's `mtime`. When a change is detected, it r
 
 ---
 
-## 45. Prompt & Agent Hooks
+## 46. Prompt & Agent Hooks
 
 > Added in v0.7.8
 
@@ -4720,7 +4889,7 @@ Agent hooks provide extended context (conversation history, tool call context) f
 
 ---
 
-## 46. Multi-Channel Gateway
+## 47. Multi-Channel Gateway
 
 > Added in v0.7.8
 
@@ -4780,7 +4949,7 @@ while ($message = $bus->dequeueInbound()) {
 
 ---
 
-## 47. Backend Protocol
+## 48. Backend Protocol
 
 > Added in v0.7.8
 
@@ -4833,7 +5002,7 @@ $bridge = $protocol->createStreamBridge();
 
 ---
 
-## 48. OAuth Device Code Flow
+## 49. OAuth Device Code Flow
 
 > Added in v0.7.8
 
@@ -4886,7 +5055,7 @@ if ($token->isExpired()) {
 
 ---
 
-## 49. Permission Path Rules
+## 50. Permission Path Rules
 
 > Added in v0.7.8
 
@@ -4946,7 +5115,7 @@ $decision = $evaluator->evaluateCommand('rm -rf /');
 
 ---
 
-## 50. Coordinator Task Notification
+## 51. Coordinator Task Notification
 
 > Added in v0.7.8
 
@@ -4991,7 +5160,7 @@ $parsed = TaskNotification::fromXml($xml);
 
 These features were inspired by analyzing the [hermes-agent](https://github.com/hermes-agent) framework and adapting its best patterns to SuperAgent's Laravel architecture.
 
-## 51. Prompt Injection Detection
+## 52. Prompt Injection Detection
 
 Scans context files and user input for prompt injection patterns across 7 threat categories.
 
@@ -5035,7 +5204,7 @@ $critical = $result->getThreatsAbove('high'); // only high + critical
 | `hidden_content` | low | HTML comments, `display:none` divs |
 | `encoding_evasion` | medium | Base64 decode, hex sequences |
 
-## 52. Credential Pool
+## 53. Credential Pool
 
 Multi-credential failover with rotation strategies for load distribution and resilience.
 
@@ -5074,7 +5243,7 @@ $stats = $pool->getStats('anthropic');
 // ['total' => 2, 'ok' => 1, 'cooldown' => 1, 'exhausted' => 0]
 ```
 
-## 53. Unified Context Compression
+## 54. Unified Context Compression
 
 4-phase hierarchical compression that reduces context intelligently without losing critical information.
 
@@ -5118,7 +5287,7 @@ $compressed = $compressor->compress($messages, function (string $text, ?string $
 $compressor->getPreviousSummary(); // "## Goal\nUser was refactoring..."
 ```
 
-## 54. Query Complexity Routing
+## 55. Query Complexity Routing
 
 Routes simple queries to cheaper models based on content analysis, complementing the existing per-turn `ModelRouter`.
 
@@ -5151,7 +5320,7 @@ $analysis = $router->analyze($query);
 // ['is_simple' => false, 'reason' => 'long (350 chars), 2 complexity keyword(s)', 'score' => 0.65]
 ```
 
-## 55. Memory Provider Interface
+## 56. Memory Provider Interface
 
 Pluggable memory backend with lifecycle hooks, enabling external memory systems alongside the builtin MEMORY.md.
 
@@ -5191,7 +5360,7 @@ $context = $manager->onTurnStart($userMessage, $history);
 $results = $manager->search('authentication bug', maxResults: 5);
 ```
 
-## 56. SQLite Session Storage
+## 57. SQLite Session Storage
 
 SQLite WAL mode backend with FTS5 full-text search for cross-session discovery.
 
@@ -5225,7 +5394,7 @@ $sqlite->count(cwd: '/my/project');
 - **Dual-write**: file storage (backward compat) + SQLite (search). Falls back gracefully if SQLite unavailable
 - **Encryption**: Optional `$encryptionKey` parameter for SQLCipher transparent encryption at rest
 
-## 57. SecurityCheckChain
+## 58. SecurityCheckChain
 
 Composable security check chain that wraps the 23-check BashSecurityValidator.
 
@@ -5271,7 +5440,7 @@ class OrgPolicyCheck implements SecurityCheck
 }
 ```
 
-## 58. Vector & Episodic Memory Providers
+## 59. Vector & Episodic Memory Providers
 
 Two external `MemoryProviderInterface` implementations for advanced memory capabilities.
 
@@ -5315,11 +5484,11 @@ $episodicProvider = new EpisodicMemoryProvider(
 $results = $episodicProvider->search('authentication', maxResults: 5);
 ```
 
-## 59. Architecture Diagram
+## 60. Architecture Diagram
 
 See [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) for a full Mermaid dependency graph with 80+ nodes covering all subsystem relationships, plus a data flow sequence diagram showing the complete request lifecycle.
 
-## 60. Middleware Pipeline
+## 61. Middleware Pipeline
 
 Composable onion-model middleware chain for LLM requests with priority-based ordering.
 
@@ -5378,7 +5547,7 @@ $pluginManager->registerMiddleware($pipeline);
 | `GuardrailMiddleware` | 70 | Input/output validation |
 | `LoggingMiddleware` | -100 | Structured request/response logging |
 
-## 61. Per-Tool Result Cache
+## 62. Per-Tool Result Cache
 
 In-memory TTL cache for read-only tool results.
 
@@ -5416,7 +5585,7 @@ $stats = $cache->getStats();
 // ['entries' => 42, 'hits' => 120, 'misses' => 30, 'hit_rate' => 0.8]
 ```
 
-## 62. Structured Output
+## 63. Structured Output
 
 Force LLM to respond in valid JSON with optional schema validation.
 
@@ -5453,7 +5622,7 @@ $format->toOpenAIFormat();    // OpenAI native json_schema
 
 ---
 
-## 63. Collaboration Pipeline
+## 64. Collaboration Pipeline
 
 > Orchestrate multi-agent workflows through phased pipelines with dependency resolution, parallel execution, failure strategies, and cross-provider support.
 
@@ -5548,7 +5717,7 @@ $pipeline->addListener(new class extends AbstractPipelineListener {
 
 ---
 
-## 64. Smart Task Router
+## 65. Smart Task Router
 
 > Automatically route tasks to optimal model tiers based on prompt content analysis, balancing capability and cost.
 
@@ -5613,7 +5782,7 @@ $pipeline = CollaborationPipeline::create()
 
 ---
 
-## 65. Phase Context Injection
+## 66. Phase Context Injection
 
 > Automatically share prior phase results with downstream agents to prevent re-discovery and save tokens.
 
@@ -5655,7 +5824,7 @@ $phase->withoutContextInjection();
 
 ---
 
-## 66. Agent Retry Policy
+## 67. Agent Retry Policy
 
 > Configure per-agent retry behavior with intelligent error classification, credential rotation, and provider fallback.
 

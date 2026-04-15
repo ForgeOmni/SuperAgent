@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-04-14
+
+### 🧠 Summary
+
+**Memory Palace**: a MemPalace-inspired hierarchical memory module (`src/Memory/Palace/`) that plugs into the existing `MemoryProviderManager` as an external provider. Wings (people / projects / agents) → Halls (memory-type corridors) → Rooms (topics) → Drawers (raw verbatim content). Adds a 4-layer memory stack with wake-up, temporal knowledge-graph triples with validity windows, per-agent diaries, near-duplicate detection, and a KG-backed fact checker. Enabled by default; zero breaking changes to the existing `MemoryStorage` / `MEMORY.md` flow. +6 focused palace tests; 1851 unit tests pass, 0 failures.
+
+### Added
+
+#### Memory Palace — Core (`src/Memory/Palace/`)
+- **Value objects**: `Hall` (5 halls: facts / events / discoveries / preferences / advice), `WingType`, `Wing`, `Room`, `Drawer` (raw verbatim with content-hash + optional embedding), `Closet` (summary pointer), `Tunnel` (cross-wing link)
+- **`PalaceStorage`** — hierarchical on-disk layout: `{memory}/palace/wings/{slug}/halls/{hall}/rooms/{room}/drawers/*.md`. Embeddings stored as `.emb` sidecar files. Frontmatter + markdown for drawers; JSON for wings / rooms / closets / tunnels
+- **`PalaceGraph`** — derived room index; auto-creates a `Tunnel` every time the same room slug appears in a second wing (same-topic-across-contexts detection). Explicit tunnels supported too (`createTunnel()`)
+- **`WingDetector`** — keyword-scoring wing routing with type-priority tiebreak (project > person > agent > topic > general); synthesises `wing_general` as fallback
+- **`PalaceRetriever`** — hybrid scoring: keyword overlap + cosine similarity (opt-in) + recency decay + access-count boost. Wing / hall / room metadata filters. Optional tunnel-following at 15% penalty. Uses a generator to stream drawers without loading everything in memory
+
+#### Memory Palace — Layers (`src/Memory/Palace/Layers/`)
+- **`MemoryLayer`** enum: L0 Identity (~50 tok, always loaded), L1 Critical Facts (~120 tok, always loaded), L2 Room Recall (on demand), L3 Deep Search (on demand)
+- **`LayerManager`** — `wakeUp($wing)` emits L0 + L1 + scoped room briefs; `recallRooms($hint)` for L2; `deepSearch($query, $filters)` delegates to the retriever for L3
+
+#### Memory Palace — Integrations
+- **`PalaceMemoryProvider`** implements `MemoryProviderInterface` — hooks into `MemoryProviderManager` as an external provider. `onTurnStart` emits wake-up once per session plus top recalled drawers. `onTurnEnd` files the assistant response as a drawer under auto-detected (wing, hall, room). `onPreCompress` flushes about-to-be-lost messages. All writes run through dedup when enabled
+- **`PalaceFactory` + `PalaceBundle`** — one-call assembly from `config/superagent.php` (`palace.*`)
+- **`AgentDiary`** (`Diary/AgentDiary.php`) — per-agent dedicated wing of type AGENT with a `hall_events/diary` room. `write()` / `read()` / `summary()`. Each specialist agent (reviewer, architect, ops, …) keeps its own history separate from shared memory
+- **`FactChecker`** — KG-backed contradiction detection with 3 severities: `attribution_conflict`, `stale`, `unsupported`. No LLM call
+- **`MemoryDeduplicator`** — content-hash exact match + 5-gram Jaccard shingle overlap (default threshold 0.85). Scoped room-locally by default because context matters
+
+#### Temporal Knowledge Graph (`src/KnowledgeGraph/`)
+- `KnowledgeEdge` gained `validFrom` / `validUntil` fields + `isValidAt($asOf)` / `isInvalidated()`. Fields default empty — **fully backward compatible**
+- `KnowledgeGraph` gained `addTriple($subject, $relation, $object, validFrom, validUntil)`, `invalidate($s, $r, $o, $endedAt)`, `queryEntity($entity, $asOf)`, and `timeline($entity)`
+- New enum cases: `NodeType::ENTITY`, `EdgeType::RELATES_TO` — used for generic triples where the verb is stored in `metadata["relation"]`
+
+#### Wake-Up CLI (`src/Console/Commands/WakeUpCommand.php`)
+- `php artisan superagent:wake-up [--wing=] [--search=] [--limit=5] [--stats]`
+- Loads L0 + L1 (~600–900 tokens) and optionally runs a drawer search scoped to a wing. Designed to bootstrap external AI sessions without full-memory loads
+
+#### Config (`config/superagent.php`)
+- New `palace` block:
+  - `enabled` (default **true**, env `SUPERAGENT_PALACE_ENABLED`)
+  - `base_path` (env `SUPERAGENT_PALACE_PATH`; default `{memory_path}/palace`)
+  - `default_wing` (env `SUPERAGENT_PALACE_DEFAULT_WING`)
+  - `vector.enabled` + `vector.embed_fn` — opt-in semantic scoring; works fully offline when disabled
+  - `dedup.enabled` + `dedup.threshold` (default 0.85)
+  - `scoring` weights: `keyword`, `vector`, `recency`, `access` (individually tunable)
+
+### Changed
+
+#### `SuperAgentServiceProvider`
+- `MemoryProviderManager` singleton now auto-attaches `PalaceMemoryProvider` as the external provider when `palace.enabled=true`. Builtin `MemoryProvider` (MEMORY.md) remains the primary — palace runs alongside, not in place of
+- `WakeUpCommand` registered in `$this->commands([...])`
+
+### Notes / Explicitly Not Included
+
+- **AAAK dialect skipped**: MemPalace's own README states AAAK currently regresses 12.4 points on LongMemEval vs raw mode (84.2% vs 96.6%). SuperAgent's palace uses raw verbatim storage — the source of the 96.6% headline number — without the lossy compression layer
+- **No backward-compatibility break**: legacy `MemoryStorage` + `MEMORY.md` + `AutoDreamConsolidator` flow is untouched and remains the builtin provider
+
+### Tests
+
+- `tests/Unit/Memory/PalaceTest.php` — 6 focused tests covering: storage round-trip, cross-wing auto-tunnel creation, wing-scoped retrieval, near-duplicate detection, agent diary read/write, temporal KG invalidation with `asOf` queries
+- Full unit suite: 1851 tests, 5234 assertions, 0 failures (14 Memory tests, all green)
+
 ## [0.8.2] - 2026-04-11
 
 ### 🚀 Summary

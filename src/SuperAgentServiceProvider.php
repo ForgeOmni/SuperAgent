@@ -355,7 +355,26 @@ class SuperAgentServiceProvider extends ServiceProvider
         // Register MemoryProviderManager singleton
         $this->app->singleton(MemoryProviderManager::class, function ($app) {
             $builtinProvider = new BuiltinMemoryProvider();
-            return new MemoryProviderManager($builtinProvider);
+            $manager = new MemoryProviderManager($builtinProvider);
+
+            // Optionally attach the Memory Palace as the external provider.
+            $palaceCfg = $app['config']->get('superagent.palace', []);
+            if (!empty($palaceCfg['enabled'])) {
+                $basePath = $app['config']->get('superagent.memory.base_path')
+                    ?: storage_path('superagent/memory');
+                $bundle = \SuperAgent\Memory\Palace\PalaceFactory::make(
+                    $basePath,
+                    $palaceCfg,
+                    $app->has(\Psr\Log\LoggerInterface::class)
+                        ? $app->make(\Psr\Log\LoggerInterface::class)
+                        : null,
+                );
+                $this->app->instance(\SuperAgent\Memory\Palace\PalaceBundle::class, $bundle);
+                $manager->setExternalProvider($bundle->provider);
+                $manager->initialize($palaceCfg);
+            }
+
+            return $manager;
         });
 
         // Register MiddlewarePipeline singleton
@@ -425,6 +444,7 @@ class SuperAgentServiceProvider extends ServiceProvider
                 \SuperAgent\Console\Commands\FeedbackCommand::class,
                 \SuperAgent\Console\Commands\DistillCommand::class,
                 \SuperAgent\Console\Commands\CheckpointCommand::class,
+                \SuperAgent\Console\Commands\WakeUpCommand::class,
             ]);
         }
 

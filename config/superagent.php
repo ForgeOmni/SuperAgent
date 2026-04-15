@@ -438,6 +438,52 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Memory Palace
+    |--------------------------------------------------------------------------
+    | MemPalace-inspired hierarchical memory: Wings (people/projects) →
+    | Halls (memory types) → Rooms (topics) → Drawers (raw verbatim). The
+    | palace plugs into MemoryProviderManager as an external provider and
+    | runs alongside the builtin MEMORY.md provider.
+    |
+    | Wake-up (L0 identity + L1 critical facts) is emitted once per session
+    | at ~600–900 tokens. Room recall (L2) and deep search (L3) fire on
+    | demand. Vector scoring is opt-in — requires an embedding callable.
+    */
+    'palace' => [
+        'enabled' => env('SUPERAGENT_PALACE_ENABLED', true),
+
+        // Override storage location (default: {memory_path}/palace).
+        'base_path' => env('SUPERAGENT_PALACE_PATH'),
+
+        // Wing routing: pin new memories to a specific wing when no
+        // better match is detected. Example: 'wing_myproject'.
+        'default_wing' => env('SUPERAGENT_PALACE_DEFAULT_WING'),
+
+        'vector' => [
+            // When true, the retriever mixes cosine similarity into its
+            // ranking. Requires an embed_fn callable set at runtime
+            // (e.g. from the service provider).
+            'enabled' => env('SUPERAGENT_PALACE_VECTOR_ENABLED', false),
+            'embed_fn' => null,
+        ],
+
+        'dedup' => [
+            'enabled' => env('SUPERAGENT_PALACE_DEDUP_ENABLED', true),
+            // Jaccard threshold on 5-gram shingles. 0.85 is strict.
+            'threshold' => (float) env('SUPERAGENT_PALACE_DEDUP_THRESHOLD', 0.85),
+        ],
+
+        // Hybrid scoring weights for PalaceRetriever.
+        'scoring' => [
+            'keyword' => (float) env('SUPERAGENT_PALACE_W_KEYWORD', 1.0),
+            'vector'  => (float) env('SUPERAGENT_PALACE_W_VECTOR', 2.0),
+            'recency' => (float) env('SUPERAGENT_PALACE_W_RECENCY', 0.5),
+            'access'  => (float) env('SUPERAGENT_PALACE_W_ACCESS', 0.3),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Checkpoint & Resume
     |--------------------------------------------------------------------------
     | When enabled, agent state is periodically checkpointed to disk during
