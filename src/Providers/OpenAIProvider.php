@@ -26,7 +26,18 @@ class OpenAIProvider implements LLMProvider
 
     public function __construct(array $config)
     {
-        $apiKey = $config['api_key'] ?? throw new ProviderException('API key is required', 'openai');
+        $authMode = $config['auth_mode'] ?? (isset($config['access_token']) ? 'oauth' : 'api_key');
+        $accessToken = $config['access_token'] ?? null;
+        $apiKey = $config['api_key'] ?? null;
+
+        $bearer = $authMode === 'oauth' ? $accessToken : $apiKey;
+        if (empty($bearer)) {
+            throw new ProviderException(
+                $authMode === 'oauth' ? 'OAuth access_token is required' : 'API key is required',
+                'openai',
+            );
+        }
+
         // Trailing slash required so Guzzle treats the request path as relative (RFC 3986).
         // Without it, an absolute path like 'v1/chat/completions' would replace the entire
         // path component of base_uri, silently dropping any custom path prefix.
@@ -37,12 +48,15 @@ class OpenAIProvider implements LLMProvider
         $this->maxRetries = $config['max_retries'] ?? 3;
 
         $headers = [
-            'Authorization' => 'Bearer ' . $apiKey,
+            'Authorization' => 'Bearer ' . $bearer,
             'Content-Type' => 'application/json',
         ];
 
         if ($this->organization) {
             $headers['OpenAI-Organization'] = $this->organization;
+        }
+        if ($authMode === 'oauth' && ! empty($config['account_id'])) {
+            $headers['chatgpt-account-id'] = $config['account_id'];
         }
 
         $this->client = new Client([

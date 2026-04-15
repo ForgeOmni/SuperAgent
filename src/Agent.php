@@ -88,6 +88,7 @@ class Agent
         $providerConfig = array_intersect_key($config, array_flip([
             'provider', 'driver', 'api_key', 'model', 'base_url', 'max_tokens',
             'api_version', 'organization', 'app_name', 'site_url',
+            'auth_mode', 'access_token', 'account_id', 'anthropic_beta',
         ]));
 
         // Ensure 'provider' is a serializable string, not an object
@@ -375,7 +376,7 @@ class Agent
         $providerName = $config['provider'] ?? static::config('superagent.default_provider', 'anthropic');
         $providerConfig = static::config("superagent.providers.{$providerName}", []);
 
-        foreach (['api_key', 'model', 'base_url', 'max_tokens'] as $key) {
+        foreach (['api_key', 'model', 'base_url', 'max_tokens', 'auth_mode', 'access_token', 'account_id', 'anthropic_beta'] as $key) {
             if (isset($config[$key])) {
                 $providerConfig[$key] = $config[$key];
             }

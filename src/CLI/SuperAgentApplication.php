@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\CLI;
 
+use SuperAgent\CLI\Commands\AuthCommand;
 use SuperAgent\CLI\Commands\ChatCommand;
 use SuperAgent\CLI\Commands\InitCommand;
 
@@ -45,6 +46,8 @@ class SuperAgentApplication
 
         return match ($command) {
             'init'    => (new InitCommand())->execute($options),
+            'auth',
+            'login'   => (new AuthCommand())->execute($options),
             default   => (new ChatCommand())->execute($options),
         };
     }
@@ -64,10 +67,15 @@ class SuperAgentApplication
             'project' => null,
             'json' => false,
             'verbose' => false,
+            // v0.8.5 real-time rendering flags
+            'rich' => true,            // Claude Code-style renderer (default on)
+            'thinking' => 'normal',    // normal | verbose | hidden
+            'plain' => false,          // disable ANSI colors / cursor control
         ];
 
         $positional = [];
         $i = 0;
+        $options['auth_args'] = [];
 
         while ($i < count($args)) {
             $arg = $args[$i];
@@ -86,6 +94,14 @@ class SuperAgentApplication
                 $options['json'] = true;
             } elseif ($arg === '--verbose' || $arg === '-v') {
                 $options['verbose'] = true;
+            } elseif ($arg === '--no-rich' || $arg === '--legacy-renderer') {
+                $options['rich'] = false;
+            } elseif ($arg === '--verbose-thinking') {
+                $options['thinking'] = 'verbose';
+            } elseif ($arg === '--no-thinking') {
+                $options['thinking'] = 'hidden';
+            } elseif ($arg === '--plain') {
+                $options['plain'] = true;
             } elseif (! str_starts_with($arg, '-')) {
                 $positional[] = $arg;
             }
@@ -95,8 +111,18 @@ class SuperAgentApplication
 
         // First positional arg: subcommand or prompt
         if (! empty($positional)) {
-            if (in_array($positional[0], ['init', 'chat'], true)) {
+            if (in_array($positional[0], ['init', 'chat', 'auth', 'login'], true)) {
                 $options['command'] = array_shift($positional);
+            }
+
+            if (in_array($options['command'] ?? '', ['auth', 'login'], true)) {
+                // For `login <provider>`, rewrite to `auth login <provider>`.
+                if ($options['command'] === 'login') {
+                    $options['auth_args'] = array_merge(['login'], $positional);
+                } else {
+                    $options['auth_args'] = $positional;
+                }
+                $positional = [];
             }
 
             // Remaining positional args joined as prompt
@@ -123,6 +149,9 @@ class SuperAgentApplication
     superagent                          Interactive REPL mode
     superagent "fix the login bug"      One-shot task execution
     superagent init                     Initialize configuration
+    superagent auth login claude-code   Import Claude Code OAuth login
+    superagent auth login codex         Import Codex OAuth login
+    superagent auth status              Show stored credentials
 
   \033[1mOptions:\033[0m
     -m, --model <model>                 Model name (e.g. sonnet, opus, haiku)
@@ -132,6 +161,10 @@ class SuperAgentApplication
         --project <path>               Project working directory
         --json                          Output results as JSON
     -v, --verbose                       Verbose output
+        --verbose-thinking              Show full thinking stream (default: 1-line preview)
+        --no-thinking                   Hide thinking entirely
+        --plain                         Disable ANSI colors / cursor control (good for pipes / logs)
+        --no-rich                       Use the legacy minimal renderer instead of Claude Code-style UI
     -V, --version                       Show version
     -h, --help                          Show this help
 

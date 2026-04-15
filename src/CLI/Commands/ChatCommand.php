@@ -41,11 +41,23 @@ class ChatCommand
     private function runOneShot(AgentFactory $factory, $agent, array $options, Renderer $renderer): int
     {
         $prompt = $options['prompt'];
+        $rich = ($options['rich'] ?? true) && ! ($options['json'] ?? false);
 
-        $renderer->info("Running: {$prompt}");
-        $renderer->separator();
+        if (! $rich) {
+            $renderer->info("Running: {$prompt}");
+            $renderer->separator();
+        }
 
         try {
+            if ($rich) {
+                // Rich renderer prints thinking, tool activity, streaming text,
+                // and a footer with turn / tokens / cost on its own.
+                $emitter = $factory->makeRichEmitter($options);
+                $result = $factory->runOneShot($agent, $prompt, $emitter);
+
+                return 0;
+            }
+
             $result = $factory->runOneShot($agent, $prompt);
 
             if ($options['json'] ?? false) {

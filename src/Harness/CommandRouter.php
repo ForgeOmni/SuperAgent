@@ -180,11 +180,34 @@ class CommandRouter
             return '__CLEAR__';
         });
 
-        $this->register('model', 'Show or change the current model', function (string $args, array $ctx): string {
-            if ($args === '') {
-                return 'Current model: ' . ($ctx['model'] ?? 'unknown');
+        $this->register('model', 'Show, list, or change the current model', function (string $args, array $ctx): string {
+            $current = (string) ($ctx['model'] ?? 'unknown');
+            $arg = trim($args);
+
+            if ($arg === '' || strtolower($arg) === 'list') {
+                $models = $this->availableModels($ctx);
+                $lines = ["Current model: {$current}", '', 'Available models:'];
+                foreach ($models as $i => $m) {
+                    $marker = ($m['id'] === $current) ? ' *' : '';
+                    $desc = $m['description'] ?? '';
+                    $lines[] = sprintf('  %d) %s%s%s', $i + 1, $m['id'], $desc ? " — {$desc}" : '', $marker);
+                }
+                $lines[] = '';
+                $lines[] = 'Usage: /model <id|number|alias>';
+                return implode("\n", $lines);
             }
-            return '__MODEL__:' . trim($args);
+
+            // Allow selecting by number
+            if (ctype_digit($arg)) {
+                $models = $this->availableModels($ctx);
+                $idx = (int) $arg - 1;
+                if (isset($models[$idx])) {
+                    return '__MODEL__:' . $models[$idx]['id'];
+                }
+                return "Invalid selection: {$arg}";
+            }
+
+            return '__MODEL__:' . $arg;
         });
 
         $this->register('cost', 'Show cost breakdown', function (string $args, array $ctx): string {
@@ -197,6 +220,54 @@ class CommandRouter
         $this->register('quit', 'Exit the session', function (string $args, array $ctx): string {
             return '__QUIT__';
         });
+    }
+
+    /**
+     * Return the list of available models for the active provider.
+     * Provider inferred from ctx['provider'] or ctx['model'] prefix.
+     *
+     * @return array<int, array{id:string, description?:string}>
+     */
+    private function availableModels(array $ctx): array
+    {
+        $provider = strtolower((string) ($ctx['provider'] ?? ''));
+        $model = (string) ($ctx['model'] ?? '');
+        if ($provider === '' && str_starts_with($model, 'claude')) {
+            $provider = 'anthropic';
+        }
+        if ($provider === '' && (str_starts_with($model, 'gpt') || str_starts_with($model, 'o'))) {
+            $provider = 'openai';
+        }
+
+        return match ($provider) {
+            'anthropic' => [
+                ['id' => 'claude-opus-4-5',    'description' => 'Opus 4.5 — top reasoning'],
+                ['id' => 'claude-sonnet-4-5',  'description' => 'Sonnet 4.5 — balanced'],
+                ['id' => 'claude-haiku-4-5',   'description' => 'Haiku 4.5 — fast + cheap'],
+                ['id' => 'claude-opus-4-1',    'description' => 'Opus 4.1'],
+                ['id' => 'claude-sonnet-4',    'description' => 'Sonnet 4'],
+            ],
+            'openai' => [
+                ['id' => 'gpt-5',              'description' => 'GPT-5'],
+                ['id' => 'gpt-5-mini',         'description' => 'GPT-5 mini'],
+                ['id' => 'gpt-4o',             'description' => 'GPT-4o'],
+                ['id' => 'o4-mini',            'description' => 'o4-mini — reasoning'],
+            ],
+            'openrouter' => [
+                ['id' => 'anthropic/claude-opus-4-5'],
+                ['id' => 'anthropic/claude-sonnet-4-5'],
+                ['id' => 'openai/gpt-5'],
+            ],
+            'ollama' => [
+                ['id' => 'llama3.1'],
+                ['id' => 'qwen2.5-coder'],
+            ],
+            default => [
+                ['id' => 'claude-opus-4-5'],
+                ['id' => 'claude-sonnet-4-5'],
+                ['id' => 'gpt-5'],
+            ],
+        };
     }
 
     // ── Session sub-commands ──────────────────────────────────────

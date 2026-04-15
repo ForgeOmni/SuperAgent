@@ -237,12 +237,19 @@ class ProviderRegistry
 
         // Check for alternative key names
         $alternativeKeys = match ($name) {
+            'anthropic' => ['api_key' => ['access_token']],
+            'openai' => ['api_key' => ['access_token']],
             'bedrock' => [
                 'access_key' => ['aws_access_key_id'],
                 'secret_key' => ['aws_secret_access_key'],
             ],
             default => [],
         };
+
+        // OAuth mode: access_token satisfies the api_key requirement.
+        if (($config['auth_mode'] ?? null) === 'oauth' && ! empty($config['access_token'])) {
+            return;
+        }
 
         foreach ($requiredKeys as $key) {
             $hasKey = isset($config[$key]);

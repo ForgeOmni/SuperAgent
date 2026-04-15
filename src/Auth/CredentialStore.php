@@ -12,7 +12,15 @@ class CredentialStore
 
     public function __construct(?string $baseDir = null)
     {
-        $this->baseDir = $baseDir ?? ($_SERVER['HOME'] ?? getenv('HOME')) . '/.superagent/credentials';
+        if ($baseDir !== null) {
+            $this->baseDir = $baseDir;
+            return;
+        }
+        $home = getenv('HOME') ?: ($_SERVER['HOME'] ?? null);
+        if (! $home && PHP_OS_FAMILY === 'Windows') {
+            $home = getenv('USERPROFILE') ?: ($_SERVER['USERPROFILE'] ?? '');
+        }
+        $this->baseDir = rtrim((string) $home, "\\/") . '/.superagent/credentials';
     }
 
     public function store(string $provider, string $key, string $value): void

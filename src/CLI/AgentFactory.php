@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace SuperAgent\CLI;
 
 use SuperAgent\Agent;
+use SuperAgent\Auth\ClaudeCodeCredentials;
+use SuperAgent\Auth\CodexCredentials;
+use SuperAgent\Auth\CredentialStore;
 use SuperAgent\Config\ConfigRepository;
 use SuperAgent\Harness\HarnessLoop;
 use SuperAgent\Harness\CommandRouter;
@@ -12,6 +15,8 @@ use SuperAgent\Harness\StreamEventEmitter;
 use SuperAgent\Harness\AutoCompactor;
 use SuperAgent\Session\SessionManager;
 use SuperAgent\CLI\Terminal\Renderer;
+use SuperAgent\Console\Output\RealTimeCliRenderer;
+use Symfony\Component\Console\Output\ConsoleOutput;
 
 /**
  * Factory for creating Agent and HarnessLoop instances in CLI mode.
@@ -46,6 +51,10 @@ class AgentFactory
             $agentConfig = array_merge($agentConfig, $providerConfig);
         }
 
+        // Merge OAuth credentials from CredentialStore (superagent auth login).
+        $agentConfig = array_merge($agentConfig, $this->resolveStoredAuth($provider));
+        $agentConfig['provider'] = $agentConfig['provider'] ?? $provider;
+
         // Model
         if (! empty($options['model'])) {
             $agentConfig['model'] = $options['model'];
@@ -74,14 +83,26 @@ class AgentFactory
         $emitter = new StreamEventEmitter();
         $renderer = $this->renderer;
 
-        // Wire stream events to terminal output
-        $emitter->on(function ($event) use ($renderer) {
-            $renderer->handleStreamEvent($event);
-        });
+        // Rich renderer (Claude Code-style) by default; legacy stream via
+        // `--no-rich`. Both paths use the same StreamEventEmitter, so auxiliary
+        // listeners (NDJSON, telemetry) keep working regardless of mode.
+        if (($options['rich'] ?? true) !== false) {
+            $symfonyOut = new ConsoleOutput();
+            $rich = new RealTimeCliRenderer(
+                output: $symfonyOut,
+                decorated: ($options['plain'] ?? false) ? false : null,
+                thinkingMode: $this->thinkingMode($options),
+            );
+            $rich->attach($emitter);
+        } else {
+            $emitter->on(function ($event) use ($renderer) {
+                $renderer->handleStreamEvent($event);
+            });
+        }
 
         // Create the agent runner closure
         $agentRunner = function (string $prompt, array $messages = []) use ($agent): \Generator {
-            yield from $agent->streamPrompt($prompt, $messages);
+            yield from $agent->stream($prompt);
         };
 
         // Session manager
@@ -118,11 +139,139 @@ class AgentFactory
     }
 
     /**
-     * Run a one-shot prompt and return the result.
+     * Pull stored OAuth credentials (from `superagent auth login`) for the given
+     * provider. Refreshes transparently if expired and a refresh_token is stored.
+     * Returns a partial config array to merge on top of providerConfig.
      */
-    public function runOneShot(Agent $agent, string $prompt): array
+    private function resolveStoredAuth(string $provider): array
     {
-        $result = $agent->prompt($prompt);
+        $store = new CredentialStore();
+        $storeKey = match ($provider) {
+            'anthropic' => 'anthropic',
+            'openai' => 'openai',
+            default => null,
+        };
+        if ($storeKey === null) {
+            return [];
+        }
+
+        $mode = $store->get($storeKey, 'auth_mode');
+        if (! $mode) {
+            return [];
+        }
+
+        if ($mode === 'api_key') {
+            $key = $store->get($storeKey, 'api_key');
+            return $key ? ['auth_mode' => 'api_key', 'api_key' => $key] : [];
+        }
+
+        if ($mode !== 'oauth') {
+            return [];
+        }
+
+        $token = $store->get($storeKey, 'access_token');
+        if (! $token) {
+            return [];
+        }
+
+        // Best-effort refresh for Anthropic tokens (expires_at is stored in ms).
+        if ($storeKey === 'anthropic') {
+            $expiresAt = $store->get($storeKey, 'expires_at');
+            if ($expiresAt && (int) floor(((int) $expiresAt) / 1000) - 60 <= time()) {
+                $reader = ClaudeCodeCredentials::default();
+                $creds = [
+                    'access_token' => $token,
+                    'refresh_token' => $store->get($storeKey, 'refresh_token'),
+                    'expires_at' => (int) $expiresAt,
+                ];
+                $refreshed = $reader->refresh($creds);
+                if ($refreshed !== null) {
+                    $token = $refreshed['access_token'];
+                    $store->store($storeKey, 'access_token', $refreshed['access_token']);
+                    if (! empty($refreshed['refresh_token'])) {
+                        $store->store($storeKey, 'refresh_token', $refreshed['refresh_token']);
+                    }
+                    if (! empty($refreshed['expires_at'])) {
+                        $store->store($storeKey, 'expires_at', (string) $refreshed['expires_at']);
+                    }
+                }
+            }
+        }
+
+        $out = ['auth_mode' => 'oauth', 'access_token' => $token];
+        if ($storeKey === 'openai' && ($acct = $store->get($storeKey, 'account_id'))) {
+            $out['account_id'] = $acct;
+        }
+        return $out;
+    }
+
+    /**
+     * Map the raw CLI `--thinking` / `--verbose-thinking` / `--no-thinking`
+     * options onto the RealTimeCliRenderer's THINKING_* constants.
+     */
+    private function thinkingMode(array $options): string
+    {
+        return match ($options['thinking'] ?? 'normal') {
+            'verbose' => RealTimeCliRenderer::THINKING_VERBOSE,
+            'hidden' => RealTimeCliRenderer::THINKING_HIDDEN,
+            default => RealTimeCliRenderer::THINKING_NORMAL,
+        };
+    }
+
+    /**
+     * Build a StreamEventEmitter pre-wired with the rich renderer — used by
+     * the one-shot path in ChatCommand when `--rich` is active.
+     */
+    public function makeRichEmitter(array $options = []): StreamEventEmitter
+    {
+        $emitter = new StreamEventEmitter();
+        $rich = new RealTimeCliRenderer(
+            output: new ConsoleOutput(),
+            decorated: ($options['plain'] ?? false) ? false : null,
+            thinkingMode: $this->thinkingMode($options),
+        );
+        $rich->attach($emitter);
+
+        return $emitter;
+    }
+
+    /**
+     * Run a one-shot prompt and return the result.
+     *
+     * When $emitter is provided, a StreamingHandler is built from it and
+     * passed to Agent::prompt() so the rich renderer can show thinking,
+     * tool use, and streaming text in real time.
+     */
+    public function runOneShot(Agent $agent, string $prompt, ?StreamEventEmitter $emitter = null): array
+    {
+        $result = $emitter !== null
+            ? $agent->prompt($prompt, $emitter->toStreamingHandler())
+            : $agent->prompt($prompt);
+
+        if ($emitter !== null) {
+            $turns = 0;
+            $cost = 0.0;
+            if ($result instanceof \SuperAgent\AgentResult) {
+                $turns = $result->turns();
+                $cost = (float) $result->totalCostUsd;
+            }
+            $emitter->emit(new \SuperAgent\Harness\AgentCompleteEvent(
+                totalTurns: $turns,
+                totalCostUsd: $cost,
+                finalMessage: $result instanceof \SuperAgent\AgentResult ? $result->message : null,
+            ));
+        }
+
+        if ($result instanceof \SuperAgent\AgentResult) {
+            return [
+                'content' => $result->text(),
+                'cost' => $result->totalCostUsd,
+                'turns' => $result->turns(),
+                'usage' => method_exists($result, 'totalUsage')
+                    ? (array) $result->totalUsage()
+                    : [],
+            ];
+        }
 
         return [
             'content' => $result['content'] ?? '',

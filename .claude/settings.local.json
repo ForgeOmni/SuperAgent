@@ -53,7 +53,8 @@
       "Bash(grep -E \"\\\\.\\(md|txt\\)$\")",
       "Bash(xargs grep:*)",
       "Bash(grep:*)",
-      "Bash(C:/Users/mlizp/SuperAgent/bin/superagent.bat:*)"
+      "Bash(C:/Users/mlizp/SuperAgent/bin/superagent.bat:*)",
+      "Bash(find:*)"
     ]
   }
 }

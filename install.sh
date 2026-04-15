@@ -15,7 +15,7 @@ set -euo pipefail
 #   5. Adds to PATH if needed
 # ============================================================================
 
-VERSION="0.8.2"
+VERSION="0.8.5"
 REQUIRED_PHP="8.1"
 INSTALL_DIR="${SUPERAGENT_HOME:-$HOME/.superagent}"
 BIN_DIR="${INSTALL_DIR}/bin"

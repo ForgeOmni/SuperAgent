@@ -456,6 +456,16 @@ class Application
         // 4. Register core services
         $app->registerCoreServices();
 
+        // 4b. If Laravel's Container class is autoloaded, its global config()
+        // helper routes through Container::getInstance()->make('config').
+        // Bind our ConfigRepository there so the helper doesn't throw in CLI.
+        if (class_exists(\Illuminate\Container\Container::class)) {
+            $laravelContainer = \Illuminate\Container\Container::getInstance();
+            if (! $laravelContainer->bound('config')) {
+                $laravelContainer->instance('config', \SuperAgent\Config\ConfigRepository::getInstance());
+            }
+        }
+
         // 5. Register model aliases from config
         $modelAliases = ConfigRepository::getInstance()->get('superagent.model_aliases', []);
         if (! empty($modelAliases) && class_exists(\SuperAgent\Providers\ModelResolver::class)) {

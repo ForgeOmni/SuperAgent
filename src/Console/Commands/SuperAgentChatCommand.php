@@ -5,15 +5,28 @@ namespace SuperAgent\Console\Commands;
 use Illuminate\Console\Command;
 use SuperAgent\Agent;
 use SuperAgent\Config\Config;
+use SuperAgent\Console\Output\RealTimeCliRenderer;
+use SuperAgent\Harness\AgentCompleteEvent;
+use SuperAgent\Harness\StreamEventEmitter;
 use SuperAgent\Providers\AnthropicProvider;
 use SuperAgent\Tools\BuiltinToolRegistry;
 
+/**
+ * Interactive chat command with a Claude Code-style real-time renderer.
+ *
+ * Every assistant turn streams thinking, tool invocations, and text deltas
+ * through a RealTimeCliRenderer. A running turn / token / cost footer is
+ * printed after each response.
+ */
 class SuperAgentChatCommand extends Command
 {
     protected $signature = 'superagent:chat
                             {--model=claude-3-haiku-20240307 : The model to use}
                             {--tools=* : Tools to enable (default: all)}
-                            {--no-stream : Disable streaming output}';
+                            {--no-stream : Disable streaming output}
+                            {--verbose-thinking : Show full thinking text instead of a single-line preview}
+                            {--no-thinking : Hide thinking entirely}
+                            {--plain : Disable ANSI colors and cursor control (good for pipes / logs)}';
 
     protected $description = 'Start an interactive chat session with SuperAgent';
 
@@ -32,7 +45,7 @@ class SuperAgentChatCommand extends Command
 
         while ($this->running) {
             $input = $this->ask('You');
-            
+
             if ($input === null || strtolower($input) === 'exit') {
                 break;
             }
@@ -73,7 +86,7 @@ class SuperAgentChatCommand extends Command
     private function getEnabledTools(): array
     {
         $requestedTools = $this->option('tools');
-        
+
         $allTools = BuiltinToolRegistry::all();
 
         if (empty($requestedTools)) {
@@ -95,28 +108,10 @@ class SuperAgentChatCommand extends Command
     private function processQuery(string $input): void
     {
         $this->line('');
-        $this->info('Assistant:');
-        
+
         try {
             if ($this->agent->config->streaming) {
-                $stream = $this->agent->stream($input);
-                
-                foreach ($stream as $chunk) {
-                    if (isset($chunk['content'])) {
-                        $this->output->write($chunk['content']);
-                    }
-                    
-                    if (isset($chunk['tool_use'])) {
-                        $this->line('');
-                        $this->comment('🔧 Using tool: ' . $chunk['tool_use']['name']);
-                    }
-                    
-                    if (isset($chunk['tool_result'])) {
-                        $this->info('✓ Tool completed');
-                    }
-                }
-                
-                $this->line('');
+                $this->runWithRenderer($input);
             } else {
                 $response = $this->agent->query($input);
                 $this->line($response->content);
@@ -124,8 +119,40 @@ class SuperAgentChatCommand extends Command
         } catch (\Exception $e) {
             $this->error('Error: ' . $e->getMessage());
         }
-        
+
         $this->line('');
+    }
+
+    private function runWithRenderer(string $input): void
+    {
+        $emitter = new StreamEventEmitter();
+        $renderer = new RealTimeCliRenderer(
+            output: $this->output,
+            decorated: $this->option('plain') ? false : null,
+            thinkingMode: $this->resolveThinkingMode(),
+        );
+        $renderer->attach($emitter);
+
+        $handler = $emitter->toStreamingHandler();
+        $result = $this->agent->prompt($input, $handler);
+
+        $emitter->emit(new AgentCompleteEvent(
+            totalTurns: count($result->allResponses ?? []),
+            totalCostUsd: $result->totalCostUsd ?? 0.0,
+            finalMessage: $result->message ?? null,
+        ));
+    }
+
+    private function resolveThinkingMode(): string
+    {
+        if ($this->option('no-thinking')) {
+            return RealTimeCliRenderer::THINKING_HIDDEN;
+        }
+        if ($this->option('verbose-thinking')) {
+            return RealTimeCliRenderer::THINKING_VERBOSE;
+        }
+
+        return RealTimeCliRenderer::THINKING_NORMAL;
     }
 
     private function clearHistory(): void
@@ -138,7 +165,7 @@ class SuperAgentChatCommand extends Command
     private function listTools(): void
     {
         $tools = BuiltinToolRegistry::all();
-        
+
         $this->info('Available tools:');
         foreach ($tools as $tool) {
             $this->line("  • {$tool->name()} - {$tool->description()}");

@@ -30,9 +30,31 @@ class AnthropicProvider implements LLMProvider
 
     protected int $maxRetries;
 
+    protected bool $oauth = false;
+
+    /**
+     * Anthropic's OAuth endpoint rejects requests whose system prompt does not
+     * begin with this exact string — it's how they gate Claude Code OAuth
+     * tokens to official-CLI traffic only.
+     */
+    private const OAUTH_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
+
     public function __construct(array $config)
     {
-        $apiKey = $config['api_key'] ?? throw new ProviderException('API key is required', 'anthropic');
+        $authMode = $config['auth_mode'] ?? (isset($config['access_token']) ? 'oauth' : 'api_key');
+        $accessToken = $config['access_token'] ?? null;
+        $apiKey = $config['api_key'] ?? null;
+
+        if ($authMode === 'oauth') {
+            if (empty($accessToken)) {
+                throw new ProviderException('OAuth access_token is required', 'anthropic');
+            }
+        } else {
+            if (empty($apiKey)) {
+                throw new ProviderException('API key is required', 'anthropic');
+            }
+        }
+
         // Guzzle follows RFC 3986 when resolving request paths against base_uri.
         // Without a trailing slash, an absolute path like '/v1/messages' replaces
         // the entire path component: 'https://host/prefix' + '/v1/messages' =>
@@ -45,13 +67,29 @@ class AnthropicProvider implements LLMProvider
         $this->maxTokens = $config['max_tokens'] ?? 8192;
         $this->maxRetries = $config['max_retries'] ?? 3;
 
+        // Claude Code OAuth tokens only authorize subscription-era models. Rewrite
+        // legacy model ids (e.g. claude-3-5-sonnet-20241022) that the API will
+        // reject with a confusing 429 "rate_limit_error".
+        if ($authMode === 'oauth' && $this->isLegacyModel($this->model)) {
+            $this->model = 'claude-opus-4-5';
+        }
+
+        $headers = [
+            'anthropic-version' => $this->apiVersion,
+            'content-type' => 'application/json',
+        ];
+        if ($authMode === 'oauth') {
+            $this->oauth = true;
+            $headers['authorization'] = 'Bearer ' . $accessToken;
+            // Required when calling the Messages API with a Claude Code OAuth token.
+            $headers['anthropic-beta'] = $config['anthropic_beta'] ?? 'oauth-2025-04-20';
+        } else {
+            $headers['x-api-key'] = $apiKey;
+        }
+
         $this->client = new Client([
             'base_uri' => $baseUrl,
-            'headers' => [
-                'x-api-key' => $apiKey,
-                'anthropic-version' => $this->apiVersion,
-                'content-type' => 'application/json',
-            ],
+            'headers' => $headers,
             'timeout' => 300,
         ]);
     }
@@ -88,11 +126,11 @@ class AnthropicProvider implements LLMProvider
                 }
 
                 throw new ProviderException(
-                    $responseBody['error']['message'] ?? $e->getMessage(),
-                    'anthropic',
-                    $status,
-                    $responseBody,
-                    $e,
+                    message: $responseBody['error']['message'] ?? $e->getMessage(),
+                    provider: 'anthropic',
+                    statusCode: $status,
+                    responseBody: $responseBody,
+                    previous: $e,
                 );
             } catch (GuzzleException $e) {
                 if ($attempt < $this->maxRetries) {
@@ -182,6 +220,41 @@ class AnthropicProvider implements LLMProvider
         return ! empty($blocks) ? $blocks : $systemPrompt;
     }
 
+    protected function isLegacyModel(string $model): bool
+    {
+        return str_starts_with($model, 'claude-3')
+            || str_starts_with($model, 'claude-2')
+            || str_starts_with($model, 'claude-instant');
+    }
+
+    /**
+     * When using Claude Code OAuth tokens the API rejects requests whose first
+     * system block doesn't begin with the required identity string. Prepend a
+     * dedicated block so the caller's real system prompt is preserved after it.
+     */
+    protected function ensureOAuthSystemPrefix(string|array $system): string|array
+    {
+        if (is_string($system)) {
+            if (str_starts_with($system, self::OAUTH_SYSTEM_PREFIX)) {
+                return $system;
+            }
+            return [
+                ['type' => 'text', 'text' => self::OAUTH_SYSTEM_PREFIX],
+                ['type' => 'text', 'text' => $system],
+            ];
+        }
+
+        $first = $system[0] ?? null;
+        $firstText = is_array($first) ? ($first['text'] ?? '') : '';
+        if (is_string($firstText) && str_starts_with($firstText, self::OAUTH_SYSTEM_PREFIX)) {
+            return $system;
+        }
+        return array_merge(
+            [['type' => 'text', 'text' => self::OAUTH_SYSTEM_PREFIX]],
+            $system,
+        );
+    }
+
     protected function buildRequestBody(
         array $messages,
         array $tools,
@@ -201,6 +274,13 @@ class AnthropicProvider implements LLMProvider
                 $options['prompt_caching']
                     ?? \SuperAgent\Config\ExperimentalFeatures::enabled('prompt_cache_break_detection'),
             );
+        } elseif ($this->oauth) {
+            // OAuth requires a system prompt; supply the required prefix alone.
+            $body['system'] = self::OAUTH_SYSTEM_PREFIX;
+        }
+
+        if ($this->oauth) {
+            $body['system'] = $this->ensureOAuthSystemPrefix($body['system']);
         }
 
         if (! empty($tools)) {
