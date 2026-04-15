@@ -54,7 +54,10 @@
       "Bash(xargs grep:*)",
       "Bash(grep:*)",
       "Bash(C:/Users/mlizp/SuperAgent/bin/superagent.bat:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(awk '{s+=$1} END {print s}')",
+      "Bash(./vendor/bin/phpunit --filter \"CredentialCipherTest|CredentialStoreEncryptionTest|ClaudeCodeCredentialsTest|CodexCredentialsTest|AnthropicProviderOAuthTest|OpenAIProviderOAuthTest|SuperAgentApplicationParseTest|CommandRouterModelPickerTest|AgentFactoryAuthTest\")",
+      "Bash(./vendor/bin/phpunit --testsuite Unit)"
     ]
   }
 }
