@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.8.5-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.8.6-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,39 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.8.6 — SuperAgent CLI：`superagent` 命令（独立 + Laravel 双模式、OAuth 登录、Claude Code 风格 REPL）
+SuperAgent 不再仅限 Laravel。**`superagent`** 二进制（`bin/superagent` / `bin/superagent.bat`）提供完整的 Claude Code 风格交互 REPL、一次性任务运行、会话管理、OAuth 登录。CLI 会自动检测 Laravel 项目：在 Laravel 项目中使用宿主 `config()` / 容器，否则通过独立的 `Foundation\Application` 启动一个最小容器——不写一行 PHP，也能用上本 SDK 的全部能力（Memory Palace、子智能体、Guardrails、AutoCompact、TaskRouter、MCP 工具、Skills）。
+
+- **交互式 REPL**（`src/CLI/Commands/ChatCommand.php`、`src/Harness/HarnessLoop.php`）— 流式 Claude Code 风格渲染：实时 text delta、思考预览、工具调用卡片、成本计数。斜杠命令：`/help`、`/status`、`/tasks`、`/compact`、`/continue`、`/session list|save|load|delete`、`/clear`、`/model`、`/cost`、`/quit`
+- **一次性模式** — `superagent "修复登录 bug"` 跑完即退出。`--json` 输出机器可读的 `{content, cost, turns, usage}`，方便脚本 / CI
+- **首次运行向导** — `superagent init` 引导选 provider（Anthropic / OpenAI / Ollama / OpenRouter），从环境变量 / 密文输入抓取 API key，选默认模型，写入 `~/.superagent/config.php`（`0600`）
+- **通过导入本地 Claude Code / Codex token 登录 OAuth** — `superagent auth login claude-code` 读 `~/.claude/.credentials.json`；`superagent auth login codex` 读 `~/.codex/auth.json`。不需要二次登录、不需要复制 API key。凭证原子写入 `~/.superagent/credentials/{anthropic,openai}.json`（`0600`），过期前 60 秒自动续期
+- **OAuth 感知 Provider**（`src/Providers/AnthropicProvider.php`、`OpenAIProvider.php`）— Bearer 模式 + `anthropic-beta: oauth-2025-04-20`；自动在第一个 system block 前插入 `"You are Claude Code, Anthropic's official CLI for Claude."`；OAuth token 不授权 legacy 模型（`claude-3*`），自动改写为 `claude-opus-4-5`。OpenAI 侧加 `chatgpt-account-id` 头走 Codex ChatGPT 订阅
+- **交互式 `/model` 选择器**（`src/Harness/CommandRouter.php`）— 按当前 provider 打印编号化清单（Opus/Sonnet/Haiku 4.5、GPT-5 系列、OpenRouter、Ollama），当前模型打 `*`。`/model 2` 按编号，`/model <id>` 按 ID
+- **富渲染**（`src/Console/Output/RealTimeCliRenderer.php`）— `--verbose-thinking` / `--no-thinking` / `--plain` / `--no-rich` 开关。`--plain` 去掉 ANSI，方便管道和 CI 日志
+- **容器整合** — `Foundation\Application::bootstrap()` 在 standalone 模式下把我们的 `ConfigRepository` 绑到 Laravel `Container::getInstance()` 的 `config` 键，于是 14 个基于 `config()` 的 Optimization / Performance 类在非 Laravel 环境也能静默工作
+- **Windows 友好** — `CredentialStore` 在 `HOME` 为空时回落到 `USERPROFILE`；批处理入口 `bin/superagent.bat`
+
+**典型首次会话：**
+```bash
+composer global require forgeomni/superagent      # 或 clone + composer install
+superagent auth login claude-code                  # 复用已有 Claude Code OAuth
+superagent "解释下这个代码库"                        # 一次性，不需要 API key
+
+superagent                                         # 进入 REPL
+> /model                                           # 查看可用模型
+> /model 1                                         # 切到 Opus 4.5
+> /session save my-session                         # 保存状态
+> /quit
+```
+
+**没装 Claude Code 时：**
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+superagent init              # 交互配置 → ~/.superagent/config.php
+superagent "审查这个 PR"
+```
 
 ### 🆕 v0.8.5 — 记忆宫殿：MemPalace 启发的分层记忆（默认开启，6 个新测试）
 - **Memory Palace**（`src/Memory/Palace/`）— 受 MemPalace（LongMemEval 96.6%）启发的分层记忆模块。Wing（人/项目/智能体）→ Hall（5 条记忆类型走廊）→ Room（话题）→ Drawer（原始逐字内容）。同一 Room 出现在不同 Wing 时自动建立 Tunnel 跨 Wing 桥接。通过现有 `MemoryProviderManager` 作为外部 Provider 插入，**不替换**内置 `MEMORY.md` 流程

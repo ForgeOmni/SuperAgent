@@ -177,17 +177,22 @@ class AuthCommand
         }
 
         foreach ($providers as $p) {
-            $mode = $this->store->get($p, 'auth_mode') ?? 'unknown';
-            $source = $this->store->get($p, 'source') ?? '-';
-            $suffix = '';
-            if ($mode === 'oauth' && ($expAt = $this->store->get($p, 'expires_at'))) {
-                $expSec = (int) floor(((int) $expAt) / 1000);
-                $remaining = $expSec - time();
-                $suffix = $remaining > 0
-                    ? sprintf(' (expires in %dh)', (int) floor($remaining / 3600))
-                    : ' (expired)';
+            try {
+                $mode = $this->store->get($p, 'auth_mode') ?? 'unknown';
+                $source = $this->store->get($p, 'source') ?? '-';
+                $suffix = '';
+                if ($mode === 'oauth' && ($expAt = $this->store->get($p, 'expires_at'))) {
+                    $expSec = (int) floor(((int) $expAt) / 1000);
+                    $remaining = $expSec - time();
+                    $suffix = $remaining > 0
+                        ? sprintf(' (expires in %dh)', (int) floor($remaining / 3600))
+                        : ' (expired)';
+                }
+                $r->line(sprintf('  %-12s  mode=%s  source=%s%s', $p, $mode, $source, $suffix));
+            } catch (\SuperAgent\Auth\AuthenticationException $e) {
+                $r->error(sprintf('  %-12s  <decrypt failed: %s>', $p, $e->getMessage()));
+                $r->hint("  Re-run: superagent auth login {$p}");
             }
-            $r->line(sprintf('  %-12s  mode=%s  source=%s%s', $p, $mode, $source, $suffix));
         }
         return 0;
     }

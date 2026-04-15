@@ -1,9 +1,10 @@
-# SuperAgent 安装手册（v0.8.5）
+# SuperAgent 安装手册（v0.8.6）
 
 > **🌍 语言**: [English](INSTALL.md) | [中文](INSTALL_CN.md) | [Français](INSTALL_FR.md)  
 > **📖 文档**: [README](README.md) | [README 中文](README_CN.md) | [README Français](README_FR.md)
 
 ## 目录
+- [独立 CLI 安装（v0.8.6+）](#独立-cli-安装v086)
 - [系统需求](#系统需求)
 - [安装步骤](#安装步骤)
 - [配置](#配置)
@@ -11,6 +12,128 @@
 - [验证](#验证)
 - [故障排除](#故障排除)
 - [升级指南](#升级指南)
+
+## 独立 CLI 安装（v0.8.6+）
+
+从 v0.8.6 起，SuperAgent 自带独立 CLI 二进制——不需要 Laravel 项目。
+
+### 安装
+
+```bash
+# 方式 A：Composer 全局
+composer global require forgeomni/superagent
+
+# 方式 B：克隆 + 链接
+git clone https://github.com/forgeomni/superagent.git
+cd superagent
+composer install
+# 把 bin/ 加入 PATH，或把 bin/superagent 软链接到 /usr/local/bin
+
+# 方式 C：一键脚本
+curl -sSL https://raw.githubusercontent.com/forgeomni/superagent/main/install.sh | bash
+# Windows PowerShell：
+iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps1 | iex
+```
+
+验证：
+
+```bash
+superagent --version        # SuperAgent v0.8.6
+superagent --help
+```
+
+### 登录认证
+
+三种方式，按需选用：
+
+**1. 复用已有的 Claude Code / Codex 登录（推荐，免 API key）：**
+```bash
+# 前提：本机已安装并登录过 Claude Code 或 Codex
+superagent auth login claude-code    # 导入 ~/.claude/.credentials.json
+superagent auth login codex          # 导入 ~/.codex/auth.json
+superagent auth status               # 验证
+```
+凭证存在 `~/.superagent/credentials/{anthropic,openai}.json`，权限 `0600`，过期前 60 秒自动续期。
+
+**2. 交互式向导：**
+```bash
+superagent init
+# 引导选 provider（Anthropic / OpenAI / Ollama / OpenRouter），
+# 自动检测已有的 env 变量 key，缺失时提示输入，
+# 写入 ~/.superagent/config.php（权限 0600）。
+```
+
+**3. 直接用环境变量：**
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+# 或
+export OPENAI_API_KEY=sk-...
+superagent "你的第一个任务"
+```
+
+### 首次运行
+
+```bash
+# 一次性
+superagent "解释下这个代码库"
+superagent -m claude-opus-4-5 "重构认证模块"
+superagent -p openai -m gpt-5 "给 X 写个单测"
+superagent --json "列出这个 repo 的 TODO" | jq .
+
+# 交互式 REPL
+superagent
+> /help                                 # 列出所有斜杠命令
+> /model                                # 当前 provider 的编号化模型清单
+> /model 1                              # 切到 1 号模型
+> /session save my-session              # 保存状态
+> /compact                              # 强制上下文压缩
+> /cost                                 # 查看当前花销
+> /quit
+```
+
+### CLI 选项
+
+| 选项 | 说明 |
+| --- | --- |
+| `-m, --model <model>` | 模型名或别名（`opus`、`claude-sonnet-4-5`、`gpt-5`…） |
+| `-p, --provider <name>` | `anthropic` / `openai` / `ollama` / `openrouter` |
+| `--max-turns <n>` | agent 轮次上限（默认 50） |
+| `-s, --system-prompt <txt>` | 自定义 system prompt（OAuth 模式下会追加到身份前缀之后） |
+| `--project <path>` | 设定 agent 的工作目录 |
+| `--json` | 一次性模式输出机器可读 JSON |
+| `--verbose-thinking` | 显示完整思考流 |
+| `--no-thinking` | 完全隐藏思考 |
+| `--plain` | 关闭 ANSI 颜色 / 光标控制（管道、CI 日志） |
+| `--no-rich` | 回到 legacy 最简渲染器 |
+
+### OAuth 注意事项
+
+- **模型限制：** Claude Code OAuth token 只授权当代模型。老 id 如 `claude-3-5-sonnet-20241022` 会返回 HTTP 429 + 混淆的 `rate_limit_error`。CLI 会静默改写为 `claude-opus-4-5`
+- **System prompt 要求：** Anthropic OAuth 端点拒绝第一 system block 不是 Claude Code 身份字符串的请求。CLI 会自动注入；你用 `-s "…"` 传的内容保留为紧跟其后的第二块
+- **Token 来源：** CLI 读本地 Claude Code / Codex 已存的 OAuth token——**不跑自己的 OAuth 流程**。Anthropic / OpenAI 不公开三方 OAuth `client_id`。Token refresh 走这两个 CLI 自带的 client_id。ToS 风险自担
+
+### 文件布局
+
+```
+~/.superagent/
+├── config.php                   # `superagent init` 产物（权限 0600）
+├── credentials/                 # `superagent auth login …` 产物
+│   ├── anthropic.json           # Anthropic 的 OAuth / api_key（权限 0600）
+│   └── openai.json              # OpenAI 的 OAuth / api_key（权限 0600）
+└── storage/
+    ├── sessions/                # /session save 的状态
+    └── palace/                  # Memory Palace（如开启）
+```
+
+### 卸载
+
+```bash
+superagent auth logout claude-code
+superagent auth logout codex
+rm -rf ~/.superagent
+composer global remove forgeomni/superagent
+```
+
 
 ## 系统需求
 

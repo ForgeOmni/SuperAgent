@@ -7,6 +7,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-04-14
+
+### 💻 Summary
+
+**SuperAgent CLI — the `superagent` command**. Until now SuperAgent was a Laravel-only SDK. 0.8.6 ships a standalone CLI tool (`bin/superagent`) that lets any user — with or without a Laravel project — launch an interactive Claude-Code-style REPL, run one-shot tasks, manage sessions, and authenticate against Anthropic / OpenAI. The CLI auto-detects Laravel projects (uses the host app's `config()` / container when present) and otherwise bootstraps a minimal standalone container via `SuperAgent\Foundation\Application`. Everything already in the SDK — `HarnessLoop`, `CommandRouter`, streaming events, session persistence, auto-compaction, sub-agents, Memory Palace — is reachable from the CLI without touching PHP code. Plus: OAuth login by importing the tokens from the user's existing Claude Code / Codex CLIs, so first-run is a single `superagent auth login claude-code`.
+
+Credential files stored under `~/.superagent/credentials/` are encrypted at rest with authenticated AES-256-GCM (`CredentialCipher`). The v0.8.6 unit suite adds **109 tests** across CLI, Auth, and OAuth provider paths: **1967 tests, 5445 assertions, 0 failures**.
+
+### Added
+
+#### Standalone CLI entry point (`bin/superagent`, `bin/superagent.bat`)
+- **`bin/superagent`** — shebanged PHP script, locates the Composer autoloader in three likely spots (dev checkout / installed-as-dependency / global PHAR)
+- **Laravel detection** — if `$cwd/bootstrap/app.php` exists and boots cleanly, uses the project's own `Illuminate\Foundation\Application`. Otherwise falls back to `\SuperAgent\Foundation\Application::bootstrap($cwd)` — a minimal container with `config` / `app` / `base_path` / `storage_path` polyfills (`src/Foundation/Application.php`, `src/Foundation/helpers.php`)
+- **`bin/superagent.bat`** — Windows launcher shim
+- **Installable via `composer global require` or the `install.sh` / `install.ps1` bootstrap scripts**
+
+#### `SuperAgentApplication` (`src/CLI/SuperAgentApplication.php`)
+- Lightweight argv parser (no symfony/console dependency for the hot path). Recognized flags: `-m/--model`, `-p/--provider`, `--max-turns`, `-s/--system-prompt`, `--project`, `--json`, `-v/--verbose`, `--verbose-thinking`, `--no-thinking`, `--plain`, `--no-rich`, `-V/--version`, `-h/--help`
+- Sub-command routing: `init`, `chat` (default), `auth`, `login`
+- First non-flag positional that matches a sub-command name becomes the command; remaining positionals form the prompt (`superagent "fix the bug"` → chat with that prompt)
+
+#### `ChatCommand` (`src/CLI/Commands/ChatCommand.php`)
+- **One-shot mode**: `superagent "prompt…"` runs a single agent turn and exits. Supports `--json` for machine-readable output (`{content, cost, turns, usage}`)
+- **Interactive REPL**: `superagent` with no prompt enters a Claude-Code-style loop driven by `HarnessLoop`. Stream events flow through `StreamEventEmitter` to the renderer; user input comes through `Renderer::prompt()`
+- Graceful `Failed to create agent: …` error path with a hint to run `superagent init`
+
+#### `InitCommand` (`src/CLI/Commands/InitCommand.php`)
+- `superagent init` — interactive setup for users without a Laravel app. Picks provider (anthropic / openai / ollama / openrouter), detects `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. from the environment, prompts for a missing key (secret input), picks default model, writes `~/.superagent/config.php` with `chmod 0600`
+- Creates `~/.superagent/` + `~/.superagent/storage/` if missing
+
+#### Credential encryption at rest (`src/Auth/CredentialCipher.php`, `CredentialStore.php`)
+- **`CredentialCipher`** — AES-256-GCM envelope encryption with `SAENC1:` magic prefix (`base64(nonce(12) || tag(16) || ciphertext)`). Authenticated: tamper fails decrypt with a clear error. Key resolution priority:
+  - `SUPERAGENT_CREDENTIAL_KEY` env var (hex or base64, ≥32 B decoded) — for vault / keychain integration
+  - persistent machine-local key at `~/.superagent/credentials/.key` (32 random bytes from CSPRNG, mode `0600`, generated once on first use)
+- **`CredentialStore`** writes ciphertext on every save (atomic temp + rename, `0600`). `loadFile()` auto-detects the `SAENC1:` magic and decrypts; any plaintext JSON left by earlier alpha builds is read once transparently and re-written encrypted on the next `store()` call
+- **Escape hatch**: set `SUPERAGENT_CREDENTIAL_ENCRYPTION=0` to keep plaintext (tests, debugging). Encryption defaults to ON
+- **Graceful decrypt failure**: `auth status` catches `AuthenticationException` per provider and prints a hint (`Re-run: superagent auth login <provider>`) instead of crashing with a stack trace
+- **Threat model**: stolen copies of `anthropic.json` / `openai.json` alone (email, backup, log) are useless without `.key`. Full-disk compromise is out of scope for any local-key scheme — use `SUPERAGENT_CREDENTIAL_KEY` to keep the key off-disk in sensitive deployments
+
+#### `AuthCommand` (`src/CLI/Commands/AuthCommand.php`) + credential readers (`src/Auth/`)
+- **`superagent auth login claude-code`** — imports the OAuth token Claude Code already has from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken` / `refreshToken` / `expiresAt` / `scopes` / `subscriptionType`). Refreshes if expired using the Claude Code `client_id` against `console.anthropic.com/v1/oauth/token`. Stores the result in `~/.superagent/credentials/anthropic.json` (mode `0600`, atomic write)
+- **`superagent auth login codex`** — imports credentials from `~/.codex/auth.json`. Handles both modes: `OPENAI_API_KEY` (direct key) and `tokens.access_token` (ChatGPT subscription OAuth with JWT-decoded `exp` expiry). Refresh via `auth.openai.com/oauth/token`. Stores in `~/.superagent/credentials/openai.json`
+- **`superagent auth status`** — lists stored providers with auth mode, source, and time-to-expiry
+- **`superagent auth logout <provider>`** — deletes stored credentials
+- **`superagent login <provider>`** — shorthand for `superagent auth login <provider>`
+- **`ClaudeCodeCredentials` / `CodexCredentials`** — reader + refresher value objects, each exposing `exists()` / `read()` / `isExpired()` / `refresh()`
+- **`CredentialStore`** — file-based per-provider JSON store under `~/.superagent/credentials/`, atomic writes with `0600` perms. Windows `USERPROFILE` fallback when `HOME` isn't set
+
+#### Terminal rendering (`src/CLI/Terminal/`, `src/Console/Output/`)
+- **`Renderer`** (`src/CLI/Terminal/Renderer.php`) — the legacy minimal renderer. ANSI auto-detect, term-width detect, banner, `info()` / `success()` / `warning()` / `error()` / `hint()` / `line()` / `separator()` / `confirm()` / `ask()` / `askSecret()`, stream-event dispatcher
+- **`RealTimeCliRenderer`** (`src/Console/Output/RealTimeCliRenderer.php`) — Claude-Code-style rich renderer (default). Hooks into `StreamEventEmitter` for live text delta, thinking previews, tool-call cards, turn-complete summaries. Controllable via CLI flags:
+  - `--verbose-thinking` — full thinking stream visible
+  - `--no-thinking` — thinking hidden entirely
+  - `--plain` — disable ANSI colors / cursor control (ideal for pipes / logs / CI)
+  - `--no-rich` / `--legacy-renderer` — fall back to `Renderer` (the minimal event echo)
+- **`PermissionPrompt`** (`src/CLI/Terminal/PermissionPrompt.php`) — interactive approval UI for tool calls gated by the permission system
+
+#### Interactive slash-command router (`src/Harness/CommandRouter.php`)
+- Built-in commands (all dispatched through `CommandRouter::dispatch($input, $ctx)`):
+  - `/help` — list of available commands
+  - `/status` — model, turns, message count, cumulative cost
+  - `/tasks` — current task list (from TaskCreate)
+  - `/compact` — force context compaction via `AutoCompactor`
+  - `/continue` — continue a pending tool loop
+  - `/session list|save|load|delete` — persistence via `SessionManager` (SQLite or file backend)
+  - `/clear` — clear conversation history
+  - `/model` — **new interactive picker**: `/model` / `/model list` prints a numbered, provider-aware catalog with the active model marked `*`; `/model 2` selects by number; `/model <id>` still accepts a raw id. Default catalogs: Anthropic (Opus/Sonnet/Haiku 4.5 family, Opus 4.1, Sonnet 4), OpenAI (GPT-5, GPT-5-mini, GPT-4o, o4-mini), OpenRouter, Ollama
+  - `/cost` — cost breakdown (total / avg per turn)
+  - `/quit` — exit the loop
+- `register(string $name, string $desc, \Closure $handler)` — extension hook for custom commands
+
+#### `AgentFactory` (`src/CLI/AgentFactory.php`)
+- Builds an `Agent` from CLI options: merges provider config, stored OAuth credentials (via `resolveStoredAuth($provider)`), CLI-overridden model / system prompt / max-turns
+- Builds a wired `HarnessLoop` from the agent: picks rich vs. legacy renderer, attaches `StreamEventEmitter`, session manager (`SessionManager::fromConfig()`), auto-compactor (`AutoCompactor::fromConfig()`), command router
+- `runOneShot()` with `AgentResult` → array projection
+- Auto-refresh on stored Anthropic OAuth 60s before expiry; new token written back to `CredentialStore`
+- Priority order for auth: stored OAuth > config `api_key` > `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env var
+
+#### Provider OAuth support (`src/Providers/`)
+- **`AnthropicProvider`** learned **OAuth bearer mode**: when `auth_mode=oauth` + `access_token`, sends `Authorization: Bearer …` + `anthropic-beta: oauth-2025-04-20` instead of `x-api-key`. Auto-prepends the required `"You are Claude Code, Anthropic's official CLI for Claude."` system block (the caller's real system prompt is preserved as a second block) — without this the API returns an obfuscated `HTTP 429 rate_limit_error`. Legacy models (`claude-3*` / `claude-2*` / `claude-instant*`) get rewritten to `claude-opus-4-5` under OAuth since Claude subscription tokens only authorize current-generation models
+- **`OpenAIProvider`** learned **OAuth bearer mode**: `auth_mode=oauth` + `access_token` sends Bearer auth + optional `chatgpt-account-id` header for Codex ChatGPT-subscription traffic
+- **`ProviderRegistry::validateConfig`** now accepts `access_token` as an alternative to `api_key` for `anthropic` / `openai` providers when `auth_mode=oauth`
+
+#### Agent-side OAuth plumbing (`src/Agent.php`)
+- `resolveProvider()` now forwards OAuth keys (`auth_mode`, `access_token`, `account_id`, `anthropic_beta`) from top-level `Agent` config into the provider config — the old allowlist (`api_key`, `model`, `base_url`, `max_tokens`) silently dropped them
+- `injectProviderConfigIntoAgentTools()` forwards the same OAuth keys so spawned sub-agents authenticate correctly in child processes
+
+#### Config / container glue (`src/Foundation/Application.php`)
+- Standalone bootstrap (`Application::bootstrap($basePath)`): creates container, loads config via `ConfigLoader`, registers 22 core singletons (guardrails, cost autopilot, adaptive feedback, smart context, knowledge graph, checkpoint, skill distillation, replay, fork, debate, cost prediction, credential pool, query complexity router, context compressor, memory provider manager, middleware pipeline, tool result cache, self-healing, pipeline engine, …), registers model aliases
+- **New**: when `Illuminate\Container\Container` is autoloaded (because `laravel/framework` is in `vendor/`), bind our `ConfigRepository` as the `config` instance on `Container::getInstance()`. This silences the 14 `[SuperAgent] Config unavailable for …` warnings emitted by Optimization / Performance classes whose `config('superagent.xxx')` calls otherwise go through Laravel's helper into an empty container
+
+### Changed
+
+- **CLI version constant** bumped from `0.8.2` → `0.8.6` (`src/CLI/SuperAgentApplication.php::VERSION`)
+- **Help text** documents the new `auth` / `login` sub-commands, `--verbose-thinking` / `--no-thinking` / `--plain` / `--no-rich` flags
+
+### Fixed
+
+- **`AnthropicProvider` error path** — `ProviderException::__construct()` was being called with positional arguments in the wrong order; arg 5 is `$retryable (bool)` but was receiving a `\Throwable`. Any Anthropic 4xx/5xx response crashed with a TypeError *inside* the error handler, masking the original API error. Fixed via named arguments (`message:`, `provider:`, `statusCode:`, `responseBody:`, `previous:`)
+- **`CredentialStore` on Windows** — `HOME` is empty on Windows, so the store silently wrote to a relative-invalid path and `auth status` always reported "No stored credentials". Falls back to `USERPROFILE`
+- **`AgentFactory::createHarnessLoop()`** — called `$agent->streamPrompt($prompt, $messages)` which doesn't exist. Replaced with `$agent->stream($prompt)`
+- **`AgentFactory::runOneShot()`** — tried to subscript `AgentResult` as if it were an array ("Cannot use object of type SuperAgent\AgentResult as array"). Now maps via `->text()` / `->totalCostUsd` / `->turns()` / `->totalUsage()`
+
+### Security
+
+- **AES-256-GCM at-rest encryption** for every file under `~/.superagent/credentials/` (authenticated: tamper ⇒ decrypt-fail with a clear error). GCM nonce is unique per write; ciphertext encoded as `SAENC1:base64(...)`. See "Credential encryption at rest" in the Added section above for key resolution + threat model
+- **No ciphertext logging** — errors from the cipher never include the raw blob or key material
+- Credential files (+ `.key`) written with mode **`0600`** via temp-file + atomic rename. OAuth refresh tokens never leave the machine
+
+### Tests
+
+Full unit suite: **1967 tests, 5445 assertions, 0 failures**. New tests added in v0.8.6:
+
+- `tests/Unit/CredentialCipherTest.php` (14) — round-trip, tamper detection (GCM tag), truncation, nonce uniqueness, key persistence, `SUPERAGENT_CREDENTIAL_KEY` env override (hex / base64 / too-short), key-file `0600` perms on Unix
+- `tests/Unit/CredentialStoreEncryptionTest.php` (14) — ciphertext-on-disk, round-trip, legacy plaintext read, legacy-plaintext auto-migration on next write, tamper raises `AuthenticationException`, delete-provider / delete-key, `listProviders`, encryption-disabled escape hatch (parameter + env var)
+- `tests/Unit/ClaudeCodeCredentialsTest.php` (10) — parsing: happy path, missing optional fields, missing access_token, missing block, invalid JSON; expiry arithmetic (past / skew / future / missing)
+- `tests/Unit/CodexCredentialsTest.php` (13) — OAuth vs API-key modes, OAuth wins when both present, invalid JSON; JWT `exp` decoding (past / skew / valid / no-exp / empty-token / malformed)
+- `tests/Unit/AnthropicProviderOAuthTest.php` (12) — header swap (Bearer + `anthropic-beta`, no `x-api-key`), required-config validation, `auth_mode` inference, legacy model rewrite under OAuth, modern model untouched, system-prompt identity-block injection (with / without user prompt / no-duplication when already prefixed), custom `anthropic_beta` override
+- `tests/Unit/OpenAIProviderOAuthTest.php` (8) — Bearer from access_token, `chatgpt-account-id` header (present / absent), api_key fallback, required-config validation, organization header preserved under OAuth
+- `tests/Unit/CLI/SuperAgentApplicationParseTest.php` (16) — sub-command routing (`init` / `chat` / `auth` / `login`), bare `login` → `auth login` rewrite, all flags (`-m/--model`, `-p/--provider`, `--max-turns`, `-s/--system-prompt`, `--json`, `--no-rich` / `--verbose-thinking` / `--no-thinking` / `--plain`), unknown-flag tolerance, empty argv
+- `tests/Unit/CLI/CommandRouterModelPickerTest.php` (17) — numbered catalog (all 4 providers), active-model star, numeric / id selection, out-of-range, provider inference from model prefix, explicit provider wins over prefix, `/help` / `/status` / `/cost` / `/quit` / `/clear` / `register()` custom command / `isCommand()`
+- `tests/Unit/CLI/AgentFactoryAuthTest.php` (7) — OAuth resolution (Anthropic), api_key resolution (OpenAI), `account_id` forwarding, malformed entries, unknown provider, oauth-without-token
+
+### Notes
+
+- **Official OAuth client reuse**: this feature reads Claude Code / Codex's locally-stored OAuth credentials — it does *not* run its own OAuth flow. Anthropic and OpenAI don't publish third-party OAuth client_ids, so there is no sanctioned way to obtain new tokens from a third-party CLI. Token refresh uses the client_ids Claude Code / Codex themselves ship with. Risks and ToS implications are the user's responsibility
+- **Model constraints under OAuth**: Claude Code subscription tokens only authorize current-generation models. `claude-3-5-sonnet-20241022` (and older) return HTTP 429 with an obfuscated `rate_limit_error` body. The provider silently rewrites to `claude-opus-4-5`; explicit `-m claude-sonnet-4-5` etc. continue to work
+- **System prompt requirement**: Anthropic's OAuth endpoint rejects any request whose first system block isn't the literal Claude Code identity string. The provider injects this automatically; your caller-supplied system prompt is preserved as a second block immediately after
+- **CLI + Laravel mode parity**: when run inside a Laravel project, the CLI uses the project's own `config()`, storage paths, and service container. Plugins, custom providers, Guardrails files, MemoryPalace storage all resolve through the host app. Outside a Laravel project, the standalone `Foundation\Application` provides the minimum needed to run the same code paths
+
 ## [0.8.5] - 2026-04-14
 
 ### 🧠 Summary

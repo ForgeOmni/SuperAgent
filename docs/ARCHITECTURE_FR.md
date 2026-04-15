@@ -1,6 +1,8 @@
 # SuperAgent Architecture — Graphe de Dépendances
 
-> **Version :** 0.8.0 | **Généré le :** 2026-04-08
+> **Version :** 0.8.6 | **Généré le :** 2026-04-14
+
+> Le graphe mermaid principal se trouve dans [la version anglaise ARCHITECTURE.md](ARCHITECTURE.md#core-system-dependencies). La version française conserve le graphe de base ; seules les descriptions des nouveaux sous-systèmes (CLI / Auth / Foundation / Memory Palace / Coordinator / Middleware) sont mises à jour ici. La version anglaise contient les dépendances CLI + OAuth complètes.
 
 > **Langue** : [English](ARCHITECTURE.md) | [中文](ARCHITECTURE_CN.md) | [Français](ARCHITECTURE_FR.md)
 
@@ -219,23 +221,28 @@ graph TB
     class BSV,GE,PID,PE,PRE security
 ```
 
-## Compteurs de Sous-systèmes
+## Compteurs de Sous-systèmes (v0.8.6)
 
-| Catégorie | Répertoires | Fichiers | Lignes |
-|-----------|-------------|----------|--------|
-| Core (Agent, QueryEngine, Prompt) | 3 | 12 | ~2 500 |
-| Fournisseurs | 1 | 10 | ~3 700 |
-| Outils | 2 | 74 | ~11 300 |
-| Optimisation | 2 | 8 | ~2 100 |
-| Performance | 1 | 8 | ~2 100 |
-| Sécurité & Guardrails | 2 | 33 | ~3 200 |
-| Mémoire | 3 | 14 | ~3 100 |
-| Session | 1 | 4 | ~1 600 |
-| Orchestration Multi-Agents | 8 | 34 | ~7 300 |
-| Intelligence | 6 | 20 | ~3 500 |
-| Pipeline | 2 | 24 | ~3 764 |
-| Infrastructure | 10 | 40 | ~5 000 |
-| **Total** | **91** | **496** | **~81 236** |
+| Catégorie | Fichiers | Lignes | Δ depuis v0.8.0 |
+|-----------|----------|--------|------------------|
+| Core (Agent, QueryEngine, Prompt) | 12 | ~2 600 | — |
+| **CLI + Console + Auth (nouveau)** | **17** | **~2 687** | **Nouveau (v0.8.5 + v0.8.6)** |
+| **Foundation (nouveau)** | **2** | **~550** | **Nouveau (v0.8.5 + v0.8.6)** |
+| Fournisseurs (compatibles OAuth) | 12 | ~3 800 | +~100 (chemins OAuth) |
+| Outils | 74 | ~11 300 | — |
+| Optimisation | 8 | ~2 100 | — |
+| Performance | 8 | ~2 100 | — |
+| Sécurité & Guardrails | 33 | ~3 200 | — |
+| Mémoire (incl. **Palace**) | 42 | ~5 400 | **+2 289 (Palace v0.8.5)** |
+| Session | 4 | ~1 600 | — |
+| Orchestration Multi-Agents | 34 | ~7 300 | — |
+| **Coordinator (nouveau)** | **14** | **~2 800** | **Nouveau (v0.8.2)** |
+| Harness | 21 | ~1 800 | — |
+| **Middleware (nouveau)** | **7** | **~900** | **Nouveau (v0.8.1)** |
+| Intelligence | 20 | ~3 500 | — |
+| Pipeline | 24 | ~3 764 | — |
+| Infrastructure | 40 | ~5 000 | — |
+| **Total** | **566** | **~93 395** | **+70 fichiers / +12 159 lignes** |
 
 ## Flux de Données
 
@@ -272,10 +279,15 @@ sequenceDiagram
 
 ## Décisions de Conception Clés
 
-1. **Double écriture sessions** : Fichier (rétrocompat) + SQLite (recherche). Fallback gracieux si SQLite indisponible
-2. **Parallélisme par chemin** : Outils d'écriture classés par chemin cible, pas seulement par flag lecture-seule
-3. **Isolation des fournisseurs de mémoire** : Les erreurs du fournisseur externe ne font jamais crasher l'agent
-4. **Rotation des credentials** : Pool intégré au niveau ProviderRegistry — transparent pour tous les consommateurs
-5. **Scan d'injection de prompt** : Intégré dans SystemPromptBuilder — scan automatique des fichiers contexte via `withContextFiles()`
-6. **Chargement progressif de skills** : Deux phases (métadonnées → contenu complet) pour minimiser l'overhead en tokens
-7. **SecurityCheckChain** : Enveloppe le validateur 23-checks existant tout en permettant l'insertion de checks personnalisés
+1. **Architecture double-déploiement (v0.8.6)** : package Laravel + binaire CLI standalone partagent le même `Agent` / `HarnessLoop` / `CommandRouter` / `MemoryProviderManager` / `SessionManager`. L'adaptation se fait à la frontière (polyfill `config()`/`app()`/`storage_path()` + `Foundation\Application` conteneur minimal reproduisant l'API bind/singleton/make de Laravel)
+2. **Import de credentials OAuth (v0.8.6)** : `src/Auth/` lit les tokens locaux existants de Claude Code / Codex et les injecte dans le mode Bearer du provider. Refresh transparent ; le provider insère automatiquement le bloc système d'identité Claude Code ; les ids de modèles legacy sont réécrits silencieusement
+3. **Memory Palace comme provider externe (v0.8.5)** : s'intègre au `MemoryProviderManager` comme second provider aux côtés du flux `MEMORY.md` intégré. Wings/Halls/Rooms/Drawers + Tunnels + pile 4 couches (L0 Identité / L1 Faits Critiques / L2 Rappel de Room / L3 Recherche Profonde). Tunnels auto-créés quand la même Room apparaît dans plusieurs Wings
+4. **Pipeline de Collaboration (v0.8.2)** : DAG multi-agents par phases avec tri topologique, 4 stratégies d'échec, 8 événements de cycle de vie. Les agents d'une phase s'exécutent en vrai parallèle via `ParallelPhaseExecutor` + `ProcessBackend` / `InProcessBackend`
+5. **Onion middleware (v0.8.1)** : `MiddlewarePipeline` compose rate-limit + retry + cost-tracking + logging + guardrail autour de chaque appel provider, par ordre de priorité
+6. **Double écriture sessions (v0.8.0)** : Fichier (rétrocompat) + SQLite (recherche). Fallback gracieux si SQLite indisponible
+7. **Parallélisme par chemin (v0.8.0)** : Outils d'écriture classés par chemin cible, pas seulement par flag lecture-seule
+8. **Isolation des fournisseurs de mémoire** : Les erreurs du fournisseur externe ne font jamais crasher l'agent
+9. **Rotation des credentials (v0.8.0) + OAuth bearer (v0.8.6)** : Les deux intégrés au niveau `ProviderRegistry` — transparent pour tous les consommateurs
+10. **Scan d'injection de prompt** : Intégré dans `SystemPromptBuilder` — scan automatique des fichiers contexte via `withContextFiles()`
+11. **Chargement progressif de skills** : Deux phases (métadonnées → contenu complet) pour minimiser l'overhead en tokens
+12. **`SecurityCheckChain`** : Enveloppe le validateur 23-checks existant tout en permettant l'insertion de checks personnalisés

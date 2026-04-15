@@ -109,6 +109,13 @@
 - [66. 阶段上下文注入](#66-阶段上下文注入)
 - [67. 智能体重试策略](#67-智能体重试策略)
 
+### SuperAgent CLI (v0.8.6)
+
+- [68. CLI 架构与启动流程](#68-cli-架构与启动流程)
+- [69. OAuth 登录（Claude Code / Codex 导入）](#69-oauth-登录claude-code--codex-导入)
+- [70. 交互式 `/model` 选择器与斜杠命令](#70-交互式-model-选择器与斜杠命令)
+- [71. 嵌入 CLI Harness 到你的应用](#71-嵌入-cli-harness-到你的应用)
+
 ---
 
 ## 1. 流水线 DSL
@@ -6609,4 +6616,311 @@ $policy = AgentRetryPolicy::default()
 // 逐智能体覆盖
 $phase->withRetryPolicy(AgentRetryPolicy::default());
 $phase->withAgentRetryPolicy('critical-agent', AgentRetryPolicy::aggressive());
+```
+
+---
+
+## 68. CLI 架构与启动流程
+
+**v0.8.6 引入。** `bin/superagent` 把 SDK 包装成无需 Laravel 项目的独立工具。启动流程：
+
+```
+bin/superagent
+ ├─ 定位 vendor/autoload.php（3 个候选路径）
+ ├─ 检测 Laravel 项目？
+ │   ├─ 是 → 启动宿主 Laravel app，复用其容器 + config()
+ │   └─ 否 → \SuperAgent\Foundation\Application::bootstrap($cwd)
+ │             ├─ ConfigLoader::load($basePath)          # 读 ~/.superagent/config.php
+ │             ├─ app->registerCoreServices()            # 22 个 singleton
+ │             ├─ 把我们的 ConfigRepository 绑到 Illuminate\Container 的 config 键
+ │             │                                         # 消除 14 条 config() 警告
+ │             └─ registerAliases($configuredAliases)
+ └─ new SuperAgentApplication()->run()
+```
+
+### 关键类
+
+| 类 | 职责 |
+| --- | --- |
+| `SuperAgent\CLI\SuperAgentApplication` | argv 解析 + 子命令路由（init / chat / auth / login） |
+| `SuperAgent\CLI\AgentFactory` | 构建 `Agent` + `HarnessLoop`，解析已存凭证，选渲染器 |
+| `SuperAgent\CLI\Commands\ChatCommand` | 一次性 + 交互 REPL |
+| `SuperAgent\CLI\Commands\InitCommand` | 首次运行交互向导 |
+| `SuperAgent\CLI\Commands\AuthCommand` | OAuth 登录 / status / logout |
+| `SuperAgent\CLI\Terminal\Renderer` | Legacy ANSI 渲染器（`--no-rich` 时使用） |
+| `SuperAgent\Console\Output\RealTimeCliRenderer` | Claude Code 风格富渲染器（默认） |
+| `SuperAgent\CLI\Terminal\PermissionPrompt` | 需审批工具调用的交互式确认 UI |
+| `SuperAgent\Foundation\Application` | 独立服务容器；Laravel 测试中也使用 |
+
+### 独立模式 vs Laravel 模式一致性
+
+两种模式驱动同一个 `Agent`、`HarnessLoop`、`CommandRouter`、`StreamEventEmitter`、`SessionManager`、`AutoCompactor`、记忆 provider。仅存在以下差异：
+
+| 方面 | Laravel 模式 | 独立模式 |
+| --- | --- | --- |
+| `config()` 帮手 | Laravel 的 Illuminate config | 我们的 `ConfigRepository`（polyfill + 容器绑定） |
+| 服务容器 | `Illuminate\Foundation\Application` | `SuperAgent\Foundation\Application`（同样的 `bind` / `singleton` / `make` API） |
+| 存储路径 | `storage_path()` → `storage/app/...` | `~/.superagent/storage/` |
+| 配置文件 | `config/superagent.php` | `~/.superagent/config.php`（来自 `superagent init`） |
+
+正因这种一致性，Memory Palace、Guardrails、Pipeline DSL、MCP 工具、Skills 等都能在 CLI 下零代码改动直接可用。
+
+### 自定义启动流程
+
+```php
+// embed.php —— 示例：把 CLI 嵌入你自己的二进制，并加自定义绑定
+require __DIR__ . '/vendor/autoload.php';
+
+$app = \SuperAgent\Foundation\Application::bootstrap(
+    basePath: getcwd(),
+    overrides: [
+        'superagent.default_provider' => 'openai',
+        'superagent.model' => 'gpt-5',
+    ],
+);
+
+// 追加你自己的单例
+$app->singleton(\MyCompany\Auditor::class, fn() => new \MyCompany\Auditor());
+
+// 跑 CLI
+exit((new \SuperAgent\CLI\SuperAgentApplication())->run());
+```
+
+---
+
+## 69. OAuth 登录（Claude Code / Codex 导入）
+
+**v0.8.6 引入。** CLI 通过**导入**用户本地 Claude Code / Codex CLI 已经持有的 OAuth token 来登录——而不是跑自己的 OAuth 流程（两家都不公开三方 OAuth client_id）。
+
+### 作用
+
+```bash
+superagent auth login claude-code
+# → 读 ~/.claude/.credentials.json
+# → 若过期，通过 console.anthropic.com/v1/oauth/token 续期
+# → 写入 ~/.superagent/credentials/anthropic.json（权限 0600）
+
+superagent auth login codex
+# → 读 ~/.codex/auth.json
+# → 若是 OAuth 且过期，通过 auth.openai.com/oauth/token 续期
+# → 写入 ~/.superagent/credentials/openai.json（权限 0600）
+```
+
+### 数据模型
+
+`CredentialStore` 为每个 provider 写一个 JSON：
+
+**anthropic.json**（OAuth）：
+```json
+{
+  "auth_mode": "oauth",
+  "source": "claude-code",
+  "access_token": "sk-ant-oat01-…",
+  "refresh_token": "sk-ant-ort01-…",
+  "expires_at": "1761100000000",
+  "subscription": "max"
+}
+```
+
+**openai.json**（两种可能形态）：
+```json
+// OAuth（ChatGPT 订阅）
+{ "auth_mode": "oauth", "source": "codex", "access_token": "eyJ…", "refresh_token": "…", "id_token": "eyJ…", "account_id": "acct_…" }
+
+// API key（Codex 配置为 OPENAI_API_KEY）
+{ "auth_mode": "api_key", "source": "codex", "api_key": "sk-…" }
+```
+
+### 自动续期流程
+
+`AgentFactory::resolveStoredAuth($provider)` 在每次构建 `Agent` 前：
+
+1. 从凭证存储读 `auth_mode`
+2. 若为 `oauth`，比较 `expires_at - 60s` 和 `time()`
+3. 若过期或即将过期，用存的 `refresh_token` + Claude Code / Codex `client_id` 调对应 refresh 端点
+4. 原子写回新的 `access_token` / `refresh_token` / `expires_at`
+5. 返回 `['auth_mode' => 'oauth', 'access_token' => …]` 给 provider
+
+### Provider 集成
+
+`AnthropicProvider`（`auth_mode=oauth`）：
+- 头：`Authorization: Bearer …`（不发 `x-api-key`）
+- 头：`anthropic-beta: oauth-2025-04-20`
+- **System 块**：自动在第一个 `system` 块前插入 `"You are Claude Code, Anthropic's official CLI for Claude."`。用户传的 system prompt 保留为紧跟其后的第二块。**必需**——否则 API 返回混淆的 `HTTP 429 rate_limit_error`
+- **模型改写**：任何 legacy id（`claude-3*`、`claude-2*`、`claude-instant*`）会被静默改写为 `claude-opus-4-5`（Claude 订阅 token 不授权老模型）
+
+`OpenAIProvider`（`auth_mode=oauth`）：
+- 头：`Authorization: Bearer …`
+- 头：`chatgpt-account-id: …`（当存在 `account_id` 时——ChatGPT 订阅流量）
+
+### 优先级
+
+构建 Agent 时按以下顺序解析（首个命中为准）：
+
+1. `new Agent([...])` 传入的 `$options['api_key']` 或 `$options['access_token']`
+2. `~/.superagent/credentials/{provider}.json`（来自 `auth login`）
+3. 配置里的 `superagent.providers.{provider}.api_key`
+4. 环境变量 `{PROVIDER}_API_KEY`
+
+### PHP 代码中的编程使用
+
+```php
+use SuperAgent\Auth\CredentialStore;
+use SuperAgent\Auth\ClaudeCodeCredentials;
+
+$store = new CredentialStore();
+$reader = ClaudeCodeCredentials::default();
+$creds = $reader->read();
+
+if ($creds && $reader->isExpired($creds)) {
+    $creds = $reader->refresh($creds);
+}
+
+$store->store('anthropic', 'access_token', $creds['access_token']);
+$store->store('anthropic', 'refresh_token', $creds['refresh_token']);
+$store->store('anthropic', 'auth_mode', 'oauth');
+```
+
+### 注意事项
+
+- **ToS 风险**：Anthropic / OpenAI 没有授权三方使用他们的 OAuth client_id。CLI 只是读 Claude Code / Codex 已经拿到的 token；refresh 用这两个官方 CLI 自带的 client_id。使用规则参照你对应的订阅条款
+- **离线**：只要存的 `access_token` 没过期，CLI 无需联网。Refresh 需联网
+- **macOS Keychain**：macOS 下 Claude Code 可能把凭证存到 Keychain 而非 `~/.claude/.credentials.json`。当前 reader 只支持 JSON 文件形态
+
+---
+
+## 70. 交互式 `/model` 选择器与斜杠命令
+
+**v0.8.6 引入**（选择器）；斜杠命令系统本身更早。
+
+### `/model`
+
+```
+> /model
+Current model: claude-sonnet-4-5
+
+Available models:
+  1) claude-opus-4-5 — Opus 4.5 — top reasoning
+  2) claude-sonnet-4-5 — Sonnet 4.5 — balanced *
+  3) claude-haiku-4-5 — Haiku 4.5 — fast + cheap
+  4) claude-opus-4-1 — Opus 4.1
+  5) claude-sonnet-4 — Sonnet 4
+
+Usage: /model <id|number|alias>
+```
+
+- `/model` / `/model list` → 编号化清单（当前模型打 `*`）
+- `/model 1` → 按编号选
+- `/model claude-haiku-4-5` → 按 id 选（原行为保留）
+
+清单是 provider 感知的（来自 `ctx['provider']` 或从当前模型前缀推断）。当前清单：
+
+| Provider | 模型 |
+| --- | --- |
+| anthropic | Opus 4.5、Sonnet 4.5、Haiku 4.5、Opus 4.1、Sonnet 4 |
+| openai | GPT-5、GPT-5-mini、GPT-4o、o4-mini |
+| openrouter | anthropic/claude-opus-4-5、anthropic/claude-sonnet-4-5、openai/gpt-5 |
+| ollama | llama3.1、qwen2.5-coder |
+
+### 扩展清单
+
+通过插件或宿主应用 ServiceProvider 覆盖：
+
+```php
+use SuperAgent\Harness\CommandRouter;
+
+$router = app()->make(CommandRouter::class);
+$router->register('model', '自定义模型选择器', function (string $args, array $ctx): string {
+    // 你的逻辑 —— 返回 '__MODEL__:<id>' 来设置模型
+});
+```
+
+### 全部内置斜杠命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `/help` | 列出所有斜杠命令 |
+| `/status` | 模型、轮数、消息计数、成本 |
+| `/tasks` | 当前 TaskCreate 任务列表 |
+| `/compact` | 通过 AutoCompactor 强制压缩上下文 |
+| `/continue` | 继续待处理的工具循环 |
+| `/session list` | 最近保存的会话 |
+| `/session save [id]` | 持久化当前状态 |
+| `/session load <id>` | 恢复已保存状态 |
+| `/session delete <id>` | 删除已保存状态 |
+| `/clear` | 重置对话历史（保留模型 + cwd） |
+| `/model` | 查看 / 列表 / 切换模型（见上） |
+| `/cost` | 总成本 + 每轮均值 |
+| `/quit` | 退出 REPL |
+
+---
+
+## 71. 嵌入 CLI Harness 到你的应用
+
+CLI 代码可复用；你可以在自己的 Laravel app 或 PHP 守护进程里提供 `superagent` 风格的交互对话。
+
+### 最小嵌入
+
+```php
+use SuperAgent\Agent;
+use SuperAgent\Harness\HarnessLoop;
+use SuperAgent\Harness\CommandRouter;
+use SuperAgent\Harness\StreamEventEmitter;
+use SuperAgent\CLI\Terminal\Renderer;
+use SuperAgent\CLI\AgentFactory;
+
+$factory = new AgentFactory(new Renderer());
+$agent = $factory->createAgent(['provider' => 'anthropic']);
+$loop = $factory->createHarnessLoop($agent, ['rich' => true]);
+
+$input = function (): ?string {
+    echo "> ";
+    $line = fgets(STDIN);
+    return $line === false ? null : rtrim($line, "\r\n");
+};
+
+$output = function (string $text): void {
+    echo $text . PHP_EOL;
+};
+
+$loop->run($input, $output);
+```
+
+### 添加自定义斜杠命令
+
+```php
+$loop->getRouter()->register('deploy', '部署当前分支', function (string $args, array $ctx) {
+    // $ctx 包含：turn_count、total_cost_usd、model、messages、cwd、session_manager...
+    return (new \MyCompany\Deployer())->run(trim($args) ?: 'staging');
+});
+```
+
+### 切换渲染器
+
+```php
+// 富渲染器（默认）
+use SuperAgent\Console\Output\RealTimeCliRenderer;
+use Symfony\Component\Console\Output\ConsoleOutput;
+
+$rich = new RealTimeCliRenderer(
+    output: new ConsoleOutput(),
+    decorated: null,          // 自动检测 TTY
+    thinkingMode: 'verbose',  // 'normal' | 'verbose' | 'hidden'
+);
+$rich->attach($loop->getEmitter());
+```
+
+### 只用 Agent（不要 HarnessLoop）
+
+纯函数式调用、不要 REPL 状态：
+
+```php
+$agent = (new AgentFactory())->createAgent([
+    'provider' => 'anthropic',
+    'model' => 'claude-opus-4-5',
+]);
+
+$result = $agent->prompt('总结这个 diff'); // AgentResult
+echo $result->text();
+echo $result->totalCostUsd;
 ```

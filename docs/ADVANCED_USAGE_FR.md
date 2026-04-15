@@ -109,6 +109,13 @@
 - [66. Injection de Contexte Inter-Phases](#66-injection-de-contexte-inter-phases)
 - [67. Politique de Retry par Agent](#67-politique-de-retry-par-agent)
 
+### CLI SuperAgent (v0.8.6)
+
+- [68. Architecture du CLI & Bootstrap](#68-architecture-du-cli--bootstrap)
+- [69. Connexion OAuth (import Claude Code / Codex)](#69-connexion-oauth-import-claude-code--codex)
+- [70. Sélecteur `/model` Interactif & Commandes Slash](#70-sélecteur-model-interactif--commandes-slash)
+- [71. Intégrer le Harness CLI dans votre application](#71-intégrer-le-harness-cli-dans-votre-application)
+
 ---
 
 ## 1. Pipeline DSL
@@ -7067,4 +7074,311 @@ $policy = AgentRetryPolicy::default()
     ->withProviderFallback('openai', ['model' => 'gpt-4o']);
 
 $phase->withAgentRetryPolicy('critical', AgentRetryPolicy::aggressive());
+```
+
+---
+
+## 68. Architecture du CLI & Bootstrap
+
+**Introduit en v0.8.6.** `bin/superagent` transforme le SDK en outil standalone utilisable sans application Laravel. Flux de démarrage :
+
+```
+bin/superagent
+ ├─ localise vendor/autoload.php (3 chemins candidats)
+ ├─ détection de projet Laravel ?
+ │   ├─ oui → boot l'app Laravel hôte, réutilise son conteneur + config()
+ │   └─ non → \SuperAgent\Foundation\Application::bootstrap($cwd)
+ │             ├─ ConfigLoader::load($basePath)          # lit ~/.superagent/config.php
+ │             ├─ app->registerCoreServices()            # 22 singletons
+ │             ├─ lie notre ConfigRepository au conteneur Illuminate (clé 'config')
+ │             │                                         # silence 14 avertissements config()
+ │             └─ registerAliases($configuredAliases)
+ └─ new SuperAgentApplication()->run()
+```
+
+### Classes clés
+
+| Classe | Rôle |
+| --- | --- |
+| `SuperAgent\CLI\SuperAgentApplication` | parseur argv + router de sous-commandes (init / chat / auth / login) |
+| `SuperAgent\CLI\AgentFactory` | construit `Agent` + `HarnessLoop`, résout les credentials stockés, choisit le renderer |
+| `SuperAgent\CLI\Commands\ChatCommand` | one-shot + REPL interactif |
+| `SuperAgent\CLI\Commands\InitCommand` | assistant de première configuration |
+| `SuperAgent\CLI\Commands\AuthCommand` | connexion OAuth / status / logout |
+| `SuperAgent\CLI\Terminal\Renderer` | renderer ANSI legacy (utilisé avec `--no-rich`) |
+| `SuperAgent\Console\Output\RealTimeCliRenderer` | renderer riche style Claude Code (défaut) |
+| `SuperAgent\CLI\Terminal\PermissionPrompt` | UI interactive d'approbation pour les appels d'outils gatés |
+| `SuperAgent\Foundation\Application` | conteneur de services standalone ; utilisé aussi dans les tests Laravel |
+
+### Parité standalone / Laravel
+
+Les deux modes pilotent les mêmes `Agent`, `HarnessLoop`, `CommandRouter`, `StreamEventEmitter`, `SessionManager`, `AutoCompactor`, providers de mémoire. Seules différences :
+
+| Aspect | Mode Laravel | Mode standalone |
+| --- | --- | --- |
+| Helper `config()` | config Illuminate de Laravel | Notre `ConfigRepository` (polyfill + binding conteneur) |
+| Conteneur de services | `Illuminate\Foundation\Application` | `SuperAgent\Foundation\Application` (même API `bind` / `singleton` / `make`) |
+| Chemin de stockage | `storage_path()` → `storage/app/...` | `~/.superagent/storage/` |
+| Fichier de config | `config/superagent.php` | `~/.superagent/config.php` (via `superagent init`) |
+
+Grâce à cette parité, Memory Palace, Guardrails, Pipeline DSL, outils MCP, Skills etc. fonctionnent depuis le CLI sans modification de code.
+
+### Personnaliser le bootstrap
+
+```php
+// embed.php — exemple : embarquer le CLI dans votre binaire avec des bindings custom
+require __DIR__ . '/vendor/autoload.php';
+
+$app = \SuperAgent\Foundation\Application::bootstrap(
+    basePath: getcwd(),
+    overrides: [
+        'superagent.default_provider' => 'openai',
+        'superagent.model' => 'gpt-5',
+    ],
+);
+
+// Ajouter votre propre singleton
+$app->singleton(\MyCompany\Auditor::class, fn() => new \MyCompany\Auditor());
+
+// Lancer le CLI
+exit((new \SuperAgent\CLI\SuperAgentApplication())->run());
+```
+
+---
+
+## 69. Connexion OAuth (import Claude Code / Codex)
+
+**Introduit en v0.8.6.** Le CLI se connecte en **important** les tokens OAuth que les CLIs Claude Code et Codex de l'utilisateur ont déjà obtenus localement — plutôt que d'exécuter son propre flux OAuth (aucun des deux éditeurs ne publie de `client_id` OAuth tiers).
+
+### Ce qu'il fait
+
+```bash
+superagent auth login claude-code
+# → lit ~/.claude/.credentials.json
+# → si expiré, rafraîchit via console.anthropic.com/v1/oauth/token
+# → écrit ~/.superagent/credentials/anthropic.json (mode 0600)
+
+superagent auth login codex
+# → lit ~/.codex/auth.json
+# → si OAuth et expiré, rafraîchit via auth.openai.com/oauth/token
+# → écrit ~/.superagent/credentials/openai.json (mode 0600)
+```
+
+### Modèle de données
+
+`CredentialStore` écrit un JSON par provider :
+
+**anthropic.json** (OAuth) :
+```json
+{
+  "auth_mode": "oauth",
+  "source": "claude-code",
+  "access_token": "sk-ant-oat01-…",
+  "refresh_token": "sk-ant-ort01-…",
+  "expires_at": "1761100000000",
+  "subscription": "max"
+}
+```
+
+**openai.json** (deux formes possibles) :
+```json
+// OAuth (abonnement ChatGPT)
+{ "auth_mode": "oauth", "source": "codex", "access_token": "eyJ…", "refresh_token": "…", "id_token": "eyJ…", "account_id": "acct_…" }
+
+// Clé API (Codex configuré avec OPENAI_API_KEY)
+{ "auth_mode": "api_key", "source": "codex", "api_key": "sk-…" }
+```
+
+### Flux de renouvellement automatique
+
+`AgentFactory::resolveStoredAuth($provider)` s'exécute avant chaque construction d'`Agent` :
+
+1. lit `auth_mode` depuis le store
+2. si `oauth`, compare `expires_at - 60s` avec `time()`
+3. si expiré/bientôt expiré, appelle l'endpoint refresh avec le `refresh_token` stocké + `client_id` Claude Code / Codex
+4. réécrit atomiquement le nouveau `access_token` / `refresh_token` / `expires_at` sur disque
+5. retourne le token frais `['auth_mode' => 'oauth', 'access_token' => …]` au provider
+
+### Intégration provider
+
+`AnthropicProvider` (`auth_mode=oauth`) :
+- header : `Authorization: Bearer …` (pas de `x-api-key`)
+- header : `anthropic-beta: oauth-2025-04-20`
+- **bloc système** : préfixe automatiquement la chaîne littérale `"You are Claude Code, Anthropic's official CLI for Claude."` comme premier bloc `system`. Le prompt système utilisateur est préservé en deuxième bloc. **Requis** — sinon l'API renvoie un `HTTP 429 rate_limit_error` obfusqué
+- **réécriture de modèle** : tout id legacy (`claude-3*`, `claude-2*`, `claude-instant*`) est silencieusement réécrit vers `claude-opus-4-5` (les tokens d'abonnement Claude n'autorisent pas ces modèles)
+
+`OpenAIProvider` (`auth_mode=oauth`) :
+- header : `Authorization: Bearer …`
+- header : `chatgpt-account-id: …` (si `account_id` présent — trafic d'abonnement ChatGPT)
+
+### Ordre de priorité
+
+Lors de la construction d'un Agent, l'auth est résolue dans cet ordre (premier match gagne) :
+
+1. `$options['api_key']` ou `$options['access_token']` passés à `new Agent([...])`
+2. `~/.superagent/credentials/{provider}.json` (via `auth login`)
+3. `superagent.providers.{provider}.api_key` dans la config
+4. Variable d'environnement `{PROVIDER}_API_KEY`
+
+### Usage programmatique depuis PHP
+
+```php
+use SuperAgent\Auth\CredentialStore;
+use SuperAgent\Auth\ClaudeCodeCredentials;
+
+$store = new CredentialStore();
+$reader = ClaudeCodeCredentials::default();
+$creds = $reader->read();
+
+if ($creds && $reader->isExpired($creds)) {
+    $creds = $reader->refresh($creds);
+}
+
+$store->store('anthropic', 'access_token', $creds['access_token']);
+$store->store('anthropic', 'refresh_token', $creds['refresh_token']);
+$store->store('anthropic', 'auth_mode', 'oauth');
+```
+
+### Caveats
+
+- **Risque ToS** : Anthropic / OpenAI n'ont pas sanctionné l'usage tiers de leurs `client_id` OAuth. Le CLI lit les tokens que Claude Code / Codex ont déjà obtenus pour vous ; le refresh utilise les client_ids embarqués par ces CLIs officiels. Respectez les mêmes règles d'usage que l'abonnement concerné
+- **Hors-ligne** : fonctionne sans réseau tant que votre `access_token` stocké n'est pas expiré. Le refresh nécessite le réseau
+- **macOS Keychain** : sur macOS, Claude Code peut stocker ses credentials dans le Keychain au lieu de `~/.claude/.credentials.json`. Le reader ne supporte que la forme JSON aujourd'hui
+
+---
+
+## 70. Sélecteur `/model` Interactif & Commandes Slash
+
+**Introduit en v0.8.6** (sélecteur) ; système de commandes slash plus ancien.
+
+### `/model`
+
+```
+> /model
+Current model: claude-sonnet-4-5
+
+Available models:
+  1) claude-opus-4-5 — Opus 4.5 — top reasoning
+  2) claude-sonnet-4-5 — Sonnet 4.5 — balanced *
+  3) claude-haiku-4-5 — Haiku 4.5 — fast + cheap
+  4) claude-opus-4-1 — Opus 4.1
+  5) claude-sonnet-4 — Sonnet 4
+
+Usage: /model <id|number|alias>
+```
+
+- `/model` / `/model list` → catalogue numéroté (modèle actif marqué `*`)
+- `/model 1` → sélection par numéro
+- `/model claude-haiku-4-5` → sélection par id (comportement original préservé)
+
+Le catalogue est conscient du provider (déduit de `ctx['provider']` ou du préfixe du modèle actif). Catalogues actuels :
+
+| Provider | Modèles |
+| --- | --- |
+| anthropic | Opus 4.5, Sonnet 4.5, Haiku 4.5, Opus 4.1, Sonnet 4 |
+| openai | GPT-5, GPT-5-mini, GPT-4o, o4-mini |
+| openrouter | anthropic/claude-opus-4-5, anthropic/claude-sonnet-4-5, openai/gpt-5 |
+| ollama | llama3.1, qwen2.5-coder |
+
+### Étendre le catalogue
+
+Override depuis un plugin ou le ServiceProvider de votre app hôte :
+
+```php
+use SuperAgent\Harness\CommandRouter;
+
+$router = app()->make(CommandRouter::class);
+$router->register('model', 'Sélecteur de modèle custom', function (string $args, array $ctx): string {
+    // votre logique — retournez '__MODEL__:<id>' pour définir le modèle
+});
+```
+
+### Toutes les commandes slash intégrées
+
+| Commande | Description |
+| --- | --- |
+| `/help` | liste toutes les commandes slash |
+| `/status` | modèle, tours, nombre de messages, coût |
+| `/tasks` | liste actuelle des tâches TaskCreate |
+| `/compact` | force la compaction du contexte via AutoCompactor |
+| `/continue` | continue une boucle d'outils en attente |
+| `/session list` | sessions sauvegardées récentes |
+| `/session save [id]` | persiste l'état actuel |
+| `/session load <id>` | restaure un état sauvegardé |
+| `/session delete <id>` | supprime un état sauvegardé |
+| `/clear` | reset l'historique de conversation (garde modèle + cwd) |
+| `/model` | affiche / liste / change le modèle (voir ci-dessus) |
+| `/cost` | coût total + moyenne par tour |
+| `/quit` | quitte le REPL |
+
+---
+
+## 71. Intégrer le Harness CLI dans votre application
+
+Le code du CLI est réutilisable ; vous pouvez offrir un chat interactif style `superagent` dans votre propre app Laravel ou daemon PHP.
+
+### Intégration minimale
+
+```php
+use SuperAgent\Agent;
+use SuperAgent\Harness\HarnessLoop;
+use SuperAgent\Harness\CommandRouter;
+use SuperAgent\Harness\StreamEventEmitter;
+use SuperAgent\CLI\Terminal\Renderer;
+use SuperAgent\CLI\AgentFactory;
+
+$factory = new AgentFactory(new Renderer());
+$agent = $factory->createAgent(['provider' => 'anthropic']);
+$loop = $factory->createHarnessLoop($agent, ['rich' => true]);
+
+$input = function (): ?string {
+    echo "> ";
+    $line = fgets(STDIN);
+    return $line === false ? null : rtrim($line, "\r\n");
+};
+
+$output = function (string $text): void {
+    echo $text . PHP_EOL;
+};
+
+$loop->run($input, $output);
+```
+
+### Ajouter une commande slash custom
+
+```php
+$loop->getRouter()->register('deploy', 'Déploie la branche courante', function (string $args, array $ctx) {
+    // $ctx contient : turn_count, total_cost_usd, model, messages, cwd, session_manager, ...
+    return (new \MyCompany\Deployer())->run(trim($args) ?: 'staging');
+});
+```
+
+### Changer de renderer
+
+```php
+// Renderer riche (défaut)
+use SuperAgent\Console\Output\RealTimeCliRenderer;
+use Symfony\Component\Console\Output\ConsoleOutput;
+
+$rich = new RealTimeCliRenderer(
+    output: new ConsoleOutput(),
+    decorated: null,          // auto-détection TTY
+    thinkingMode: 'verbose',  // 'normal' | 'verbose' | 'hidden'
+);
+$rich->attach($loop->getEmitter());
+```
+
+### Agent seul (sans HarnessLoop)
+
+Pour une interface purement callable sans état REPL :
+
+```php
+$agent = (new AgentFactory())->createAgent([
+    'provider' => 'anthropic',
+    'model' => 'claude-opus-4-5',
+]);
+
+$result = $agent->prompt('résume ce diff'); // AgentResult
+echo $result->text();
+echo $result->totalCostUsd;
 ```

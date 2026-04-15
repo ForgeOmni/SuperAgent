@@ -1,6 +1,8 @@
 # SuperAgent 架构 — 依赖关系图
 
-> **版本:** 0.8.0 | **生成日期:** 2026-04-08
+> **版本:** 0.8.6 | **生成日期:** 2026-04-14
+
+> 主 mermaid 依赖图见 [英文版 ARCHITECTURE.md](ARCHITECTURE.md#core-system-dependencies)。中文版保留核心依赖图，仅对新增子系统（CLI / Auth / Foundation / Memory Palace / Coordinator / Middleware）的说明作概述更新。英文版包含完整的 CLI + OAuth 依赖关系。
 
 > **语言**: [English](ARCHITECTURE.md) | [中文](ARCHITECTURE_CN.md) | [Français](ARCHITECTURE_FR.md)
 
@@ -230,23 +232,28 @@ graph TB
     class BSV,GE,PID,PE,PRE security
 ```
 
-## 子系统统计
+## 子系统统计（v0.8.6）
 
-| 分类 | 目录数 | 文件数 | 行数 |
-|------|--------|--------|------|
-| 核心（Agent, QueryEngine, Prompt） | 3 | 12 | ~2,500 |
-| 提供者 | 1 | 10 | ~3,700 |
-| 工具 | 2 | 74 | ~11,300 |
-| 优化 | 2 | 8 | ~2,100 |
-| 性能 | 1 | 8 | ~2,100 |
-| 安全与护栏 | 2 | 33 | ~3,200 |
-| 记忆 | 3 | 14 | ~3,100 |
-| 会话 | 1 | 4 | ~1,600 |
-| 多智能体编排 | 8 | 34 | ~7,300 |
-| 智能 | 6 | 20 | ~3,500 |
-| 流水线 | 2 | 24 | ~3,764 |
-| 基础设施 | 10 | 40 | ~5,000 |
-| **总计** | **91** | **496** | **~81,236** |
+| 分类 | 文件数 | 行数 | 自 v0.8.0 的变化 |
+|------|--------|------|-------------------|
+| 核心（Agent、QueryEngine、Prompt） | 12 | ~2,600 | — |
+| **CLI + Console + Auth（新）** | **17** | **~2,687** | **新增（v0.8.5 + v0.8.6）** |
+| **Foundation（新）** | **2** | **~550** | **新增（v0.8.5 + v0.8.6）** |
+| 提供者（支持 OAuth） | 12 | ~3,800 | +~100（OAuth 路径） |
+| 工具 | 74 | ~11,300 | — |
+| 优化 | 8 | ~2,100 | — |
+| 性能 | 8 | ~2,100 | — |
+| 安全与护栏 | 33 | ~3,200 | — |
+| 记忆（含 **Palace**） | 42 | ~5,400 | **+2,289（Palace v0.8.5）** |
+| 会话 | 4 | ~1,600 | — |
+| 多智能体编排 | 34 | ~7,300 | — |
+| **Coordinator（新）** | **14** | **~2,800** | **新增（v0.8.2）** |
+| Harness | 21 | ~1,800 | — |
+| **Middleware（新）** | **7** | **~900** | **新增（v0.8.1）** |
+| 智能 | 20 | ~3,500 | — |
+| 流水线 | 24 | ~3,764 | — |
+| 基础设施 | 40 | ~5,000 | — |
+| **总计** | **566** | **~93,395** | **+70 文件 / +12,159 行** |
 
 ## 数据流
 
@@ -283,10 +290,15 @@ sequenceDiagram
 
 ## 关键设计决策
 
-1. **双写会话**：文件（向后兼容）+ SQLite（搜索）。SQLite 不可用时优雅降级
-2. **路径感知并行**：写工具按目标路径分类，而非仅按只读标志
-3. **记忆提供者隔离**：外部提供者错误永远不会导致 Agent 崩溃
-4. **凭证轮转**：池在 ProviderRegistry 层集成 — 对所有消费者透明
-5. **Prompt 注入扫描**：集成到 SystemPromptBuilder — 在 `withContextFiles()` 时自动扫描上下文文件
-6. **渐进式技能加载**：两阶段（元数据 → 完整内容）最小化 token 开销
-7. **SecurityCheckChain**：包裹现有 23 项检查验证器，同时支持自定义检查插入
+1. **双部署架构（v0.8.6）**：Laravel 包 + 独立 CLI 二进制共享同一套 `Agent` / `HarnessLoop` / `CommandRouter` / `MemoryProviderManager` / `SessionManager`。差异只在边界（polyfill `config()`/`app()`/`storage_path()` + `Foundation\Application` 最小容器，镜像 Laravel 的 bind/singleton/make API）
+2. **OAuth 凭证导入（v0.8.6）**：`src/Auth/` 读取本地 Claude Code / Codex 已有的 token，注入到 provider 的 Bearer 模式。自动续期；provider 自动注入 Claude Code 身份 system block；legacy 模型 id 静默改写
+3. **Memory Palace 作为外部 provider（v0.8.5）**：通过 `MemoryProviderManager` 作为第二个 provider 接入，与内置 `MEMORY.md` 流程并存。Wings/Halls/Rooms/Drawers + Tunnels + 4 层栈（L0 身份 / L1 关键事实 / L2 房间召回 / L3 深度搜索）。同一 Room 出现在多个 Wing 时自动建立 Tunnel
+4. **协作管道（v0.8.2）**：分阶段多智能体 DAG，拓扑排序，4 种失败策略，8 事件生命周期监听。阶段内智能体通过 `ParallelPhaseExecutor` + `ProcessBackend` / `InProcessBackend` 真并行执行
+5. **中间件洋葱（v0.8.1）**：`MiddlewarePipeline` 按优先级把 rate-limit + retry + cost-tracking + logging + guardrail 中间件组合在每次 provider 调用外围
+6. **双写会话（v0.8.0）**：文件（向后兼容）+ SQLite（搜索）。SQLite 不可用时优雅降级
+7. **路径感知并行（v0.8.0）**：写工具按目标路径分类，而非仅按只读标志
+8. **记忆提供者隔离**：外部提供者错误永远不会导致 Agent 崩溃
+9. **凭证轮转（v0.8.0）+ OAuth Bearer（v0.8.6）**：均在 `ProviderRegistry` 层集成——对所有消费者透明
+10. **Prompt 注入扫描**：集成到 `SystemPromptBuilder` — 在 `withContextFiles()` 时自动扫描上下文文件
+11. **渐进式技能加载**：两阶段（元数据 → 完整内容）最小化 token 开销
+12. **`SecurityCheckChain`**：包裹现有 23 项检查验证器，同时支持自定义检查插入

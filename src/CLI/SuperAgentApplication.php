@@ -19,7 +19,7 @@ use SuperAgent\CLI\Commands\InitCommand;
  */
 class SuperAgentApplication
 {
-    private const VERSION = '0.8.2';
+    private const VERSION = '0.8.6';
     private const NAME = 'SuperAgent';
 
     public function run(): int

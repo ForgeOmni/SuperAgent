@@ -1,9 +1,10 @@
-# SuperAgent Installation Guide (v0.8.5)
+# SuperAgent Installation Guide (v0.8.6)
 
 > **🌍 Language**: [English](INSTALL.md) | [中文](INSTALL_CN.md) | [Français](INSTALL_FR.md)  
 > **📖 Documentation**: [README](README.md) | [README 中文](README_CN.md) | [README Français](README_FR.md)
 
 ## Table of Contents
+- [Standalone CLI Install (v0.8.6+)](#standalone-cli-install-v086)
 - [System Requirements](#system-requirements)
 - [Installation Steps](#installation-steps)
 - [Configuration](#configuration)
@@ -11,6 +12,128 @@
 - [Verification](#verification)
 - [Troubleshooting](#troubleshooting)
 - [Upgrade Guide](#upgrade-guide)
+
+## Standalone CLI Install (v0.8.6+)
+
+As of v0.8.6, SuperAgent ships with a standalone CLI binary — no Laravel project required.
+
+### Install
+
+```bash
+# Option A: Composer global
+composer global require forgeomni/superagent
+
+# Option B: Clone + link
+git clone https://github.com/forgeomni/superagent.git
+cd superagent
+composer install
+# then add bin/ to PATH, or symlink bin/superagent into /usr/local/bin
+
+# Option C: One-liner bootstrap scripts
+curl -sSL https://raw.githubusercontent.com/forgeomni/superagent/main/install.sh | bash
+# Windows PowerShell:
+iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps1 | iex
+```
+
+Verify:
+
+```bash
+superagent --version        # SuperAgent v0.8.6
+superagent --help
+```
+
+### Authenticate
+
+Three options, pick whichever fits your environment:
+
+**1. Reuse an existing Claude Code / Codex login (recommended — no API-key juggling):**
+```bash
+# Requires Claude Code or Codex already installed and logged in locally
+superagent auth login claude-code    # imports ~/.claude/.credentials.json
+superagent auth login codex          # imports ~/.codex/auth.json
+superagent auth status               # verify
+```
+Credentials are stored at `~/.superagent/credentials/{anthropic,openai}.json` with mode `0600`, auto-refreshed 60 s before expiry.
+
+**2. Interactive setup:**
+```bash
+superagent init
+# Prompts for provider (Anthropic / OpenAI / Ollama / OpenRouter),
+# detects existing env-var keys, asks for a key if absent,
+# writes ~/.superagent/config.php (mode 0600).
+```
+
+**3. Plain env var:**
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+# or
+export OPENAI_API_KEY=sk-...
+superagent "your first task"
+```
+
+### First run
+
+```bash
+# One-shot
+superagent "explain this codebase"
+superagent -m claude-opus-4-5 "refactor the auth module"
+superagent -p openai -m gpt-5 "write a unit test for X"
+superagent --json "list TODOs in this repo" | jq .
+
+# Interactive REPL
+superagent
+> /help                                 # show all slash commands
+> /model                                # numbered picker for current provider
+> /model 1                              # switch to model #1
+> /session save my-session              # persist state
+> /compact                              # force context compaction
+> /cost                                 # show spend so far
+> /quit
+```
+
+### CLI flags
+
+| Flag | Description |
+| --- | --- |
+| `-m, --model <model>` | Model name or alias (`opus`, `claude-sonnet-4-5`, `gpt-5`, …) |
+| `-p, --provider <name>` | `anthropic` / `openai` / `ollama` / `openrouter` |
+| `--max-turns <n>` | Hard cap on agent turns (default 50) |
+| `-s, --system-prompt <txt>` | Custom system prompt (appended after the OAuth identity block when on OAuth) |
+| `--project <path>` | Set working directory for the agent |
+| `--json` | Machine-readable JSON output in one-shot mode |
+| `--verbose-thinking` | Show full thinking stream |
+| `--no-thinking` | Hide thinking entirely |
+| `--plain` | Disable ANSI colors / cursor control (pipes, CI logs) |
+| `--no-rich` | Use the legacy minimal renderer |
+
+### OAuth caveats
+
+- **Model constraints:** Claude Code OAuth tokens only authorize current-generation models. Legacy ids like `claude-3-5-sonnet-20241022` return HTTP 429 with an obfuscated `rate_limit_error`. The CLI silently rewrites them to `claude-opus-4-5`
+- **System prompt requirement:** Anthropic's OAuth endpoint rejects requests whose first system block isn't the literal Claude Code identity string. The CLI injects it automatically; your `-s "…"` content is preserved as a second block right after
+- **Token source:** the CLI reads Claude Code / Codex's locally-stored OAuth tokens — it does **not** run its own OAuth flow. Anthropic / OpenAI don't publish third-party OAuth `client_id`s. Token refresh uses the client_ids those CLIs ship with. ToS risk is yours
+
+### File layout
+
+```
+~/.superagent/
+├── config.php                   # from `superagent init` (mode 0600)
+├── credentials/                 # from `superagent auth login …`
+│   ├── anthropic.json           # OAuth / api_key for Anthropic (mode 0600)
+│   └── openai.json              # OAuth / api_key for OpenAI   (mode 0600)
+└── storage/
+    ├── sessions/                # /session save state
+    └── palace/                  # Memory Palace (if enabled)
+```
+
+### Uninstall
+
+```bash
+superagent auth logout claude-code
+superagent auth logout codex
+rm -rf ~/.superagent
+composer global remove forgeomni/superagent
+```
+
 
 ## System Requirements
 

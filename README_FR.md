@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.5-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.6-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,39 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.8.6 — SuperAgent CLI : commande `superagent` (standalone + Laravel, connexion OAuth, REPL style Claude Code)
+SuperAgent n'est plus limité à Laravel. Le binaire **`superagent`** (`bin/superagent` / `bin/superagent.bat`) fournit un REPL complet style Claude Code, un exécuteur de tâches one-shot, la gestion de sessions et l'authentification OAuth. Le CLI détecte automatiquement les projets Laravel et utilise le `config()` / conteneur de l'hôte ; sinon il démarre un conteneur minimal via `Foundation\Application` — sans une seule ligne de PHP, vous avez accès à tout le SDK (Memory Palace, sous-agents, Guardrails, AutoCompaction, TaskRouter, outils MCP, Skills).
+
+- **REPL interactif** (`src/CLI/Commands/ChatCommand.php`, `src/Harness/HarnessLoop.php`) — rendu streaming style Claude Code avec deltas texte en direct, aperçus de thinking, cartes d'appel d'outils, compteurs de coût. Commandes slash : `/help`, `/status`, `/tasks`, `/compact`, `/continue`, `/session list|save|load|delete`, `/clear`, `/model`, `/cost`, `/quit`
+- **Mode one-shot** — `superagent "répare ce bug"` exécute une seule tâche et sort. `--json` émet `{content, cost, turns, usage}` exploitables par script / CI
+- **Assistant de première utilisation** — `superagent init` guide le choix du provider (Anthropic / OpenAI / Ollama / OpenRouter), capture la clé API depuis l'env ou une saisie secrète, choisit le modèle par défaut, et écrit `~/.superagent/config.php` (`0600`)
+- **Connexion OAuth en important vos tokens Claude Code / Codex** — `superagent auth login claude-code` lit `~/.claude/.credentials.json` ; `superagent auth login codex` lit `~/.codex/auth.json`. Pas de deuxième connexion, pas de copier-coller de clé API. Tokens stockés atomiquement dans `~/.superagent/credentials/{anthropic,openai}.json` (mode `0600`), rafraîchis 60 s avant expiration
+- **Providers conscients de l'OAuth** (`src/Providers/AnthropicProvider.php`, `OpenAIProvider.php`) — mode Bearer + `anthropic-beta: oauth-2025-04-20` ; ajoute automatiquement le bloc système requis `"You are Claude Code, Anthropic's official CLI for Claude."` ; réécrit les ids legacy (`claude-3*`) vers `claude-opus-4-5` puisque les tokens OAuth n'autorisent que les modèles actuels. Côté OpenAI : header `chatgpt-account-id` pour le trafic d'abonnement ChatGPT Codex
+- **Sélecteur `/model` interactif** (`src/Harness/CommandRouter.php`) — catalogue numéroté conscient du provider (Opus/Sonnet/Haiku 4.5, famille GPT-5, OpenRouter, Ollama), modèle actif marqué d'un `*`. `/model 2` par numéro, `/model <id>` par identifiant
+- **Rendu riche** (`src/Console/Output/RealTimeCliRenderer.php`) — drapeaux `--verbose-thinking` / `--no-thinking` / `--plain` / `--no-rich`. `--plain` retire les ANSI, idéal pour pipes et logs CI
+- **Intégration conteneur** — `Foundation\Application::bootstrap()` lie notre `ConfigRepository` au singleton `Container::getInstance()` de Laravel en mode standalone, pour que les 14 classes Optimization / Performance basées sur `config()` fonctionnent silencieusement hors Laravel
+- **Compatible Windows** — `CredentialStore` retombe sur `USERPROFILE` si `HOME` est vide ; lanceur batch `bin/superagent.bat`
+
+**Première session type :**
+```bash
+composer global require forgeomni/superagent      # ou clone + composer install
+superagent auth login claude-code                  # réutilise la connexion Claude Code existante
+superagent "explique ce codebase"                  # one-shot, sans clé API
+
+superagent                                         # REPL interactif
+> /model                                           # liste les modèles disponibles
+> /model 1                                         # bascule sur Opus 4.5
+> /session save my-session                         # persiste l'état
+> /quit
+```
+
+**Sans installation locale de Claude Code :**
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+superagent init              # configuration interactive → ~/.superagent/config.php
+superagent "review ce PR"
+```
 
 ### 🆕 v0.8.5 — Memory Palace : Mémoire Hiérarchique Inspirée de MemPalace (activé par défaut, 6 nouveaux tests)
 - **Memory Palace** (`src/Memory/Palace/`) — Module de mémoire hiérarchique inspiré de MemPalace (96,6% LongMemEval). Wings (personnes / projets / agents) → Halls (5 corridors de types de mémoire) → Rooms (sujets) → Drawers (contenu verbatim brut). Des Tunnels automatiques relient la même Room entre différents Wings. Se branche dans le `MemoryProviderManager` existant comme provider externe sans remplacer le flux `MEMORY.md` intégré
