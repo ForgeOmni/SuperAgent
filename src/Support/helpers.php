@@ -5,12 +5,19 @@ declare(strict_types=1);
 /**
  * SuperAgent standalone polyfills for collect() and now().
  *
- * These functions are only defined when Laravel's helpers are NOT present.
- * In a Laravel application, illuminate/support defines these first via
- * Composer autoload, so our function_exists() checks skip them.
+ * Composer's `files` autoload load order across packages is not guaranteed.
+ * We can't rely on `function_exists()` alone — if our helpers load before
+ * illuminate/support's helpers, our collect() wins and Laravel's
+ * ReflectsClosures breaks at runtime (mapWithKeys not defined).
+ *
+ * Using class_exists() against Illuminate's bundled classes is reliable
+ * because PSR-4 autoload resolves those immediately on first use.
  */
 
-if (! function_exists('collect')) {
+// class_exists() with autoloading enabled — if illuminate/support is
+// installed, this triggers its autoload and returns true; we skip
+// declaring our collect() so Laravel's helpers.php can declare it.
+if (! class_exists(\Illuminate\Support\Collection::class) && ! function_exists('collect')) {
     /**
      * Create a new Collection instance.
      *
@@ -23,14 +30,12 @@ if (! function_exists('collect')) {
     }
 }
 
-if (! function_exists('now')) {
+if (! class_exists(\Illuminate\Support\Carbon::class) && ! function_exists('now')) {
     /**
      * Create a new DateTime instance for "now".
      *
      * Returns SuperAgent\Support\DateTime which provides toIso8601String()
      * for Carbon compatibility.
-     *
-     * @return \SuperAgent\Support\DateTime
      */
     function now(?\DateTimeZone $tz = null): \SuperAgent\Support\DateTime
     {
