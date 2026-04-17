@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Smoke;
+namespace SuperAgent\Tests\Smoke;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Agent;

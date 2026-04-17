@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit;
+namespace SuperAgent\Tests\Unit;
 
 use Carbon\Carbon;
 use PHPUnit\Framework\TestCase;

@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit;
+namespace SuperAgent\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Swarm\BackendRegistry;

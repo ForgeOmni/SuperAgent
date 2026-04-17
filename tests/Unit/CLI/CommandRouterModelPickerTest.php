@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\CLI;
+namespace SuperAgent\Tests\Unit\CLI;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Harness\CommandRouter;

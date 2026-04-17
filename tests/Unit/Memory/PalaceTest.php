@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Memory;
+namespace SuperAgent\Tests\Unit\Memory;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Memory\Palace\Drawer;

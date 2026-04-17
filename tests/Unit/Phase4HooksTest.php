@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit;
+namespace SuperAgent\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Hooks\AsyncHookManager;

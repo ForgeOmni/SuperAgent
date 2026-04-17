@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit;
+namespace SuperAgent\Tests\Unit;
 
 use Generator;
 use PHPUnit\Framework\TestCase;

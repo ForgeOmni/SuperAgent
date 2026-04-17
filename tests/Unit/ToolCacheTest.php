@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit;
+namespace SuperAgent\Tests\Unit;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\ToolCache\ToolCacheManager;
@@ -170,7 +170,21 @@ class ToolCacheTest extends TestCase
         
         // Clean up
         $cache->clear();
-        rmdir($tempDir);
+        $this->removeDirectoryTree($tempDir);
+    }
+
+    private function removeDirectoryTree(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        foreach (new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        ) as $entry) {
+            $entry->isDir() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+        }
+        rmdir($dir);
     }
     
     /**

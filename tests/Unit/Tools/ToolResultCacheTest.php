@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Tools;
+namespace SuperAgent\Tests\Unit\Tools;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Tools\ToolResult;

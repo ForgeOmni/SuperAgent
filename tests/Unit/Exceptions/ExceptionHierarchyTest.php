@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Exceptions;
+namespace SuperAgent\Tests\Unit\Exceptions;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Exceptions\AgentException;

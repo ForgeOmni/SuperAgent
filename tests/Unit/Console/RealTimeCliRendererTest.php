@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Console;
+namespace SuperAgent\Tests\Unit\Console;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Console\Output\RealTimeCliRenderer;

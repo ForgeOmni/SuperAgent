@@ -14,7 +14,7 @@ use SuperAgent\QueryEngine;
 use SuperAgent\Tools\ClosureTool;
 use SuperAgent\Tools\ToolResult;
 
-class ≈QueryEngineTest extends TestCase
+class QueryEngineTest extends TestCase
 {
     private function makeMockProvider(array $responses): LLMProvider
     {

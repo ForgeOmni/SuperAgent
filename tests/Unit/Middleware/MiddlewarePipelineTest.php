@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Tests\Unit\Middleware;
+namespace SuperAgent\Tests\Unit\Middleware;
 
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Messages\AssistantMessage;

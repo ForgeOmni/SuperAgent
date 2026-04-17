@@ -1,6 +1,6 @@
 <?php
 
-namespace Tests\Unit;
+namespace SuperAgent\Tests\Unit;
 
 use Generator;
 use PHPUnit\Framework\TestCase;
