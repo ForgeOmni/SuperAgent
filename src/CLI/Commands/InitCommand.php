@@ -60,6 +60,7 @@ class InitCommand
         $renderer->line('  2) openai     (GPT-5.4)');
         $renderer->line('  3) ollama     (Local models)');
         $renderer->line('  4) openrouter (Multi-model)');
+        $renderer->line('  5) gemini     (Google Gemini)');
         $renderer->newLine();
 
         $choice = $renderer->ask('Provider [1]: ') ?: '1';
@@ -67,6 +68,7 @@ class InitCommand
             '2' => 'openai',
             '3' => 'ollama',
             '4' => 'openrouter',
+            '5' => 'gemini',
             default => 'anthropic',
         };
         $config['default_provider'] = $provider;
@@ -76,6 +78,7 @@ class InitCommand
             $envVar = match ($provider) {
                 'openai' => 'OPENAI_API_KEY',
                 'openrouter' => 'OPENROUTER_API_KEY',
+                'gemini' => 'GEMINI_API_KEY',
                 default => 'ANTHROPIC_API_KEY',
             };
 
@@ -108,6 +111,7 @@ class InitCommand
             'openai' => 'gpt-4o',
             'ollama' => 'llama3.1',
             'openrouter' => 'anthropic/claude-sonnet-4-6',
+            'gemini' => 'gemini-2.0-flash',
             default => 'claude-sonnet-4-6',
         };
         $model = $renderer->ask("Default model [{$defaultModel}]: ") ?: $defaultModel;

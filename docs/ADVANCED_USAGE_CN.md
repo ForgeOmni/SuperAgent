@@ -6924,3 +6924,159 @@ $result = $agent->prompt('总结这个 diff'); // AgentResult
 echo $result->text();
 echo $result->totalCostUsd;
 ```
+
+---
+
+## 32. Google Gemini 原生 Provider (v0.8.7)
+
+> `GeminiProvider` 是 Google Generative Language API 的一等原生客户端，直接讲 Gemini 的协议，不经 OpenRouter 或代理，且完全兼容 MCP / Skills / 子 Agent——因为它实现的是与其他 Provider 相同的 `LLMProvider` 契约。
+
+### 创建 Gemini Agent
+
+```php
+use SuperAgent\Providers\ProviderRegistry;
+
+// 从环境（先读 GEMINI_API_KEY，再 GOOGLE_API_KEY）
+$gemini = ProviderRegistry::createFromEnv('gemini');
+
+// 显式配置
+$gemini = ProviderRegistry::create('gemini', [
+    'api_key' => 'AIzaSy…',
+    'model' => 'gemini-2.5-flash',
+    'max_tokens' => 8192,
+]);
+
+$gemini->setModel('gemini-1.5-pro');
+```
+
+### CLI
+
+```bash
+superagent -p gemini -m gemini-2.5-flash "总结这份 README"
+superagent auth login gemini        # 从 @google/gemini-cli 或环境变量导入
+superagent init                     # 选项 5) gemini
+/model list                         # 当 provider 为 gemini 时显示 Gemini 目录
+```
+
+### 协议转换（`formatMessages` / `formatTools` 做的事）
+
+Gemini 在三个方向与 OpenAI / Anthropic 不同，`GeminiProvider` 透明处理：
+
+| 内部概念                          | Gemini 协议格式                                                    |
+|-----------------------------------|--------------------------------------------------------------------|
+| `assistant` 消息                  | `role: "model"`                                                    |
+| 文本块                            | `parts[].text`                                                     |
+| `tool_use` 块                     | `parts[].functionCall { name, args }`                              |
+| `ToolResultMessage`               | `role: "user"` + `parts[].functionResponse { name, response }`     |
+| 系统提示                          | 顶层 `systemInstruction.parts[]`（不进 `contents[]`）              |
+| 工具声明                          | `tools[0].functionDeclarations[]`，OpenAPI-3.0 子集                |
+
+三个关键细节：
+
+1. **`functionResponse.name` 必填**，但 `tool_result` 块只存 `tool_use_id`。Provider 扫描历史 assistant 消息建 `toolUseId → toolName` 映射。
+2. **无原生 tool_call ID** — Gemini 的 `functionCall` 不带 id。`parseSSEStream()` 合成 `gemini_<hex>_<index>`，MCP / Skills / Agent 循环中的 tool_use → tool_result 对应关系得以维持。
+3. **Schema 清洗** — `formatTools()` 剥离 `$schema`、`additionalProperties`、`$ref`、`examples`、`default`、`pattern`（不在 Gemini 子集里），并把空 `properties` 强制改为字面量对象 `{}`——Gemini 拒收 `[]`。
+
+### 计费 / 监控
+
+动态 `ModelCatalog`（见第 33 节）内置全部 Gemini 1.5 / 2.x 定价。`CostCalculator::calculate()` 优先读目录，成本追踪 / NDJSON 日志 / 遥测 / `/cost` 开箱即用。
+
+### 已知限制
+
+- **OAuth 刷新未自动化** — `gemini auth login gemini` 不会自动刷新过期 token；Google token 端点需要 `@google/gemini-cli` 的发版级凭证。token 过期时导入器提示「运行 `gemini login` 刷新后再导入」。
+- **结构化输出** — Gemini 的 `response_schema` 尚未接到 `options['response_format']`；需要强制 JSON 时用 prompt 级指令，或改用 Anthropic / OpenAI。
+
+---
+
+## 33. 动态模型目录 ModelCatalog (v0.8.7)
+
+> `ModelCatalog` 是 SuperAgent 关于模型元数据与定价的单一数据源。三层来源合并，模型列表与价格无需发包即可更新——解决「AI 变化太快」的问题。
+
+### 三层来源（后者覆盖前者）
+
+| 层 | 来源                                          | 可写 | 用途                                               |
+|----|-----------------------------------------------|------|----------------------------------------------------|
+| 1  | `resources/models.json`（包内基线）           | 否   | 随包发布的不可变基线                               |
+| 2  | `~/.superagent/models.json`（用户覆盖）       | 是   | `superagent models update` 写入                    |
+| 3  | `ModelCatalog::register()` / `loadFromFile()` | 是   | 运行时覆盖（最高优先）                             |
+
+### 谁在消费目录
+
+- **`CostCalculator::resolve($model)`** — 先查目录，再回退静态表。
+- **`ModelResolver::resolve($alias)`** — 别名解析接入目录的 `family` / `date` / `aliases`。
+- **`CommandRouter /model` 选择器** — 列表来源于 `ModelCatalog::modelsFor($provider)`。
+
+### CLI
+
+```bash
+superagent models list                          # 合并目录，每 1M token 价格
+superagent models list --provider gemini
+superagent models update                        # 从 $SUPERAGENT_MODELS_URL 拉取
+superagent models update --url https://…        # 显式 URL
+superagent models status                        # 源与上次更新时间
+superagent models reset                         # 删除覆盖，回退基线
+```
+
+### 环境变量
+
+```env
+SUPERAGENT_MODELS_URL=https://your-cdn/superagent-models.json
+SUPERAGENT_MODELS_AUTO_UPDATE=1   # 启动时 7 天陈旧自动刷新（可选）
+```
+
+自动刷新静默失败：网络超时或返回非法目录时，CLI 使用已缓存数据继续。每个进程至多一次网络请求。
+
+### JSON Schema
+
+```json
+{
+  "_meta": { "schema_version": 1, "updated": "2026-04-19" },
+  "providers": {
+    "anthropic": {
+      "env": "ANTHROPIC_API_KEY",
+      "models": [
+        {
+          "id": "claude-opus-4-7",
+          "family": "opus",
+          "date": "20260301",
+          "input": 15.0,
+          "output": 75.0,
+          "aliases": ["opus", "claude-opus"],
+          "description": "Opus 4.7 — 最强推理"
+        }
+      ]
+    }
+  }
+}
+```
+
+- `input` / `output` — 每百万 token 的美元价格。
+- `family` + `date` — 一个 family 里挑 `date` 最新的作为别名目标。
+- `aliases[]` — 大小写不敏感。
+
+### 编程 API
+
+```php
+use SuperAgent\Providers\ModelCatalog;
+
+ModelCatalog::pricing('claude-opus-4-7');
+ModelCatalog::modelsFor('gemini');
+ModelCatalog::resolveAlias('opus');
+
+ModelCatalog::register('my-custom-model', [
+    'provider' => 'openrouter',
+    'input' => 0.5,
+    'output' => 1.5,
+]);
+
+ModelCatalog::loadFromFile('/path/to/models.json');
+ModelCatalog::refreshFromRemote();
+ModelCatalog::isStale(7 * 86400);
+ModelCatalog::clearOverrides();
+ModelCatalog::invalidate();
+```
+
+### 自建目录托管
+
+把 `SUPERAGENT_MODELS_URL` 指向任意返回同结构 JSON 的 HTTPS 端点（CDN / 内部网关 / GitHub raw / S3）。企业内部用一个每晚跑的 cron 从内部定价库生成 JSON，所有 SuperAgent 实例都能跟上最新价格，无需发包。
+

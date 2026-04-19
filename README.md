@@ -250,11 +250,17 @@ superagent "review this PR"
 - **Token Budget Control** — Dynamic budget management, smart cost control
 
 ### 🌍 Multi-Provider Support
-- **Claude (Anthropic)** — Latest Claude 4.6, including Opus, Sonnet and Haiku variants
-- **OpenAI** — GPT-5.4, GPT-5, GPT-4 Turbo and legacy models
+- **Claude (Anthropic)** — Latest Claude 4.7 Opus / Sonnet, 4.5 Haiku (and all 4.6 / 4.5 / 4 variants)
+- **OpenAI** — GPT-5 / GPT-5-mini / GPT-5-nano, GPT-4o, o4-mini, and legacy models
+- **Google Gemini (native)** — `GeminiProvider` hits the Generative Language API directly with streaming SSE, function calling, and full MCP / Skills / sub-agent support. `superagent -p gemini -m gemini-2.5-flash "…"`
 - **AWS Bedrock** — Claude via AWS, with the latest models
 - **Ollama** — Local models including Llama 3, Mistral, and others
 - **OpenRouter** — Unified API to 100+ models
+
+### 🔄 Dynamic model catalog (v0.8.7)
+- **`ModelCatalog`** — one JSON (`resources/models.json`) drives `CostCalculator` pricing, `ModelResolver` aliases, and the `/model` picker. Override at `~/.superagent/models.json` or fetch from `SUPERAGENT_MODELS_URL`
+- **CLI**: `superagent models list | update | status | reset` to refresh model lists + pricing without a package release
+- **Opt-in auto-refresh** with `SUPERAGENT_MODELS_AUTO_UPDATE=1` (7-day staleness check at CLI startup)
 
 ## 📦 Installation
 
@@ -289,7 +295,12 @@ ANTHROPIC_API_KEY=your-api-key
 
 # Optional providers
 OPENAI_API_KEY=your-openai-key
+GEMINI_API_KEY=your-gemini-key   # or GOOGLE_API_KEY
 AWS_BEDROCK_REGION=us-east-1
+
+# Model catalog auto-update (opt-in)
+SUPERAGENT_MODELS_URL=https://your-cdn/models.json
+SUPERAGENT_MODELS_AUTO_UPDATE=1
 
 # Multi-agent features
 SUPERAGENT_WEBSOCKET_ENABLED=true

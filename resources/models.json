@@ -1,0 +1,142 @@
+{
+  "_meta": {
+    "schema_version": 1,
+    "updated": "2026-04-19",
+    "note": "Source of truth for model catalog + pricing. Per-million-token USD prices. Override at runtime via SUPERAGENT_MODELS_FILE env var or ModelCatalog::loadFromFile(). Each entry may set `family` (for alias resolution), `aliases`, `date` (YYYYMMDD; newest wins within a family), `input`/`output` pricing, and `description`."
+  },
+
+  "providers": {
+
+    "anthropic": {
+      "env": "ANTHROPIC_API_KEY",
+      "models": [
+        {"id": "claude-opus-4-7",          "family": "opus",   "date": "20260301", "input": 15.0,  "output": 75.0,  "aliases": ["opus", "claude-opus", "claude-opus-4", "claude-opus-4-7"], "description": "Opus 4.7 — top reasoning"},
+        {"id": "claude-opus-4-6-20250514", "family": "opus",   "date": "20250514", "input": 15.0,  "output": 75.0,  "description": "Opus 4.6"},
+        {"id": "claude-opus-4-5",          "family": "opus",   "date": "20251015", "input": 15.0,  "output": 75.0,  "description": "Opus 4.5"},
+        {"id": "claude-opus-4-1",          "family": "opus",   "date": "20250801", "input": 15.0,  "output": 75.0,  "description": "Opus 4.1"},
+        {"id": "claude-opus-4-20250514",   "family": "opus",   "date": "20250514", "input": 15.0,  "output": 75.0,  "description": "Opus 4"},
+
+        {"id": "claude-sonnet-4-7",          "family": "sonnet", "date": "20260301", "input": 3.0,   "output": 15.0,  "aliases": ["sonnet", "claude-sonnet", "claude-sonnet-4", "claude-sonnet-4-7"], "description": "Sonnet 4.7 — balanced"},
+        {"id": "claude-sonnet-4-6",          "family": "sonnet", "date": "20260201", "input": 3.0,   "output": 15.0,  "description": "Sonnet 4.6"},
+        {"id": "claude-sonnet-4-5",          "family": "sonnet", "date": "20251001", "input": 3.0,   "output": 15.0,  "description": "Sonnet 4.5"},
+        {"id": "claude-sonnet-4-20250514",   "family": "sonnet", "date": "20250514", "input": 3.0,   "output": 15.0,  "description": "Sonnet 4"},
+        {"id": "claude-3-5-sonnet-20241022", "family": "sonnet", "date": "20241022", "input": 3.0,   "output": 15.0,  "description": "Sonnet 3.5 (legacy)"},
+
+        {"id": "claude-haiku-4-5-20251001", "family": "haiku", "date": "20251001", "input": 0.80,  "output": 4.0,   "aliases": ["haiku", "claude-haiku", "claude-haiku-4", "claude-haiku-4-5"], "description": "Haiku 4.5 — fast + cheap"},
+        {"id": "claude-haiku-3-5-20241022", "family": "haiku", "date": "20241022", "input": 0.80,  "output": 4.0,   "description": "Haiku 3.5 (legacy)"},
+        {"id": "claude-3-haiku-20240307",   "family": "haiku", "date": "20240307", "input": 0.25,  "output": 1.25,  "description": "Haiku 3 (legacy)"}
+      ]
+    },
+
+    "openai": {
+      "env": "OPENAI_API_KEY",
+      "models": [
+        {"id": "gpt-5",         "family": "gpt-5",      "date": "20251101", "input": 1.25, "output": 10.0, "aliases": ["gpt5"], "description": "GPT-5 — flagship"},
+        {"id": "gpt-5-mini",    "family": "gpt-5-mini", "date": "20251101", "input": 0.25, "output": 2.0,  "aliases": ["gpt5-mini"], "description": "GPT-5 mini"},
+        {"id": "gpt-5-nano",    "family": "gpt-5-nano", "date": "20251101", "input": 0.05, "output": 0.40, "description": "GPT-5 nano"},
+
+        {"id": "gpt-4o",            "family": "gpt-4o",      "date": "20241120", "input": 2.50, "output": 10.0, "aliases": ["gpt4", "gpt4o"], "description": "GPT-4o"},
+        {"id": "gpt-4o-2024-11-20", "family": "gpt-4o",      "date": "20241120", "input": 2.50, "output": 10.0},
+        {"id": "gpt-4o-mini",       "family": "gpt-4o-mini", "date": "20240718", "input": 0.15, "output": 0.60, "aliases": ["gpt4o-mini", "gpt4-mini"], "description": "GPT-4o mini"},
+
+        {"id": "o4-mini",    "family": "o4-mini", "date": "20250601", "input": 1.10, "output": 4.40, "description": "o4-mini — reasoning"},
+        {"id": "o3-mini",    "family": "o3-mini", "date": "20250131", "input": 1.10, "output": 4.40, "description": "o3-mini"},
+        {"id": "o1-preview", "family": "o1",      "date": "20240912", "input": 15.0, "output": 60.0, "description": "o1-preview (legacy)"},
+        {"id": "o1-mini",    "family": "o1-mini", "date": "20240912", "input": 3.0,  "output": 12.0, "description": "o1-mini (legacy)"},
+
+        {"id": "gpt-4-turbo",    "family": "gpt-4-turbo", "date": "20240409", "input": 10.0, "output": 30.0},
+        {"id": "gpt-4",          "family": "gpt-4",       "date": "20230314", "input": 30.0, "output": 60.0},
+        {"id": "gpt-3.5-turbo",  "family": "gpt-3.5",     "date": "20230613", "input": 0.50, "output": 1.50, "aliases": ["gpt35", "gpt3.5"]}
+      ]
+    },
+
+    "gemini": {
+      "env": "GEMINI_API_KEY",
+      "models": [
+        {"id": "gemini-2.5-pro",              "family": "gemini-pro",   "date": "20250325", "input": 1.25,   "output": 10.0,  "aliases": ["gemini-pro", "gemini-2.5"], "description": "Gemini 2.5 Pro — long-context reasoning"},
+        {"id": "gemini-2.5-flash",            "family": "gemini-flash", "date": "20250325", "input": 0.30,   "output": 2.50,  "description": "Gemini 2.5 Flash"},
+
+        {"id": "gemini-2.0-flash",             "family": "gemini-flash", "date": "20250205", "input": 0.10,   "output": 0.40,  "aliases": ["gemini", "gemini-2", "gemini-2-flash"], "description": "Gemini 2.0 Flash — fast + cheap"},
+        {"id": "gemini-2.0-flash-lite",        "family": "gemini-flash", "date": "20250205", "input": 0.075,  "output": 0.30,  "description": "Gemini 2.0 Flash Lite"},
+        {"id": "gemini-2.0-flash-thinking-exp","family": "gemini-flash", "date": "20250205", "input": 0.10,   "output": 0.40,  "description": "Gemini 2.0 Flash Thinking (experimental)"},
+
+        {"id": "gemini-1.5-pro",     "family": "gemini-pro",   "date": "20240924", "input": 1.25,  "output": 5.0,  "description": "Gemini 1.5 Pro"},
+        {"id": "gemini-1.5-flash",   "family": "gemini-flash", "date": "20240924", "input": 0.075, "output": 0.30, "description": "Gemini 1.5 Flash"},
+        {"id": "gemini-1.5-flash-8b","family": "gemini-flash", "date": "20241003", "input": 0.0375,"output": 0.15, "description": "Gemini 1.5 Flash 8B"}
+      ]
+    },
+
+    "openrouter": {
+      "env": "OPENROUTER_API_KEY",
+      "models": [
+        {"id": "anthropic/claude-opus-4-7",     "input": 15.0,  "output": 75.0},
+        {"id": "anthropic/claude-sonnet-4-7",   "input": 3.0,   "output": 15.0},
+        {"id": "anthropic/claude-haiku-4-5",    "input": 0.80,  "output": 4.0},
+        {"id": "anthropic/claude-3-5-sonnet",   "input": 3.0,   "output": 15.0},
+        {"id": "anthropic/claude-3-opus",       "input": 15.0,  "output": 75.0},
+        {"id": "openai/gpt-5",                  "input": 1.25,  "output": 10.0},
+        {"id": "openai/gpt-4o",                 "input": 2.50,  "output": 10.0},
+        {"id": "google/gemini-2.5-pro",         "input": 1.25,  "output": 10.0},
+        {"id": "google/gemini-2.0-flash",       "input": 0.10,  "output": 0.40},
+        {"id": "google/gemini-pro",             "input": 0.50,  "output": 1.50},
+        {"id": "google/gemini-pro-1.5",         "input": 3.50,  "output": 10.50},
+        {"id": "meta-llama/llama-3-70b-instruct", "input": 0.80, "output": 0.80},
+        {"id": "meta-llama/llama-3-8b-instruct",  "input": 0.10, "output": 0.10},
+        {"id": "mistralai/mistral-large",       "input": 8.0,   "output": 24.0},
+        {"id": "mistralai/mixtral-8x7b-instruct","input": 0.60, "output": 0.60}
+      ]
+    },
+
+    "bedrock": {
+      "env": "AWS_ACCESS_KEY_ID",
+      "models": [
+        {"id": "anthropic.claude-opus-4-7-v1:0",                    "input": 15.0, "output": 75.0},
+        {"id": "anthropic.claude-sonnet-4-7-v1:0",                  "input": 3.0,  "output": 15.0},
+        {"id": "anthropic.claude-haiku-4-5-20251001-v1:0",          "input": 0.80, "output": 4.0},
+        {"id": "anthropic.claude-sonnet-4-6-20250627-v1:0",         "input": 3.0,  "output": 15.0},
+        {"id": "anthropic.claude-opus-4-6-20250514-v1:0",           "input": 15.0, "output": 75.0},
+        {"id": "anthropic.claude-sonnet-4-20250514-v1:0",           "input": 3.0,  "output": 15.0},
+        {"id": "anthropic.claude-opus-4-20250514-v1:0",             "input": 15.0, "output": 75.0},
+        {"id": "anthropic.claude-3-5-sonnet-20241022-v2:0",         "input": 3.0,  "output": 15.0},
+        {"id": "anthropic.claude-3-sonnet-20240229-v1:0",           "input": 3.0,  "output": 15.0},
+        {"id": "anthropic.claude-3-haiku-20240307-v1:0",            "input": 0.25, "output": 1.25},
+        {"id": "anthropic.claude-3-opus-20240229-v1:0",             "input": 15.0, "output": 75.0},
+        {"id": "amazon.titan-text-express-v1",                      "input": 0.13, "output": 0.17},
+        {"id": "amazon.titan-text-lite-v1",                         "input": 0.075,"output": 0.10},
+        {"id": "meta.llama3-1-70b-instruct-v1:0",                   "input": 0.99, "output": 0.99},
+        {"id": "meta.llama3-1-8b-instruct-v1:0",                    "input": 0.22, "output": 0.22},
+        {"id": "mistral.mistral-7b-instruct-v0:2",                  "input": 0.15, "output": 0.20},
+        {"id": "mistral.mixtral-8x7b-instruct-v0:1",                "input": 0.45, "output": 0.70}
+      ]
+    },
+
+    "ollama": {
+      "env": null,
+      "models": [
+        {"id": "llama3.1",           "input": 0.0, "output": 0.0},
+        {"id": "llama3",             "input": 0.0, "output": 0.0},
+        {"id": "llama3:8b",          "input": 0.0, "output": 0.0},
+        {"id": "llama3:70b",         "input": 0.0, "output": 0.0},
+        {"id": "llama2",             "input": 0.0, "output": 0.0},
+        {"id": "llama2:7b",          "input": 0.0, "output": 0.0},
+        {"id": "llama2:13b",         "input": 0.0, "output": 0.0},
+        {"id": "llama2:70b",         "input": 0.0, "output": 0.0},
+        {"id": "qwen2.5-coder",      "input": 0.0, "output": 0.0},
+        {"id": "qwen",               "input": 0.0, "output": 0.0},
+        {"id": "mistral",            "input": 0.0, "output": 0.0},
+        {"id": "mixtral",            "input": 0.0, "output": 0.0},
+        {"id": "codellama",          "input": 0.0, "output": 0.0},
+        {"id": "deepseek-coder",     "input": 0.0, "output": 0.0},
+        {"id": "phi",                "input": 0.0, "output": 0.0},
+        {"id": "orca-mini",          "input": 0.0, "output": 0.0},
+        {"id": "vicuna",             "input": 0.0, "output": 0.0},
+        {"id": "neural-chat",        "input": 0.0, "output": 0.0},
+        {"id": "starling-lm",        "input": 0.0, "output": 0.0},
+        {"id": "nous-hermes2",       "input": 0.0, "output": 0.0},
+        {"id": "openhermes",         "input": 0.0, "output": 0.0},
+        {"id": "zephyr",             "input": 0.0, "output": 0.0},
+        {"id": "yi",                 "input": 0.0, "output": 0.0}
+      ]
+    }
+  }
+}

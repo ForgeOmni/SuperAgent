@@ -7,6 +7,7 @@ namespace SuperAgent\CLI\Commands;
 use SuperAgent\Auth\ClaudeCodeCredentials;
 use SuperAgent\Auth\CodexCredentials;
 use SuperAgent\Auth\CredentialStore;
+use SuperAgent\Auth\GeminiCliCredentials;
 use SuperAgent\CLI\Terminal\Renderer;
 
 /**
@@ -46,6 +47,7 @@ class AuthCommand
         return match ($provider) {
             'claude', 'claude-code', 'anthropic' => $this->loginClaudeCode(),
             'codex', 'openai' => $this->loginCodex(),
+            'gemini', 'gemini-cli', 'google' => $this->loginGeminiCli(),
             '' => $this->usage(),
             default => $this->usage("Unknown provider: {$provider}"),
         };
@@ -147,6 +149,48 @@ class AuthCommand
         return 0;
     }
 
+    private function loginGeminiCli(): int
+    {
+        $r = $this->renderer;
+        $reader = GeminiCliCredentials::default();
+
+        if (! $reader->exists()) {
+            $r->error("Gemini CLI credentials not found at: {$reader->path()}");
+            $r->hint('Install @google/gemini-cli and run `gemini login`,');
+            $r->hint('  or export GEMINI_API_KEY / GOOGLE_API_KEY in your shell.');
+            return 1;
+        }
+
+        $creds = $reader->read();
+        if ($creds === null) {
+            $r->error("Could not parse Gemini credentials at: {$reader->path()}");
+            return 1;
+        }
+
+        if ($creds['mode'] === 'oauth' && $reader->isExpired($creds)) {
+            $r->warning('Gemini OAuth token expired.');
+            $r->hint('Run `gemini login` to refresh, then re-run this import.');
+        }
+
+        if ($creds['mode'] === 'oauth') {
+            $this->store->store('gemini', 'access_token', (string) $creds['access_token']);
+            if (! empty($creds['refresh_token'])) {
+                $this->store->store('gemini', 'refresh_token', (string) $creds['refresh_token']);
+            }
+            if (! empty($creds['expires_at'])) {
+                $this->store->store('gemini', 'expires_at', (string) $creds['expires_at']);
+            }
+            $this->store->store('gemini', 'auth_mode', 'oauth');
+        } else {
+            $this->store->store('gemini', 'api_key', (string) $creds['api_key']);
+            $this->store->store('gemini', 'auth_mode', 'api_key');
+        }
+        $this->store->store('gemini', 'source', $creds['source'] === 'env' ? 'env' : 'gemini-cli');
+
+        $r->success(sprintf('Imported Gemini credentials (%s).', $creds['mode']));
+        return 0;
+    }
+
     private function logout(string $provider): int
     {
         if ($provider === '') {
@@ -155,6 +199,7 @@ class AuthCommand
         $key = match ($provider) {
             'claude', 'claude-code', 'anthropic' => 'anthropic',
             'codex', 'openai' => 'openai',
+            'gemini', 'gemini-cli', 'google' => 'gemini',
             default => null,
         };
         if ($key === null) {
@@ -173,6 +218,7 @@ class AuthCommand
             $r->info('No stored credentials.');
             $r->hint('Run: superagent auth login claude-code');
             $r->hint('  or: superagent auth login codex');
+            $r->hint('  or: superagent auth login gemini');
             return 0;
         }
 
@@ -205,8 +251,9 @@ class AuthCommand
         $this->renderer->line('Usage:');
         $this->renderer->line('  superagent auth login claude-code');
         $this->renderer->line('  superagent auth login codex');
+        $this->renderer->line('  superagent auth login gemini');
         $this->renderer->line('  superagent auth status');
-        $this->renderer->line('  superagent auth logout <claude-code|codex>');
+        $this->renderer->line('  superagent auth logout <claude-code|codex|gemini>');
         return $error !== null ? 1 : 0;
     }
 }

@@ -250,11 +250,17 @@ superagent "审查这个 PR"
 - **Token预算控制** - 动态预算管理，智能成本控制
 
 ### 🌍 多供应商支持
-- **Claude (Anthropic)** - 最新Claude 4.6，包括Opus、Sonnet和Haiku变体
-- **OpenAI** - GPT-5.4、GPT-5、GPT-4 Turbo及旧版模型
+- **Claude (Anthropic)** - 最新 Claude 4.7 Opus / Sonnet、4.5 Haiku（以及全部 4.6 / 4.5 / 4 系列）
+- **OpenAI** - GPT-5 / GPT-5-mini / GPT-5-nano、GPT-4o、o4-mini 及旧版模型
+- **Google Gemini（原生）** - `GeminiProvider` 直连 Generative Language API，支持 SSE streaming、function calling，全量兼容 MCP / Skills / 子 Agent。`superagent -p gemini -m gemini-2.5-flash "…"`
 - **AWS Bedrock** - 通过AWS使用Claude，支持最新模型
 - **Ollama** - 本地模型，包括Llama 3、Mistral等
 - **OpenRouter** - 100+模型统一API
+
+### 🔄 动态模型目录 (v0.8.7)
+- **`ModelCatalog`** - 单一 JSON（`resources/models.json`）驱动 `CostCalculator` 计费、`ModelResolver` 别名与 `/model` 选择器。可在 `~/.superagent/models.json` 覆盖，或设 `SUPERAGENT_MODELS_URL` 远端拉取
+- **CLI**：`superagent models list | update | status | reset` 无需发版即可刷新模型列表与价格
+- **启动自动刷新**（可选）：设 `SUPERAGENT_MODELS_AUTO_UPDATE=1`，CLI 每 7 天陈旧时自动拉一次
 
 ## 📦 安装
 
@@ -289,7 +295,12 @@ ANTHROPIC_API_KEY=你的API密钥
 
 # 可选供应商
 OPENAI_API_KEY=你的OpenAI密钥
+GEMINI_API_KEY=你的Gemini密钥   # 或 GOOGLE_API_KEY
 AWS_BEDROCK_REGION=us-east-1
+
+# 模型目录自动更新（可选）
+SUPERAGENT_MODELS_URL=https://your-cdn/models.json
+SUPERAGENT_MODELS_AUTO_UPDATE=1
 
 # 多智能体功能
 SUPERAGENT_WEBSOCKET_ENABLED=true

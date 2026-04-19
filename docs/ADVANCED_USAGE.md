@@ -6185,3 +6185,172 @@ $result = $agent->prompt('summarize this diff'); // AgentResult
 echo $result->text();
 echo $result->totalCostUsd;
 ```
+
+---
+
+## 32. Google Gemini Provider (v0.8.7)
+
+> `GeminiProvider` is a first-class native client for the Google Generative Language API. It speaks Gemini's wire format directly, not via OpenRouter or a proxy, and is fully compatible with MCP, Skills, and sub-agents because it implements the same `LLMProvider` contract as every other provider.
+
+### Creating a Gemini agent
+
+```php
+use SuperAgent\Providers\ProviderRegistry;
+
+// From env (reads GEMINI_API_KEY, then GOOGLE_API_KEY)
+$gemini = ProviderRegistry::createFromEnv('gemini');
+
+// Explicit config
+$gemini = ProviderRegistry::create('gemini', [
+    'api_key' => 'AIzaSy…',
+    'model' => 'gemini-2.5-flash',
+    'max_tokens' => 8192,
+]);
+
+$gemini->setModel('gemini-1.5-pro');
+```
+
+### CLI
+
+```bash
+superagent -p gemini -m gemini-2.5-flash "summarize this README"
+superagent auth login gemini        # import tokens from @google/gemini-cli or env
+superagent init                     # pick option 5) gemini
+/model list                         # picker now includes Gemini when active
+```
+
+### Wire-format conversion (what `formatMessages` / `formatTools` do)
+
+Gemini's API shape differs from OpenAI/Anthropic on three axes that `GeminiProvider` handles transparently:
+
+| Internal concept                  | Gemini wire format                                                    |
+|-----------------------------------|------------------------------------------------------------------------|
+| `assistant` message               | `role: "model"`                                                        |
+| Text block                        | `parts[].text`                                                         |
+| `tool_use` block                  | `parts[].functionCall { name, args }`                                  |
+| `ToolResultMessage` (tool_result) | `role: "user"` + `parts[].functionResponse { name, response }`         |
+| System prompt                     | Top-level `systemInstruction.parts[]` (not a `contents[]` entry)       |
+| Tool declarations                 | `tools[0].functionDeclarations[]` with OpenAPI-3.0 subset schemas      |
+
+Three subtleties worth knowing:
+
+1. **`functionResponse.name` is required** but `tool_result` blocks only store `tool_use_id`. The provider walks the conversation to build a `toolUseId → toolName` map from prior assistant messages.
+2. **No native tool-call IDs** — Gemini omits `id` on each `functionCall`. `parseSSEStream()` mints synthetic `gemini_<hex>_<index>` IDs so downstream `tool_use → tool_result` correlation still works for MCP, Skills, and agent loops.
+3. **Schema sanitization** — `formatTools()` strips `$schema`, `additionalProperties`, `$ref`, `examples`, `default`, `pattern` (not in Gemini's OpenAPI-3.0 subset) and forces empty `properties` to an object literal `{}` because Gemini rejects `[]`.
+
+### Pricing / telemetry
+
+The dynamic `ModelCatalog` (see section 33) ships pricing for all Gemini 1.5 and 2.x models — `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`. `CostCalculator::calculate($model, $usage)` pulls from the catalog first, so cost tracking / NDJSON logs / telemetry / `/cost` all work out of the box.
+
+### Gotchas
+
+- **OAuth refresh is not automated** for `gemini auth login gemini`. Google's token endpoint requires release-specific client credentials from `@google/gemini-cli`. When the imported OAuth token is expired, the importer prints a hint: *"Run `gemini login` to refresh, then re-run this import."*
+- **Response format** — Gemini's `response_schema` equivalent is not yet wired into `options['response_format']`; use prompt-level instructions or Anthropic/OpenAI if you need enforced structured output.
+
+---
+
+## 33. Dynamic Model Catalog (v0.8.7)
+
+> `ModelCatalog` is SuperAgent's single source of truth for model metadata + pricing. It merges three layered sources so model lists and prices can be updated without a package release — addressing the "AI moves too fast" problem.
+
+### Source resolution (later wins)
+
+| Tier | Source                                            | Writable | Use                                                   |
+|------|---------------------------------------------------|----------|--------------------------------------------------------|
+| 1    | `resources/models.json` (bundled)                 | No       | Immutable baseline shipped with the package           |
+| 2    | `~/.superagent/models.json` (user override)       | Yes      | Persisted by `superagent models update`               |
+| 3    | `ModelCatalog::register()` / `loadFromFile()`     | Yes      | Runtime overrides (highest precedence)                |
+
+### Who consumes the catalog
+
+- **`CostCalculator::resolve($model)`** — pricing lookup before the static fallback map.
+- **`ModelResolver::resolve($alias)`** — alias → canonical id after built-in families; picks up new families (`opus`, `sonnet`, `gemini-pro`, …) from the catalog.
+- **`CommandRouter /model` picker** — numbered list built from `ModelCatalog::modelsFor($provider)`.
+
+### CLI
+
+```bash
+superagent models list                          # merged catalog, per-1M pricing
+superagent models list --provider gemini
+superagent models update                        # pull from $SUPERAGENT_MODELS_URL
+superagent models update --url https://…        # explicit URL
+superagent models status                        # sources + last-update age
+superagent models reset                         # delete override, fall back to bundled
+```
+
+### Environment
+
+```env
+# Remote catalog endpoint (must return the same JSON schema as resources/models.json)
+SUPERAGENT_MODELS_URL=https://your-cdn/superagent-models.json
+
+# Opt-in 7-day staleness auto-refresh at CLI startup
+SUPERAGENT_MODELS_AUTO_UPDATE=1
+```
+
+Auto-refresh is silent-failing: if the network call times out or the response is not a valid catalog, the CLI proceeds with whatever is already cached. One network call per process, max.
+
+### JSON schema
+
+```json
+{
+  "_meta": { "schema_version": 1, "updated": "2026-04-19" },
+  "providers": {
+    "anthropic": {
+      "env": "ANTHROPIC_API_KEY",
+      "models": [
+        {
+          "id": "claude-opus-4-7",
+          "family": "opus",
+          "date": "20260301",
+          "input": 15.0,
+          "output": 75.0,
+          "aliases": ["opus", "claude-opus"],
+          "description": "Opus 4.7 — top reasoning"
+        }
+      ]
+    },
+    "gemini": { "env": "GEMINI_API_KEY", "models": [ /* … */ ] },
+    "openai": { "models": [ /* … */ ] }
+  }
+}
+```
+
+- `input` / `output` — USD per million tokens.
+- `family` + `date` — `ModelResolver` picks the newest `date` within a family for alias resolution.
+- `aliases[]` — case-insensitive strings that resolve to this id.
+
+### Programmatic API
+
+```php
+use SuperAgent\Providers\ModelCatalog;
+
+// Read
+ModelCatalog::pricing('claude-opus-4-7');   // ['input' => 15.0, 'output' => 75.0]
+ModelCatalog::modelsFor('gemini');          // [['id' => 'gemini-2.5-pro', …], …]
+ModelCatalog::resolveAlias('opus');         // 'claude-opus-4-7'
+
+// Write (runtime, highest precedence)
+ModelCatalog::register('my-custom-model', [
+    'provider' => 'openrouter',
+    'input' => 0.5,
+    'output' => 1.5,
+    'description' => 'internal model',
+]);
+
+// Replace from file
+ModelCatalog::loadFromFile('/path/to/models.json');
+
+// Pull from remote and persist to ~/.superagent/models.json
+ModelCatalog::refreshFromRemote();
+
+// Check / clear state (test helpers)
+ModelCatalog::isStale(7 * 86400);    // true if override >7 days old / missing
+ModelCatalog::clearOverrides();      // drop runtime register() entries
+ModelCatalog::invalidate();          // drop cached sources; next read re-loads
+```
+
+### Hosting your own catalog
+
+Point `SUPERAGENT_MODELS_URL` at any HTTPS endpoint (CDN, internal gateway, raw GitHub URL, S3) that returns the same JSON. Clone `resources/models.json`, adjust it, publish it. A nightly cron that regenerates the JSON from your internal pricing database is a straightforward way to give every SuperAgent instance in your org accurate costs without a package release.
+

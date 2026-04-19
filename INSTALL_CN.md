@@ -51,6 +51,7 @@ superagent --help
 # 前提：本机已安装并登录过 Claude Code 或 Codex
 superagent auth login claude-code    # 导入 ~/.claude/.credentials.json
 superagent auth login codex          # 导入 ~/.codex/auth.json
+superagent auth login gemini         # 导入 ~/.gemini/*.json 或 GEMINI_API_KEY 环境变量
 superagent auth status               # 验证
 ```
 凭证存在 `~/.superagent/credentials/{anthropic,openai}.json`，权限 `0600`，过期前 60 秒自动续期。
@@ -241,7 +242,7 @@ php artisan migrate
 ```env
 # ========== SuperAgent 基础配置 ==========
 
-# 默认AI提供商 (anthropic|openai|bedrock|ollama)
+# 默认AI提供商 (anthropic|openai|gemini|bedrock|ollama|openrouter)
 SUPERAGENT_PROVIDER=anthropic
 
 # Anthropic Claude 配置
@@ -264,6 +265,14 @@ BEDROCK_MODEL=anthropic.claude-v2
 # 本地Ollama模型（可选）
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama2
+
+# Google Gemini 原生（可选 — 直连 API，非经 OpenRouter 转发）
+GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx    # 或改用 GOOGLE_API_KEY
+GEMINI_MODEL=gemini-2.0-flash
+
+# 动态模型目录（v0.8.7+）— 无需发版即可同步最新模型与价格
+# SUPERAGENT_MODELS_URL=https://your-cdn/models.json
+# SUPERAGENT_MODELS_AUTO_UPDATE=1   # 启动时 7 天陈旧自动刷新
 
 # ========== 功能开关 ==========
 

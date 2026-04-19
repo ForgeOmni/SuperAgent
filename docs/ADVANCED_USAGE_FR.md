@@ -7382,3 +7382,154 @@ $result = $agent->prompt('résume ce diff'); // AgentResult
 echo $result->text();
 echo $result->totalCostUsd;
 ```
+
+---
+
+## 32. Provider Google Gemini natif (v0.8.7)
+
+> `GeminiProvider` est un client natif de première classe pour l'API Google Generative Language. Il parle directement le protocole Gemini, sans OpenRouter ni proxy, et reste totalement compatible avec MCP / Skills / sous-agents parce qu'il implémente le même contrat `LLMProvider` que tous les autres providers.
+
+### Créer un agent Gemini
+
+```php
+use SuperAgent\Providers\ProviderRegistry;
+
+$gemini = ProviderRegistry::createFromEnv('gemini'); // lit GEMINI_API_KEY puis GOOGLE_API_KEY
+
+$gemini = ProviderRegistry::create('gemini', [
+    'api_key' => 'AIzaSy…',
+    'model' => 'gemini-2.5-flash',
+    'max_tokens' => 8192,
+]);
+
+$gemini->setModel('gemini-1.5-pro');
+```
+
+### CLI
+
+```bash
+superagent -p gemini -m gemini-2.5-flash "résume ce README"
+superagent auth login gemini        # importe depuis @google/gemini-cli ou env
+superagent init                     # choisir option 5) gemini
+/model list                         # le sélecteur affiche Gemini quand actif
+```
+
+### Conversion du wire-format
+
+| Concept interne                  | Format wire Gemini                                                |
+|----------------------------------|-------------------------------------------------------------------|
+| Message `assistant`              | `role: "model"`                                                   |
+| Bloc texte                       | `parts[].text`                                                    |
+| Bloc `tool_use`                  | `parts[].functionCall { name, args }`                             |
+| `ToolResultMessage`              | `role: "user"` + `parts[].functionResponse { name, response }`    |
+| Prompt système                   | `systemInstruction.parts[]` top-level (pas dans `contents[]`)     |
+| Déclarations d'outils            | `tools[0].functionDeclarations[]` en sous-ensemble OpenAPI-3.0    |
+
+Trois subtilités :
+
+1. **`functionResponse.name` requis** — le provider construit une map `toolUseId → toolName` depuis les messages assistant précédents.
+2. **Pas d'ID tool-call natif** — `parseSSEStream()` synthétise `gemini_<hex>_<index>`, préservant la corrélation `tool_use → tool_result` pour MCP / Skills / agents.
+3. **Nettoyage de schéma** — `formatTools()` retire `$schema`, `additionalProperties`, `$ref`, `examples`, `default`, `pattern` et force `properties` vide à `{}`.
+
+### Tarification / télémétrie
+
+Le `ModelCatalog` dynamique (section 33) embarque la tarification de tous les Gemini 1.5 et 2.x. `CostCalculator::calculate()` interroge d'abord le catalogue, donc suivi des coûts, NDJSON, télémétrie et `/cost` fonctionnent sans configuration.
+
+### Limitations connues
+
+- **Refresh OAuth non automatisé** — si le token importé est expiré, l'importateur affiche : *"Exécutez `gemini login` pour rafraîchir, puis relancez l'import."*
+- **Sortie structurée** — l'équivalent `response_schema` de Gemini n'est pas encore câblé dans `options['response_format']`.
+
+---
+
+## 33. Catalogue de modèles dynamique (v0.8.7)
+
+> `ModelCatalog` est la source unique de SuperAgent pour les métadonnées et la tarification des modèles. Trois sources fusionnées pour mettre à jour modèles et tarifs sans publier une nouvelle version.
+
+### Résolution des sources (la dernière gagne)
+
+| Niveau | Source                                            | Écrivable | Usage                                                    |
+|--------|---------------------------------------------------|-----------|-----------------------------------------------------------|
+| 1      | `resources/models.json` (bundled)                 | Non       | Baseline immuable                                        |
+| 2      | `~/.superagent/models.json`                       | Oui       | Écrite par `superagent models update`                    |
+| 3      | `ModelCatalog::register()` / `loadFromFile()`     | Oui       | Overrides runtime (priorité max)                         |
+
+### Consommateurs
+
+- **`CostCalculator::resolve($model)`** — lookup avant la map statique.
+- **`ModelResolver::resolve($alias)`** — récupère les familles (`opus`, `sonnet`, `gemini-pro`, …) du catalogue.
+- **Sélecteur `/model`** — liste construite depuis `ModelCatalog::modelsFor($provider)`.
+
+### CLI
+
+```bash
+superagent models list                          # catalogue fusionné, prix per-1M
+superagent models list --provider gemini
+superagent models update                        # depuis $SUPERAGENT_MODELS_URL
+superagent models update --url https://…        # URL explicite
+superagent models status
+superagent models reset
+```
+
+### Environnement
+
+```env
+SUPERAGENT_MODELS_URL=https://your-cdn/superagent-models.json
+SUPERAGENT_MODELS_AUTO_UPDATE=1   # auto-refresh 7 jours au démarrage CLI
+```
+
+Auto-refresh silent-failing : réseau KO ou réponse invalide → CLI continue avec le cache. Un seul appel réseau par processus.
+
+### Schéma JSON
+
+```json
+{
+  "_meta": { "schema_version": 1, "updated": "2026-04-19" },
+  "providers": {
+    "anthropic": {
+      "env": "ANTHROPIC_API_KEY",
+      "models": [
+        {
+          "id": "claude-opus-4-7",
+          "family": "opus",
+          "date": "20260301",
+          "input": 15.0,
+          "output": 75.0,
+          "aliases": ["opus", "claude-opus"],
+          "description": "Opus 4.7 — raisonnement de pointe"
+        }
+      ]
+    }
+  }
+}
+```
+
+- `input` / `output` — USD par million de tokens.
+- `family` + `date` — la date la plus récente gagne la résolution d'alias.
+
+### API programmatique
+
+```php
+use SuperAgent\Providers\ModelCatalog;
+
+ModelCatalog::pricing('claude-opus-4-7');
+ModelCatalog::modelsFor('gemini');
+ModelCatalog::resolveAlias('opus');
+
+ModelCatalog::register('my-custom-model', [
+    'provider' => 'openrouter',
+    'input' => 0.5,
+    'output' => 1.5,
+]);
+
+ModelCatalog::loadFromFile('/path/to/models.json');
+ModelCatalog::refreshFromRemote();
+ModelCatalog::isStale(7 * 86400);
+ModelCatalog::clearOverrides();
+ModelCatalog::invalidate();
+```
+
+### Héberger votre propre catalogue
+
+Pointez `SUPERAGENT_MODELS_URL` sur n'importe quel endpoint HTTPS (CDN, passerelle interne, URL GitHub raw, S3). Un cron nocturne qui régénère le JSON depuis votre base de tarification interne donne à toutes les instances SuperAgent de votre org des coûts exacts sans release.
+

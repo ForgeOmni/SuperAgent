@@ -7,6 +7,7 @@ namespace SuperAgent\CLI;
 use SuperAgent\CLI\Commands\AuthCommand;
 use SuperAgent\CLI\Commands\ChatCommand;
 use SuperAgent\CLI\Commands\InitCommand;
+use SuperAgent\CLI\Commands\ModelsCommand;
 
 /**
  * SuperAgent CLI Application.
@@ -41,6 +42,11 @@ class SuperAgentApplication
         // Parse options
         $options = $this->parseOptions($args);
 
+        // Opt-in background refresh of the model catalog. No-op unless
+        // SUPERAGENT_MODELS_AUTO_UPDATE=1 AND SUPERAGENT_MODELS_URL is set AND
+        // the local override is stale (>7d). Swallows network failures.
+        \SuperAgent\Providers\ModelCatalog::maybeAutoUpdate();
+
         // Route to subcommand or default chat
         $command = $options['command'] ?? 'chat';
 
@@ -48,6 +54,7 @@ class SuperAgentApplication
             'init'    => (new InitCommand())->execute($options),
             'auth',
             'login'   => (new AuthCommand())->execute($options),
+            'models'  => (new ModelsCommand())->execute($options),
             default   => (new ChatCommand())->execute($options),
         };
     }
@@ -76,6 +83,7 @@ class SuperAgentApplication
         $positional = [];
         $i = 0;
         $options['auth_args'] = [];
+        $options['models_args'] = [];
 
         while ($i < count($args)) {
             $arg = $args[$i];
@@ -111,7 +119,7 @@ class SuperAgentApplication
 
         // First positional arg: subcommand or prompt
         if (! empty($positional)) {
-            if (in_array($positional[0], ['init', 'chat', 'auth', 'login'], true)) {
+            if (in_array($positional[0], ['init', 'chat', 'auth', 'login', 'models'], true)) {
                 $options['command'] = array_shift($positional);
             }
 
@@ -122,6 +130,11 @@ class SuperAgentApplication
                 } else {
                     $options['auth_args'] = $positional;
                 }
+                $positional = [];
+            }
+
+            if (($options['command'] ?? '') === 'models') {
+                $options['models_args'] = $positional;
                 $positional = [];
             }
 
@@ -151,11 +164,16 @@ class SuperAgentApplication
     superagent init                     Initialize configuration
     superagent auth login claude-code   Import Claude Code OAuth login
     superagent auth login codex         Import Codex OAuth login
+    superagent auth login gemini        Import Gemini CLI login (OAuth or API key)
     superagent auth status              Show stored credentials
+    superagent models list              List bundled + overridden models
+    superagent models update            Fetch latest model catalog from remote URL
+    superagent models status            Show catalog source + age
+    superagent models reset             Delete user override and fall back to bundled
 
   \033[1mOptions:\033[0m
     -m, --model <model>                 Model name (e.g. sonnet, opus, haiku)
-    -p, --provider <provider>           Provider (anthropic, openai, ollama, etc.)
+    -p, --provider <provider>           Provider (anthropic, openai, gemini, ollama, openrouter, bedrock)
         --max-turns <n>                 Maximum agent turns (default: 50)
     -s, --system-prompt <prompt>        Custom system prompt
         --project <path>               Project working directory

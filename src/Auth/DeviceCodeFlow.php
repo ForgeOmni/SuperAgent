@@ -147,6 +147,13 @@ class DeviceCodeFlow
 
     private function tryOpenBrowser(string $url): void
     {
+        // Honour the global "no browser" switch so headless CI runs and the
+        // unit suite don't spawn a real browser (previously the platform-
+        // detection test actually launched the user's browser at example.com).
+        if ($this->browserLaunchDisabled()) {
+            return;
+        }
+
         $command = match (PHP_OS_FAMILY) {
             'Darwin' => 'open',
             'Linux' => 'xdg-open',
@@ -156,5 +163,16 @@ class DeviceCodeFlow
         if ($command) {
             @exec("{$command} " . escapeshellarg($url) . ' 2>/dev/null &');
         }
+    }
+
+    private function browserLaunchDisabled(): bool
+    {
+        foreach (['SUPERAGENT_NO_BROWSER', 'CI', 'PHPUNIT_RUNNING'] as $var) {
+            $v = getenv($var);
+            if ($v !== false && $v !== '' && $v !== '0' && strtolower($v) !== 'false') {
+                return true;
+            }
+        }
+        return false;
     }
 }

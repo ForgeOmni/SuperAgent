@@ -96,7 +96,7 @@ superagent
 | Flag | Description |
 | --- | --- |
 | `-m, --model <model>` | Model name or alias (`opus`, `claude-sonnet-4-5`, `gpt-5`, …) |
-| `-p, --provider <name>` | `anthropic` / `openai` / `ollama` / `openrouter` |
+| `-p, --provider <name>` | `anthropic` / `openai` / `gemini` / `ollama` / `openrouter` / `bedrock` |
 | `--max-turns <n>` | Hard cap on agent turns (default 50) |
 | `-s, --system-prompt <txt>` | Custom system prompt (appended after the OAuth identity block when on OAuth) |
 | `--project <path>` | Set working directory for the agent |
@@ -119,7 +119,8 @@ superagent
 ├── config.php                   # from `superagent init` (mode 0600)
 ├── credentials/                 # from `superagent auth login …`
 │   ├── anthropic.json           # OAuth / api_key for Anthropic (mode 0600)
-│   └── openai.json              # OAuth / api_key for OpenAI   (mode 0600)
+│   ├── openai.json              # OAuth / api_key for OpenAI   (mode 0600)
+│   └── gemini.json              # OAuth / api_key for Gemini   (mode 0600)
 └── storage/
     ├── sessions/                # /session save state
     └── palace/                  # Memory Palace (if enabled)
@@ -241,7 +242,7 @@ Edit your `.env` file and add the necessary configuration:
 ```env
 # ========== SuperAgent Base Configuration ==========
 
-# Default AI Provider (anthropic|openai|bedrock|ollama)
+# Default AI Provider (anthropic|openai|gemini|bedrock|ollama|openrouter)
 SUPERAGENT_PROVIDER=anthropic
 
 # Anthropic Claude Configuration
@@ -264,6 +265,14 @@ BEDROCK_MODEL=anthropic.claude-v2
 # Local Ollama Models (optional)
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama2
+
+# Google Gemini (optional — native provider, not via OpenRouter)
+GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx    # or set GOOGLE_API_KEY instead
+GEMINI_MODEL=gemini-2.0-flash
+
+# Dynamic model catalog (v0.8.7+) — pull latest models/pricing without a release
+# SUPERAGENT_MODELS_URL=https://your-cdn/models.json
+# SUPERAGENT_MODELS_AUTO_UPDATE=1   # enable 7-day staleness auto-refresh
 
 # ========== Feature Toggles ==========
 
@@ -414,6 +423,13 @@ return [
             'organization' => env('OPENAI_ORG_ID'),
             'max_tokens' => 4096,
             'temperature' => 0.7,
+        ],
+
+        'gemini' => [
+            'api_key' => env('GEMINI_API_KEY', env('GOOGLE_API_KEY')),
+            'model' => env('GEMINI_MODEL', 'gemini-2.0-flash'),
+            'max_tokens' => env('GEMINI_MAX_TOKENS', 8192),
+            'max_retries' => 3,
         ],
     ],
     

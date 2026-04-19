@@ -2,6 +2,11 @@
 
 require __DIR__ . '/../vendor/autoload.php';
 
+// Prevent tests from accidentally launching the user's browser via Auth/DeviceCodeFlow.
+// Honoured by DeviceCodeFlow::tryOpenBrowser().
+putenv('PHPUNIT_RUNNING=1');
+putenv('SUPERAGENT_NO_BROWSER=1');
+
 // Load .env file if it exists
 $envFile = __DIR__ . '/../.env';
 if (file_exists($envFile)) {

@@ -250,11 +250,17 @@ superagent "review ce PR"
 - **Contrôle du Budget de Tokens** - Gestion dynamique du budget, contrôle intelligent des coûts
 
 ### 🌍 Support Multi-Fournisseurs
-- **Claude (Anthropic)** - Dernière version Claude 4.6 incluant Opus, Sonnet et Haiku
-- **OpenAI** - GPT-5.4, GPT-5, GPT-4 Turbo et modèles hérités
+- **Claude (Anthropic)** - Dernières versions Claude 4.7 Opus / Sonnet, 4.5 Haiku (plus toutes les variantes 4.6 / 4.5 / 4)
+- **OpenAI** - GPT-5 / GPT-5-mini / GPT-5-nano, GPT-4o, o4-mini et modèles hérités
+- **Google Gemini (natif)** - `GeminiProvider` parle directement l'API Generative Language : streaming SSE, function calling, compatibilité complète MCP / Skills / sous-agents. `superagent -p gemini -m gemini-2.5-flash "…"`
 - **AWS Bedrock** - Claude via AWS avec support des derniers modèles
 - **Ollama** - Modèles locaux incluant Llama 3, Mistral et plus
 - **OpenRouter** - API unifiée pour 100+ modèles
+
+### 🔄 Catalogue de modèles dynamique (v0.8.7)
+- **`ModelCatalog`** — un seul JSON (`resources/models.json`) alimente la tarification `CostCalculator`, les alias `ModelResolver` et le sélecteur `/model`. Surchargeable via `~/.superagent/models.json` ou `SUPERAGENT_MODELS_URL`
+- **CLI** : `superagent models list | update | status | reset` pour rafraîchir la liste de modèles + tarifs sans nouvelle version du package
+- **Auto-refresh opt-in** avec `SUPERAGENT_MODELS_AUTO_UPDATE=1` (vérification de fraîcheur 7 jours au démarrage du CLI)
 
 ## 📦 Installation
 
@@ -290,6 +296,14 @@ ANTHROPIC_MODEL=claude-4.6-opus-latest
 # Configuration OpenAI (optionnel)
 OPENAI_API_KEY=sk-xxxxxxxxxxxxx
 OPENAI_MODEL=gpt-5.4
+
+# Configuration Gemini (optionnel)
+GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx   # ou GOOGLE_API_KEY
+GEMINI_MODEL=gemini-2.0-flash
+
+# Catalogue de modèles auto-update (opt-in)
+SUPERAGENT_MODELS_URL=https://your-cdn/models.json
+SUPERAGENT_MODELS_AUTO_UPDATE=1
 ```
 
 ## 🚀 Démarrage Rapide

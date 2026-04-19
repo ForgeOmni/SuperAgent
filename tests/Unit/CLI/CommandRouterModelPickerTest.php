@@ -37,7 +37,10 @@ class CommandRouterModelPickerTest extends TestCase
     {
         $r = new CommandRouter();
         $out = $r->dispatch('/model 1', ['model' => 'claude-sonnet-4-5'])->output;
-        $this->assertSame('__MODEL__:claude-opus-4-5', $out);
+        // The catalog backing /model is now dynamic (resources/models.json). The top of
+        // the Anthropic list tracks whatever ships as the newest Opus entry — asserting
+        // on the __MODEL__: prefix + claude-opus-* keeps the test stable across updates.
+        $this->assertMatchesRegularExpression('/^__MODEL__:claude-opus-\d/', $out);
     }
 
     public function test_out_of_range_numeric_returns_error(): void

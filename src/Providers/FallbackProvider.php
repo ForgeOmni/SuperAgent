@@ -216,7 +216,7 @@ class FallbackProvider implements LLMProvider
         $available = ProviderRegistry::discover();
         
         // Priority order
-        $priority = ['anthropic', 'openai', 'openrouter', 'bedrock', 'ollama'];
+        $priority = ['anthropic', 'openai', 'gemini', 'openrouter', 'bedrock', 'ollama'];
         
         foreach ($priority as $name) {
             if (in_array($name, $available)) {

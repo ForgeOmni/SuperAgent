@@ -3,6 +3,7 @@
 namespace SuperAgent;
 
 use SuperAgent\Messages\Usage;
+use SuperAgent\Providers\ModelCatalog;
 
 class CostCalculator
 {
@@ -44,6 +45,21 @@ class CostCalculator
         'openai/gpt-3.5-turbo' => ['input' => 0.50, 'output' => 1.50],
         'google/gemini-pro' => ['input' => 0.50, 'output' => 1.50],
         'google/gemini-pro-1.5' => ['input' => 3.50, 'output' => 10.50],
+
+        // Google Gemini native API (per-token prices are USD per million tokens).
+        // Values reflect Google AI Studio public pricing as of 2026-04; `register()`
+        // can override any row if pricing shifts.
+        'gemini-2.0-flash'             => ['input' => 0.10, 'output' => 0.40],
+        'gemini-2.0-flash-001'         => ['input' => 0.10, 'output' => 0.40],
+        'gemini-2.0-flash-lite'        => ['input' => 0.075, 'output' => 0.30],
+        'gemini-2.0-flash-thinking-exp'=> ['input' => 0.10, 'output' => 0.40],
+        'gemini-2.5-pro'               => ['input' => 1.25, 'output' => 10.0],
+        'gemini-2.5-flash'             => ['input' => 0.30, 'output' => 2.50],
+        'gemini-1.5-pro'               => ['input' => 1.25, 'output' => 5.0],
+        'gemini-1.5-pro-002'           => ['input' => 1.25, 'output' => 5.0],
+        'gemini-1.5-flash'             => ['input' => 0.075, 'output' => 0.30],
+        'gemini-1.5-flash-002'         => ['input' => 0.075, 'output' => 0.30],
+        'gemini-1.5-flash-8b'          => ['input' => 0.0375, 'output' => 0.15],
         'meta-llama/llama-3-70b-instruct' => ['input' => 0.80, 'output' => 0.80],
         'meta-llama/llama-3-8b-instruct' => ['input' => 0.10, 'output' => 0.10],
         'mistralai/mistral-large' => ['input' => 8.0, 'output' => 24.0],
@@ -113,14 +129,28 @@ class CostCalculator
 
     /**
      * Register or override pricing for a model.
+     *
+     * Writes through to the dynamic ModelCatalog so CLI tools and the catalog stay
+     * consistent with the static fallback used by this class.
      */
     public static function register(string $model, float $inputPerMillion, float $outputPerMillion): void
     {
         static::$pricing[$model] = ['input' => $inputPerMillion, 'output' => $outputPerMillion];
+        ModelCatalog::register($model, [
+            'input' => $inputPerMillion,
+            'output' => $outputPerMillion,
+        ]);
     }
 
     protected static function resolve(string $model): array
     {
+        // Dynamic source first: the JSON-backed catalog (bundled + user override +
+        // runtime register()). Keeps pricing updatable without a code release.
+        $catalog = ModelCatalog::pricing($model);
+        if ($catalog !== null) {
+            return $catalog;
+        }
+
         if (isset(static::$pricing[$model])) {
             return static::$pricing[$model];
         }

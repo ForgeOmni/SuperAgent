@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Providers;
 
+// ModelCatalog lives in the same namespace, so no additional use statement is required.
+
 /**
  * Resolves model aliases and shorthand names to canonical model identifiers.
  *
@@ -76,6 +78,13 @@ class ModelResolver
         $matched = static::fuzzyMatchFamily($key);
         if ($matched !== null) {
             return static::latestInFamily($matched) ?? $model;
+        }
+
+        // 4. Dynamic catalog — picks up families shipped in resources/models.json
+        //    and any user override fetched via `superagent models update`.
+        $fromCatalog = ModelCatalog::resolveAlias($key);
+        if ($fromCatalog !== null) {
+            return $fromCatalog;
         }
 
         // No match — pass through as-is
@@ -271,5 +280,19 @@ class ModelResolver
         static::register('gpt-3.5-turbo', 'gpt-3.5', [
             'gpt35', 'gpt3.5', 'gpt-3.5-turbo',
         ], 20230613);
+
+        // ── Google Gemini ─────────────────────────────────────────
+
+        static::register('gemini-2.0-flash', 'gemini-flash', [
+            'gemini', 'gemini-flash', 'gemini-2', 'gemini-2-flash',
+        ], 20250205);
+        static::register('gemini-1.5-flash', 'gemini-flash', [], 20240924);
+
+        static::register('gemini-2.5-pro', 'gemini-pro', [
+            'gemini-pro', 'gemini-2.5', 'gemini-2-5-pro',
+        ], 20250325);
+        static::register('gemini-1.5-pro', 'gemini-pro', [
+            'gemini-1-5-pro',
+        ], 20240924);
     }
 }

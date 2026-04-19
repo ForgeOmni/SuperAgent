@@ -7,6 +7,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-04-19
+
+### 💻 Summary
+
+**Google Gemini support + a dynamic, CLI-updatable model catalog.** Two themes in one release:
+
+1. **First-class Gemini integration** — a native `GeminiProvider`, CLI flag (`-p gemini`), init-wizard entry, `/model` picker, cost tracking, and one-command credential import from the `@google/gemini-cli`. MCP, Skills, and sub-agents work through Gemini with no additional code because they already route through the provider-agnostic `LLMProvider::formatTools()` / `formatMessages()` contract.
+2. **`ModelCatalog` — a 3-tier model & pricing registry.** Bundled baseline (`resources/models.json`) + user override (`~/.superagent/models.json`) + opt-in remote URL. New `superagent models list|update|status|reset` CLI lets users refresh model lists and pricing without a package release, addressing the "AI moves too fast" problem. `CostCalculator`, `ModelResolver`, and the `/model` picker all pull from the same catalog, so one JSON edit updates every surface that needs model metadata.
+
+The unit suite now runs **2060 tests / 5675 assertions / 0 failures** (36 new tests: `GeminiProviderTest` × 17, `ModelCatalogTest` × 11, `GeminiCliCredentialsTest` × 8).
+
+### Added
+
+#### `GeminiProvider` (`src/Providers/GeminiProvider.php`)
+- **Endpoint** — `https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse` with `x-goog-api-key` header auth (AI Studio keys). Trailing-slash `base_uri` pattern consistent with `AnthropicProvider` so custom gateway path prefixes are preserved.
+- **Streaming SSE parser** — handles `candidates[].content.parts[].text` / `functionCall`, `finishReason`, `usageMetadata` (prompt / candidates tokens). Emits `StreamingHandler::emitText()` / `emitToolUse()` / `emitRawEvent()` for live UI.
+- **`formatMessages()`** — converts internal `Message[]` to Gemini's `contents[]` shape:
+  - `assistant` role → `model` (Gemini's naming).
+  - text blocks → `parts[].text`.
+  - `tool_use` blocks → `parts[].functionCall { name, args }`.
+  - `ToolResultMessage` → `role: user` + `parts[].functionResponse { name, response }`.
+  - system prompt is **not** a `contents[]` entry — goes to top-level `systemInstruction.parts[]`.
+- **Tool-name resolution** — Gemini's `functionResponse` requires the tool *name*, but `tool_result` blocks only carry `tool_use_id`. `formatMessages()` walks prior assistant messages to build a `toolUseId → toolName` map, then resolves each tool result against it.
+- **`formatTools()`** — wraps declarations in `tools[0].functionDeclarations[]` and sanitizes each schema against Gemini's OpenAPI-3.0 subset:
+  - strips unsupported keywords: `$schema`, `additionalProperties`, `$ref`, `examples`, `default`, `pattern`, …
+  - recurses into `properties` and `items`.
+  - empty `properties` forced to `(object)[]` so `json_encode` emits `{}` not `[]` (Gemini rejects the latter).
+- **Synthetic tool-call IDs** — Gemini doesn't issue `id` values for `functionCall`, so the SSE parser mints `gemini_<hex>_<index>` ids. This keeps the downstream `tool_use → tool_result` correlation intact for MCP, Skills, and agent loops.
+- **`wrapFunctionResponse()`** — tool results must be JSON objects; bare strings are wrapped under a `content` key, errors flagged with `{"error": true}`.
+- **Retry** — 429 / 5xx with `Retry-After` honoured, exponential backoff capped at 30 s, same pattern as other providers.
+- **Stop-reason mapping** — `STOP` → `EndTurn`, `MAX_TOKENS` → `MaxTokens`, `SAFETY` / `RECITATION` / `OTHER` → `EndTurn`. When the API omits `finishReason` but tool calls were emitted, defaults to `ToolUse`.
+
+#### `ProviderRegistry` integration (`src/Providers/ProviderRegistry.php`)
+- Registered as `'gemini' => GeminiProvider::class`.
+- Default config: `model: gemini-2.0-flash`, `max_tokens: 8192`, `max_retries: 3`.
+- `validateConfig('gemini', …)` requires `api_key`.
+- **`createFromEnv('gemini')`** reads `GEMINI_API_KEY` first, falls back to `GOOGLE_API_KEY`.
+- **`discover()`** auto-detects either env var.
+- **`getCapabilities('gemini')`** — streaming ✓, tools ✓, vision ✓, structured_output ✓, `max_context: 1_048_576`.
+- `FallbackProvider::$priority` now includes `'gemini'` (`src/Providers/FallbackProvider.php:219`).
+
+#### `ModelCatalog` — dynamic model & pricing registry (`src/Providers/ModelCatalog.php`, `resources/models.json`)
+- **Three layered sources**, later wins:
+  1. **Bundled baseline** — `resources/models.json` shipped with the package. Immutable.
+  2. **User override** — `~/.superagent/models.json`. Written atomically by `models update`.
+  3. **Runtime `register()`** — `CostCalculator::register()` and `ModelCatalog::register()` both write through here.
+- **Bundled catalog covers the latest Anthropic / OpenAI / Gemini / OpenRouter / Bedrock / Ollama families**, including Claude Opus/Sonnet 4.7, Haiku 4.5, GPT-5 / GPT-5-mini / GPT-5-nano, Gemini 2.5 Pro / 2.5 Flash / 2.0 Flash.
+- **API** — `model(id)`, `pricing(id)`, `modelsFor(provider)`, `providers()`, `resolveAlias(alias)` (picks newest in family), `register(id, entry)`, `loadFromFile(path)`, `refreshFromRemote(url, timeout)`, `resetUserOverride()`, `userOverrideMtime()`, `isStale()`, `maybeAutoUpdate()`, `clearOverrides()`, `invalidate()`.
+- **Opt-in auto-refresh** — `ModelCatalog::maybeAutoUpdate()` is called once at CLI startup. No-op unless `SUPERAGENT_MODELS_AUTO_UPDATE=1` AND `SUPERAGENT_MODELS_URL` is set AND the user override is older than 7 days. Network failures are swallowed so a dead remote never blocks startup.
+- **Env configuration**:
+  - `SUPERAGENT_MODELS_URL` — HTTPS endpoint returning the same JSON schema as `resources/models.json`. Used by `superagent models update` and `maybeAutoUpdate()`.
+  - `SUPERAGENT_MODELS_AUTO_UPDATE` — `1` / `true` / `yes` / `on` to enable the 7-day staleness auto-refresh.
+
+#### `superagent models` CLI subcommand (`src/CLI/Commands/ModelsCommand.php`)
+- `superagent models list [--provider <p>]` — prints the merged (bundled + override + runtime) catalog with per-1M token pricing.
+- `superagent models update [--url <u>]` — fetches the remote catalog, validates it, and persists atomically to `~/.superagent/models.json`. Returns a count of models loaded.
+- `superagent models status` — shows which sources are populated and how long ago the override was last updated.
+- `superagent models reset` — deletes the user override so subsequent loads fall back to the bundled catalog (with confirmation prompt).
+
+#### CLI-wide Gemini integration
+- **`InitCommand`** (`src/CLI/Commands/InitCommand.php`) — adds option `5) gemini`, maps to `GEMINI_API_KEY`, default model `gemini-2.0-flash`.
+- **`CommandRouter /model`** (`src/Harness/CommandRouter.php`) — Gemini catalog surfaces in the numbered picker when provider is `gemini` or model id starts with `gemini`. The picker now **reads from `ModelCatalog`**, so `superagent models update` immediately changes what `/model list` shows.
+- **`SuperAgentApplication`** (`src/CLI/SuperAgentApplication.php`) — `-p gemini` accepted; help text lists gemini alongside anthropic / openai; `models` added to subcommand routing; `maybeAutoUpdate()` called at entry.
+
+#### `GeminiCliCredentials` — import from `@google/gemini-cli` (`src/Auth/GeminiCliCredentials.php`)
+- Probes `~/.gemini/oauth_creds.json`, `~/.gemini/credentials.json`, `~/.gemini/settings.json`, then falls through to the `GEMINI_API_KEY` / `GOOGLE_API_KEY` env vars.
+- Returns a normalized shape with `mode ∈ {oauth, api_key}` + `access_token`/`refresh_token`/`expires_at` (in ms, reconciled from seconds/ms/ISO-8601) or `api_key`.
+- OAuth refresh is intentionally *not* automated — Gemini CLI refreshes on each `gemini login`, and Google's token endpoint needs release-specific client credentials. When the token is expired the importer prints a hint: *"Run `gemini login` to refresh, then re-run this import."*
+
+#### `AuthCommand` updates (`src/CLI/Commands/AuthCommand.php`)
+- `superagent auth login gemini` — imports credentials via `GeminiCliCredentials`, stores under provider key `gemini` with `auth_mode: oauth|api_key` and `source: gemini-cli|env`.
+- `superagent auth logout gemini` — removes the stored gemini credentials.
+- `superagent auth status` — lists the `gemini` provider alongside existing entries.
+- `superagent login gemini` — shorthand for `superagent auth login gemini` (pre-existing pattern).
+
+#### `CostCalculator` now pulls from `ModelCatalog` (`src/CostCalculator.php`)
+- `resolve()` consults `ModelCatalog::pricing($model)` first; falls through to the static `$pricing` map and then the existing prefix / provider-family heuristics. Result: every model listed in `resources/models.json` gets exact pricing, and user catalog updates flow through without a code release.
+- `register()` now writes through to `ModelCatalog::register()` so the dynamic catalog and the static fallback stay in sync.
+- **New Gemini rows added to the static fallback** (`gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-2.0-flash-thinking-exp`, `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-1.5-flash-8b`) for defence-in-depth against a missing JSON file.
+
+#### `ModelResolver` consults `ModelCatalog` for aliases (`src/Providers/ModelResolver.php`)
+- Resolution order extended to **4. Dynamic catalog** — picks up new families (`opus`, `sonnet`, `gemini-flash`, `gemini-pro`, etc.) and their latest dated entry from `ModelCatalog::resolveAlias()`. Users who `superagent models update` immediately get `opus` → `claude-opus-4-7` (or whatever the new latest is).
+- Built-in Gemini families seeded in `ensureInitialized()` for offline fallback.
+
+#### Telemetry / thread monitoring compatibility
+No code change required — `CostTracker`, `CostTrackingMiddleware`, `CostTrackingEnhancer`, NDJSON logging, StructuredLogger, and the swarm / parallel-agent backends all consume `$provider->name()` as an opaque string and `CostCalculator::calculate()` via the model id. Gemini slots in transparently.
+
+### Changed
+
+#### MCP / Skills / Agents compatibility (unchanged, now documented)
+All three subsystems route through `LLMProvider::formatTools()` and `formatMessages()`:
+- **MCP** — tools registered via `MCPManager` flow through `GeminiProvider::formatTools()` → `functionDeclarations[]` and back through the synthetic-ID mechanism.
+- **Skills** — remain a framework-level abstraction (system prompt injection + tool registration); no provider-specific gating.
+- **Agents** — `Agent::prompt()` dispatches through the provider registry; sub-agents inherit whatever provider the parent was created with.
+
+### Fixed
+
+#### Unit tests no longer launch the user's browser (`src/Auth/DeviceCodeFlow.php`, `tests/bootstrap.php`)
+- `DeviceCodeFlow::tryOpenBrowser()` now honours `SUPERAGENT_NO_BROWSER=1` / `CI` / `PHPUNIT_RUNNING` and short-circuits before invoking `open` / `xdg-open` / `start`.
+- `tests/bootstrap.php` sets `PHPUNIT_RUNNING=1` and `SUPERAGENT_NO_BROWSER=1` so the device-code-flow platform-detection test (`AuthTest::testDeviceCodeFlowTryOpenBrowserPlatformDetection`) stops spawning a real Safari / xdg-open call to `https://example.com/device` during the unit run.
+
+### Environment reference
+
+```env
+# Gemini
+GEMINI_API_KEY=...
+GOOGLE_API_KEY=...            # alternative name picked up by createFromEnv()
+
+# Model catalog (opt-in remote sync)
+SUPERAGENT_MODELS_URL=https://your-cdn/models.json
+SUPERAGENT_MODELS_AUTO_UPDATE=1   # enable 7-day staleness auto-refresh at CLI startup
+```
+
+```bash
+# One-shot Gemini call
+superagent -p gemini -m gemini-2.0-flash "summarize this repo's README"
+
+# Import from @google/gemini-cli
+superagent auth login gemini
+
+# Manage the model catalog
+superagent models list
+superagent models update                    # from $SUPERAGENT_MODELS_URL
+superagent models update --url https://…    # explicit URL
+superagent models status
+superagent models reset
+```
+
+### Test results
+
+**2060 tests / 5675 assertions / 0 failures** (6 skipped; 36 new tests vs v0.8.6).
+
 ## [0.8.6] - 2026-04-14
 
 ### 💻 Summary

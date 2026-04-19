@@ -238,6 +238,30 @@ class CommandRouter
         if ($provider === '' && (str_starts_with($model, 'gpt') || str_starts_with($model, 'o'))) {
             $provider = 'openai';
         }
+        if ($provider === '' && str_starts_with($model, 'gemini')) {
+            $provider = 'gemini';
+        }
+
+        // Dynamic catalog wins when it has entries for this provider — keeps /model
+        // in sync with `superagent models update` without a code release.
+        if ($provider !== '') {
+            $catalog = \SuperAgent\Providers\ModelCatalog::modelsFor($provider);
+            if (! empty($catalog)) {
+                $out = [];
+                foreach ($catalog as $entry) {
+                    $row = ['id' => (string) ($entry['id'] ?? '')];
+                    if (! empty($entry['description'])) {
+                        $row['description'] = (string) $entry['description'];
+                    }
+                    if ($row['id'] !== '') {
+                        $out[] = $row;
+                    }
+                }
+                if (! empty($out)) {
+                    return $out;
+                }
+            }
+        }
 
         return match ($provider) {
             'anthropic' => [
@@ -252,6 +276,12 @@ class CommandRouter
                 ['id' => 'gpt-5-mini',         'description' => 'GPT-5 mini'],
                 ['id' => 'gpt-4o',             'description' => 'GPT-4o'],
                 ['id' => 'o4-mini',            'description' => 'o4-mini — reasoning'],
+            ],
+            'gemini' => [
+                ['id' => 'gemini-2.0-flash',             'description' => 'Gemini 2.0 Flash — fast + cheap'],
+                ['id' => 'gemini-2.0-flash-thinking-exp','description' => 'Gemini 2.0 Flash Thinking (experimental)'],
+                ['id' => 'gemini-1.5-pro',               'description' => 'Gemini 1.5 Pro — long context'],
+                ['id' => 'gemini-1.5-flash',             'description' => 'Gemini 1.5 Flash'],
             ],
             'openrouter' => [
                 ['id' => 'anthropic/claude-opus-4-5'],

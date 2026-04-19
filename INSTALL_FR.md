@@ -51,6 +51,7 @@ Trois options, au choix :
 # Nécessite Claude Code ou Codex déjà installé et connecté localement
 superagent auth login claude-code    # importe ~/.claude/.credentials.json
 superagent auth login codex          # importe ~/.codex/auth.json
+superagent auth login gemini         # importe ~/.gemini/*.json ou la variable GEMINI_API_KEY
 superagent auth status               # vérifier
 ```
 Les credentials sont stockés dans `~/.superagent/credentials/{anthropic,openai}.json` en mode `0600`, renouvelés 60 s avant expiration.
@@ -264,6 +265,14 @@ BEDROCK_MODEL=anthropic.claude-v2
 # Modèles Ollama Locaux (optionnel)
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=llama2
+
+# Google Gemini natif (optionnel — appel direct de l'API, pas via OpenRouter)
+GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx    # ou GOOGLE_API_KEY
+GEMINI_MODEL=gemini-2.0-flash
+
+# Catalogue de modèles dynamique (v0.8.7+) — synchroniser les modèles/tarifs sans release
+# SUPERAGENT_MODELS_URL=https://your-cdn/models.json
+# SUPERAGENT_MODELS_AUTO_UPDATE=1   # auto-refresh avec vérification de fraîcheur 7 jours
 
 # ========== Bascules de Fonctionnalités ==========
 

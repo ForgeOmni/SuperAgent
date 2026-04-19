@@ -19,6 +19,7 @@ class ProviderRegistry
         'openrouter' => OpenRouterProvider::class,
         'bedrock' => BedrockProvider::class,
         'ollama' => OllamaProvider::class,
+        'gemini' => GeminiProvider::class,
     ];
 
     /**
@@ -67,6 +68,11 @@ class ProviderRegistry
             'max_tokens' => 2048,
             'max_retries' => 3,
             'keep_alive' => true,
+        ],
+        'gemini' => [
+            'model' => 'gemini-2.0-flash',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
         ],
     ];
 
@@ -232,6 +238,7 @@ class ProviderRegistry
             'openrouter' => ['api_key'],
             'bedrock' => ['access_key', 'secret_key'],
             'ollama' => [], // No required keys for Ollama
+            'gemini' => ['api_key'],
             default => [],
         };
 
@@ -299,6 +306,10 @@ class ProviderRegistry
             'ollama' => [
                 'base_url' => $_ENV['OLLAMA_BASE_URL'] ?? getenv('OLLAMA_BASE_URL') ?? 'http://localhost:11434',
             ],
+            'gemini' => [
+                'api_key' => $_ENV['GEMINI_API_KEY'] ?? getenv('GEMINI_API_KEY')
+                    ?: ($_ENV['GOOGLE_API_KEY'] ?? getenv('GOOGLE_API_KEY')),
+            ],
             default => throw new ProviderException("Unknown provider: {$name}", $name),
         };
 
@@ -327,6 +338,10 @@ class ProviderRegistry
 
         if (getenv('AWS_ACCESS_KEY_ID') && getenv('AWS_SECRET_ACCESS_KEY')) {
             $available[] = 'bedrock';
+        }
+
+        if (getenv('GEMINI_API_KEY') || getenv('GOOGLE_API_KEY')) {
+            $available[] = 'gemini';
         }
 
         // Check if Ollama is running
@@ -396,6 +411,13 @@ class ProviderRegistry
                 'structured_output' => false,
                 'local' => true,
                 'embeddings' => true,
+            ],
+            'gemini' => [
+                'streaming' => true,
+                'tools' => true,
+                'vision' => true,
+                'max_context' => 1_048_576,
+                'structured_output' => true,
             ],
             default => [],
         };
