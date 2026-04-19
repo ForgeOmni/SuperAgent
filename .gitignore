@@ -6,3 +6,8 @@ composer.lock
 .idea/
 .DS_Store
 /storage/logs/laravel.log
+
+# Runtime / local state
+.claude/scheduled_tasks.lock
+sitemap_server.log
+sqlite_mcp_server.db
