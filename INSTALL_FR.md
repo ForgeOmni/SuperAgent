@@ -121,9 +121,44 @@ superagent
 ├── credentials/                 # produit par `superagent auth login …`
 │   ├── anthropic.json           # OAuth / api_key pour Anthropic (mode 0600)
 │   └── openai.json              # OAuth / api_key pour OpenAI   (mode 0600)
+├── models.json                  # v0.8.7+ override utilisateur modèles / tarifs
+├── mcp.json                     # v0.8.8+ config serveur MCP (`superagent mcp …`)
+├── skills/                      # v0.8.8+ fichiers skill markdown installés par l'utilisateur
+├── mcp-auth.json                # v0.8.8+ tokens OAuth serveurs MCP (mode 0600)
+├── cost_ledger.json             # v0.8.8+ registre quotidien CostLimiter (mode 0600)
+├── features.json                # v0.8.8+ fichier FeatureFlags (optionnel)
 └── storage/
     ├── sessions/                # état /session save
     └── palace/                  # Memory Palace (si activé)
+```
+
+### Commandes CLI v0.8.8 (référence rapide)
+
+```bash
+# Kimi / Qwen / GLM / MiniMax natifs — une fois les env ci-dessus définies :
+superagent chat -p kimi "Résume ce dépôt"
+superagent chat -p qwen -m qwen3.6-max-preview "..."
+superagent chat -p glm "..."
+superagent chat -p minimax "..."
+
+# Serveurs MCP (partagés par tous les cerveaux principaux)
+superagent mcp add filesystem stdio npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp
+superagent mcp list
+superagent mcp remove filesystem
+
+# Skills utilisateur
+superagent skills install ./my-skill.md
+superagent skills list
+superagent skills show my-skill
+
+# Orchestration Swarm (plan + exécution ; --plan-only pour dry-run)
+superagent swarm "Analyse ce dépôt et rédige un deck"
+superagent swarm "..." --provider kimi --max-sub-agents 50
+superagent swarm "..." --role chercheur:collecter --role rédacteur:écrire   # route vers MiniMax
+superagent swarm "..." --json --plan-only                                    # sortie plan JSON
+
+# Health checks (programmatique)
+php -r 'require "vendor/autoload.php"; print_r(\SuperAgent\Providers\ProviderRegistry::healthCheck("kimi"));'
 ```
 
 ### Désinstallation
@@ -242,7 +277,9 @@ php artisan migrate
 ```env
 # ========== Configuration de Base SuperAgent ==========
 
-# Fournisseur IA par défaut (anthropic|openai|bedrock|ollama)
+# Fournisseur IA par défaut
+# anthropic | openai | gemini | bedrock | ollama | openrouter
+# v0.8.8 ajoute : kimi | qwen | glm | minimax (voir ci-dessous)
 SUPERAGENT_PROVIDER=anthropic
 
 # Configuration Anthropic Claude
@@ -270,9 +307,31 @@ OLLAMA_MODEL=llama2
 GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx    # ou GOOGLE_API_KEY
 GEMINI_MODEL=gemini-2.0-flash
 
+# ========== v0.8.8 fournisseurs natifs (tous optionnels) ==========
+# Moonshot Kimi (K2.6, Agent Swarm, File-Extract, Batches)
+KIMI_API_KEY=sk-moonshot-xxxxxxxxxxxxx    # ou alias MOONSHOT_API_KEY
+KIMI_REGION=intl                           # intl | cn (clé liée à l'hôte)
+
+# Alibaba Qwen (natif DashScope — thinking, code-interpreter, long-file)
+QWEN_API_KEY=sk-dashscope-xxxxxxxxxxxxx   # ou alias DASHSCOPE_API_KEY
+QWEN_REGION=intl                           # intl (Singapour) | us (Virginie) | cn (Pékin) | hk
+
+# Z.AI / BigModel — GLM-5, outils Web Search / Reader / OCR / ASR
+GLM_API_KEY=your-zai-key                   # ou alias ZAI_API_KEY / ZHIPU_API_KEY
+GLM_REGION=intl                            # intl (api.z.ai) | cn (open.bigmodel.cn)
+
+# MiniMax (M2.7 Agent Teams, TTS, musique, vidéo, image)
+MINIMAX_API_KEY=your-minimax-key
+MINIMAX_GROUP_ID=your-group-id             # optionnel — ajoute l'en-tête X-GroupId
+MINIMAX_REGION=intl                        # intl | cn
+
 # Catalogue de modèles dynamique (v0.8.7+) — synchroniser les modèles/tarifs sans release
 # SUPERAGENT_MODELS_URL=https://your-cdn/models.json
-# SUPERAGENT_MODELS_AUTO_UPDATE=1   # auto-refresh avec vérification de fraîcheur 7 jours
+# SUPERAGENT_MODELS_AUTO_UPDATE=1           # auto-refresh avec vérification de fraîcheur 7 jours
+
+# Couche de sécurité (v0.8.8+)
+# SUPERAGENT_OFFLINE=1                      # bloque tout appel d'outil marqué `network`
+# SUPERAGENT_DISABLE=thinking,cost_limit    # liste séparée par virgule des fonctionnalités à désactiver
 
 # ========== Bascules de Fonctionnalités ==========
 

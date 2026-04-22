@@ -121,9 +121,44 @@ superagent
 │   ├── anthropic.json           # OAuth / api_key for Anthropic (mode 0600)
 │   ├── openai.json              # OAuth / api_key for OpenAI   (mode 0600)
 │   └── gemini.json              # OAuth / api_key for Gemini   (mode 0600)
+├── models.json                  # v0.8.7+ user-level model / pricing override
+├── mcp.json                     # v0.8.8+ MCP server config (`superagent mcp …`)
+├── skills/                      # v0.8.8+ user-installed skill markdown files
+├── mcp-auth.json                # v0.8.8+ OAuth tokens for MCP servers (mode 0600)
+├── cost_ledger.json             # v0.8.8+ daily CostLimiter spend ledger (mode 0600)
+├── features.json                # v0.8.8+ FeatureFlags file (optional)
 └── storage/
     ├── sessions/                # /session save state
     └── palace/                  # Memory Palace (if enabled)
+```
+
+### v0.8.8 CLI commands (quick reference)
+
+```bash
+# Native Kimi / Qwen / GLM / MiniMax — once the env vars above are set:
+superagent chat -p kimi "Summarise this repo"
+superagent chat -p qwen -m qwen3.6-max-preview "..."
+superagent chat -p glm "..."
+superagent chat -p minimax "..."
+
+# MCP servers (shared by every main brain)
+superagent mcp add filesystem stdio npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp
+superagent mcp list
+superagent mcp remove filesystem
+
+# User-level Skills
+superagent skills install ./my-skill.md
+superagent skills list
+superagent skills show my-skill
+
+# Swarm orchestration (plan + execute; --plan-only for dry-run)
+superagent swarm "Analyse this repo and write a deck"
+superagent swarm "..." --provider kimi --max-sub-agents 50
+superagent swarm "..." --role researcher:gather --role writer:draft   # routes to MiniMax
+superagent swarm "..." --json --plan-only                              # planner-only JSON
+
+# Doctor / health checks (programmatic)
+php -r 'require "vendor/autoload.php"; print_r(\SuperAgent\Providers\ProviderRegistry::healthCheck("kimi"));'
 ```
 
 ### Uninstall
@@ -242,7 +277,9 @@ Edit your `.env` file and add the necessary configuration:
 ```env
 # ========== SuperAgent Base Configuration ==========
 
-# Default AI Provider (anthropic|openai|gemini|bedrock|ollama|openrouter)
+# Default AI Provider
+# anthropic | openai | gemini | bedrock | ollama | openrouter
+# v0.8.8 adds: kimi | qwen | glm | minimax (see below)
 SUPERAGENT_PROVIDER=anthropic
 
 # Anthropic Claude Configuration
@@ -270,9 +307,31 @@ OLLAMA_MODEL=llama2
 GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx    # or set GOOGLE_API_KEY instead
 GEMINI_MODEL=gemini-2.0-flash
 
+# ========== v0.8.8 native providers (all optional) ==========
+# Moonshot Kimi (K2.6, Agent Swarm, File-Extract, Batches)
+KIMI_API_KEY=sk-moonshot-xxxxxxxxxxxxx    # or MOONSHOT_API_KEY alias
+KIMI_REGION=intl                           # intl | cn (key is host-bound)
+
+# Alibaba Qwen (DashScope native — thinking, code-interpreter, long-file)
+QWEN_API_KEY=sk-dashscope-xxxxxxxxxxxxx   # or DASHSCOPE_API_KEY alias
+QWEN_REGION=intl                           # intl (Singapore) | us (Virginia) | cn (Beijing) | hk
+
+# Z.AI / BigModel — GLM-5, Web Search / Reader / OCR / ASR tools
+GLM_API_KEY=your-zai-key                   # or ZAI_API_KEY / ZHIPU_API_KEY alias
+GLM_REGION=intl                            # intl (api.z.ai) | cn (open.bigmodel.cn)
+
+# MiniMax (M2.7 Agent Teams, TTS, music, video, image)
+MINIMAX_API_KEY=your-minimax-key
+MINIMAX_GROUP_ID=your-group-id             # optional — adds X-GroupId header
+MINIMAX_REGION=intl                        # intl | cn
+
 # Dynamic model catalog (v0.8.7+) — pull latest models/pricing without a release
 # SUPERAGENT_MODELS_URL=https://your-cdn/models.json
-# SUPERAGENT_MODELS_AUTO_UPDATE=1   # enable 7-day staleness auto-refresh
+# SUPERAGENT_MODELS_AUTO_UPDATE=1           # enable 7-day staleness auto-refresh
+
+# Security layer (v0.8.8+)
+# SUPERAGENT_OFFLINE=1                      # block every `network`-tagged tool call
+# SUPERAGENT_DISABLE=thinking,cost_limit    # comma-list of features to disable
 
 # ========== Feature Toggles ==========
 

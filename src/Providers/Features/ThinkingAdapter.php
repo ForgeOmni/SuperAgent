@@ -44,6 +44,11 @@ class ThinkingAdapter extends FeatureAdapter
      */
     public const DEFAULT_BUDGET_TOKENS = 4000;
 
+    public static function validSpecKeys(): ?array
+    {
+        return ['enabled', 'required', 'budget'];
+    }
+
     /**
      * CoT fallback text injected when the provider lacks native thinking.
      * Written in the second person so it composes naturally with whatever

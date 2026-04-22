@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.8.6-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.8.8-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,44 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.8.8 — Kimi / Qwen / GLM / MiniMax 原生接入、能力驱动 feature 管线、安全层（+375 测试）
+
+已注册 10 家 provider，亚洲四家升级为**一等原生** —— 各自的 region map、模型目录、原生能力钩子。Agent loop、MCP 栈、Skills 系统在所有 10 家上表现一致。
+
+- **四家原生 provider** —— `KimiProvider`（Moonshot）、`QwenProvider`（DashScope 原生）、`GlmProvider`（Z.AI / BigModel）、`MiniMaxProvider`。其中三家共享协议中性的 `ChatCompletionsProvider` 基类（`OpenAIProvider` 和 `OpenRouterProvider` 也迁进来了 —— 395 / 430 行重构成各 ~130 行）。Qwen 独立实现，因为 DashScope 的 `text-generation/generation` 请求体 shape 不是 chat-completions
+- **全面 region 感知** —— Kimi (intl/cn)、Qwen (intl/us/cn/hk)、GLM (intl/cn)、MiniMax (intl/cn)。`ProviderRegistry::createWithRegion()` + 带 region 标签的 `CredentialPool` 条目防止国内 key 漏到国际 endpoint
+- **能力接口家族** —— 13 个 `Supports*` 接口（Thinking / Swarm / ContextCaching / FileExtract / WebSearch / CodeInterpreter / OCR / Skills / Batch / TTS / Music / Video / Image）。Provider 只实现自己原生支持的；`FeatureDispatcher` 把 `$options['features']` 路由到对应 fragment 或优雅降级
+- **Feature adapter** —— `ThinkingAdapter`（Anthropic / Qwen / GLM / Kimi 原生，其他 CoT prompt 降级）、`AgentTeamsAdapter`（MiniMax M2.7 原生，其他 scaffold 降级）、`CodeInterpreterAdapter`（Qwen 原生，其他 sandbox-tool 提示降级）。新 adapter 在 `FeatureDispatcher::registerDefaults()` 注册
+- **Specialty-as-Tool（11 个工具）** —— 任何主脑（Claude / GPT / Gemini…）都能调用 `glm_web_search` / `glm_web_reader` / `glm_ocr` / `glm_asr` / `kimi_file_extract` / `kimi_batch` / `kimi_swarm` / `qwen_long_file` / `minimax_tts` / `minimax_music` / `minimax_video` / `minimax_image`。共享 `ProviderToolBase` 处理属性声明、轮询助手、Guzzle client 复用
+- **`superagent mcp` / `skills` / `swarm` CLI** —— `~/.superagent/mcp.json` 原子写配置；markdown skill install/list/show/remove/path；`superagent swarm <prompt>` 规划 + 执行（`native_swarm` 走 `KimiSwarmTool`，`agent_teams` 走 MiniMax chat，`local_swarm` 委托 `src/Swarm/`）
+- **`SkillInjector` + provider 桥接器** —— 通用路径把 skill body 合并进 `$options['system_prompt']`（带幂等 `## Skill: <name>` 标题）。`KimiSkillBridge` / `MiniMaxSkillBridge` 通过 `SkillInjector::registerBridge()` 注册 —— MiniMax M2.7 用"行为契约"框架，利用其训练好的 97% skill 遵循率
+- **安全层** —— `src/Security/`：`NetworkPolicy` 遵循 `SUPERAGENT_OFFLINE=1`；`CostLimiter` 走 `~/.superagent/cost_ledger.json`（UTC 自动滚动、原子写、chmod 0600），三级配额（per-call / per-tool-daily / global-daily）；`ToolSecurityValidator` 组合两者，Bash 委托给现有 `BashSecurityValidator`（23 个 check 未动，57 个测试仍绿）
+- **`CapabilityRouter` + `SwarmRouter`** —— 自动挑 provider / region / 策略。排序：偏好列表 → 原生 feature 数 → 混合成本（`input + 4·output` per 1M tokens）做 tiebreaker
+- **`ProviderRegistry::healthCheck()`** —— 5 秒 cURL 探测，返回 `{ok, latency_ms, reason}` —— 验证认证 + 可达性，不只是 env 变量
+- **`FeatureFlags`** —— 运行时覆盖 > `SUPERAGENT_DISABLE=a,b,c` env > `~/.superagent/features.json` > 默认（开）。不改代码选择性关能力
+- **非阻塞 `pollIterator()`** —— `pollUntilDone()` 的 `Generator` 变体，Laravel queue worker 可以在 poll 间 `release($delay)`，不用为 15 分钟视频渲染卡住整个 worker
+- **CI workflow** —— `.github/workflows/test.yml` 在 PHP 8.1 / 8.2 / 8.3 上跑 Unit + Smoke + Compat；Integration job（真 vendor 端点）受 `SUPERAGENT_INTEGRATION=1` 闸门
+- **三语文档** —— `docs/NATIVE_PROVIDERS{,_CN,_FR}.md`、`docs/FEATURES_MATRIX{,_CN,_FR}.md`、`docs/MIGRATION_NATIVE{,_CN,_FR}.md`。迁移指南给出从 `OpenAIProvider+base_url` 切到原生的一行 diff
+
+兼容红线（全绿）：所有公开方法签名不变、`BashSecurityValidator` 零改动、`OpenAIProvider` byte-exact（被现有 OAuth 测试锁定）、`resources/models.json` v1 继续加载、`CredentialPool` 无 region 字符串 key 继续有效。全量测试：**2471 tests / 6879 assertions / 0 failures**（从 0.8.7 的 2060 / 5675 增长）。
+
+四家新 provider 快速上手：
+
+```bash
+export KIMI_API_KEY=sk-moonshot-...   # 或 MOONSHOT_API_KEY
+export QWEN_API_KEY=sk-dashscope-...  # 或 DASHSCOPE_API_KEY
+export GLM_API_KEY=...                 # 或 ZAI_API_KEY / ZHIPU_API_KEY
+export MINIMAX_API_KEY=...
+export QWEN_REGION=intl                # intl | us | cn | hk（可选）
+
+superagent chat -p kimi "用 Python 写斐波那契"
+superagent swarm "分析这个 repo 生成报告" --max-sub-agents 50
+```
+
+### 🆕 v0.8.7 — Gemini 原生 provider + CLI 可更新的模型目录（+36 测试）
+- **Gemini 一等集成** —— 原生 `GeminiProvider`、CLI `-p gemini`、init 向导、`/model` 选择器、成本跟踪、一键从 `@google/gemini-cli` 导入凭证
+- **`ModelCatalog` 三级模型+定价注册表** —— 内置基线 + 用户覆盖（`~/.superagent/models.json`）+ 可选远端 URL。新 `superagent models list|update|status|reset` CLI
 
 ### 🆕 v0.8.6 — SuperAgent CLI：`superagent` 命令（独立 + Laravel 双模式、OAuth 登录、Claude Code 风格 REPL）
 SuperAgent 不再仅限 Laravel。**`superagent`** 二进制（`bin/superagent` / `bin/superagent.bat`）提供完整的 Claude Code 风格交互 REPL、一次性任务运行、会话管理、OAuth 登录。CLI 会自动检测 Laravel 项目：在 Laravel 项目中使用宿主 `config()` / 容器，否则通过独立的 `Foundation\Application` 启动一个最小容器——不写一行 PHP，也能用上本 SDK 的全部能力（Memory Palace、子智能体、Guardrails、AutoCompact、TaskRouter、MCP 工具、Skills）。

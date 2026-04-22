@@ -22,13 +22,20 @@ class SkillManager
         return self::$instance;
     }
 
-    public function __construct()
+    /**
+     * @param bool $autoLoadDisk When true (default), the constructor auto-
+     *            loads built-ins then the user + project skill directories
+     *            + `config('superagent.skills.paths')`. Pass false to stop
+     *            after built-ins so tests populate directories deterministically
+     *            before loading. Legacy fallback: when `PHPUNIT_RUNNING=1` is
+     *            set, disk auto-load is skipped unconditionally — keeps
+     *            pre-flag test bootstraps working.
+     */
+    public function __construct(bool $autoLoadDisk = true)
     {
         $this->loadBuiltinSkills();
-        // Skip disk-level auto-loading under PHPUnit so a developer's real
-        // ~/.superagent/skills directory doesn't colour test runs. Tests that
-        // want to exercise the loaders call them explicitly on a fresh instance.
-        if (getenv('PHPUNIT_RUNNING') !== '1') {
+
+        if ($autoLoadDisk && getenv('PHPUNIT_RUNNING') !== '1') {
             $this->loadUserDir();
             $this->loadProjectDir();
             $this->loadConfiguredPaths();

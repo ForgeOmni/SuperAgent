@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.6-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.8-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Docs**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -11,6 +11,44 @@
 SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that delivers Claude-level capabilities with multi-agent orchestration, real-time monitoring, and distributed scaling. Build and deploy teams of AI agents that work in parallel, with automatic task detection and intelligent resource management.
 
 ## ✨ Core Features
+
+### 🆕 v0.8.8 — Native Kimi / Qwen / GLM / MiniMax, capability-driven feature pipeline, security layer (375 new tests)
+
+Ten registered providers, with the Asian four now **first-class natives** — their own region maps, model catalogs, and native-capability hooks. The agent loop, MCP stack, and Skills system compose identically across all ten.
+
+- **Four native providers** — `KimiProvider` (Moonshot), `QwenProvider` (DashScope native), `GlmProvider` (Z.AI / BigModel), `MiniMaxProvider`. Three share a protocol-neutral `ChatCompletionsProvider` base (which `OpenAIProvider` and `OpenRouterProvider` now extend too — refactored from 395 / 430 lines to ~130 each). Qwen is standalone because DashScope's `text-generation/generation` body shape isn't chat-completions
+- **Region-aware everything** — Kimi (intl/cn), Qwen (intl/us/cn/hk), GLM (intl/cn), MiniMax (intl/cn). `ProviderRegistry::createWithRegion()` + region-tagged `CredentialPool` entries prevent cn keys leaking to intl endpoints
+- **Capability interface family** — 13 `Supports*` interfaces (Thinking / Swarm / ContextCaching / FileExtract / WebSearch / CodeInterpreter / OCR / Skills / Batch / TTS / Music / Video / Image). Providers implement what they natively support; `FeatureDispatcher` routes `$options['features']` to the right fragment or falls back gracefully
+- **Feature adapters** — `ThinkingAdapter` (Anthropic / Qwen / GLM / Kimi native, CoT prompt fallback elsewhere), `AgentTeamsAdapter` (MiniMax M2.7 native, scaffold fallback), `CodeInterpreterAdapter` (Qwen native, sandbox-tool hint fallback). Register new ones in `FeatureDispatcher::registerDefaults()`
+- **Specialty-as-Tool (11 tools)** — any main brain (Claude, GPT, Gemini…) can call `glm_web_search` / `glm_web_reader` / `glm_ocr` / `glm_asr` / `kimi_file_extract` / `kimi_batch` / `kimi_swarm` / `qwen_long_file` / `minimax_tts` / `minimax_music` / `minimax_video` / `minimax_image` as ordinary `Tool`s. Shared `ProviderToolBase` handles attributes, poll helpers, Guzzle-client reuse
+- **`superagent mcp` / `skills` / `swarm` CLI** — atomic-write user config at `~/.superagent/mcp.json`; markdown skills install/list/show/remove/path; `superagent swarm <prompt>` plans + executes (`native_swarm` via `KimiSwarmTool`, `agent_teams` via MiniMax chat, `local_swarm` handed off to `src/Swarm/`)
+- **`SkillInjector` + provider bridges** — universal path merges skill bodies into `$options['system_prompt']` with an idempotent `## Skill: <name>` header. `KimiSkillBridge` / `MiniMaxSkillBridge` registered via `SkillInjector::registerBridge()` — MiniMax M2.7 gets a "behavioural contract" framing that leans on its trained-in 97% skill adherence
+- **Security layer** — `src/Security/`: `NetworkPolicy` respects `SUPERAGENT_OFFLINE=1`; `CostLimiter` enforces per-call / per-tool-daily / global-daily caps via `~/.superagent/cost_ledger.json` (UTC auto-rollover, atomic write, chmod 0600); `ToolSecurityValidator` composites the two and delegates Bash to existing `BashSecurityValidator` (23 checks unchanged, 57 tests still passing)
+- **`CapabilityRouter` + `SwarmRouter`** — pick the right provider / region / strategy automatically. Router ranks by preferred-list, native-feature count, then blended cost (`input + 4·output` per 1M tokens) as tiebreaker
+- **`ProviderRegistry::healthCheck()`** — 5s cURL probe per provider returning `{ok, latency_ms, reason}` — validates auth + reachability, not just env vars
+- **`FeatureFlags`** — runtime override > `SUPERAGENT_DISABLE=a,b,c` env > `~/.superagent/features.json` > default (on). Selectively kill capabilities without code
+- **Non-blocking `pollIterator()`** — `Generator` variant of `pollUntilDone()` so Laravel queue workers can `release($delay)` between probes instead of burning a worker on a 15-minute video render
+- **CI workflow** — `.github/workflows/test.yml` runs Unit + Smoke + Compat on PHP 8.1 / 8.2 / 8.3; Integration job (real vendor endpoints) gated behind `SUPERAGENT_INTEGRATION=1`
+- **Three-language docs** — `docs/NATIVE_PROVIDERS{,_CN,_FR}.md`, `docs/FEATURES_MATRIX{,_CN,_FR}.md`, `docs/MIGRATION_NATIVE{,_CN,_FR}.md`. Migration guide shows the one-line switch from `OpenAIProvider+base_url` to native, plus every unlock
+
+Compat red lines (all green): no public method signature changed, `BashSecurityValidator` untouched, `OpenAIProvider` byte-exact behaviour (locked by existing OAuth test), `resources/models.json` v1 still loads unchanged, `CredentialPool` region-less keys still work. Full suite: **2471 tests / 6879 assertions / 0 failures** (up from 2060 / 5675 at 0.8.7).
+
+Quick start for the four new providers:
+
+```bash
+export KIMI_API_KEY=sk-moonshot-...   # or MOONSHOT_API_KEY
+export QWEN_API_KEY=sk-dashscope-...  # or DASHSCOPE_API_KEY
+export GLM_API_KEY=...                 # or ZAI_API_KEY / ZHIPU_API_KEY
+export MINIMAX_API_KEY=...
+export QWEN_REGION=intl                # intl | us | cn | hk (optional)
+
+superagent chat -p kimi "Write a fibonacci in Python"
+superagent swarm "Analyse this repo and write a report" --max-sub-agents 50
+```
+
+### 🆕 v0.8.7 — Gemini native provider + CLI-updatable model catalog (36 new tests)
+- **First-class Gemini integration** — a native `GeminiProvider`, CLI flag (`-p gemini`), init-wizard entry, `/model` picker, cost tracking, one-command credential import from `@google/gemini-cli`
+- **`ModelCatalog` — a 3-tier model & pricing registry** — bundled baseline + user override (`~/.superagent/models.json`) + opt-in remote URL. New `superagent models list|update|status|reset` CLI
 
 ### 🆕 v0.8.6 — SuperAgent CLI: `superagent` command (standalone + Laravel, OAuth login, Claude-Code-style REPL)
 SuperAgent is no longer Laravel-only. The **`superagent`** binary (`bin/superagent` / `bin/superagent.bat`) ships a full Claude-Code-style REPL, one-shot task runner, session management, and OAuth-based authentication. The CLI auto-detects Laravel projects and uses the host `config()` / container when present; otherwise it bootstraps a minimal standalone container that still unlocks everything in this SDK — Memory Palace, sub-agents, Guardrails, AutoCompaction, TaskRouter, MCP tools, skills — without writing a line of PHP.

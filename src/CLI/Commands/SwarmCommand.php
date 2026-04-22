@@ -57,8 +57,119 @@ class SwarmCommand
             $renderer->line('  Roles:      ' . count($request['roles']));
         }
         $renderer->newLine();
-        $renderer->hint('Execution wiring lands in a follow-up phase; for now this command only plans.');
+
+        if (! empty($request['_plan_only'])) {
+            return 0;
+        }
+
+        // Execute the plan — three code paths, one per strategy.
+        return match ($plan->strategy) {
+            'native_swarm' => $this->executeNativeSwarm($renderer, $plan),
+            'agent_teams'  => $this->executeAgentTeams($renderer, $plan),
+            'local_swarm'  => $this->executeLocalSwarm($renderer, $plan),
+            default        => $this->unknownStrategy($renderer, $plan->strategy),
+        };
+    }
+
+    /**
+     * `native_swarm` → Kimi Agent Swarm via `KimiSwarmTool`. Requires
+     * `KIMI_API_KEY` in the environment. The tool itself handles the
+     * submit → poll → fetch loop (see `KimiSwarmTool`).
+     */
+    private function executeNativeSwarm(\SuperAgent\CLI\Terminal\Renderer $renderer, \SuperAgent\Providers\SwarmPlan $plan): int
+    {
+        if (! getenv('KIMI_API_KEY') && ! getenv('MOONSHOT_API_KEY')) {
+            $renderer->error('native_swarm strategy requires KIMI_API_KEY in the environment');
+            return 1;
+        }
+
+        try {
+            $provider = \SuperAgent\Providers\ProviderRegistry::createFromEnv('kimi');
+            $tool = new \SuperAgent\Tools\Providers\Kimi\KimiSwarmTool($provider);
+            $renderer->info('Submitting to Kimi Agent Swarm...');
+            $result = $tool->execute(array_filter([
+                'prompt' => $plan->prompt,
+                'max_sub_agents' => $plan->options['max_sub_agents'] ?? null,
+                'timeout_seconds' => $plan->options['timeout_seconds'] ?? 900,
+                'wait' => ! ($plan->options['async'] ?? false),
+            ], static fn ($v) => $v !== null));
+
+            if ($result->isError) {
+                $renderer->error($result->contentAsString());
+                return 1;
+            }
+            $renderer->success('Swarm completed.');
+            $renderer->line(is_string($result->content) ? $result->content : json_encode($result->content, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            return 0;
+        } catch (\Throwable $e) {
+            $renderer->error('native_swarm failed: ' . $e->getMessage());
+            return 1;
+        }
+    }
+
+    /**
+     * `agent_teams` → MiniMax M2.7 chat call with the
+     * `agent_teams` feature — `FeatureDispatcher` injects the
+     * scaffolding via `AgentTeamsAdapter`.
+     */
+    private function executeAgentTeams(\SuperAgent\CLI\Terminal\Renderer $renderer, \SuperAgent\Providers\SwarmPlan $plan): int
+    {
+        if (! getenv('MINIMAX_API_KEY')) {
+            $renderer->error('agent_teams strategy requires MINIMAX_API_KEY in the environment');
+            return 1;
+        }
+
+        try {
+            $provider = \SuperAgent\Providers\ProviderRegistry::createFromEnv('minimax');
+            $messages = [new \SuperAgent\Messages\UserMessage($plan->prompt)];
+            $options = [
+                'features' => [
+                    'agent_teams' => array_filter([
+                        'roles' => $plan->options['roles'] ?? null,
+                        'objective' => $plan->options['objective'] ?? $plan->prompt,
+                    ], static fn ($v) => $v !== null),
+                ],
+            ];
+
+            $renderer->info('Running MiniMax Agent Teams...');
+            foreach ($provider->chat($messages, [], null, $options) as $chunk) {
+                foreach ($chunk->content as $block) {
+                    if ($block->type === 'text') {
+                        $renderer->line($block->text);
+                    }
+                }
+            }
+            return 0;
+        } catch (\Throwable $e) {
+            $renderer->error('agent_teams failed: ' . $e->getMessage());
+            return 1;
+        }
+    }
+
+    /**
+     * `local_swarm` → SuperAgent's in-process swarm (`src/Swarm/`).
+     *
+     * Stub: wiring the `Team` / `ParallelAgentCoordinator` / backend
+     * selection requires caller-supplied AgentDefinition instances and
+     * a configured AgentManager — non-trivial to do sensibly from a
+     * single prompt line. This command hands the user the plan and
+     * points them at the programmatic API.
+     */
+    private function executeLocalSwarm(\SuperAgent\CLI\Terminal\Renderer $renderer, \SuperAgent\Providers\SwarmPlan $plan): int
+    {
+        $renderer->info('local_swarm strategy selected.');
+        $renderer->hint(
+            'Direct CLI execution of local swarms is not supported — '
+            . 'wire it programmatically via src/Swarm/Team + AgentPool + ParallelAgentCoordinator. '
+            . 'The --json output above contains the plan your code should consume.',
+        );
         return 0;
+    }
+
+    private function unknownStrategy(\SuperAgent\CLI\Terminal\Renderer $renderer, string $strategy): int
+    {
+        $renderer->error("Unknown strategy: {$strategy}");
+        return 2;
     }
 
     /**
@@ -94,6 +205,11 @@ class SwarmCommand
                     break;
                 case '--json':
                     $request['_json'] = true;
+                    $request['_plan_only'] = true;  // --json is dry-run: emit plan only, no execution
+                    break;
+                case '--plan-only':
+                case '--dry-run':
+                    $request['_plan_only'] = true;
                     break;
                 default:
                     $promptParts[] = $arg;

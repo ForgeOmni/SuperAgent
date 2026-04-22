@@ -37,6 +37,24 @@ abstract class FeatureAdapter
     public const FEATURE_NAME = '';
 
     /**
+     * Spec keys this adapter understands. Used by `FeatureDispatcher` in
+     * debug mode to warn about misspelled or unsupported keys. The four
+     * common framework keys (`enabled`, `required`, plus adapter-defined
+     * extras) are added to the baseline so each subclass only lists
+     * *its* domain-specific knobs.
+     *
+     * Return `null` to disable validation entirely (rare — use when the
+     * adapter accepts a free-form spec, e.g. forwarding arbitrary vendor
+     * knobs).
+     *
+     * @return array<int, string>|null
+     */
+    public static function validSpecKeys(): ?array
+    {
+        return ['enabled', 'required'];
+    }
+
+    /**
      * Apply this feature to the outgoing request body.
      *
      * Concrete subclasses implement the provider routing table. The default

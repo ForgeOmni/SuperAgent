@@ -39,6 +39,11 @@ class AgentTeamsAdapter extends FeatureAdapter
 {
     public const FEATURE_NAME = 'agent_teams';
 
+    public static function validSpecKeys(): ?array
+    {
+        return ['enabled', 'required', 'roles', 'objective', 'protocol'];
+    }
+
     public static function apply(LLMProvider $provider, array $spec, array &$body): void
     {
         if (self::isDisabled($spec)) {

@@ -11,6 +11,7 @@ use GuzzleHttp\Exception\GuzzleException;
 use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\Enums\StopReason;
 use SuperAgent\Exceptions\ProviderException;
+use SuperAgent\Providers\Capabilities\SupportsCodeInterpreter;
 use SuperAgent\Providers\Capabilities\SupportsThinking;
 use SuperAgent\Providers\Features\FeatureDispatcher;
 use SuperAgent\Messages\AssistantMessage;
@@ -51,7 +52,7 @@ use SuperAgent\Tools\Tool;
  *   - `cn`             → dashscope.aliyuncs.com       — Beijing
  *   - `hk`             → cn-hongkong.dashscope.aliyuncs.com
  */
-class QwenProvider implements LLMProvider, SupportsThinking
+class QwenProvider implements LLMProvider, SupportsThinking, SupportsCodeInterpreter
 {
     public function thinkingRequestFragment(int $budgetTokens): array
     {
@@ -59,6 +60,16 @@ class QwenProvider implements LLMProvider, SupportsThinking
         return ['parameters' => [
             'enable_thinking' => true,
             'thinking_budget' => max(1, $budgetTokens),
+        ]];
+    }
+
+    public function codeInterpreterRequestFragment(array $options = []): array
+    {
+        // DashScope's code interpreter activator lives under `parameters`
+        // alongside thinking knobs; FeatureAdapter::merge() deep-merges
+        // this into existing `parameters` without clobbering them.
+        return ['parameters' => [
+            'enable_code_interpreter' => true,
         ]];
     }
 

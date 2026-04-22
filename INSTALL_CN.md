@@ -121,9 +121,44 @@ superagent
 ├── credentials/                 # `superagent auth login …` 产物
 │   ├── anthropic.json           # Anthropic 的 OAuth / api_key（权限 0600）
 │   └── openai.json              # OpenAI 的 OAuth / api_key（权限 0600）
+├── models.json                  # v0.8.7+ 用户级模型 / 定价覆盖
+├── mcp.json                     # v0.8.8+ MCP server 配置（`superagent mcp …`）
+├── skills/                      # v0.8.8+ 用户安装的 skill markdown
+├── mcp-auth.json                # v0.8.8+ MCP server OAuth token（权限 0600）
+├── cost_ledger.json             # v0.8.8+ CostLimiter 每日花销账本（权限 0600）
+├── features.json                # v0.8.8+ FeatureFlags 配置（可选）
 └── storage/
     ├── sessions/                # /session save 的状态
     └── palace/                  # Memory Palace（如开启）
+```
+
+### v0.8.8 CLI 命令速查
+
+```bash
+# Kimi / Qwen / GLM / MiniMax 原生 —— 设好上面的 env 后：
+superagent chat -p kimi "总结这个代码库"
+superagent chat -p qwen -m qwen3.6-max-preview "..."
+superagent chat -p glm "..."
+superagent chat -p minimax "..."
+
+# MCP servers（所有主脑共享）
+superagent mcp add filesystem stdio npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp
+superagent mcp list
+superagent mcp remove filesystem
+
+# 用户级 Skills
+superagent skills install ./my-skill.md
+superagent skills list
+superagent skills show my-skill
+
+# Swarm 编排（规划 + 执行；--plan-only 干跑）
+superagent swarm "分析 repo 并生成 PPT"
+superagent swarm "..." --provider kimi --max-sub-agents 50
+superagent swarm "..." --role researcher:搜资料 --role writer:撰写   # 路由到 MiniMax
+superagent swarm "..." --json --plan-only                             # 仅输出 plan JSON
+
+# 健康检查（编程式）
+php -r 'require "vendor/autoload.php"; print_r(\SuperAgent\Providers\ProviderRegistry::healthCheck("kimi"));'
 ```
 
 ### 卸载
@@ -242,7 +277,9 @@ php artisan migrate
 ```env
 # ========== SuperAgent 基础配置 ==========
 
-# 默认AI提供商 (anthropic|openai|gemini|bedrock|ollama|openrouter)
+# 默认AI提供商
+# anthropic | openai | gemini | bedrock | ollama | openrouter
+# v0.8.8 新增：kimi | qwen | glm | minimax（见下文）
 SUPERAGENT_PROVIDER=anthropic
 
 # Anthropic Claude 配置
@@ -270,9 +307,31 @@ OLLAMA_MODEL=llama2
 GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx    # 或改用 GOOGLE_API_KEY
 GEMINI_MODEL=gemini-2.0-flash
 
+# ========== v0.8.8 四家原生 provider（都可选）==========
+# Moonshot Kimi（K2.6、Agent Swarm、File-Extract、Batch）
+KIMI_API_KEY=sk-moonshot-xxxxxxxxxxxxx    # 别名 MOONSHOT_API_KEY
+KIMI_REGION=intl                           # intl | cn（key 与 host 绑定）
+
+# Alibaba Qwen（DashScope 原生 — thinking、code-interpreter、long-file）
+QWEN_API_KEY=sk-dashscope-xxxxxxxxxxxxx   # 别名 DASHSCOPE_API_KEY
+QWEN_REGION=intl                           # intl（新加坡）| us（弗吉尼亚）| cn（北京）| hk
+
+# Z.AI / BigModel — GLM-5、Web Search / Reader / OCR / ASR 工具
+GLM_API_KEY=your-zai-key                   # 别名 ZAI_API_KEY / ZHIPU_API_KEY
+GLM_REGION=intl                            # intl（api.z.ai）| cn（open.bigmodel.cn）
+
+# MiniMax（M2.7 Agent Teams、TTS、音乐、视频、图像）
+MINIMAX_API_KEY=your-minimax-key
+MINIMAX_GROUP_ID=your-group-id             # 可选 — 会加 X-GroupId header
+MINIMAX_REGION=intl                        # intl | cn
+
 # 动态模型目录（v0.8.7+）— 无需发版即可同步最新模型与价格
 # SUPERAGENT_MODELS_URL=https://your-cdn/models.json
-# SUPERAGENT_MODELS_AUTO_UPDATE=1   # 启动时 7 天陈旧自动刷新
+# SUPERAGENT_MODELS_AUTO_UPDATE=1           # 启动时 7 天陈旧自动刷新
+
+# 安全层（v0.8.8+）
+# SUPERAGENT_OFFLINE=1                      # 阻断所有带 `network` 属性的工具
+# SUPERAGENT_DISABLE=thinking,cost_limit    # 逗号分隔的 feature flag 禁用列表
 
 # ========== 功能开关 ==========
 

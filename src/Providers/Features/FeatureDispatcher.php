@@ -65,6 +65,7 @@ class FeatureDispatcher
         foreach ([
             ThinkingAdapter::class,
             AgentTeamsAdapter::class,
+            CodeInterpreterAdapter::class,
         ] as $class) {
             self::register($class);
         }
@@ -118,7 +119,51 @@ class FeatureDispatcher
                 $spec = $spec === true ? [] : ['enabled' => false];
             }
             $adapterClass = self::$adapters[$name];
+
+            if (self::debugMode()) {
+                self::warnOnUnknownKeys($name, $adapterClass, $spec);
+            }
+
             $adapterClass::apply($provider, $spec, $body);
+        }
+    }
+
+    /**
+     * Whether to emit warnings for suspicious feature specs. Gated behind
+     * `SUPERAGENT_DEBUG=1` so production paths stay fully silent.
+     */
+    private static function debugMode(): bool
+    {
+        $env = getenv('SUPERAGENT_DEBUG');
+        if ($env === false || $env === '') {
+            return false;
+        }
+        return in_array(strtolower(trim((string) $env)), ['1', 'true', 'yes', 'on'], true);
+    }
+
+    /**
+     * Compare the caller's spec keys against the adapter's declared
+     * `validSpecKeys()`; warn via `error_log()` on any unknown key.
+     * Warning only — the unknown keys are still forwarded to the adapter
+     * unchanged, in case the caller knows better than the framework.
+     *
+     * @param class-string<FeatureAdapter> $adapterClass
+     * @param array<string, mixed>         $spec
+     */
+    private static function warnOnUnknownKeys(string $featureName, string $adapterClass, array $spec): void
+    {
+        $valid = $adapterClass::validSpecKeys();
+        if ($valid === null) {
+            return;  // free-form spec — skip validation
+        }
+        $unknown = array_diff(array_keys($spec), $valid);
+        foreach ($unknown as $key) {
+            error_log(sprintf(
+                "[SuperAgent] features.%s: unknown spec key '%s' (valid: %s)",
+                $featureName,
+                $key,
+                implode(', ', $valid),
+            ));
         }
     }
 }

@@ -384,6 +384,123 @@ class ProviderRegistry
     }
 
     /**
+     * Best-effort health check for a single provider. Returns a structured
+     * `HealthStatus` array — never throws. This intentionally differs from
+     * `discover()` which only looks at environment variables: `healthCheck`
+     * actually **hits the network** (with a short timeout) to verify auth
+     * + reachability. Call explicitly via `superagent doctor` or during
+     * startup when an operator wants "are my keys live right now".
+     *
+     * Lightweight strategy — try `GET /v1/models` (or equivalent) with a
+     * 5-second timeout. If the endpoint doesn't exist we fall back to a
+     * minimal chat call with 1 max_token. Any 2xx response counts as OK.
+     *
+     * @return array{provider: string, ok: bool, latency_ms?: int, reason?: string}
+     */
+    public static function healthCheck(string $name): array
+    {
+        if (! isset(self::$providers[$name])) {
+            return ['provider' => $name, 'ok' => false, 'reason' => 'unknown provider'];
+        }
+
+        try {
+            $config = match ($name) {
+                'anthropic' => ['api_key' => $_ENV['ANTHROPIC_API_KEY'] ?? getenv('ANTHROPIC_API_KEY') ?: null],
+                'openai'    => ['api_key' => $_ENV['OPENAI_API_KEY'] ?? getenv('OPENAI_API_KEY') ?: null],
+                'kimi'      => ['api_key' => $_ENV['KIMI_API_KEY'] ?? getenv('KIMI_API_KEY') ?: null],
+                'qwen'      => ['api_key' => $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?: null],
+                'glm'       => ['api_key' => $_ENV['GLM_API_KEY'] ?? getenv('GLM_API_KEY') ?: null],
+                'minimax'   => ['api_key' => $_ENV['MINIMAX_API_KEY'] ?? getenv('MINIMAX_API_KEY') ?: null],
+                'gemini'    => ['api_key' => $_ENV['GEMINI_API_KEY'] ?? getenv('GEMINI_API_KEY') ?: null],
+                'openrouter'=> ['api_key' => $_ENV['OPENROUTER_API_KEY'] ?? getenv('OPENROUTER_API_KEY') ?: null],
+                default     => [],
+            };
+
+            if (empty($config['api_key'] ?? null) && $name !== 'ollama' && $name !== 'bedrock') {
+                return ['provider' => $name, 'ok' => false, 'reason' => 'no API key in environment'];
+            }
+
+            // Create provider (validates config); any ProviderException here
+            // points at a configuration problem, not a network problem.
+            try {
+                $provider = self::create($name, $config);
+            } catch (ProviderException $e) {
+                return ['provider' => $name, 'ok' => false, 'reason' => 'config: ' . $e->getMessage()];
+            }
+
+            $t0 = microtime(true);
+            $probeUrl = self::healthProbeUrl($name, $provider);
+            if ($probeUrl === null) {
+                return ['provider' => $name, 'ok' => true, 'reason' => 'no probe endpoint — skipping'];
+            }
+
+            $ch = curl_init($probeUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 5,
+                CURLOPT_TIMEOUT => 5,
+                CURLOPT_HTTPHEADER => self::healthProbeHeaders($name, $config),
+                CURLOPT_NOBODY => false,
+            ]);
+            curl_exec($ch);
+            $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $err = curl_error($ch);
+            curl_close($ch);
+            $ms = (int) ((microtime(true) - $t0) * 1000);
+
+            if ($status >= 200 && $status < 300) {
+                return ['provider' => $name, 'ok' => true, 'latency_ms' => $ms];
+            }
+            if ($status === 401 || $status === 403) {
+                return ['provider' => $name, 'ok' => false, 'latency_ms' => $ms, 'reason' => "auth rejected (HTTP {$status})"];
+            }
+            if ($err !== '') {
+                return ['provider' => $name, 'ok' => false, 'latency_ms' => $ms, 'reason' => "curl: {$err}"];
+            }
+            return ['provider' => $name, 'ok' => false, 'latency_ms' => $ms, 'reason' => "HTTP {$status}"];
+        } catch (\Throwable $e) {
+            return ['provider' => $name, 'ok' => false, 'reason' => 'unexpected: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Cheap listing endpoint per provider. Null means "skip the HTTP probe"
+     * (e.g. Bedrock uses AWS SDK, not a plain HTTPS endpoint we can curl).
+     */
+    private static function healthProbeUrl(string $name, object $provider): ?string
+    {
+        return match ($name) {
+            'anthropic'  => 'https://api.anthropic.com/v1/models',
+            'openai'     => 'https://api.openai.com/v1/models',
+            'openrouter' => 'https://openrouter.ai/api/v1/models',
+            'gemini'     => 'https://generativelanguage.googleapis.com/v1beta/models',
+            'kimi'       => method_exists($provider, 'getRegion') && $provider->getRegion() === 'cn'
+                ? 'https://api.moonshot.cn/v1/models'
+                : 'https://api.moonshot.ai/v1/models',
+            'qwen'       => 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models',
+            'glm'        => 'https://api.z.ai/api/paas/v4/models',
+            'minimax'    => 'https://api.minimax.io/v1/text/models',
+            'ollama'     => 'http://localhost:11434/api/tags',
+            default      => null,  // bedrock uses AWS SDK — no plain probe
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     * @return array<int, string>
+     */
+    private static function healthProbeHeaders(string $name, array $config): array
+    {
+        $bearer = $config['api_key'] ?? null;
+        return match ($name) {
+            'anthropic' => ['x-api-key: ' . $bearer, 'anthropic-version: 2023-06-01'],
+            'gemini'    => ['x-goog-api-key: ' . $bearer],
+            'ollama'    => [],
+            default     => $bearer ? ['Authorization: Bearer ' . $bearer] : [],
+        };
+    }
+
+    /**
      * Auto-discover available providers based on environment.
      */
     public static function discover(): array

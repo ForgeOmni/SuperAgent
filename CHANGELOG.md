@@ -108,10 +108,35 @@ Highlights:
 - `docs/MIGRATION_NATIVE.md` — migration guide from OpenAI-compat-mode usage to native providers.
 - `examples/mixed_agent.php` — runnable cross-provider composition example.
 
+### Post-release improvements (still inside the 0.8.8 window)
+
+Twenty follow-up items after the initial 0.8.8 milestone — listed here rather than cut as a 0.8.9 because they're polish on top of the same release surface (no new vendor API contracts, no new config schema). Final test count with these included: **2471 tests / 6879 assertions / 0 failures**.
+
+- **CI workflow** — `.github/workflows/test.yml` runs Unit + Smoke + Compat on every push / PR across PHP 8.1 / 8.2 / 8.3. A separate Integration job runs on manual dispatch or release tags, honouring a `SUPERAGENT_INTEGRATION=1` gate so vendor keys only hit the wire when a maintainer opts in.
+- **Integration testsuite scaffold** — `tests/Integration/` with `IntegrationTestCase` base class, `KimiIntegrationTest` canary (real endpoint roundtrip when `KIMI_API_KEY` is set), and `KimiSwarmSchemaProbeTest` that flags `HTTP 404/405/400` as "Kimi's Swarm REST spec moved, update `KimiProvider::submitSwarm()`". Other providers follow the same template.
+- **`resources/models.json` pricing corrected against vendor docs** — Kimi K2.6 (0.60/2.50 → 0.95/4.00), Qwen3.6-Max-Preview (2.0/8.0 → 0.78/3.90), GLM-5 (2.0/8.0 → 1.00/3.20), GLM-4.x (2.0/8.0 → 0.60/2.20), Qwen3-VL-Plus / VL-OCR also aligned. MiniMax M2.7 (0.30/1.20) matched the official sheet and stayed as shipped.
+- **Kimi `SupportsThinking`** — Kimi activates thinking via model variant switch, not a request field. `KimiProvider::thinkingRequestFragment()` now returns `['model' => 'kimi-k2-thinking-preview']`; `FeatureDispatcher` deep-merge swaps the model id for the turn. New catalog entry `kimi-k2-thinking-preview` with the thinking capability flag.
+- **`AgentDefinition::features()`** — new optional method returning a generic `features` spec that downstream wiring (`AgentManager` / `Agent::run()` call sites in application code) can forward into `$options['features']`. Base default is `null` so every pre-0.8.8 `AgentDefinition` subclass continues to produce byte-exact chat requests.
+- **`superagent swarm` execution wiring** — the CLI now dispatches each strategy: `native_swarm` instantiates `KimiSwarmTool` and drives submit → poll → fetch, `agent_teams` runs a MiniMax chat call with the `agent_teams` feature so `AgentTeamsAdapter` injects the scaffold, and `local_swarm` hands the user the plan and points at the programmatic `src/Swarm/` API (wiring a generic CLI dispatcher for local swarms requires caller-supplied `AgentDefinition`s which a single prompt line can't express). `--plan-only` / `--dry-run` / `--json` keep the command useful as a dry-run.
+- **Three-language doc set** — `docs/NATIVE_PROVIDERS.md` + `_FR.md`, `docs/FEATURES_MATRIX_CN.md` + `_FR.md`, `docs/MIGRATION_NATIVE_CN.md` + `_FR.md` — restoring the en/cn/fr parity the rest of `docs/` has always had.
+- **`pollIterator()` non-blocking variant** — `ProviderToolBase::pollIterator()` yields probe payloads through a `Generator` so Laravel queue workers can `release($delay)` between polls instead of blocking on `usleep`. `pollUntilDone()` is now a thin wrapper over the iterator, so the sync path stays byte-exact.
+- **CapabilityRouter cost / latency ranking** — per-1M-token blended cost (`input + 4·output`) is used as a tiebreaker after preferred-list and native-feature-count. `prefer_low_cost: true` in the request also promotes cost to the primary ranker. Candidates with no pricing data sort last so "unpriced" doesn't falsely win as "cheapest".
+- **`CodeInterpreterAdapter`** — `features.code_interpreter` routes to Qwen's `enable_code_interpreter` via `SupportsCodeInterpreter`, falls back to a prompt hint telling the model to prefer a caller-provided sandbox tool over guessing. Registered in `FeatureDispatcher::registerDefaults()`.
+- **`SkillManager` constructor flag** — `new SkillManager(autoLoadDisk: false)` replaces the `PHPUNIT_RUNNING` env check as the canonical way to disable disk auto-load. The env check still works so nothing breaks.
+- **`ProviderMockHelper`** — shared test utility (`tests/Helpers/ProviderMockHelper::injectMockClient()`) that replaces the 20+ line MockHandler + HandlerStack + reflection boilerplate every provider test used to hand-roll. The reference-binding pattern is now centralised (the `&$history` pitfall is fixed once, in one place).
+- **`OpenRouterProvider` refactored** onto `ChatCompletionsProvider` (430 → 130 lines). `HTTP-Referer` / `X-Title` move to `extraHeaders()`; `provider_order` / `provider_preferences` / `transforms` land via `customizeRequestBody()`. Default base URL pinned by Compat tests.
+- **`ProviderRegistry::healthCheck()`** — lightweight cURL-based reachability probe (`GET /v1/models`) per provider with a 5s timeout. Structured return shape (`ok` / `latency_ms` / `reason`). Never throws — unknown providers / missing keys / auth failures each report themselves with a distinct `reason`.
+- **Feature spec key validation** — `FeatureAdapter::validSpecKeys()` lets adapters declare the spec keys they accept; `FeatureDispatcher` warns via `error_log()` on typos when `SUPERAGENT_DEBUG=1` is set. Production paths stay fully silent.
+- **Kimi / MiniMax `SkillBridge`s** — `src/Skills/Bridges/KimiSkillBridge.php` is a placeholder that falls through to the universal path (Kimi's native Skills REST isn't public yet). `MiniMaxSkillBridge` injects a MiniMax-tailored "follow this skill as an active contract" framing that leans on M2.7's trained-in 97% skill adherence.
+- **`McpOAuth`** — scaffold for RFC 8628 device-code flow against MCP servers that require it. Token cache at `~/.superagent/mcp-auth.json` (chmod 0600), multi-server coexistence, expired-token detection. Wire `authenticate()` lives in code but is untested against a live authorization server — waiting for the first OAuth-gated MCP server to show up in production.
+- **`FeatureFlags`** — `src/Config/FeatureFlags.php` gives users a runtime override / `~/.superagent/features.json` / `SUPERAGENT_DISABLE=flag1,flag2` env stack for selectively disabling capabilities without code changes. `FeatureFlags::enabled($key)` at any guard point.
+
 ### Changed
 
 - **`OpenAIProvider` rewritten** as a `ChatCompletionsProvider` subclass (395 → 127 lines). OAuth / Organization / `chatgpt-account-id` behaviour preserved and verified by existing `OpenAIProviderOAuthTest`; default base URL `api.openai.com` pinned by `tests/Compat/ProviderDefaultsLockdownTest`.
+- **`OpenRouterProvider` rewritten** as a `ChatCompletionsProvider` subclass (430 → 130 lines). See the post-release improvements section above.
 - **`ProviderRegistry::getCapabilities()`** extended with entries for `kimi` / `qwen` / `glm` / `minimax` including a `regions` key. Existing six-provider entries unchanged (snapshot-locked by `tests/Compat/ProviderCapabilitiesShapeTest`).
+- **`resources/models.json`** prices for Kimi / Qwen / GLM families corrected against each vendor's official pricing page (see post-release notes).
 
 ### Compat Red Lines (All Green)
 
@@ -120,6 +145,8 @@ Highlights:
 - `BashSecurityValidator` and its 23 checks are bit-for-bit unchanged.
 - `OpenAIProvider` behaviour byte-exact (existing tests pass untouched).
 - `CredentialPool` accepts region-less keys as before; new `region` arg defaults to null.
+- `SkillManager` default constructor behaves identically under PHPUnit (env flag still honoured for backward compat).
+- `FeatureDispatcher` stays a hard no-op when `$options['features']` is absent — request body byte-exact with pre-0.8.8.
 
 ## [0.8.7] - 2026-04-19
 
