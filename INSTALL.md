@@ -161,7 +161,7 @@ superagent swarm "..." --json --plan-only                              # planner
 php -r 'require "vendor/autoload.php"; print_r(\SuperAgent\Providers\ProviderRegistry::healthCheck("kimi"));'
 ```
 
-### v0.8.8 post-release — AgentTool productivity fields (orchestration upgrade)
+### v0.8.9 — AgentTool productivity fields (orchestration upgrade)
 
 No new CLI surface; the change is on every `AgentTool` success payload. Orchestrators (including `/team`, `superagent swarm`, and any custom `AgentManager`-based code) should now read these fields when deciding whether a sub-agent actually did its job:
 

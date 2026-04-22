@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.8-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.9-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Docs**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Advanced Usage](docs/ADVANCED_USAGE.md) | [API Docs](docs/)
@@ -11,6 +11,32 @@
 SuperAgent is a powerful enterprise-grade Laravel AI Agent SDK that delivers Claude-level capabilities with multi-agent orchestration, real-time monitoring, and distributed scaling. Build and deploy teams of AI agents that work in parallel, with automatic task detection and intelligent resource management.
 
 ## ✨ Core Features
+
+### 🆕 v0.8.9 — `AgentTool` productivity instrumentation for multi-agent orchestration
+
+Small, surgical release. Every sub-agent dispatched via `AgentTool` now returns hard evidence of what the child actually did — not just `success: true`. Fixes a recurring `/team` failure mode where orchestrators over-trusted the child's self-reported success while the child had produced only prose (no tool calls, no files).
+
+- **Four new result fields** on every `AgentTool` success payload — `filesWritten` (absolute paths written via `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create`, deduped), `toolCallsByName` (e.g. `['Read' => 2, 'Bash' => 5, 'Write' => 1]`), `productivityWarning` (advisory string or null), and a sharpened `totalToolUseCount` that prefers observed tool calls over child-reported turn count
+- **Three productivity statuses** — `completed` (normal), `completed_empty` (zero tool calls observed — model described the plan instead of executing; always a dispatch-failure signal, re-dispatch or pick a stronger model), `async_launched` (unchanged from 0.8.8, only for `run_in_background: true`)
+- **`completed_no_writes` explicitly removed** — a staging revision had flagged "called tools but wrote no files" as a failure status. MiniMax-backed orchestrators over-read it as terminal failure and fell back to self-impersonation mid-run. Downgraded to an **advisory** `productivityWarning` that keeps the status `completed` — advisory consults often return findings via text without persisting files, and that's legitimate
+- **Sharper `AgentTool::description()` and `run_in_background` schema** — spells out the parallelism contract explicitly (emit multiple agent `tool_use` blocks in the same assistant message for parallel fan-out; `run_in_background: true` is fire-and-forget and wrong for any workflow that needs to consolidate child outputs) and documents each status value so orchestrators don't have to guess
+- **Observational, not heuristic** — the runtime counts the `tool_use` events it actually saw streaming from the child (via both the canonical `assistant`-message path and the legacy `__PROGRESS__` path), not the child's own narration
+- **Compat-safe** — zero public signatures changed; new fields are purely additive; pre-0.8.9 callers that destructure known keys are unaffected
+
+Full suite still green: **2476 tests / 6891 assertions / 0 failures** (up from 2471 / 6879 at 0.8.8 — 5 new `AgentToolProductivityTest` scenarios).
+
+```php
+// Every AgentTool call now returns this shape in addition to the 0.8.8 fields:
+$result = $agentTool->execute([
+    'description' => 'Analyse logs',
+    'prompt'      => 'Read logs/*.jsonl and write findings.md',
+]);
+// $result['status']               // 'completed' | 'completed_empty' | 'async_launched'
+// $result['filesWritten']         // ['/abs/path/findings.md']
+// $result['toolCallsByName']      // ['Read' => 3, 'Write' => 1]
+// $result['totalToolUseCount']    // 4 — observed, not turn count
+// $result['productivityWarning']  // null when productive, advisory string otherwise
+```
 
 ### 🆕 v0.8.8 — Native Kimi / Qwen / GLM / MiniMax, capability-driven feature pipeline, security layer (375 new tests)
 
@@ -30,9 +56,8 @@ Ten registered providers, with the Asian four now **first-class natives** — th
 - **Non-blocking `pollIterator()`** — `Generator` variant of `pollUntilDone()` so Laravel queue workers can `release($delay)` between probes instead of burning a worker on a 15-minute video render
 - **CI workflow** — `.github/workflows/test.yml` runs Unit + Smoke + Compat on PHP 8.1 / 8.2 / 8.3; Integration job (real vendor endpoints) gated behind `SUPERAGENT_INTEGRATION=1`
 - **Three-language docs** — `docs/NATIVE_PROVIDERS{,_CN,_FR}.md`, `docs/FEATURES_MATRIX{,_CN,_FR}.md`, `docs/MIGRATION_NATIVE{,_CN,_FR}.md`. Migration guide shows the one-line switch from `OpenAIProvider+base_url` to native, plus every unlock
-- **`AgentTool` productivity instrumentation (2026-04-22 follow-up)** — every sub-agent result now carries hard evidence of what the child actually did: `filesWritten` (absolute paths via `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create`, deduped), `toolCallsByName` (`['Read' => 3, 'Write' => 1]`), `productivityWarning`, and a sharpened `totalToolUseCount` (observed tool calls, not child-reported turns). New `status` values — `completed` (normal), `completed_empty` (zero tool calls observed — always a dispatch-failure signal; re-dispatch or pick a stronger model), `async_launched` (unchanged for `run_in_background: true`). A `completed_no_writes` status was briefly staged then removed: MiniMax-backed orchestrators over-read it as terminal failure and fell back to self-impersonation; the no-writes case is now an **advisory** warning with status `completed`. `AgentTool::description()` also rewritten to spell out the parallelism contract — emit multiple agent `tool_use` blocks in the same assistant message for parallel fan-out; `run_in_background: true` is fire-and-forget and wrong for any workflow that consolidates child outputs. Additive — zero public signatures changed
 
-Compat red lines (all green): no public method signature changed, `BashSecurityValidator` untouched, `OpenAIProvider` byte-exact behaviour (locked by existing OAuth test), `resources/models.json` v1 still loads unchanged, `CredentialPool` region-less keys still work. Full suite: **2476 tests / 6891 assertions / 0 failures** (up from 2060 / 5675 at 0.8.7).
+Compat red lines (all green): no public method signature changed, `BashSecurityValidator` untouched, `OpenAIProvider` byte-exact behaviour (locked by existing OAuth test), `resources/models.json` v1 still loads unchanged, `CredentialPool` region-less keys still work. Full suite: **2471 tests / 6879 assertions / 0 failures** (up from 2060 / 5675 at 0.8.7).
 
 Quick start for the four new providers:
 

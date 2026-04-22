@@ -7534,9 +7534,9 @@ ModelCatalog::invalidate();
 Pointez `SUPERAGENT_MODELS_URL` sur n'importe quel endpoint HTTPS (CDN, passerelle interne, URL GitHub raw, S3). Un cron nocturne qui régénère le JSON depuis votre base de tarification interne donne à toutes les instances SuperAgent de votre org des coûts exacts sans release.
 
 
-## 34. Instrumentation de productivité d'AgentTool (v0.8.8)
+## 34. Instrumentation de productivité d'AgentTool (v0.8.9)
 
-> Chaque sous-agent dispatché via `AgentTool` renvoie désormais des preuves concrètes de ce que l'enfant a vraiment fait. Cela remplace le fait de faire confiance à `success: true` seul, qui était instable pour des cerveaux optimisés sur des métriques d'adhérence aux skills plutôt que sur la fiabilité des appels d'outils — ils déclarent le plan terminé sans avoir lancé un seul outil. Livré en follow-up le 2026-04-22 dans la fenêtre de release 0.8.8.
+> Chaque sous-agent dispatché via `AgentTool` renvoie désormais des preuves concrètes de ce que l'enfant a vraiment fait. Cela remplace le fait de faire confiance à `success: true` seul, qui était instable pour des cerveaux optimisés sur des métriques d'adhérence aux skills plutôt que sur la fiabilité des appels d'outils — ils déclarent le plan terminé sans avoir lancé un seul outil.
 
 ### Les champs
 
@@ -7588,7 +7588,7 @@ switch ($result['status']) {
 }
 ```
 
-Le cycle de vie de `completed_no_writes` : une révision staging marquait « a appelé des outils mais n'a rien écrit » comme statut d'échec. Les orchestrateurs adossés à MiniMax le lisaient comme échec terminal et se rabattaient sur l'auto-impersonation en plein run — produisant un rapport unique expédié et sautant entièrement la consolidation. Supprimé avant merge. Le cas no-writes est désormais surfacé comme `productivityWarning` **consultatif** tandis que le statut reste `completed` ; les appelants imposent « fichiers requis » au niveau de la couche de politique où vit le contrat de tâche.
+Le cycle de vie de `completed_no_writes` : une révision staging pendant le développement 0.8.9 marquait « a appelé des outils mais n'a rien écrit » comme statut d'échec. Les orchestrateurs adossés à MiniMax le lisaient comme échec terminal et se rabattaient sur l'auto-impersonation en plein run — produisant un rapport unique expédié et sautant entièrement la consolidation. Supprimé avant release. Le cas no-writes est désormais surfacé comme `productivityWarning` **consultatif** tandis que le statut reste `completed` ; les appelants imposent « fichiers requis » au niveau de la couche de politique où vit le contrat de tâche.
 
 ### Le contrat de parallélisme (important)
 

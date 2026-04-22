@@ -161,7 +161,7 @@ superagent swarm "..." --json --plan-only                                    # s
 php -r 'require "vendor/autoload.php"; print_r(\SuperAgent\Providers\ProviderRegistry::healthCheck("kimi"));'
 ```
 
-### v0.8.8 post-release — Champs de productivité d'AgentTool (mise à niveau orchestration)
+### v0.8.9 — Champs de productivité d'AgentTool (mise à niveau orchestration)
 
 Pas de nouvelle surface CLI ; la modification porte sur chaque payload de succès d'`AgentTool`. Les orchestrateurs (incluant `/team`, `superagent swarm`, et tout code custom à base d'`AgentManager`) devraient désormais lire ces champs pour décider si un sous-agent a vraiment fait son travail :
 

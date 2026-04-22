@@ -7081,9 +7081,9 @@ ModelCatalog::invalidate();
 把 `SUPERAGENT_MODELS_URL` 指向任意返回同结构 JSON 的 HTTPS 端点（CDN / 内部网关 / GitHub raw / S3）。企业内部用一个每晚跑的 cron 从内部定价库生成 JSON，所有 SuperAgent 实例都能跟上最新价格，无需发包。
 
 
-## 34. AgentTool 生产力观测（v0.8.8）
+## 34. AgentTool 生产力观测（v0.8.9）
 
-> 每次通过 `AgentTool` 分派的子 Agent 现在会返回**它到底做了什么**的硬证据。此前仅靠 `success: true` 判断已被证明对"以 skill-adherence 为训练指标而非 tool-use 可靠性"的 brain 不稳定 —— 它们会宣称"计划已完成"但实际上一次 tool 都没调。作为 2026-04-22 收尾落入 0.8.8 发布窗口。
+> 每次通过 `AgentTool` 分派的子 Agent 现在会返回**它到底做了什么**的硬证据。此前仅靠 `success: true` 判断已被证明对"以 skill-adherence 为训练指标而非 tool-use 可靠性"的 brain 不稳定 —— 它们会宣称"计划已完成"但实际上一次 tool 都没调。
 
 ### 新增字段
 
@@ -7133,7 +7133,7 @@ switch ($result['status']) {
 }
 ```
 
-`completed_no_writes` 的生命周期：staging 阶段曾有过一个把"调了 tool 但没写文件"升格为失败 status 的版本。MiniMax-backed 编排器误读为终止失败，于是中途开始自己扮演所有角色 —— 产出一份仓促的报告、完全跳过整合。合并前已移除。"未落盘"情况现在作为 **advisory** 的 `productivityWarning` 出现，状态仍是 `completed`；调用方在策略层（task 契约所在的地方）自行决定"是否必须有文件"。
+`completed_no_writes` 的生命周期：0.8.9 开发阶段曾有过一个把"调了 tool 但没写文件"升格为失败 status 的版本。MiniMax-backed 编排器误读为终止失败，于是中途开始自己扮演所有角色 —— 产出一份仓促的报告、完全跳过整合。发版前已移除。"未落盘"情况现在作为 **advisory** 的 `productivityWarning` 出现，状态仍是 `completed`；调用方在策略层（task 契约所在的地方）自行决定"是否必须有文件"。
 
 ### 并行契约（重要）
 

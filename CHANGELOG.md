@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-04-22
+
+### 💻 Summary
+
+**AgentTool productivity instrumentation — every sub-agent result now carries hard evidence of what the child actually did.** Fixes a recurring `/team` regression where orchestrators (notably MiniMax-backed ones) accepted `success: true` at face value and moved on, even though the child had produced only prose — no tool calls, no files, no consolidation. The runtime now observes each child's `tool_use` stream directly and returns `filesWritten`, `toolCallsByName`, `totalToolUseCount`, `productivityWarning`, plus a sharpened `status` field on every `AgentTool` result.
+
+Scope is deliberately small: one file changed in `src/` (`Tools/Builtin/AgentTool.php`), one new test file, zero public signature changes, zero new provider contracts. Everything pre-0.8.9 keeps its exact shape — the new fields are additive.
+
+### Added
+
+#### `src/Tools/Builtin/AgentTool.php` — productivity accumulators
+
+- **`recordToolUse(string $agentId, string $toolName, array $toolInput)`** — private hook called from `applyProgressEvents()` on every streamed `tool_use` event (both the canonical `assistant`-message path and the legacy `__PROGRESS__` `tool_use` event path). Increments per-name tool counters and, for the write-class tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Create`), captures the `file_path` / `path` input so the orchestrator sees concrete paths, not just counts. Malformed tool_use blocks with no path are counted toward `toolCallsByName` but don't pollute `filesWritten`.
+- **`buildProductivityInfo(string $agentId, int $childReportedTurns): array`** — single source of truth for the result block appended by both the process-pool branch (`waitForProcessCompletion()`) and the fiber branch (`waitForFiberCompletion()`). Returns the final `status`, deduped `filesWritten` list, `toolCallsByName` map, `totalToolUseCount` (prefers observed tool-use count over child-reported turn count — `turns` counts assistant turns, not tool calls), and `productivityWarning` string.
+- **New accumulator fields on `$activeTasks[$agentId]`** — `tool_counts` (name→count) and `files_written` (list of absolute paths), populated during the stream and reset per dispatch.
+
+#### New result fields on every `AgentTool` success payload
+
+- `filesWritten: list<string>` — absolute paths the child wrote via `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create`. Deduped. Empty list when the child produced results via text only (legitimate for advisory consults).
+- `toolCallsByName: array<string,int>` — e.g. `['Read' => 2, 'Bash' => 5, 'Write' => 1]`. Gives the orchestrator a precise picture of how the child spent its budget without having to scrape the child's narrative.
+- `productivityWarning: ?string` — `null` on clean runs; an informational string when the child called tools but wrote no files; a stronger "zero tool calls" string when the child produced only prose.
+- `totalToolUseCount` — now reflects **observed** tool calls when any were seen, falling back to child-reported turns only when nothing was observed. Pre-0.8.9 this field counted turns unconditionally.
+
+#### Three productivity statuses
+
+- `completed` — normal success. The child ran tools; files may or may not have been written (see `filesWritten`).
+- `completed_empty` — **zero tool calls observed**. The model described what it would do instead of doing it. Orchestrators should always treat this as a dispatch failure: re-dispatch with a more explicit instruction, or pick a stronger model.
+- `async_launched` — unchanged from 0.8.8. Only emitted when the caller passed `run_in_background: true`.
+
+A fourth status — `completed_no_writes` — was briefly present during 0.8.9 development (flagging "called tools but wrote no files" as a failure). It has been deliberately removed: MiniMax-backed orchestrators over-read it as terminal failure and fell back to self-impersonation mid-run, producing a single rushed report and skipping consolidation. The no-writes case is now surfaced as an **advisory** `productivityWarning` while the status stays `completed` — callers decide whether files are required based on their own contract.
+
+#### Expanded tool description + `run_in_background` doc
+
+- `AgentTool::description()` now spells out the parallelism contract explicitly: "to run multiple agents concurrently, emit all agent calls as separate `tool_use` blocks in a single assistant message — the runtime fans them out in parallel and blocks until every child finishes." Also documents each of the three status values so orchestrators don't have to guess.
+- The `run_in_background` schema description flips from one line to a full "fire-and-forget" clarification — background mode is wrong for any workflow that needs to consolidate child outputs; it returns `async_launched` immediately with no result to read. The right way to run agents in parallel is to emit multiple foreground calls in the same assistant message.
+
+#### Tests (`tests/Unit/AgentToolProductivityTest.php`)
+
+Five locked-down scenarios against the private `recordToolUse()` / `buildProductivityInfo()` surface (reflection — the public API stays the returned array):
+
+- `testCompletedWithWrites` — Read + 2 Writes → `completed`, no warning, two paths in `filesWritten`, count map, observed-count beats child-reported turns.
+- `testToolsRanButNoWritesStaysCompleted` — Bash + Read with no Writes → `completed` + **advisory** warning containing "wrote no files" and "advisory". Pins the RUN 72 regression fix.
+- `testCompletedEmpty` — zero tool calls → `completed_empty` + "zero tool calls" warning; `totalToolUseCount` falls back to the child-reported turn count so downstream book-keeping still has a number.
+- `testDuplicatePathsDeduped` — two Edits + one Write on the same path → single entry in `filesWritten`; per-name counts preserved.
+- `testWriteToolWithoutPathDoesNotPollute` — malformed Write with no `file_path` → tool call counted but `filesWritten` stays empty; status is `completed` with the advisory warning.
+
+### Changed
+
+- `AgentTool::waitForProcessCompletion()` / `waitForFiberCompletion()` now call `buildProductivityInfo()` once at the tail and spread its result into the returned `ToolResult`. The old `'status' => 'completed'` literal is replaced by the computed status so `completed_empty` propagates to callers.
+- `applyProgressEvents()` casts tool names and inputs to their declared types before both forwarding to `ProgressTracker::addToolActivity()` and calling `recordToolUse()`. No behaviour change for well-formed streams; defends against stray integer / null values on malformed ones.
+
+### Why (context the code won't tell you)
+
+Dispatching N sub-agents and trusting `success: true` from each has been reliable for Claude-Code-class brains but flaky for brains optimised on skill-adherence metrics rather than tool-use reliability — the model declares the plan done without actually firing tools. Logs from `/team` RUN 61 and RUN 72 both showed the same failure shape: the SuperAgent orchestrator accepted `success: true`, the child's final text was a prose plan, `filesWritten` (had it existed) would have been empty. The fix is observational, not heuristic: we count the tool_use events we actually saw and let the orchestrator decide what "productive" means for its task.
+
+### Compat Red Lines (All Green)
+
+- Zero public method signatures changed.
+- `AgentTool` success payloads gain four fields (`filesWritten`, `toolCallsByName`, `productivityWarning`, and a sharper `totalToolUseCount`) — additive; callers that destructure known keys are unaffected.
+- `status: 'completed'` still emits in the exact same conditions as pre-0.8.9 except the "zero tool calls" edge case, which now routes to `completed_empty`. No pre-0.8.9 test asserted `status === 'completed'` for a zero-tool-call run (the shape didn't exist in practice).
+- Every other provider / router / security / MCP / Skills code path is byte-exact with 0.8.8.
+
+**Test suite: 2476 tests / 6891 assertions / 0 failures** (up from 2471 / 6879 at 0.8.8 — 5 new `AgentToolProductivityTest` scenarios).
+
 ## [0.8.8] - 2026-04-21
 
 ### 💻 Summary
@@ -110,7 +174,7 @@ Highlights:
 
 ### Post-release improvements (still inside the 0.8.8 window)
 
-Twenty-one follow-up items after the initial 0.8.8 milestone — listed here rather than cut as a 0.8.9 because they're polish on top of the same release surface (no new vendor API contracts, no new config schema). Final test count with these included: **2476 tests / 6891 assertions / 0 failures**.
+Twenty follow-up items after the initial 0.8.8 milestone — listed here rather than cut as a 0.8.9 because they're polish on top of the same release surface (no new vendor API contracts, no new config schema). Final test count with these included: **2471 tests / 6879 assertions / 0 failures**.
 
 - **CI workflow** — `.github/workflows/test.yml` runs Unit + Smoke + Compat on every push / PR across PHP 8.1 / 8.2 / 8.3. A separate Integration job runs on manual dispatch or release tags, honouring a `SUPERAGENT_INTEGRATION=1` gate so vendor keys only hit the wire when a maintainer opts in.
 - **Integration testsuite scaffold** — `tests/Integration/` with `IntegrationTestCase` base class, `KimiIntegrationTest` canary (real endpoint roundtrip when `KIMI_API_KEY` is set), and `KimiSwarmSchemaProbeTest` that flags `HTTP 404/405/400` as "Kimi's Swarm REST spec moved, update `KimiProvider::submitSwarm()`". Other providers follow the same template.
@@ -130,15 +194,6 @@ Twenty-one follow-up items after the initial 0.8.8 milestone — listed here rat
 - **Kimi / MiniMax `SkillBridge`s** — `src/Skills/Bridges/KimiSkillBridge.php` is a placeholder that falls through to the universal path (Kimi's native Skills REST isn't public yet). `MiniMaxSkillBridge` injects a MiniMax-tailored "follow this skill as an active contract" framing that leans on M2.7's trained-in 97% skill adherence.
 - **`McpOAuth`** — scaffold for RFC 8628 device-code flow against MCP servers that require it. Token cache at `~/.superagent/mcp-auth.json` (chmod 0600), multi-server coexistence, expired-token detection. Wire `authenticate()` lives in code but is untested against a live authorization server — waiting for the first OAuth-gated MCP server to show up in production.
 - **`FeatureFlags`** — `src/Config/FeatureFlags.php` gives users a runtime override / `~/.superagent/features.json` / `SUPERAGENT_DISABLE=flag1,flag2` env stack for selectively disabling capabilities without code changes. `FeatureFlags::enabled($key)` at any guard point.
-- **`AgentTool` productivity instrumentation (2026-04-22)** — every sub-agent dispatched via `AgentTool` now carries hard evidence of what the child actually did. Fixes a recurring `/team` regression where orchestrators accepted `success: true` while the child had produced only prose (no tool calls, no files). The runtime observes each child's `tool_use` stream directly (both the canonical `assistant`-message path and the legacy `__PROGRESS__` path) via new private `recordToolUse()` / `buildProductivityInfo()` helpers and appends four fields to every success payload:
-  - `filesWritten: list<string>` — deduped absolute paths captured from the five write-class tools (`Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create`); empty when the child returned findings inline (legitimate for advisory consults).
-  - `toolCallsByName: array<string,int>` — raw per-name counts.
-  - `totalToolUseCount` — now prefers **observed** tool calls over the child-reported turn count; falls back to turns only when nothing was observed. Pre-fix this counted turns unconditionally.
-  - `productivityWarning: ?string` — `null` on clean runs; advisory string when tools ran but no files were written; stronger "zero tool calls" string when the child produced only prose.
-
-  New `status` values: `completed` (normal), `completed_empty` (zero tool calls observed — always a dispatch-failure signal), `async_launched` (unchanged, only for `run_in_background: true`). A `completed_no_writes` status was briefly staged but removed before merge — MiniMax-backed orchestrators over-read it as terminal failure and fell back to self-impersonation mid-run, producing a single rushed report and skipping consolidation. The no-writes case is now surfaced as an advisory `productivityWarning` while the status stays `completed`.
-
-  `AgentTool::description()` and the `run_in_background` schema description also rewritten to spell out the parallelism contract: emit multiple agent `tool_use` blocks in a single assistant message for parallel fan-out (runtime blocks until every child finishes); `run_in_background: true` is fire-and-forget — wrong for any workflow that consolidates child outputs. Covered by new `tests/Unit/AgentToolProductivityTest.php` (five scenarios: writes, tools-without-writes advisory, `completed_empty`, deduped paths, malformed tool_use without `file_path`). Public signatures unchanged — the new fields are purely additive.
 
 ### Changed
 

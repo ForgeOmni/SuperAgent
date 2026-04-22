@@ -6355,9 +6355,9 @@ ModelCatalog::invalidate();          // drop cached sources; next read re-loads
 Point `SUPERAGENT_MODELS_URL` at any HTTPS endpoint (CDN, internal gateway, raw GitHub URL, S3) that returns the same JSON. Clone `resources/models.json`, adjust it, publish it. A nightly cron that regenerates the JSON from your internal pricing database is a straightforward way to give every SuperAgent instance in your org accurate costs without a package release.
 
 
-## 34. AgentTool Productivity Instrumentation (v0.8.8)
+## 34. AgentTool Productivity Instrumentation (v0.8.9)
 
-> Every sub-agent dispatched via `AgentTool` now returns hard evidence of what the child actually did. This replaces trusting `success: true` alone, which was flaky for brains optimised on skill-adherence metrics rather than tool-use reliability — they'd declare the plan done without actually firing any tools. Landed as a 2026-04-22 follow-up inside the 0.8.8 release window.
+> Every sub-agent dispatched via `AgentTool` now returns hard evidence of what the child actually did. This replaces trusting `success: true` alone, which was flaky for brains optimised on skill-adherence metrics rather than tool-use reliability — they'd declare the plan done without actually firing any tools.
 
 ### The fields
 
@@ -6408,7 +6408,7 @@ switch ($result['status']) {
 }
 ```
 
-The lifecycle of `completed_no_writes`: a staging revision flagged "called tools but wrote no files" as a failure status. MiniMax-backed orchestrators over-read it as terminal failure and fell back to self-impersonation mid-run — producing a single rushed report and skipping consolidation entirely. It was removed before merge. The no-writes case is now surfaced as an **advisory** `productivityWarning` while the status stays `completed`; callers enforce "files required" at the policy layer where the task contract lives.
+The lifecycle of `completed_no_writes`: a staging revision during 0.8.9 development flagged "called tools but wrote no files" as a failure status. MiniMax-backed orchestrators over-read it as terminal failure and fell back to self-impersonation mid-run — producing a single rushed report and skipping consolidation entirely. It was removed before release. The no-writes case is now surfaced as an **advisory** `productivityWarning` while the status stays `completed`; callers enforce "files required" at the policy layer where the task contract lives.
 
 ### The parallelism contract (important)
 

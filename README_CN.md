@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.8.8-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.8.9-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,32 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.8.9 — `AgentTool` 子 Agent 生产力观测（为多 Agent 编排加护栏）
+
+小而精的一次收尾。每次通过 `AgentTool` 分派的子 Agent 现在会返回**它到底做了什么**的硬证据，不再是单看 `success: true`。修复 `/team` 长期存在的一类失败：编排器看到子 Agent 自报 `success: true` 就继续推进，但子 Agent 其实只写了一堆说明文字 —— 没有 tool call、没有文件落盘。
+
+- **Result 上新增四个字段** —— `filesWritten`（子 Agent 通过 `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create` 落盘的绝对路径列表，去重）、`toolCallsByName`（如 `['Read' => 2, 'Bash' => 5, 'Write' => 1]`）、`productivityWarning`（咨询性提示字符串或 null）、`totalToolUseCount`（改为优先使用**观察到的** tool call 数，而非子 Agent 自报的 turn 数）
+- **三种生产力状态** —— `completed`（正常）、`completed_empty`（**观察到 0 次 tool call** —— 模型在"讲计划"而不是"执行计划"；永远视为分派失败，重新分派或换更强的模型）、`async_launched`（与 0.8.8 一致，仅在 `run_in_background: true` 时触发）
+- **`completed_no_writes` 明确移除** —— 开发阶段曾把"调了 tool 但没写文件"升级为失败状态。MiniMax-backed 编排器误读为终止失败，于是中途开始自己扮演所有角色，产出一份仓促的报告并跳过整合。现降级为 **advisory** 的 `productivityWarning`，状态仍是 `completed` —— 咨询类子任务本来就该用文本返回结论，不强求文件
+- **`AgentTool::description()` 和 `run_in_background` schema 重写** —— 明确并行契约（要并行就在**同一条 assistant 消息内**抛多个 agent `tool_use` block，runtime 负责 fan-out 并阻塞到全部完成；`run_in_background: true` 是 fire-and-forget，任何需要汇总子 Agent 输出的场景都**不能用**），并把三个 status 值写清楚，编排器不用猜
+- **观察式，不是启发式** —— runtime 直接数子 Agent streaming 出来的 `tool_use` 事件（覆盖标准 `assistant` 消息路径和遗留 `__PROGRESS__` 路径），不再信子 Agent 自己的叙述
+- **完全兼容** —— 0 个公开方法签名变更；新字段纯加法；0.8.9 前解构已知 key 的调用方完全不受影响
+
+全量测试仍绿：**2476 tests / 6891 assertions / 0 failures**（从 0.8.8 的 2471 / 6879 增长 —— `AgentToolProductivityTest` 新增 5 个场景）。
+
+```php
+// 每次 AgentTool 调用现在除 0.8.8 字段外还会返回：
+$result = $agentTool->execute([
+    'description' => '分析日志',
+    'prompt'      => '读取 logs/*.jsonl 并写入 findings.md',
+]);
+// $result['status']               // 'completed' | 'completed_empty' | 'async_launched'
+// $result['filesWritten']         // ['/abs/path/findings.md']
+// $result['toolCallsByName']      // ['Read' => 3, 'Write' => 1]
+// $result['totalToolUseCount']    // 4 —— 观察值，非 turn 数
+// $result['productivityWarning']  // 正常时为 null，否则为 advisory 字符串
+```
 
 ### 🆕 v0.8.8 — Kimi / Qwen / GLM / MiniMax 原生接入、能力驱动 feature 管线、安全层（+375 测试）
 
@@ -30,9 +56,8 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 - **非阻塞 `pollIterator()`** —— `pollUntilDone()` 的 `Generator` 变体，Laravel queue worker 可以在 poll 间 `release($delay)`，不用为 15 分钟视频渲染卡住整个 worker
 - **CI workflow** —— `.github/workflows/test.yml` 在 PHP 8.1 / 8.2 / 8.3 上跑 Unit + Smoke + Compat；Integration job（真 vendor 端点）受 `SUPERAGENT_INTEGRATION=1` 闸门
 - **三语文档** —— `docs/NATIVE_PROVIDERS{,_CN,_FR}.md`、`docs/FEATURES_MATRIX{,_CN,_FR}.md`、`docs/MIGRATION_NATIVE{,_CN,_FR}.md`。迁移指南给出从 `OpenAIProvider+base_url` 切到原生的一行 diff
-- **`AgentTool` 子 Agent 生产力观测（2026-04-22 后续）** —— 每次子 Agent 返回上都带上它到底做了什么的硬证据：`filesWritten`（`Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create` 写入的绝对路径，去重）、`toolCallsByName`（如 `['Read' => 3, 'Write' => 1]`）、`productivityWarning`、以及改为**观察值**的 `totalToolUseCount`（不再数子 Agent 自报 turn）。`status` 新增两种：`completed`（正常）、`completed_empty`（观察到 0 次 tool call —— 永远视为分派失败，重新分派或换更强模型）、`async_launched`（`run_in_background: true` 时不变）。曾临时有过一个 `completed_no_writes` 状态但合并前移除 —— MiniMax-backed 编排器会误读为终止失败、于是中途开始自己扮演所有角色；"未落盘"现降级为 **advisory** 提示，状态仍 `completed`。`AgentTool::description()` 也重写，明确并行契约：要并行就在同一条 assistant 消息里抛多个 agent `tool_use` block；`run_in_background: true` 是 fire-and-forget，需要汇总子 Agent 输出的场景都**不能用**。纯加法 —— 0 个公开方法签名变更
 
-兼容红线（全绿）：所有公开方法签名不变、`BashSecurityValidator` 零改动、`OpenAIProvider` byte-exact（被现有 OAuth 测试锁定）、`resources/models.json` v1 继续加载、`CredentialPool` 无 region 字符串 key 继续有效。全量测试：**2476 tests / 6891 assertions / 0 failures**（从 0.8.7 的 2060 / 5675 增长）。
+兼容红线（全绿）：所有公开方法签名不变、`BashSecurityValidator` 零改动、`OpenAIProvider` byte-exact（被现有 OAuth 测试锁定）、`resources/models.json` v1 继续加载、`CredentialPool` 无 region 字符串 key 继续有效。全量测试：**2471 tests / 6879 assertions / 0 failures**（从 0.8.7 的 2060 / 5675 增长）。
 
 四家新 provider 快速上手：
 

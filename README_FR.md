@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.8-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.8.9-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,32 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.8.9 — Instrumentation de productivité pour `AgentTool` (filet de sécurité pour l'orchestration multi-agents)
+
+Release petite et chirurgicale. Tout sous-agent dispatché via `AgentTool` renvoie désormais des preuves concrètes de ce que l'enfant a vraiment fait — pas seulement `success: true`. Corrige un mode d'échec récurrent de `/team` où les orchestrateurs faisaient confiance au `success: true` auto-déclaré de l'enfant alors qu'il n'avait produit que de la prose (aucun appel d'outil, aucun fichier).
+
+- **Quatre nouveaux champs sur chaque payload de succès d'`AgentTool`** — `filesWritten` (chemins absolus écrits via `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create`, dédupliqués), `toolCallsByName` (ex. `['Read' => 2, 'Bash' => 5, 'Write' => 1]`), `productivityWarning` (chaîne consultative ou null), et un `totalToolUseCount` affûté qui privilégie les appels d'outils **observés** plutôt que le compte de tours auto-rapporté
+- **Trois statuts de productivité** — `completed` (normal), `completed_empty` (zéro appel d'outil observé — le modèle a décrit le plan au lieu de l'exécuter ; toujours un signal d'échec de dispatch, re-dispatcher ou choisir un modèle plus fort), `async_launched` (inchangé depuis 0.8.8, uniquement pour `run_in_background: true`)
+- **`completed_no_writes` explicitement supprimé** — une révision intermédiaire marquait "a appelé des outils mais n'a rien écrit" comme statut d'échec. Les orchestrateurs adossés à MiniMax le lisaient comme échec terminal et se rabattaient sur l'auto-impersonation en plein run. Rétrogradé en `productivityWarning` **consultatif** qui garde le statut `completed` — les consultations d'avis renvoient souvent leurs conclusions via le texte sans persister de fichiers, et c'est légitime
+- **`AgentTool::description()` et schéma `run_in_background` affûtés** — énoncent explicitement le contrat de parallélisme (émettre plusieurs blocs `tool_use` d'agent dans le même message assistant pour le fan-out parallèle ; `run_in_background: true` est fire-and-forget et **mauvais** pour tout workflow qui doit consolider les sorties enfants) et documentent chaque valeur de statut pour que les orchestrateurs n'aient pas à deviner
+- **Observationnel, pas heuristique** — le runtime compte les événements `tool_use` qu'il a vraiment vus streamer depuis l'enfant (via le chemin canonique de message `assistant` et le chemin legacy `__PROGRESS__`), pas la narration de l'enfant lui-même
+- **Compat préservée** — zéro signature publique modifiée ; les nouveaux champs sont purement additifs ; les appelants pré-0.8.9 qui déstructurent des clés connues ne sont pas affectés
+
+Suite complète toujours verte : **2476 tests / 6891 assertions / 0 échec** (en hausse de 2471 / 6879 à 0.8.8 — 5 nouveaux scénarios `AgentToolProductivityTest`).
+
+```php
+// Chaque appel AgentTool renvoie maintenant cette forme en plus des champs 0.8.8 :
+$result = $agentTool->execute([
+    'description' => 'Analyser les logs',
+    'prompt'      => 'Lis logs/*.jsonl et écris findings.md',
+]);
+// $result['status']               // 'completed' | 'completed_empty' | 'async_launched'
+// $result['filesWritten']         // ['/abs/path/findings.md']
+// $result['toolCallsByName']      // ['Read' => 3, 'Write' => 1]
+// $result['totalToolUseCount']    // 4 — observé, pas le nombre de tours
+// $result['productivityWarning']  // null si productif, chaîne consultative sinon
+```
 
 ### 🆕 v0.8.8 — Kimi / Qwen / GLM / MiniMax natifs, pipeline de fonctionnalités dirigé par capacités, couche de sécurité (+375 tests)
 
@@ -30,9 +56,8 @@ Dix fournisseurs enregistrés, avec les quatre asiatiques désormais **natifs de
 - **`pollIterator()` non-bloquant** — variante `Generator` de `pollUntilDone()` pour que les workers de queue Laravel puissent `release($delay)` entre sondages au lieu de brûler un worker sur un rendu vidéo de 15 minutes
 - **Workflow CI** — `.github/workflows/test.yml` lance Unit + Smoke + Compat sur PHP 8.1 / 8.2 / 8.3 ; job Integration (vrais endpoints vendeur) gardé derrière `SUPERAGENT_INTEGRATION=1`
 - **Documentation trilingue** — `docs/NATIVE_PROVIDERS{,_CN,_FR}.md`, `docs/FEATURES_MATRIX{,_CN,_FR}.md`, `docs/MIGRATION_NATIVE{,_CN,_FR}.md`. Le guide de migration montre le diff d'une ligne pour passer de `OpenAIProvider+base_url` au natif
-- **Instrumentation de productivité d'`AgentTool` (follow-up 2026-04-22)** — chaque résultat de sous-agent porte désormais des preuves concrètes de ce que l'enfant a vraiment fait : `filesWritten` (chemins absolus via `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create`, dédupliqués), `toolCallsByName` (ex. `['Read' => 3, 'Write' => 1]`), `productivityWarning`, et un `totalToolUseCount` affûté (appels d'outils observés, plus les tours auto-rapportés de l'enfant). Nouveaux `status` : `completed` (normal), `completed_empty` (zéro appel d'outil observé — toujours un signal d'échec de dispatch ; re-dispatcher ou choisir un modèle plus fort), `async_launched` (inchangé pour `run_in_background: true`). Un statut `completed_no_writes` a été brièvement staged puis supprimé : les orchestrateurs adossés à MiniMax le lisaient comme échec terminal et se rabattaient sur l'auto-impersonation ; le cas no-writes est désormais un avertissement **consultatif** avec statut `completed`. `AgentTool::description()` également réécrit pour énoncer le contrat de parallélisme — émettre plusieurs blocs `tool_use` d'agent dans le même message assistant pour le fan-out parallèle ; `run_in_background: true` est fire-and-forget et mauvais pour tout workflow qui consolide les sorties enfants. Additif — zéro signature publique modifiée
 
-Lignes rouges de compatibilité (toutes vertes) : aucune signature de méthode publique changée, `BashSecurityValidator` intouché, comportement `OpenAIProvider` au byte près (verrouillé par le test OAuth existant), `resources/models.json` v1 se charge inchangé, clés sans région dans `CredentialPool` fonctionnent toujours. Suite complète : **2476 tests / 6891 assertions / 0 échec** (en hausse de 2060 / 5675 à 0.8.7).
+Lignes rouges de compatibilité (toutes vertes) : aucune signature de méthode publique changée, `BashSecurityValidator` intouché, comportement `OpenAIProvider` au byte près (verrouillé par le test OAuth existant), `resources/models.json` v1 se charge inchangé, clés sans région dans `CredentialPool` fonctionnent toujours. Suite complète : **2471 tests / 6879 assertions / 0 échec** (en hausse de 2060 / 5675 à 0.8.7).
 
 Démarrage rapide pour les quatre nouveaux fournisseurs :
 
