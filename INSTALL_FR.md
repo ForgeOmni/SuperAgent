@@ -161,6 +161,33 @@ superagent swarm "..." --json --plan-only                                    # s
 php -r 'require "vendor/autoload.php"; print_r(\SuperAgent\Providers\ProviderRegistry::healthCheck("kimi"));'
 ```
 
+### v0.8.8 post-release — Champs de productivité d'AgentTool (mise à niveau orchestration)
+
+Pas de nouvelle surface CLI ; la modification porte sur chaque payload de succès d'`AgentTool`. Les orchestrateurs (incluant `/team`, `superagent swarm`, et tout code custom à base d'`AgentManager`) devraient désormais lire ces champs pour décider si un sous-agent a vraiment fait son travail :
+
+```php
+$result = $agentTool->execute([
+    'description' => 'Analyser les logs',
+    'prompt'      => 'Lis logs/*.jsonl et écris findings.md',
+]);
+
+// status : 'completed' (normal), 'completed_empty' (zéro appel d'outil — re-dispatcher),
+//          ou 'async_launched' (uniquement si run_in_background: true a été passé).
+$result['status'];
+
+$result['filesWritten'];         // list<string> de chemins absolus (Write/Edit/MultiEdit/NotebookEdit/Create)
+$result['toolCallsByName'];      // ['Read' => 3, 'Bash' => 1, 'Write' => 1]
+$result['totalToolUseCount'];    // appels d'outils observés — pas le nombre de tours
+$result['productivityWarning'];  // null si propre ; chaîne consultative sinon
+```
+
+Deux garde-fous pratiques :
+
+1. **Toujours traiter `status === 'completed_empty'` comme un échec.** L'enfant a fait zéro appel d'outil — le modèle a décrit ce qu'il allait faire au lieu de le faire. Re-dispatcher avec une instruction "invoque des outils" plus explicite, ou choisir un modèle plus fort.
+2. **`completed` + `filesWritten` vide n'est pas automatiquement un échec.** Les consultations d'avis, les récupérations de recherche pure, et les smoke tests Bash-only sont tous légitimes. Inspectez `productivityWarning` et décidez selon le contrat de votre tâche si des fichiers étaient attendus.
+
+Pour lancer plusieurs agents en parallèle, émettez tous les appels `AgentTool` comme **des blocs `tool_use` séparés dans un même message assistant** — le runtime les fan-out et bloque jusqu'à la fin de chaque enfant. **Ne pas** mettre `run_in_background: true` pour ça ; le mode background est fire-and-forget et renvoie `async_launched` sans résultat à consolider.
+
 ### Désinstallation
 
 ```bash

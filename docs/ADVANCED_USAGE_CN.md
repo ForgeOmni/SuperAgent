@@ -7080,3 +7080,92 @@ ModelCatalog::invalidate();
 
 把 `SUPERAGENT_MODELS_URL` 指向任意返回同结构 JSON 的 HTTPS 端点（CDN / 内部网关 / GitHub raw / S3）。企业内部用一个每晚跑的 cron 从内部定价库生成 JSON，所有 SuperAgent 实例都能跟上最新价格，无需发包。
 
+
+## 34. AgentTool 生产力观测（v0.8.8）
+
+> 每次通过 `AgentTool` 分派的子 Agent 现在会返回**它到底做了什么**的硬证据。此前仅靠 `success: true` 判断已被证明对"以 skill-adherence 为训练指标而非 tool-use 可靠性"的 brain 不稳定 —— 它们会宣称"计划已完成"但实际上一次 tool 都没调。作为 2026-04-22 收尾落入 0.8.8 发布窗口。
+
+### 新增字段
+
+```php
+use SuperAgent\Tools\Builtin\AgentTool;
+
+$tool = new AgentTool();
+$result = $tool->execute([
+    'description' => '分析仓库',
+    'prompt'      => '读 src/**/*.php 并把职责摘要写到 REPORT.md',
+]);
+
+// status 的三种取值：
+//   'completed'        正常成功
+//   'completed_empty'  0 次 tool call —— 永远视为失败
+//   'async_launched'   仅当 run_in_background: true 时（没结果可读）
+$result['status'];
+
+$result['filesWritten'];         // list<string>，去重后的绝对路径
+$result['toolCallsByName'];      // ['Read' => 12, 'Grep' => 3, 'Write' => 1]
+$result['totalToolUseCount'];    // 观察到的 tool 调用数（优先于子 Agent 自报的 turn 数）
+$result['productivityWarning'];  // null 或一段咨询性提示文字
+```
+
+`filesWritten` 收集五种 write 类 tool（`Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create`）的路径并去重 —— 同一个文件被 `Edit`→`Edit`→`Write` 三次只出现一次。`toolCallsByName` 是跨子 Agent 所有 tool 的原始按名计数，让你能精准回答"测试套件到底跑没跑"这种问题，不用去解析子 Agent 自述。
+
+### 三种 status
+
+```php
+switch ($result['status']) {
+    case 'completed':
+        // 正常路径。子 Agent 调了 tool。是否落盘文件另说。
+        // 如果你这个任务契约要求文件，检查 $result['filesWritten']
+        // 和 $result['productivityWarning'] 的咨询性提示。
+        break;
+
+    case 'completed_empty':
+        // 硬分派失败。子 Agent 0 次 tool call。最终文本就是全部输出。
+        // 用更明确的"请调用工具"指令重新分派，或换更强模型。
+        $retry = $tool->execute([...$spec, 'prompt' => $spec['prompt'] . "\n\n你必须调用工具。"]);
+        break;
+
+    case 'async_launched':
+        // 仅当 run_in_background: true 时。本轮没有子 Agent 输出可读 ——
+        // runtime 立即返回句柄。
+        break;
+}
+```
+
+`completed_no_writes` 的生命周期：staging 阶段曾有过一个把"调了 tool 但没写文件"升格为失败 status 的版本。MiniMax-backed 编排器误读为终止失败，于是中途开始自己扮演所有角色 —— 产出一份仓促的报告、完全跳过整合。合并前已移除。"未落盘"情况现在作为 **advisory** 的 `productivityWarning` 出现，状态仍是 `completed`；调用方在策略层（task 契约所在的地方）自行决定"是否必须有文件"。
+
+### 并行契约（重要）
+
+要并行跑多个子 Agent，请在**同一条 assistant 消息**里抛多个 `AgentTool` `tool_use` block。runtime 会把它们 fan-out 并行执行，阻塞到所有子 Agent 完成，然后把每个子 Agent 的最终输出作为下一轮的 tool_result 返回。`/team`、`superagent swarm`、以及任何自定义编排器都应该用这个模式来 fan-out。
+
+```text
+Assistant turn  →  [tool_use: AgentTool { prompt: "总结 src/Providers" }]
+                   [tool_use: AgentTool { prompt: "总结 src/Tools" }]
+                   [tool_use: AgentTool { prompt: "总结 src/Skills" }]
+Runtime         →  并行分派 3 个，阻塞到全部完成
+下一轮          →  三个 tool_result，编排器做整合
+```
+
+这个模式**不要**把 `run_in_background` 设成 `true`。后者是 fire-and-forget —— 立即返回 `async_launched`，没有可整合的结果。`run_in_background: true` 只留给真正的"扔出去别等"场景（长轮询、遥测上报等）。
+
+### 什么时候 `completed` + 空 `filesWritten` 是合理的
+
+不是每个子 Agent 都应该写文件。几类空 `filesWritten` 合理的场景：
+
+- **咨询性子任务** —— "看这个 diff，给我第二意见" —— 答案本来就是内联文本。
+- **纯研究拉取** —— 子 Agent 读文档、返回引用。
+- **只跑 Bash 的 smoke test** —— `phpunit`、`composer diagnose`、一条 curl —— 报告就是 exit code + stdout。
+
+这些情况下 `productivityWarning` 纯咨询 —— 它告诉你子 Agent 用了 tool 但没落盘。如果你的任务**确实**要求文件（一份分析、CSV、报告），先读一下子 Agent 的文本内容（咨询性子任务往往把结论写在那儿），只有文本也没给出期望内容时才重新分派。
+
+### 累加器如何工作（实现笔记）
+
+`AgentTool::applyProgressEvents()` 同时监听标准的 `assistant` 消息路径和遗留的 `__PROGRESS__` 事件路径里的 `tool_use` block。对每个，它调用 `recordToolUse($agentId, $name, $input)`，给 `activeTasks[$agentId]['tool_counts'][$name]` 计数 +1，对 write 类 tool 额外把 `$input['file_path'] ?? $input['path']` 推入 `files_written`。
+
+`buildProductivityInfo($agentId, $childReportedTurns)` 在子 Agent 完成时跑一次（`waitForProcessCompletion()` 和 `waitForFiberCompletion()` 都会调），产出最终的这个 block。**观察到的** tool 调用数优先于子 Agent 自报的 turn 数 —— 因为 `turns` 数的是 assistant 轮数，不是 tool call 数，模型产出交错的 text+tool_use 消息时两者就会分道扬镳。
+
+### 测试
+
+见 `tests/Unit/AgentToolProductivityTest.php`，锁定五种场景：有写入的 `completed`、无写入的 `completed`（advisory warning）、`completed_empty`、路径去重、缺 `file_path` 的畸形 tool_use。
+

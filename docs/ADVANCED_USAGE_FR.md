@@ -7533,3 +7533,94 @@ ModelCatalog::invalidate();
 
 Pointez `SUPERAGENT_MODELS_URL` sur n'importe quel endpoint HTTPS (CDN, passerelle interne, URL GitHub raw, S3). Un cron nocturne qui régénère le JSON depuis votre base de tarification interne donne à toutes les instances SuperAgent de votre org des coûts exacts sans release.
 
+
+## 34. Instrumentation de productivité d'AgentTool (v0.8.8)
+
+> Chaque sous-agent dispatché via `AgentTool` renvoie désormais des preuves concrètes de ce que l'enfant a vraiment fait. Cela remplace le fait de faire confiance à `success: true` seul, qui était instable pour des cerveaux optimisés sur des métriques d'adhérence aux skills plutôt que sur la fiabilité des appels d'outils — ils déclarent le plan terminé sans avoir lancé un seul outil. Livré en follow-up le 2026-04-22 dans la fenêtre de release 0.8.8.
+
+### Les champs
+
+```php
+use SuperAgent\Tools\Builtin\AgentTool;
+
+$tool = new AgentTool();
+$result = $tool->execute([
+    'description' => 'Analyser le dépôt',
+    'prompt'      => 'Lis src/**/*.php et écris REPORT.md résumant les responsabilités',
+]);
+
+// status — une de ces valeurs :
+//   'completed'        succès normal
+//   'completed_empty'  zéro appel d'outil — toujours traiter comme un échec
+//   'async_launched'   uniquement quand run_in_background: true (aucun résultat à lire)
+$result['status'];
+
+$result['filesWritten'];         // list<string> chemins absolus, dédupliqués
+$result['toolCallsByName'];      // ['Read' => 12, 'Grep' => 3, 'Write' => 1]
+$result['totalToolUseCount'];    // privilégie le compte observé au compte de tours de l'enfant
+$result['productivityWarning'];  // null, ou une chaîne informative
+```
+
+`filesWritten` capture les chemins depuis les cinq outils d'écriture (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Create`) et déduplique — `Edit`→`Edit`→`Write` sur le même fichier apparaît une seule fois. `toolCallsByName` est le compte brut par nom pour chaque outil invoqué par l'enfant, vous permettant de poser des questions précises comme « a-t-il vraiment lancé la suite de tests ? » sans scraper la narration de l'enfant.
+
+### Les trois statuts
+
+```php
+switch ($result['status']) {
+    case 'completed':
+        // Chemin normal. L'enfant a invoqué des outils. Des fichiers peuvent
+        // avoir été écrits ou non. Si votre contrat de tâche exige des fichiers,
+        // vérifiez $result['filesWritten'] et la note consultative dans
+        // $result['productivityWarning'].
+        break;
+
+    case 'completed_empty':
+        // Échec de dispatch dur. L'enfant a fait ZÉRO appel d'outil. Le texte
+        // final est la sortie entière. Re-dispatcher avec une instruction
+        // "invoque des outils" plus explicite, ou choisir un modèle plus fort.
+        $retry = $tool->execute([...$spec, 'prompt' => $spec['prompt'] . "\n\nVous DEVEZ invoquer des outils."]);
+        break;
+
+    case 'async_launched':
+        // Uniquement quand run_in_background: true a été passé. Aucune sortie
+        // d'enfant à lire dans ce tour — le runtime a renvoyé un handle immédiatement.
+        break;
+}
+```
+
+Le cycle de vie de `completed_no_writes` : une révision staging marquait « a appelé des outils mais n'a rien écrit » comme statut d'échec. Les orchestrateurs adossés à MiniMax le lisaient comme échec terminal et se rabattaient sur l'auto-impersonation en plein run — produisant un rapport unique expédié et sautant entièrement la consolidation. Supprimé avant merge. Le cas no-writes est désormais surfacé comme `productivityWarning` **consultatif** tandis que le statut reste `completed` ; les appelants imposent « fichiers requis » au niveau de la couche de politique où vit le contrat de tâche.
+
+### Le contrat de parallélisme (important)
+
+Pour lancer plusieurs agents simultanément, émettez tous les appels `AgentTool` comme **des blocs `tool_use` séparés dans un même message assistant**. Le runtime les fan-out en parallèle et bloque jusqu'à ce que chaque enfant finisse, puis renvoie la sortie finale de chaque enfant au prochain tour assistant. C'est ainsi que `/team`, `superagent swarm`, et tout orchestrateur custom devraient fan-out.
+
+```text
+Tour assistant  →  [tool_use: AgentTool { prompt: "résumer src/Providers" }]
+                   [tool_use: AgentTool { prompt: "résumer src/Tools" }]
+                   [tool_use: AgentTool { prompt: "résumer src/Skills" }]
+Runtime         →  dispatche les trois, bloque jusqu'à ce que tous finissent
+Tour suivant    →  trois tool_results, l'orchestrateur consolide
+```
+
+**Ne pas** mettre `run_in_background: true` pour ce pattern. Le mode background est fire-and-forget — il renvoie `async_launched` immédiatement, aucun résultat consolidé à lire. Réservez-le pour les vraies tâches "lance puis oublie" (polls longue durée, télémétrie).
+
+### Quand `completed` avec `filesWritten` vide est légitime
+
+Tous les sous-agents ne sont pas censés écrire des fichiers. Exemples où un `filesWritten` vide est acceptable :
+
+- **Consultations d'avis** — « lis ce diff, donne un second avis » — la réponse est censée être du texte inline.
+- **Récupérations de recherche pure** — un sous-agent qui lit des docs et renvoie des citations.
+- **Smoke tests Bash-only** — `phpunit`, `composer diagnose`, un curl — le rapport est exit code + stdout.
+
+Le `productivityWarning` est informatif pour ces cas — il vous dit que l'enfant a utilisé des outils mais n'a rien persisté. Si votre tâche *exigeait* des fichiers (une analyse, un CSV, un rapport), inspectez d'abord le texte de l'enfant (les consultations d'avis y renvoient leurs conclusions) et re-dispatchez seulement quand le texte manque aussi du contenu attendu.
+
+### Comment fonctionnent les accumulateurs (note d'implémentation)
+
+`AgentTool::applyProgressEvents()` écoute les blocs `tool_use` sur le chemin canonique de message `assistant` et le chemin legacy des événements `__PROGRESS__`. Pour chacun, il appelle `recordToolUse($agentId, $name, $input)`, qui incrémente `activeTasks[$agentId]['tool_counts'][$name]` et, pour les outils d'écriture, pousse `$input['file_path'] ?? $input['path']` sur `files_written`.
+
+`buildProductivityInfo($agentId, $childReportedTurns)` tourne une fois quand l'enfant finit (dans `waitForProcessCompletion()` et `waitForFiberCompletion()`) et produit le bloc final. Le compte d'appels d'outils observés a priorité sur le compte de tours auto-rapporté de l'enfant parce que le champ `turns` compte les tours assistant, pas les appels d'outils — ils divergent quand le modèle produit des messages text+tool_use entrelacés.
+
+### Tests
+
+Voir `tests/Unit/AgentToolProductivityTest.php` pour les scénarios verrouillés : `completed` avec écritures, `completed` sans écritures (avertissement consultatif), `completed_empty`, chemins dédupliqués, et tool_use malformé sans `file_path`.
+

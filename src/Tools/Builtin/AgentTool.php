@@ -66,7 +66,23 @@ class AgentTool extends Tool
     public function description(): string
     {
         return 'Launch a new agent to handle complex, multi-step tasks autonomously. ' .
-               'The agent runs independently and can use tools to complete its task.';
+               'The agent runs independently and can use tools to complete its task. ' .
+               'Parallelism: to run multiple agents concurrently, emit all agent calls as ' .
+               'separate tool_use blocks in a single assistant message — the runtime fans ' .
+               'them out in parallel and blocks until every child finishes, returning each ' .
+               "child's final output. Do NOT set run_in_background=true unless you genuinely " .
+               'want fire-and-forget (returns async_launched immediately, no result to read) — ' .
+               'that mode is wrong for any workflow that needs to consolidate child outputs. ' .
+               'Result status values: "completed" (child finished normally — tools may or ' .
+               'may not have been called, files may or may not have been written; inspect ' .
+               'the filesWritten field to decide), "completed_empty" (child made ZERO tool ' .
+               'calls — model described the task instead of executing; ALWAYS re-dispatch or ' .
+               'pick a stronger model), "async_launched" (background mode only). Each result ' .
+               'carries filesWritten (list of absolute paths), toolCallsByName (map), and ' .
+               'productivityWarning (informational string or null). If the task required ' .
+               'reports/CSVs on disk and filesWritten is empty, check the child text first — ' .
+               'advisory consults often return results inline — and only re-dispatch when ' .
+               'the text also lacks the expected content.';
     }
 
     public function inputSchema(): array
@@ -112,7 +128,12 @@ class AgentTool extends Tool
                 ],
                 'run_in_background' => [
                     'type' => 'boolean',
-                    'description' => 'Set to true to run this agent in the background',
+                    'description' => 'Fire-and-forget mode. Default (false) blocks until the child finishes ' .
+                                     "and returns its output — this is what you want when you plan to read " .
+                                     "the child's result. Set true ONLY for genuine background tasks whose " .
+                                     'output you do not need in this turn (long-running polls, telemetry, etc.). ' .
+                                     'To run multiple agents concurrently, leave this false and emit all agent ' .
+                                     'calls in a single assistant message — the runtime parallelizes them.',
                 ],
             ],
             'required' => ['description', 'prompt'],
@@ -211,6 +232,14 @@ class AgentTool extends Tool
                 'name' => $name,
                 'backend_instance' => $backend,
                 'started_at' => new \DateTimeImmutable(),
+                // Productivity accumulators — populated by applyProgressEvents()
+                // as the child's tool_use events stream in. Used by
+                // waitForProcessCompletion() to detect the "completed but
+                // unproductive" failure mode (child returns success:true
+                // without calling any tools or writing any files) and surface
+                // it to the orchestrator via productivityWarning.
+                'tool_counts' => [],     // name => count
+                'files_written' => [],   // list of absolute paths
             ];
 
             // Synchronous (foreground) mode: wait for the process to finish
@@ -310,14 +339,19 @@ class AgentTool extends Tool
                 $content[] = ['type' => 'text', 'text' => $text];
             }
 
+            $productivity = $this->buildProductivityInfo($agentId, (int) ($result['turns'] ?? 0));
+
             return ToolResult::success([
-                'status' => 'completed',
+                'status' => $productivity['status'],
                 'agentId' => $agentId,
                 'agentType' => $agentType,
                 'content' => $content,
                 'totalDurationMs' => (int) $duration,
                 'totalTokens' => ($usage['input_tokens'] ?? 0) + ($usage['output_tokens'] ?? 0),
-                'totalToolUseCount' => $result['turns'] ?? 0,
+                'totalToolUseCount' => $productivity['totalToolUseCount'],
+                'filesWritten' => $productivity['filesWritten'],
+                'toolCallsByName' => $productivity['toolCallsByName'],
+                'productivityWarning' => $productivity['productivityWarning'],
                 'usage' => [
                     'input_tokens' => $usage['input_tokens'] ?? 0,
                     'output_tokens' => $usage['output_tokens'] ?? 0,
@@ -380,14 +414,19 @@ class AgentTool extends Tool
             $content[] = ['type' => 'text', 'text' => $text];
         }
 
+        $productivity = $this->buildProductivityInfo($agentId, count($agentResult->allResponses));
+
         return ToolResult::success([
-            'status' => 'completed',
+            'status' => $productivity['status'],
             'agentId' => $agentId,
             'agentType' => $agentType,
             'content' => $content,
             'totalDurationMs' => (int) $duration,
             'totalTokens' => $usage->inputTokens + $usage->outputTokens,
-            'totalToolUseCount' => count($agentResult->allResponses),
+            'totalToolUseCount' => $productivity['totalToolUseCount'],
+            'filesWritten' => $productivity['filesWritten'],
+            'toolCallsByName' => $productivity['toolCallsByName'],
+            'productivityWarning' => $productivity['productivityWarning'],
             'usage' => [
                 'input_tokens' => $usage->inputTokens,
                 'output_tokens' => $usage->outputTokens,
@@ -420,10 +459,13 @@ class AgentTool extends Tool
                     $content = $event['message']['content'] ?? [];
                     foreach ($content as $block) {
                         if (($block['type'] ?? '') === 'tool_use') {
+                            $toolName = (string) ($block['name'] ?? 'unknown');
+                            $toolInput = (array) ($block['input'] ?? []);
                             $tracker->addToolActivity([
-                                'name' => $block['name'] ?? 'unknown',
-                                'input' => $block['input'] ?? [],
+                                'name' => $toolName,
+                                'input' => $toolInput,
                             ]);
+                            $this->recordToolUse($agentId, $toolName, $toolInput);
                         }
                     }
                     // Per-turn usage (SuperAgent extension on assistant events)
@@ -459,10 +501,13 @@ class AgentTool extends Tool
                 // ── Legacy __PROGRESS__ format (backward compat) ─
                 case 'tool_use':
                     $data = $event['data'] ?? [];
+                    $toolName = (string) ($data['tool_name'] ?? 'unknown');
+                    $toolInput = (array) ($data['input'] ?? []);
                     $tracker->addToolActivity([
-                        'name' => $data['tool_name'] ?? 'unknown',
-                        'input' => $data['input'] ?? [],
+                        'name' => $toolName,
+                        'input' => $toolInput,
                     ]);
+                    $this->recordToolUse($agentId, $toolName, $toolInput);
                     break;
 
                 case 'turn':
@@ -476,6 +521,99 @@ class AgentTool extends Tool
                     break;
             }
         }
+    }
+
+    /**
+     * Accumulate a child's tool_use event into the per-agent productivity
+     * counters so waitForProcessCompletion()/waitForFiberCompletion() can
+     * report concrete evidence of work done rather than relying on the
+     * child's self-reported success flag alone.
+     *
+     * Tool names treated as "file writes" map to inputs carrying a path — we
+     * capture the path so the orchestrator knows exactly which files the
+     * child created, and can catch the common /team failure mode where a
+     * sub-agent returns success:true without persisting anything.
+     */
+    private function recordToolUse(string $agentId, string $toolName, array $toolInput): void
+    {
+        if (!isset($this->activeTasks[$agentId])) {
+            return;
+        }
+        $this->activeTasks[$agentId]['tool_counts'][$toolName] =
+            ($this->activeTasks[$agentId]['tool_counts'][$toolName] ?? 0) + 1;
+
+        // Tool names that mean "I wrote something to disk". Covers both
+        // Claude Code's vocabulary (Write/Edit/MultiEdit/NotebookEdit) and
+        // the generic Create used by some generic-purpose agents.
+        static $writeTools = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Create'];
+        if (in_array($toolName, $writeTools, true)) {
+            $path = $toolInput['file_path'] ?? $toolInput['path'] ?? null;
+            if (is_string($path) && $path !== '') {
+                $this->activeTasks[$agentId]['files_written'][] = $path;
+            }
+        }
+    }
+
+    /**
+     * Build the productivity block appended to every ToolResult.
+     *
+     * Only `completed_empty` is a hard failure status — that's the classic
+     * "model wrote prose instead of executing" case (zero tool calls).
+     *
+     * We deliberately do NOT elevate "called tools but didn't Write files"
+     * to a failure status: many legitimate sub-agent patterns return
+     * findings via the assistant's text (for parent consolidation) without
+     * writing to disk. Advisory consults, pure-research pulls, Bash-only
+     * smoke tests — all valid. We still surface `filesWritten` as an
+     * informational list so the caller (SKILL policy layer) can enforce
+     * "files are required for this particular task" where appropriate.
+     *
+     * History: an earlier revision flagged no-Write as `completed_no_writes`
+     * (2026-04-22). MINIMAX-backed SuperAgent orchestrators read that status
+     * as "child failed" and fell back to playing roles themselves in one
+     * session — producing a single rushed report and skipping consolidation
+     * entirely (RUN 72). Downgrading to a pure info field restored the
+     * pre-regression behavior while keeping the zero-tool-calls check.
+     *
+     * @return array{
+     *   status: string,
+     *   filesWritten: list<string>,
+     *   toolCallsByName: array<string,int>,
+     *   totalToolUseCount: int,
+     *   productivityWarning: ?string,
+     * }
+     */
+    private function buildProductivityInfo(string $agentId, int $childReportedTurns): array
+    {
+        $task = $this->activeTasks[$agentId] ?? ['tool_counts' => [], 'files_written' => []];
+        $counts = $task['tool_counts'];
+        $files = array_values(array_unique($task['files_written']));
+        $observedToolCalls = array_sum($counts);
+
+        // Prefer observed tool-use count over child-reported turns: turns
+        // counts assistant turns, not tool calls. When observed >0 we know
+        // the child really did invoke tools.
+        $totalToolUseCount = $observedToolCalls > 0 ? $observedToolCalls : $childReportedTurns;
+
+        $status = 'completed';
+        $warning = null;
+        if ($observedToolCalls === 0) {
+            $status  = 'completed_empty';
+            $warning = 'Child made zero tool calls. The final text is the entire output; no files were created, no commands were run. This usually means the model described what it would do instead of doing it — retry with a more explicit instruction to invoke tools, or pick a stronger model.';
+        } elseif ($files === []) {
+            // Keep `status: completed`. Attach an informational note so the
+            // caller has context, but do NOT block: some sub-agent patterns
+            // legitimately return findings as text without persisting files.
+            $warning = 'Note: child invoked ' . $observedToolCalls . ' tool(s) but wrote no files. If this task was expected to produce reports/CSVs on disk, inspect the child text (it may contain the answer inline) or re-dispatch with an explicit write instruction. Otherwise this is fine — advisory consultations often return results via text only.';
+        }
+
+        return [
+            'status'              => $status,
+            'filesWritten'        => $files,
+            'toolCallsByName'     => $counts,
+            'totalToolUseCount'   => $totalToolUseCount,
+            'productivityWarning' => $warning,
+        ];
     }
 
     public function setTeamContext(TeamContext $context): void

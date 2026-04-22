@@ -6354,3 +6354,93 @@ ModelCatalog::invalidate();          // drop cached sources; next read re-loads
 
 Point `SUPERAGENT_MODELS_URL` at any HTTPS endpoint (CDN, internal gateway, raw GitHub URL, S3) that returns the same JSON. Clone `resources/models.json`, adjust it, publish it. A nightly cron that regenerates the JSON from your internal pricing database is a straightforward way to give every SuperAgent instance in your org accurate costs without a package release.
 
+
+## 34. AgentTool Productivity Instrumentation (v0.8.8)
+
+> Every sub-agent dispatched via `AgentTool` now returns hard evidence of what the child actually did. This replaces trusting `success: true` alone, which was flaky for brains optimised on skill-adherence metrics rather than tool-use reliability — they'd declare the plan done without actually firing any tools. Landed as a 2026-04-22 follow-up inside the 0.8.8 release window.
+
+### The fields
+
+```php
+use SuperAgent\Tools\Builtin\AgentTool;
+
+$tool = new AgentTool();
+$result = $tool->execute([
+    'description' => 'Analyse repo',
+    'prompt'      => 'Read src/**/*.php and write REPORT.md summarising responsibilities',
+]);
+
+// status — one of:
+//   'completed'        normal success
+//   'completed_empty'  zero tool calls — always treat as failure
+//   'async_launched'   only when run_in_background: true (no result to read)
+$result['status'];
+
+$result['filesWritten'];         // list<string> absolute paths, deduped
+$result['toolCallsByName'];      // ['Read' => 12, 'Grep' => 3, 'Write' => 1]
+$result['totalToolUseCount'];    // prefers observed count over child-reported turn count
+$result['productivityWarning'];  // null, or an informational string
+```
+
+`filesWritten` captures paths from the five write-class tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Create`) and dedupes — `Edit`→`Edit`→`Write` on the same file appears once. `toolCallsByName` is raw per-name counts across every tool the child invoked, letting you ask precise questions like "did it actually run the test suite?" without scraping the child's narrative.
+
+### The three statuses
+
+```php
+switch ($result['status']) {
+    case 'completed':
+        // Normal path. Child invoked tools. Files may or may not have been written.
+        // If your task contract requires files, check $result['filesWritten'] and
+        // the advisory note in $result['productivityWarning'].
+        break;
+
+    case 'completed_empty':
+        // Hard dispatch failure. Child made ZERO tool calls. The final text is
+        // the entire output. Re-dispatch with a more explicit "invoke tools"
+        // instruction, or pick a stronger model.
+        $retry = $tool->execute([...$spec, 'prompt' => $spec['prompt'] . "\n\nYou MUST invoke tools."]);
+        break;
+
+    case 'async_launched':
+        // Only when run_in_background: true was passed. There is no child output
+        // to read in this turn — the runtime returned a handle immediately.
+        break;
+}
+```
+
+The lifecycle of `completed_no_writes`: a staging revision flagged "called tools but wrote no files" as a failure status. MiniMax-backed orchestrators over-read it as terminal failure and fell back to self-impersonation mid-run — producing a single rushed report and skipping consolidation entirely. It was removed before merge. The no-writes case is now surfaced as an **advisory** `productivityWarning` while the status stays `completed`; callers enforce "files required" at the policy layer where the task contract lives.
+
+### The parallelism contract (important)
+
+To run multiple agents concurrently, emit all `AgentTool` calls as **separate `tool_use` blocks in a single assistant message**. The runtime fans them out in parallel and blocks until every child finishes, then returns each child's final output to the next assistant turn. This is how `/team`, `superagent swarm`, and any custom orchestrator should fan out.
+
+```text
+Assistant turn  →  [tool_use: AgentTool { prompt: "summarise src/Providers" }]
+                   [tool_use: AgentTool { prompt: "summarise src/Tools" }]
+                   [tool_use: AgentTool { prompt: "summarise src/Skills" }]
+Runtime         →  dispatches all three, blocks until all complete
+Next turn       →  three tool_results, orchestrator consolidates
+```
+
+Do **not** set `run_in_background: true` for that pattern. Background mode is fire-and-forget — it returns `async_launched` immediately, no consolidated result to read. Reserve it for genuine "kick off, don't wait" tasks (long-running polls, telemetry).
+
+### When `completed` with empty `filesWritten` is legitimate
+
+Not every sub-agent is supposed to write files. Examples where an empty `filesWritten` is fine:
+
+- **Advisory consults** — "read this diff, return a second opinion" — the answer is supposed to be inline text.
+- **Pure research pulls** — a sub-agent reading docs and returning quotes.
+- **Bash-only smoke tests** — `phpunit`, `composer diagnose`, a curl — the report is the exit code + stdout.
+
+The `productivityWarning` is informational for these cases — it tells you the child used tools but didn't persist. If your task *did* require files (an analysis, a CSV, a report), inspect the child's text first (advisory consults return the findings there) and only re-dispatch when the text also lacks the expected content.
+
+### How the accumulators work (implementation note)
+
+`AgentTool::applyProgressEvents()` listens for `tool_use` blocks on both the canonical `assistant`-message path and the legacy `__PROGRESS__` event path. For each, it calls `recordToolUse($agentId, $name, $input)`, which increments `activeTasks[$agentId]['tool_counts'][$name]` and, for write-class tools, pushes `$input['file_path'] ?? $input['path']` onto `files_written`.
+
+`buildProductivityInfo($agentId, $childReportedTurns)` runs once when the child completes (in both `waitForProcessCompletion()` and `waitForFiberCompletion()`) and produces the final block. The observed tool-use count takes precedence over the child's self-reported turn count because the `turns` field counts assistant turns, not tool calls — they diverge when the model produces interleaved text+tool_use messages.
+
+### Tests
+
+See `tests/Unit/AgentToolProductivityTest.php` for the locked-down scenarios: `completed` with writes, `completed` without writes (advisory warning), `completed_empty`, deduped paths, and malformed tool_use without a `file_path`.
+

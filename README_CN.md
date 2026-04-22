@@ -30,8 +30,9 @@ SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude
 - **非阻塞 `pollIterator()`** —— `pollUntilDone()` 的 `Generator` 变体，Laravel queue worker 可以在 poll 间 `release($delay)`，不用为 15 分钟视频渲染卡住整个 worker
 - **CI workflow** —— `.github/workflows/test.yml` 在 PHP 8.1 / 8.2 / 8.3 上跑 Unit + Smoke + Compat；Integration job（真 vendor 端点）受 `SUPERAGENT_INTEGRATION=1` 闸门
 - **三语文档** —— `docs/NATIVE_PROVIDERS{,_CN,_FR}.md`、`docs/FEATURES_MATRIX{,_CN,_FR}.md`、`docs/MIGRATION_NATIVE{,_CN,_FR}.md`。迁移指南给出从 `OpenAIProvider+base_url` 切到原生的一行 diff
+- **`AgentTool` 子 Agent 生产力观测（2026-04-22 后续）** —— 每次子 Agent 返回上都带上它到底做了什么的硬证据：`filesWritten`（`Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create` 写入的绝对路径，去重）、`toolCallsByName`（如 `['Read' => 3, 'Write' => 1]`）、`productivityWarning`、以及改为**观察值**的 `totalToolUseCount`（不再数子 Agent 自报 turn）。`status` 新增两种：`completed`（正常）、`completed_empty`（观察到 0 次 tool call —— 永远视为分派失败，重新分派或换更强模型）、`async_launched`（`run_in_background: true` 时不变）。曾临时有过一个 `completed_no_writes` 状态但合并前移除 —— MiniMax-backed 编排器会误读为终止失败、于是中途开始自己扮演所有角色；"未落盘"现降级为 **advisory** 提示，状态仍 `completed`。`AgentTool::description()` 也重写，明确并行契约：要并行就在同一条 assistant 消息里抛多个 agent `tool_use` block；`run_in_background: true` 是 fire-and-forget，需要汇总子 Agent 输出的场景都**不能用**。纯加法 —— 0 个公开方法签名变更
 
-兼容红线（全绿）：所有公开方法签名不变、`BashSecurityValidator` 零改动、`OpenAIProvider` byte-exact（被现有 OAuth 测试锁定）、`resources/models.json` v1 继续加载、`CredentialPool` 无 region 字符串 key 继续有效。全量测试：**2471 tests / 6879 assertions / 0 failures**（从 0.8.7 的 2060 / 5675 增长）。
+兼容红线（全绿）：所有公开方法签名不变、`BashSecurityValidator` 零改动、`OpenAIProvider` byte-exact（被现有 OAuth 测试锁定）、`resources/models.json` v1 继续加载、`CredentialPool` 无 region 字符串 key 继续有效。全量测试：**2476 tests / 6891 assertions / 0 failures**（从 0.8.7 的 2060 / 5675 增长）。
 
 四家新 provider 快速上手：
 

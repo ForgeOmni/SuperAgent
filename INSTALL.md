@@ -161,6 +161,33 @@ superagent swarm "..." --json --plan-only                              # planner
 php -r 'require "vendor/autoload.php"; print_r(\SuperAgent\Providers\ProviderRegistry::healthCheck("kimi"));'
 ```
 
+### v0.8.8 post-release — AgentTool productivity fields (orchestration upgrade)
+
+No new CLI surface; the change is on every `AgentTool` success payload. Orchestrators (including `/team`, `superagent swarm`, and any custom `AgentManager`-based code) should now read these fields when deciding whether a sub-agent actually did its job:
+
+```php
+$result = $agentTool->execute([
+    'description' => 'Analyse logs',
+    'prompt'      => 'Read logs/*.jsonl and write findings.md',
+]);
+
+// status: 'completed' (normal), 'completed_empty' (zero tool calls — re-dispatch),
+//         or 'async_launched' (only when run_in_background: true was passed).
+$result['status'];
+
+$result['filesWritten'];         // list<string> of absolute paths (Write/Edit/MultiEdit/NotebookEdit/Create)
+$result['toolCallsByName'];      // ['Read' => 3, 'Bash' => 1, 'Write' => 1]
+$result['totalToolUseCount'];    // observed tool uses — not turns
+$result['productivityWarning'];  // null when clean; advisory string otherwise
+```
+
+Two practical guardrails:
+
+1. **Always treat `status === 'completed_empty'` as a failure.** The child made zero tool calls — the model described what it would do instead of doing it. Re-dispatch with a more explicit "invoke tools" instruction or pick a stronger model.
+2. **`completed` + empty `filesWritten` is not automatically failure.** Advisory consults, pure-research pulls, and Bash-only smoke tests are all legitimate. Inspect `productivityWarning` and decide based on your task contract whether files were expected.
+
+To run multiple agents in parallel, emit all `AgentTool` calls as **separate `tool_use` blocks in a single assistant message** — the runtime fans them out and blocks until every child finishes. Do **not** set `run_in_background: true` for that; background mode is fire-and-forget and returns `async_launched` with no result to consolidate.
+
 ### Uninstall
 
 ```bash
