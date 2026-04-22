@@ -11,3 +11,4 @@ composer.lock
 .claude/scheduled_tasks.lock
 sitemap_server.log
 sqlite_mcp_server.db
+/.claude/
