@@ -6,6 +6,7 @@ namespace SuperAgent\Providers;
 
 use SuperAgent\Exceptions\ProviderException;
 use SuperAgent\Providers\Capabilities\SupportsSwarm;
+use SuperAgent\Providers\Capabilities\SupportsThinking;
 
 /**
  * Moonshot Kimi — Platform API.
@@ -23,8 +24,20 @@ use SuperAgent\Providers\Capabilities\SupportsSwarm;
  * versa. SuperAgent's CredentialPool carries an optional `region` tag so a
  * single account can safely pool both key families.
  */
-class KimiProvider extends ChatCompletionsProvider implements SupportsSwarm
+class KimiProvider extends ChatCompletionsProvider implements SupportsSwarm, SupportsThinking
 {
+    /**
+     * Kimi does not expose a request-field for thinking — it uses a
+     * dedicated model variant (`kimi-k2-thinking-preview`). Returning a
+     * `model` override here tells the caller (via FeatureDispatcher deep-
+     * merge) to swap in the thinking variant for this turn. `$budgetTokens`
+     * is advisory — Kimi's thinking model decides its own budget.
+     */
+    public function thinkingRequestFragment(int $budgetTokens): array
+    {
+        return ['model' => 'kimi-k2-thinking-preview'];
+    }
+
     /**
      * Submit a Kimi K2.6 Agent Swarm job.
      *

@@ -152,6 +152,44 @@ abstract class ProviderToolBase extends Tool
         int $timeoutSeconds = 120,
         float $intervalSeconds = 2.0,
     ): array {
+        foreach ($this->pollIterator($probe, $timeoutSeconds, $intervalSeconds) as $payload) {
+            if (($payload['status'] ?? null) === 'done') {
+                return $payload;
+            }
+        }
+
+        // pollIterator handles 'failed' + timeout by throwing — reaching
+        // this point means the generator completed without yielding 'done',
+        // which should never happen but guards against future edits.
+        throw new \RuntimeException('pollUntilDone: generator drained without a terminal state');
+    }
+
+    /**
+     * Non-blocking cousin of `pollUntilDone()` — yields the probe payload
+     * after each iteration, sleeping in the caller's frame between yields.
+     *
+     * Use this when running under a job queue (Laravel queue worker etc.)
+     * where blocking the whole process on `usleep` is unacceptable — the
+     * caller can release the worker, reschedule after a delay, and resume
+     * on the next run. The generator's internal state (deadline, interval)
+     * stays consistent across yields because each iteration recomputes
+     * from `microtime(true)`.
+     *
+     * Under the hood `pollUntilDone()` drives this generator in a tight
+     * loop with `usleep`, preserving its original blocking semantics for
+     * CLI use.
+     *
+     * @param callable(): array{status: string, error?: string, ...} $probe
+     *
+     * @return \Generator<int, array{status: string, ...}>
+     *
+     * @throws \RuntimeException on upstream 'failed' or timeout.
+     */
+    protected function pollIterator(
+        callable $probe,
+        int $timeoutSeconds = 120,
+        float $intervalSeconds = 2.0,
+    ): \Generator {
         $deadline = microtime(true) + $timeoutSeconds;
         $interval = max(0.1, $intervalSeconds);
 
@@ -159,8 +197,10 @@ abstract class ProviderToolBase extends Tool
             $payload = $probe();
             $status = (string) ($payload['status'] ?? 'unknown');
 
+            yield $payload;
+
             if ($status === 'done') {
-                return $payload;
+                return;
             }
             if ($status === 'failed') {
                 throw new \RuntimeException(
@@ -173,8 +213,9 @@ abstract class ProviderToolBase extends Tool
                 );
             }
 
-            // Sleep in sub-second chunks so tests can override the interval
-            // without the whole suite slowing to a crawl.
+            // Blocking sleep — the sync wrapper path. Non-blocking callers
+            // consume the generator directly and manage sleeping themselves
+            // (e.g. Laravel queue's `release($delay)`).
             usleep((int) ($interval * 1_000_000));
         }
     }

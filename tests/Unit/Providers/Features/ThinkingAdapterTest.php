@@ -47,24 +47,35 @@ class ThinkingAdapterTest extends TestCase
         );
     }
 
-    public function test_kimi_without_native_thinking_falls_back_to_cot(): void
+    public function test_kimi_native_thinking_swaps_model_variant(): void
     {
-        // Kimi doesn't implement SupportsThinking in this phase — model-based
-        // thinking selection lands later. Adapter must degrade to CoT prompt
-        // rather than crash.
-        $p = new KimiProvider(['api_key' => 'sk-x']);
+        // As of Phase 10 (#5), Kimi implements SupportsThinking by switching
+        // to the `kimi-k2-thinking-preview` model variant — Kimi doesn't
+        // expose a request-level thinking field.
+        $p = new KimiProvider(['api_key' => 'sk-x', 'model' => 'kimi-k2-6']);
+        $body = ['model' => 'kimi-k2-6', 'messages' => [['role' => 'user', 'content' => 'hi']]];
+        ThinkingAdapter::apply($p, [], $body);
+        $this->assertSame('kimi-k2-thinking-preview', $body['model']);
+        // No CoT prompt injected when the provider handled it natively.
+        $this->assertSame('user', $body['messages'][0]['role']);
+    }
+
+    public function test_provider_without_native_thinking_falls_back_to_cot(): void
+    {
+        // OpenAI doesn't implement SupportsThinking — adapter must degrade
+        // to CoT prompt injection rather than crash.
+        $p = new OpenAIProvider(['api_key' => 'sk-x']);
         $body = ['messages' => [['role' => 'user', 'content' => 'hi']]];
         ThinkingAdapter::apply($p, [], $body);
         // CoT is injected as a new system message prepended.
         $this->assertSame('system', $body['messages'][0]['role']);
         $this->assertStringContainsString('step-by-step', $body['messages'][0]['content']);
-        // Original user message preserved at position 1.
         $this->assertSame('user', $body['messages'][1]['role']);
     }
 
     public function test_cot_fallback_appends_to_existing_system_prompt(): void
     {
-        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $p = new OpenAIProvider(['api_key' => 'sk-x']);
         $body = ['messages' => [
             ['role' => 'system', 'content' => 'You are helpful.'],
             ['role' => 'user', 'content' => 'hi'],
@@ -72,7 +83,6 @@ class ThinkingAdapterTest extends TestCase
         ThinkingAdapter::apply($p, [], $body);
         $this->assertStringContainsString('You are helpful.', $body['messages'][0]['content']);
         $this->assertStringContainsString('step-by-step', $body['messages'][0]['content']);
-        // No duplicate system message inserted.
         $roles = array_column($body['messages'], 'role');
         $this->assertSame(['system', 'user'], $roles);
     }

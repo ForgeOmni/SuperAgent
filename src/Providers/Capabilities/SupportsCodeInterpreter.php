@@ -5,23 +5,24 @@ declare(strict_types=1);
 namespace SuperAgent\Providers\Capabilities;
 
 /**
- * Provider supports a server-side code interpreter — a sandbox that executes
- * model-authored code during a chat turn and returns stdout / artefacts
- * (Qwen `enable_code_interpreter`, OpenAI code interpreter tool).
+ * Provider exposes a server-side code interpreter — the model can
+ * generate Python / shell and have it executed on the vendor side, with
+ * stdout and artefacts fed back into the conversation (Qwen's
+ * `enable_code_interpreter`, OpenAI code interpreter, Gemini's
+ * `code_execution`).
  *
- * The interface returns a request-body fragment rather than offering a
- * direct call, because code-interpreter is usually a per-turn opt-in that
- * rides along with the chat request, not a standalone RPC.
+ * The method returns a request-body fragment to merge into the outbound
+ * chat request, mirroring `SupportsThinking`'s shape. Caller-driven
+ * execution (a local sandbox tool, Jupyter kernel, etc.) stays outside
+ * this interface — it belongs in `Tool`-land, not `Capability`-land.
  */
 interface SupportsCodeInterpreter
 {
     /**
-     * Build the provider-specific body fragment that turns the code
-     * interpreter on for the next chat call.
+     * @param array<string, mixed> $options Caller hints — reserved for
+     *            future per-vendor knobs (max runtime, allowed packages, …).
      *
-     * @param array<string, mixed> $opts Provider-specific knobs
-     *                                    (language, timeout, files, …).
-     * @return array<string, mixed>
+     * @return array<string, mixed> Fragment to deep-merge into the chat body.
      */
-    public function codeInterpreterRequestFragment(array $opts = []): array;
+    public function codeInterpreterRequestFragment(array $options = []): array;
 }

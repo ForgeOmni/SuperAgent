@@ -64,4 +64,26 @@ abstract class AgentDefinition
     {
         return 'general';
     }
+
+    /**
+     * Generic `features` spec that `FeatureDispatcher` translates into
+     * provider-specific body fragments at chat time (thinking / web_search /
+     * context_cache / agent_teams / …). Return `null` (default) to opt out
+     * entirely — Agent runtime then doesn't touch `$options['features']`
+     * and the request is byte-exact with pre-v0.8.9 behaviour.
+     *
+     * Example:
+     *   public function features(): ?array {
+     *       return [
+     *           'thinking'    => ['budget' => 4000],
+     *           'agent_teams' => ['objective' => '...', 'roles' => [...]],
+     *       ];
+     *   }
+     *
+     * @return array<string, array<string, mixed>>|null
+     */
+    public function features(): ?array
+    {
+        return null;
+    }
 }

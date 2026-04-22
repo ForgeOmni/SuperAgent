@@ -145,8 +145,8 @@ class CapabilityRouter
             // else: keep original set — region preference is a hint, not a hard filter
         }
 
-        // 4. Rank: explicit preferred list > count of native (non-required)
-        //    features supported > catalog order.
+        // 4. Rank: explicit preferred list > native-feature count >
+        //    blended cost (non-zero pricing present) > catalog order.
         $nonRequiredFeatures = [];
         foreach ($features as $name => $spec) {
             if (is_string($name) && empty(($spec['required'] ?? false))) {
@@ -154,9 +154,11 @@ class CapabilityRouter
             }
         }
 
+        $preferLowCost = ! empty($request['prefer_low_cost']);
+
         usort(
             $candidates,
-            static function (array $a, array $b) use ($preferredList, $nonRequiredFeatures): int {
+            static function (array $a, array $b) use ($preferredList, $nonRequiredFeatures, $preferLowCost): int {
                 $prefA = array_search($a['provider'], $preferredList, true);
                 $prefB = array_search($b['provider'], $preferredList, true);
                 $prefA = $prefA === false ? PHP_INT_MAX : $prefA;
@@ -167,7 +169,29 @@ class CapabilityRouter
 
                 $supA = self::countSupported($a['id'], $nonRequiredFeatures);
                 $supB = self::countSupported($b['id'], $nonRequiredFeatures);
-                return $supB <=> $supA;
+                if ($supA !== $supB) {
+                    return $supB <=> $supA;  // more native support wins
+                }
+
+                // Cost tiebreaker — cheap candidates first when requested,
+                // or when the feature set is empty (router has no reason to
+                // prefer an expensive model over a cheap equivalent).
+                // Blended score: input + 4·output — reflects that typical
+                // agent traffic reads more than it writes but output bytes
+                // weigh heavier per token. Candidates with missing prices
+                // (input+output both 0) sort last so "unpriced" doesn't
+                // falsely win as "cheapest".
+                if ($preferLowCost || $nonRequiredFeatures === []) {
+                    $costA = self::blendedCost($a['id']);
+                    $costB = self::blendedCost($b['id']);
+                    if ($costA !== $costB) {
+                        if ($costA <= 0.0) return 1;
+                        if ($costB <= 0.0) return -1;
+                        return $costA <=> $costB;
+                    }
+                }
+
+                return 0;
             },
         );
 
@@ -215,5 +239,25 @@ class CapabilityRouter
             }
         }
         return $n;
+    }
+
+    /**
+     * Blended per-1M-tokens cost used as a ranking tiebreaker. Formula
+     * `input + 4·output` reflects that typical agent traffic reads much
+     * more than it writes but each output token costs ~3-5× an input
+     * token; `4` is the empirical sweet spot for OpenAI / Anthropic
+     * pricing and generalises reasonably to others.
+     *
+     * Returns `0.0` when pricing data is missing — callers interpret that
+     * as "unknown cost" and sort it *after* known-priced candidates so we
+     * don't claim an unpriced model is the cheapest.
+     */
+    private static function blendedCost(string $modelId): float
+    {
+        $pricing = ModelCatalog::pricing($modelId);
+        if ($pricing === null) {
+            return 0.0;
+        }
+        return (float) $pricing['input'] + 4.0 * (float) $pricing['output'];
     }
 }
