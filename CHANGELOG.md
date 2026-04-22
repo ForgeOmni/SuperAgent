@@ -7,6 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-04-21
+
+### 💻 Summary
+
+**Native providers for Kimi / Qwen / GLM / MiniMax, region-aware credentials, and a capability-driven feature pipeline.** The agent loop, MCP stack and Skills system now compose the same way across ten registered providers.
+
+Highlights:
+
+1. **Four new native providers** — `KimiProvider` (Moonshot), `QwenProvider` (DashScope), `GlmProvider` (Z.AI / BigModel), `MiniMaxProvider`. Each owns its region map, default model, and extension hooks. Three speak the `/chat/completions` wire (refactored under a neutral `ChatCompletionsProvider` base, which `OpenAIProvider` now also extends); `QwenProvider` implements DashScope's native `text-generation/generation` body shape standalone.
+2. **Capability interface family + Feature dispatch** — 13 `Supports*` interfaces (Thinking / Swarm / ContextCaching / FileExtract / WebSearch / CodeInterpreter / OCR / Skills / Batch / TTS / Music / Video / Image). `FeatureDispatcher` routes `$options['features']` to the right provider-specific fragment via `FeatureAdapter` subclasses; `ThinkingAdapter` and `AgentTeamsAdapter` ship by default, with graceful CoT fallback so every provider can honour a `thinking` request.
+3. **Specialty-as-Tool (10 tools)** — any main brain (Claude, GPT, Gemini, …) can now call GLM Web Search / Web Reader / OCR / ASR, Kimi File-Extract / Batch / Swarm, Qwen Long-File, MiniMax TTS / Music / Video / Image as ordinary SuperAgent tools. Each declares `attributes()` (`network` / `cost` / `sensitive`) and plugs into the new security layer.
+4. **MCP manager's canonical user config** — `~/.superagent/mcp.json` is now loaded alongside Claude-Code's `.mcp.json`; new `superagent mcp add/list/remove/status/path` CLI writes it atomically. `MCPTool` already implements SuperAgent's `Tool` contract, so every native provider inherits MCP access for free (verified by `CrossProviderToolFormatTest`).
+5. **Skills user directory** — `~/.superagent/skills/` and `<project>/.superagent/skills/` are auto-loaded on `SkillManager` construction (disabled under PHPUnit for test isolation). New `superagent skills install/list/show/remove/path` CLI. `SkillInjector` merges the skill body into `$options['system_prompt']` with an idempotent `## Skill: <name>` header, or defers to a provider-specific bridge when one is registered.
+6. **Agent Team orchestration** — `SwarmRouter` picks between `native_swarm` (Kimi), `agent_teams` (MiniMax M2.7) and `local_swarm` (existing `src/Swarm/` infrastructure) based on the request shape. `KimiProvider` now implements `SupportsSwarm` against a provisional REST surface; `KimiSwarmTool` wraps it as a blocking or fire-and-forget tool. `superagent swarm <prompt>` CLI runs the planner today (execution wiring lands next).
+7. **Security layer** — new `src/Security/` with `NetworkPolicy` (respects `SUPERAGENT_OFFLINE=1`), `CostLimiter` (per-call / per-tool-daily / global-daily caps backed by `~/.superagent/cost_ledger.json` with UTC auto-rollover), and the composite `ToolSecurityValidator`. Bash tools continue to delegate to the existing `BashSecurityValidator` — the 23 security checks and their test suite are untouched.
+8. **Backward compatibility** — schema v2 `resources/models.json` (capabilities + regions per-model, per-provider-block inheritance) loads v1 catalogs unchanged; every existing test stays green. Compat lockdown suite (`tests/Compat/`) pins v1 parsing, provider default base URLs and `ProviderRegistry::getCapabilities()` shapes for the six pre-0.8.8 providers.
+
+**Test suite: 2435 tests / 6803 assertions / 0 failures** (up from 2060 / 5675 at 0.8.7 — 375 net new tests).
+
+### Added
+
+#### Providers (`src/Providers/`)
+- **`ChatCompletionsProvider`** — protocol-neutral abstract base: bearer auth, region-aware base URL, SSE streaming parser, retry loop, tool/message conversion. Subclass hooks `providerName()` / `defaultRegion()` / `regionToBaseUrl()` / `defaultModel()` / `resolveBearer()` / `missingBearerMessage()` / `chatCompletionsPath()` / `extraHeaders()` / `customizeRequestBody()`. `OpenAIProvider` refactored into a ~130-line subclass (was 395 lines) with OAuth / Organization / `chatgpt-account-id` as `extraHeaders()` + `resolveBearer()` overrides.
+- **`KimiProvider`** — `kimi` name; regions `intl` (api.moonshot.ai) / `cn` (api.moonshot.cn); default `kimi-k2-6`. Implements `SupportsSwarm` with a provisional `/v1/swarm/jobs` REST surface pending Moonshot's public spec.
+- **`QwenProvider`** — standalone (non-chat-completions); endpoint `POST /api/v1/services/aigc/text-generation/generation` with SSE via `X-DashScope-SSE: enable`; body `{model, input: {messages}, parameters: {…}}` including `enable_thinking`, `thinking_budget`, `enable_code_interpreter`, `parallel_tool_calls`; regions `intl` (Singapore), `us` (Virginia), `cn` (Beijing), `hk` (Hong Kong). Implements `SupportsThinking`.
+- **`GlmProvider`** — `glm` name; regions `intl` (api.z.ai) / `cn` (open.bigmodel.cn); base URL includes `/api/paas/v4/` so `chatCompletionsPath()` returns `chat/completions`. `customizeRequestBody()` injects `thinking: {type: enabled}` when `$options['thinking']` is set. Implements `SupportsThinking`.
+- **`MiniMaxProvider`** — `minimax` name; regions `intl` (api.minimax.io) / `cn` (api.minimaxi.com); path `v1/text/chatcompletion_v2`; optional `X-GroupId` header via `extraHeaders(config)`.
+- **`AnthropicProvider`** — implements `SupportsThinking` (`thinking: {type: enabled, budget_tokens}`).
+
+#### Capability interfaces (`src/Providers/Capabilities/`)
+- Sync fragments: `SupportsThinking`, `SupportsContextCaching`, `SupportsFileExtract`, `SupportsWebSearch`, `SupportsCodeInterpreter`, `SupportsOCR`, `SupportsSkills`.
+- Async (extend `AsyncCapable`): `SupportsSwarm`, `SupportsBatch`, `SupportsTTS`, `SupportsMusic`, `SupportsVideo`, `SupportsImage`.
+- `AsyncCapable` contract + `JobHandle` value object + `JobStatus` enum (`Pending` / `Running` / `Done` / `Failed` / `Canceled`), with `toArray()` / `fromArray()` for persistence.
+
+#### Feature dispatch (`src/Providers/Features/`)
+- `FeatureAdapter` abstract base with `required` / `disabled` handling and a deep-merge helper that preserves associative sub-objects while replacing indexed lists wholesale.
+- `FeatureDispatcher` — static adapter registry; `ChatCompletionsProvider::buildRequestBody()` and `QwenProvider::buildRequestBody()` call `FeatureDispatcher::apply($this, $options, $body)` once at the tail. Unknown feature names are silently ignored so the ecosystem can ship new adapters ahead of user code. No-op when `$options['features']` is absent — Compat-safe.
+- `ThinkingAdapter` — routes to `SupportsThinking::thinkingRequestFragment($budget)` when available; falls back to a CoT system-prompt injection; raises `FeatureNotSupportedException` when `required: true` and no path available.
+- `AgentTeamsAdapter` — injects a `## Agent Team` scaffold (objective, roles, coordination protocol) into chat-completions `messages`; idempotent; merges with existing system messages.
+
+#### Routing
+- `CapabilityRouter::pick()` — filters the full model catalog by required `features`, honours explicit `provider`/`region` pins, ranks remainder by preferred-list then native-feature count.
+- `SwarmRouter::plan()` — picks `native_swarm` / `agent_teams` / `local_swarm` strategy based on request shape; returns a `SwarmPlan` value object with human-readable rationale.
+
+#### Model catalog (`src/Providers/ModelCatalog.php`)
+- Schema v2 additive fields: `capabilities` and `regions` on model entries plus provider-block defaults that models inherit unless they override. v1 catalogs continue to parse unchanged.
+- New public API: `capabilitiesFor(string $id)` (falls back to `ProviderRegistry::getCapabilities()`), `regionsFor(string $id)`.
+- `resources/models.json` extended with **22 new model entries** across the four new providers (Kimi K2.6, Qwen3.6-Max-Preview, Qwen-Long, Qwen-VL, GLM-5 / 5V-Turbo / 4.6, MiniMax-M2.7 etc.) with regions and native-capability flags.
+
+#### Credential pool (`src/Providers/CredentialPool.php`)
+- Optional `region` tag on `CredentialEntry`; `getKey($provider, ?$region)` filters; region-less keys stay "universal" so existing users' configs are unaffected. `ProviderRegistry::create()` passes the resolved region when consulting the pool, preventing cn keys from leaking to intl endpoints.
+
+#### Provider registry
+- Four new `$providers` / `$defaultConfigs` entries.
+- New factory `ProviderRegistry::createWithRegion($name, $region, $config)`.
+- `createFromEnv()` handles `KIMI_API_KEY` (+ `MOONSHOT_API_KEY` alias), `QWEN_API_KEY` (+ `DASHSCOPE_API_KEY`), `GLM_API_KEY` (+ `ZAI_API_KEY` / `ZHIPU_API_KEY`), `MINIMAX_API_KEY` + `MINIMAX_GROUP_ID`, each with a `*_REGION` companion.
+
+#### Provider tools (`src/Tools/Providers/`)
+- `ProviderToolBase` — abstract Tool base: provider injection, `attributes()` declaration, reflection helper to reuse the provider's Guzzle client, `safeInvoke()` exception shield, `pollUntilDone($probe, $timeout, $interval)` helper for async jobs.
+- **GLM**: `GlmWebSearchTool`, `GlmWebReaderTool`, `GlmOcrTool`, `GlmAsrTool`.
+- **Kimi**: `KimiFileExtractTool`, `KimiBatchTool`, `KimiSwarmTool`.
+- **MiniMax**: `MiniMaxTtsTool`, `MiniMaxMusicTool` (async sync-wait), `MiniMaxVideoTool` (async sync-wait + T2V/I2V), `MiniMaxImageTool`. Shared `MiniMaxMediaExtractor` normalises URL / hex / base64 / file_id response shapes across endpoints.
+- **Qwen**: `QwenLongFileTool`.
+
+#### MCP
+- `MCPManager::userConfigPath()`, `readUserConfig()`, `writeUserConfig()` (atomic temp-rename + `chmod 0644`), `loadFromUserConfig()`. Constructor now loads the user config regardless of Laravel availability.
+- New `superagent mcp` CLI: `list`, `add <name> <stdio|http|sse> <target>` (repeatable `--arg` / `--env K=V` / `--header H: V`), `remove <name>`, `status`, `path`.
+
+#### Skills
+- `SkillManager::userSkillsDir()` = `~/.superagent/skills`; `projectSkillsDir($root)` = `<root>/.superagent/skills`.
+- New `loadUserDir()` / `loadProjectDir()` auto-called from the constructor (skipped under PHPUnit for test isolation).
+- `SkillInjector` — universal path merges the skill body into `$options['system_prompt']` with an idempotent `## Skill: <name>` header; provider-specific bridges registered via `registerBridge($providerName, $class)` short-circuit when they return `true`.
+- New `superagent skills` CLI: `list`, `show <name>`, `install <file>` (validates markdown frontmatter `name` before copying), `remove <name>`, `path`.
+
+#### Security (`src/Security/`)
+- `SecurityDecision` — uniform `allow` / `ask` / `deny` value object with `reason` and `context`.
+- `NetworkPolicy` — blocks `network`-attributed tools when `SUPERAGENT_OFFLINE=1` (or `forceOffline(true)`).
+- `CostLimiter` — three-level quota (`per_call_usd` > `per_tool_daily_usd[<tool>]` > `global_daily_usd`) plus `ask_threshold_usd`. Ledger at `~/.superagent/cost_ledger.json` (schema v1, UTC date auto-rollover, atomic write, `chmod 0600`). `record(tool, usd)` called only on successful tool runs so failures don't burn budget.
+- `ToolSecurityValidator` — composite gate. Bash tools (class name ending in `BashTool`) delegate to the existing `BashSecurityValidator`. Network check wins over cost check. `sensitive` attribute → policy-configurable default (`ask` / `allow` / `deny`).
+
+#### Exceptions
+- `FeatureNotSupportedException` extends `ProviderException` so existing `catch (ProviderException)` continues to catch the new type.
+
+#### Tests
+- `tests/Compat/` — new testsuite: `V1CatalogLockdownTest`, `SchemaV2LoaderTest`, `CapabilitiesDerivationTest`, `ProviderDefaultsLockdownTest`, `ProviderCapabilitiesShapeTest`.
+- `tests/Unit/Providers/Capabilities/` — contract + JobHandle + FeatureAdapter + FeatureNotSupportedException tests.
+- `tests/Unit/Providers/Features/` — `ThinkingAdapterTest`, `FeatureDispatcherTest`, `AgentTeamsAdapterTest`.
+- `tests/Unit/Providers/` — `KimiProviderTest`, `QwenProviderTest`, `GlmProviderTest`, `MiniMaxProviderTest`, `CapabilityRouterTest`, `SwarmRouterTest`, `KimiSwarmCapabilityTest`.
+- `tests/Unit/Tools/Providers/` — ten provider tool test files.
+- `tests/Unit/MCP/` — `UserConfigTest`, `CrossProviderToolFormatTest` (MCPTool translates correctly through every native provider's `formatTools()`).
+- `tests/Unit/CLI/` — `McpCommandTest`, `SkillsCommandTest`.
+- `tests/Unit/Skills/` — `UserSkillsDirTest`, `SkillInjectorTest`.
+- `tests/Unit/Security/` — `NetworkPolicyTest`, `CostLimiterTest`, `ToolSecurityValidatorTest`.
+
+#### Documentation
+- `design/NATIVE_PROVIDERS_CN.md` — design document with phase plan (kept in `design/` separate from user-facing `docs/`).
+- `docs/NATIVE_PROVIDERS_CN.md` — user-facing guide for the four new providers.
+- `docs/FEATURES_MATRIX.md` — per-provider capability grid.
+- `docs/MIGRATION_NATIVE.md` — migration guide from OpenAI-compat-mode usage to native providers.
+- `examples/mixed_agent.php` — runnable cross-provider composition example.
+
+### Changed
+
+- **`OpenAIProvider` rewritten** as a `ChatCompletionsProvider` subclass (395 → 127 lines). OAuth / Organization / `chatgpt-account-id` behaviour preserved and verified by existing `OpenAIProviderOAuthTest`; default base URL `api.openai.com` pinned by `tests/Compat/ProviderDefaultsLockdownTest`.
+- **`ProviderRegistry::getCapabilities()`** extended with entries for `kimi` / `qwen` / `glm` / `minimax` including a `regions` key. Existing six-provider entries unchanged (snapshot-locked by `tests/Compat/ProviderCapabilitiesShapeTest`).
+
+### Compat Red Lines (All Green)
+
+- Not a single pre-0.8.8 public method changed signature.
+- `resources/models.json` still parses as v1 when no `capabilities` / `regions` are present.
+- `BashSecurityValidator` and its 23 checks are bit-for-bit unchanged.
+- `OpenAIProvider` behaviour byte-exact (existing tests pass untouched).
+- `CredentialPool` accepts region-less keys as before; new `region` arg defaults to null.
+
 ## [0.8.7] - 2026-04-19
 
 ### 💻 Summary

@@ -21,6 +21,14 @@ namespace SuperAgent\Providers;
  * The user's request drove this abstraction: model lists / pricing change quickly,
  * and shipping a JSON file that can be refreshed without a package release keeps
  * the CLI usable in the face of a fast-moving model landscape.
+ *
+ * Schema versioning:
+ *   - v1 (baseline) — each model has `id`, optional pricing/family/date/aliases/description.
+ *   - v2 (additive) — adds optional `capabilities` and `regions` on model entries, and
+ *     provider-level defaults under `providers[p].capabilities` / `providers[p].regions`
+ *     that model entries inherit when they don't set their own. The loader accepts both
+ *     versions transparently; `_meta.schema_version` is informational only.
+ *     See `design/NATIVE_PROVIDERS_CN.md` §4.7 for the full v2 spec.
  */
 class ModelCatalog
 {
@@ -94,6 +102,59 @@ class ModelCatalog
     {
         self::ensureLoaded();
         return self::$byId ?? [];
+    }
+
+    /**
+     * Capabilities for a given model id.
+     *
+     * Resolution order:
+     *   1. Explicit `capabilities` on the model entry (schema v2).
+     *   2. Provider-level `capabilities` default (schema v2, merged in at ingest time).
+     *   3. `ProviderRegistry::getCapabilities(<provider>)` — hard-coded per-provider map
+     *      kept for backward compatibility with v1 catalogs that pre-date schema v2.
+     *
+     * Returns an empty array when nothing is known. The shape is intentionally
+     * loose — callers should treat missing keys as "unknown/unsupported".
+     *
+     * @return array<string, mixed>
+     */
+    public static function capabilitiesFor(string $id): array
+    {
+        $entry = self::model($id);
+        if ($entry === null) {
+            return [];
+        }
+
+        if (isset($entry['capabilities']) && is_array($entry['capabilities'])) {
+            return $entry['capabilities'];
+        }
+
+        $provider = $entry['provider'] ?? null;
+        if (! is_string($provider) || $provider === '') {
+            return [];
+        }
+
+        return ProviderRegistry::getCapabilities($provider);
+    }
+
+    /**
+     * Regions a given model is available in (schema v2). Empty array means the
+     * model makes no claim about regions — callers should treat it as "default /
+     * single region" and not filter.
+     *
+     * @return array<int, string>
+     */
+    public static function regionsFor(string $id): array
+    {
+        $entry = self::model($id);
+        if ($entry === null) {
+            return [];
+        }
+        $regions = $entry['regions'] ?? [];
+        if (! is_array($regions)) {
+            return [];
+        }
+        return array_values(array_filter(array_map('strval', $regions), static fn ($r) => $r !== ''));
     }
 
     /**
@@ -384,6 +445,17 @@ class ModelCatalog
             if (! is_array($models)) {
                 continue;
             }
+
+            // Schema v2: provider-level defaults for `capabilities` and `regions`
+            // apply to every model in this block unless the model overrides them.
+            $providerDefaults = [];
+            if (isset($providerBlock['capabilities']) && is_array($providerBlock['capabilities'])) {
+                $providerDefaults['capabilities'] = $providerBlock['capabilities'];
+            }
+            if (isset($providerBlock['regions']) && is_array($providerBlock['regions'])) {
+                $providerDefaults['regions'] = $providerBlock['regions'];
+            }
+
             foreach ($models as $model) {
                 if (! is_array($model) || ! isset($model['id'])) {
                     continue;
@@ -392,6 +464,15 @@ class ModelCatalog
                 if (isset($model['date']) && is_string($model['date'])) {
                     $model['date'] = (int) $model['date'];
                 }
+
+                // Model-level capabilities/regions win; otherwise inherit from provider block.
+                if (isset($providerDefaults['capabilities']) && ! isset($model['capabilities'])) {
+                    $model['capabilities'] = $providerDefaults['capabilities'];
+                }
+                if (isset($providerDefaults['regions']) && ! isset($model['regions'])) {
+                    $model['regions'] = $providerDefaults['regions'];
+                }
+
                 self::insert((string) $model['id'], $model);
             }
         }

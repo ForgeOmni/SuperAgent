@@ -137,6 +137,57 @@
         {"id": "zephyr",             "input": 0.0, "output": 0.0},
         {"id": "yi",                 "input": 0.0, "output": 0.0}
       ]
+    },
+
+    "kimi": {
+      "env": "KIMI_API_KEY",
+      "regions": ["intl", "cn"],
+      "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
+      "models": [
+        {"id": "kimi-k2-6",        "family": "k2",        "date": "20260420", "input": 0.60, "output": 2.50, "aliases": ["kimi", "k2", "kimi-k2"], "description": "Kimi K2.6 — 1T MoE, agent swarm, skills", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "swarm": true, "skills": true, "file_extract": true, "context_cache": "auto", "batch": true, "mcp": true, "max_context": 262144}},
+        {"id": "kimi-k2-5",        "family": "k2",        "date": "20251001", "input": 0.60, "output": 2.50, "description": "Kimi K2.5 (previous)"},
+        {"id": "kimi-latest",      "family": "kimi-latest","date": "20260301", "input": 0.60, "output": 2.50, "description": "Rolling latest"}
+      ]
+    },
+
+    "qwen": {
+      "env": "QWEN_API_KEY",
+      "regions": ["intl", "us", "cn", "hk"],
+      "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
+      "models": [
+        {"id": "qwen3.6-max-preview", "family": "qwen-max", "date": "20260420", "input": 2.0, "output": 8.0, "aliases": ["qwen", "qwen-max", "qwen3.6"], "description": "Qwen3.6-Max-Preview — 260K ctx flagship", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "code_interpreter": true, "file_extract": true, "mcp": true, "max_context": 260000}},
+        {"id": "qwen3-max",           "family": "qwen-max", "date": "20260123", "input": 2.0, "output": 8.0, "description": "Qwen3-Max"},
+        {"id": "qwen3.5-plus",        "family": "qwen-plus","date": "20260215", "input": 0.40, "output": 1.20, "description": "Qwen3.5-Plus"},
+        {"id": "qwen3.5-flash",       "family": "qwen-flash","date": "20260223","input": 0.15, "output": 0.60, "description": "Qwen3.5-Flash"},
+        {"id": "qwen-long-latest",    "family": "qwen-long","date": "20260201", "input": 0.50, "output": 2.00, "description": "Qwen-Long — 10M tokens via file reference (cn region only)", "regions": ["cn"]},
+        {"id": "qwen3-vl-plus",       "family": "qwen-vl",  "date": "20260215", "input": 2.0, "output": 8.0, "description": "Qwen3-VL-Plus multimodal"},
+        {"id": "qwen-vl-ocr",         "family": "qwen-ocr", "date": "20260101", "input": 1.0, "output": 3.0, "description": "Qwen-VL OCR"}
+      ]
+    },
+
+    "glm": {
+      "env": "GLM_API_KEY",
+      "regions": ["intl", "cn"],
+      "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
+      "models": [
+        {"id": "glm-5",          "family": "glm-5",    "date": "20260301", "input": 2.0, "output": 8.0, "aliases": ["glm", "glm5"], "description": "GLM-5 — 744B MoE agentic flagship", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "web_search": true, "ocr": true, "asr": true, "mcp": true, "max_context": 200000}},
+        {"id": "glm-5-turbo",    "family": "glm-5",    "date": "20260301", "input": 0.50, "output": 2.0, "description": "GLM-5-Turbo"},
+        {"id": "glm-5v-turbo",   "family": "glm-5v",   "date": "20260301", "input": 1.0, "output": 4.0, "description": "GLM-5V-Turbo — native multimodal agent"},
+        {"id": "glm-4.7",        "family": "glm-4",    "date": "20260201", "input": 2.0, "output": 8.0, "description": "GLM-4.7"},
+        {"id": "glm-4.6",        "family": "glm-4",    "date": "20260101", "input": 2.0, "output": 8.0, "description": "GLM-4.6 — 200K ctx"},
+        {"id": "glm-4.5",        "family": "glm-4",    "date": "20251001", "input": 2.0, "output": 8.0, "description": "GLM-4.5"}
+      ]
+    },
+
+    "minimax": {
+      "env": "MINIMAX_API_KEY",
+      "regions": ["intl", "cn"],
+      "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
+      "models": [
+        {"id": "MiniMax-M2.7",  "family": "m2",  "date": "20260318", "input": 0.30, "output": 1.20, "aliases": ["minimax", "m2", "minimax-m2"], "description": "MiniMax M2.7 — 230B MoE, self-evolving agent", "capabilities": {"streaming": true, "tools": true, "vision": true, "skills": true, "agent_teams": true, "dynamic_tool_search": true, "mcp": true, "max_context": 204800}},
+        {"id": "MiniMax-M2.5",  "family": "m2",  "date": "20260201", "input": 0.30, "output": 1.20, "description": "MiniMax M2.5"},
+        {"id": "MiniMax-M2",    "family": "m2",  "date": "20260101", "input": 0.30, "output": 1.20, "description": "MiniMax M2"}
+      ]
     }
   }
 }

@@ -7,7 +7,10 @@ namespace SuperAgent\CLI;
 use SuperAgent\CLI\Commands\AuthCommand;
 use SuperAgent\CLI\Commands\ChatCommand;
 use SuperAgent\CLI\Commands\InitCommand;
+use SuperAgent\CLI\Commands\McpCommand;
 use SuperAgent\CLI\Commands\ModelsCommand;
+use SuperAgent\CLI\Commands\SkillsCommand;
+use SuperAgent\CLI\Commands\SwarmCommand;
 
 /**
  * SuperAgent CLI Application.
@@ -20,7 +23,7 @@ use SuperAgent\CLI\Commands\ModelsCommand;
  */
 class SuperAgentApplication
 {
-    private const VERSION = '0.8.6';
+    private const VERSION = '0.8.8';
     private const NAME = 'SuperAgent';
 
     public function run(): int
@@ -55,6 +58,9 @@ class SuperAgentApplication
             'auth',
             'login'   => (new AuthCommand())->execute($options),
             'models'  => (new ModelsCommand())->execute($options),
+            'mcp'     => (new McpCommand())->execute($options),
+            'skills'  => (new SkillsCommand())->execute($options),
+            'swarm'   => (new SwarmCommand())->execute($options),
             default   => (new ChatCommand())->execute($options),
         };
     }
@@ -84,6 +90,9 @@ class SuperAgentApplication
         $i = 0;
         $options['auth_args'] = [];
         $options['models_args'] = [];
+        $options['mcp_args'] = [];
+        $options['skills_args'] = [];
+        $options['swarm_args'] = [];
 
         while ($i < count($args)) {
             $arg = $args[$i];
@@ -119,7 +128,7 @@ class SuperAgentApplication
 
         // First positional arg: subcommand or prompt
         if (! empty($positional)) {
-            if (in_array($positional[0], ['init', 'chat', 'auth', 'login', 'models'], true)) {
+            if (in_array($positional[0], ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm'], true)) {
                 $options['command'] = array_shift($positional);
             }
 
@@ -130,6 +139,21 @@ class SuperAgentApplication
                 } else {
                     $options['auth_args'] = $positional;
                 }
+                $positional = [];
+            }
+
+            if (($options['command'] ?? '') === 'mcp') {
+                $options['mcp_args'] = $positional;
+                $positional = [];
+            }
+
+            if (($options['command'] ?? '') === 'skills') {
+                $options['skills_args'] = $positional;
+                $positional = [];
+            }
+
+            if (($options['command'] ?? '') === 'swarm') {
+                $options['swarm_args'] = $positional;
                 $positional = [];
             }
 

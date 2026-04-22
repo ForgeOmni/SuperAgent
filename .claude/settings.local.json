@@ -86,7 +86,14 @@
       "Bash(echo \"exit=$?\")",
       "Read(//tmp/**)",
       "Bash(sed -n '252,300p' /Users/xiyang/PhpstormProjects/SuperAgent/README_CN.md)",
-      "Bash(sed -n '252,300p' /Users/xiyang/PhpstormProjects/SuperAgent/README_FR.md)"
+      "Bash(sed -n '252,300p' /Users/xiyang/PhpstormProjects/SuperAgent/README_FR.md)",
+      "WebSearch",
+      "WebFetch(domain:docs.z.ai)",
+      "WebFetch(domain:platform.minimax.io)",
+      "WebFetch(domain:www.alibabacloud.com)",
+      "WebFetch(domain:www.kimi.com)",
+      "WebFetch(domain:platform.kimi.ai)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

@@ -20,6 +20,10 @@ class ProviderRegistry
         'bedrock' => BedrockProvider::class,
         'ollama' => OllamaProvider::class,
         'gemini' => GeminiProvider::class,
+        'kimi' => KimiProvider::class,
+        'qwen' => QwenProvider::class,
+        'glm' => GlmProvider::class,
+        'minimax' => MiniMaxProvider::class,
     ];
 
     /**
@@ -71,6 +75,30 @@ class ProviderRegistry
         ],
         'gemini' => [
             'model' => 'gemini-2.0-flash',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
+        'kimi' => [
+            'model' => 'kimi-k2-6',
+            'region' => 'intl',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
+        'qwen' => [
+            'model' => 'qwen3.6-max-preview',
+            'region' => 'intl',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
+        'glm' => [
+            'model' => 'glm-4.6',
+            'region' => 'intl',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
+        'minimax' => [
+            'model' => 'MiniMax-M2.7',
+            'region' => 'intl',
             'max_tokens' => 8192,
             'max_retries' => 3,
         ],
@@ -126,9 +154,11 @@ class ProviderRegistry
         $defaultConfig = self::$defaultConfigs[$name] ?? [];
         $config = array_merge($defaultConfig, $config);
 
-        // If a credential pool is configured, try to get a key from the pool
+        // If a credential pool is configured, try to get a key from the pool.
+        // Pass the region so region-tagged keys only get served for matching regions
+        // (region-less keys remain universal).
         if (self::$credentialPool !== null && !isset($config['_skip_pool'])) {
-            $poolKey = self::$credentialPool->getKey($name);
+            $poolKey = self::$credentialPool->getKey($name, $config['region'] ?? null);
             if ($poolKey !== null) {
                 $config['api_key'] = $poolKey;
                 $config['_pool_key'] = $poolKey; // Track which key was used for reporting
@@ -140,6 +170,21 @@ class ProviderRegistry
 
         $providerClass = self::$providers[$name];
         return new $providerClass($config);
+    }
+
+    /**
+     * Create a provider pinned to a specific region. Convenience wrapper around
+     * `create()` that ensures `region` ends up in the config even if the caller
+     * passed other settings.
+     *
+     * Throws if the provider class has no `regionToBaseUrl()` support (non-
+     * ChatCompletionsProvider like Anthropic / Bedrock / Ollama that don't
+     * carry a region concept) — use `create()` for those.
+     */
+    public static function createWithRegion(string $name, string $region, array $config = []): LLMProvider
+    {
+        $config['region'] = $region;
+        return self::create($name, $config);
     }
 
     /**
@@ -239,6 +284,7 @@ class ProviderRegistry
             'bedrock' => ['access_key', 'secret_key'],
             'ollama' => [], // No required keys for Ollama
             'gemini' => ['api_key'],
+            'kimi', 'qwen', 'glm', 'minimax' => ['api_key'],
             default => [],
         };
 
@@ -310,6 +356,27 @@ class ProviderRegistry
                 'api_key' => $_ENV['GEMINI_API_KEY'] ?? getenv('GEMINI_API_KEY')
                     ?: ($_ENV['GOOGLE_API_KEY'] ?? getenv('GOOGLE_API_KEY')),
             ],
+            'kimi' => [
+                'api_key' => $_ENV['KIMI_API_KEY'] ?? getenv('KIMI_API_KEY')
+                    ?: ($_ENV['MOONSHOT_API_KEY'] ?? getenv('MOONSHOT_API_KEY')),
+                'region' => $_ENV['KIMI_REGION'] ?? getenv('KIMI_REGION') ?: 'intl',
+            ],
+            'qwen' => [
+                'api_key' => $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY')
+                    ?: ($_ENV['DASHSCOPE_API_KEY'] ?? getenv('DASHSCOPE_API_KEY')),
+                'region' => $_ENV['QWEN_REGION'] ?? getenv('QWEN_REGION') ?: 'intl',
+            ],
+            'glm' => [
+                'api_key' => $_ENV['GLM_API_KEY'] ?? getenv('GLM_API_KEY')
+                    ?: ($_ENV['ZAI_API_KEY'] ?? getenv('ZAI_API_KEY'))
+                    ?: ($_ENV['ZHIPU_API_KEY'] ?? getenv('ZHIPU_API_KEY')),
+                'region' => $_ENV['GLM_REGION'] ?? getenv('GLM_REGION') ?: 'intl',
+            ],
+            'minimax' => [
+                'api_key' => $_ENV['MINIMAX_API_KEY'] ?? getenv('MINIMAX_API_KEY'),
+                'group_id' => $_ENV['MINIMAX_GROUP_ID'] ?? getenv('MINIMAX_GROUP_ID') ?: null,
+                'region' => $_ENV['MINIMAX_REGION'] ?? getenv('MINIMAX_REGION') ?: 'intl',
+            ],
             default => throw new ProviderException("Unknown provider: {$name}", $name),
         };
 
@@ -342,6 +409,22 @@ class ProviderRegistry
 
         if (getenv('GEMINI_API_KEY') || getenv('GOOGLE_API_KEY')) {
             $available[] = 'gemini';
+        }
+
+        if (getenv('KIMI_API_KEY') || getenv('MOONSHOT_API_KEY')) {
+            $available[] = 'kimi';
+        }
+
+        if (getenv('QWEN_API_KEY') || getenv('DASHSCOPE_API_KEY')) {
+            $available[] = 'qwen';
+        }
+
+        if (getenv('GLM_API_KEY') || getenv('ZAI_API_KEY') || getenv('ZHIPU_API_KEY')) {
+            $available[] = 'glm';
+        }
+
+        if (getenv('MINIMAX_API_KEY')) {
+            $available[] = 'minimax';
         }
 
         // Check if Ollama is running
@@ -418,6 +501,38 @@ class ProviderRegistry
                 'vision' => true,
                 'max_context' => 1_048_576,
                 'structured_output' => true,
+            ],
+            'kimi' => [
+                'streaming' => true,
+                'tools' => true,
+                'vision' => true,
+                'max_context' => 262_144,
+                'structured_output' => true,
+                'regions' => ['intl', 'cn'],
+            ],
+            'qwen' => [
+                'streaming' => true,
+                'tools' => true,
+                'vision' => true,
+                'max_context' => 260_000,
+                'structured_output' => true,
+                'regions' => ['intl', 'us', 'cn', 'hk'],
+            ],
+            'glm' => [
+                'streaming' => true,
+                'tools' => true,
+                'vision' => true,
+                'max_context' => 200_000,
+                'structured_output' => true,
+                'regions' => ['intl', 'cn'],
+            ],
+            'minimax' => [
+                'streaming' => true,
+                'tools' => true,
+                'vision' => true,
+                'max_context' => 204_800,
+                'structured_output' => true,
+                'regions' => ['intl', 'cn'],
             ],
             default => [],
         };

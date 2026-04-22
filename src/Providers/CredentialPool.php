@@ -32,7 +32,7 @@ class CredentialPool
     /**
      * Create from configuration array.
      *
-     * Expected format:
+     * Expected format (v1, region-less — still supported):
      *   [
      *     'anthropic' => [
      *       'strategy' => 'round_robin',
@@ -41,6 +41,21 @@ class CredentialPool
      *       'cooldown_error' => 86400,
      *     ],
      *   ]
+     *
+     * Extended format with region tagging (v2, additive):
+     *   [
+     *     'kimi' => [
+     *       'strategy' => 'round_robin',
+     *       'keys' => [
+     *         ['key' => 'sk-moon-1', 'region' => 'intl'],
+     *         ['key' => 'sk-moon-2', 'region' => 'cn'],
+     *         'sk-untagged',   // still allowed — treated as universal
+     *       ],
+     *     ],
+     *   ]
+     *
+     * Region-less keys are "universal" — returned for any region query.
+     * This keeps existing callers' config files working unchanged.
      */
     public static function fromConfig(array $config = [], ?LoggerInterface $logger = null): self
     {
@@ -53,7 +68,18 @@ class CredentialPool
             $cooldownError = (int) ($providerConfig['cooldown_error'] ?? 86400);
 
             foreach ($keys as $key) {
-                $pool->addCredential($provider, $key, $strategy, $cooldown429, $cooldownError);
+                if (is_array($key)) {
+                    $pool->addCredential(
+                        $provider,
+                        (string) $key['key'],
+                        $strategy,
+                        $cooldown429,
+                        $cooldownError,
+                        $key['region'] ?? null,
+                    );
+                } else {
+                    $pool->addCredential($provider, $key, $strategy, $cooldown429, $cooldownError);
+                }
             }
         }
 
@@ -61,7 +87,8 @@ class CredentialPool
     }
 
     /**
-     * Add a credential to the pool.
+     * Add a credential to the pool. `$region` is optional and additive —
+     * a null region makes the key universal (served for any region query).
      */
     public function addCredential(
         string $provider,
@@ -69,21 +96,28 @@ class CredentialPool
         string $strategy = 'fill_first',
         int $cooldown429 = 3600,
         int $cooldownError = 86400,
+        ?string $region = null,
     ): void {
         $this->pools[$provider][] = new CredentialEntry(
             apiKey: $apiKey,
             strategy: $strategy,
             cooldown429: $cooldown429,
             cooldownError: $cooldownError,
+            region: $region,
         );
     }
 
     /**
      * Get the next available API key for a provider.
      *
+     * `$region` is optional. When set, only keys tagged with the same region
+     * (or untagged universal keys) are candidates — this prevents an intl
+     * key from leaking to a cn endpoint, which every vendor in this family
+     * host-binds.
+     *
      * @return string|null API key, or null if all credentials are exhausted/cooling down
      */
-    public function getKey(string $provider): ?string
+    public function getKey(string $provider, ?string $region = null): ?string
     {
         if (!isset($this->pools[$provider]) || empty($this->pools[$provider])) {
             return null;
@@ -92,12 +126,16 @@ class CredentialPool
         $entries = &$this->pools[$provider];
         $strategy = $entries[0]->strategy;
 
-        // Filter to available credentials
+        // Filter to available credentials that match the requested region.
         $available = [];
         foreach ($entries as $i => $entry) {
-            if ($entry->isAvailable()) {
-                $available[$i] = $entry;
+            if (! $entry->isAvailable()) {
+                continue;
             }
+            if ($region !== null && $entry->region !== null && $entry->region !== $region) {
+                continue;
+            }
+            $available[$i] = $entry;
         }
 
         if (empty($available)) {
@@ -185,11 +223,12 @@ class CredentialPool
     }
 
     /**
-     * Check if a provider has any available credentials.
+     * Check if a provider has any available credentials (optionally for a
+     * specific region).
      */
-    public function hasAvailable(string $provider): bool
+    public function hasAvailable(string $provider, ?string $region = null): bool
     {
-        return $this->getKey($provider) !== null;
+        return $this->getKey($provider, $region) !== null;
     }
 
     /**
@@ -285,6 +324,7 @@ class CredentialEntry
         public readonly string $strategy = 'fill_first',
         public readonly int $cooldown429 = 3600,
         public readonly int $cooldownError = 86400,
+        public readonly ?string $region = null,
     ) {}
 
     public function isAvailable(): bool

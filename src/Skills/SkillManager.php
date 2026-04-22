@@ -25,7 +25,64 @@ class SkillManager
     public function __construct()
     {
         $this->loadBuiltinSkills();
-        $this->loadConfiguredPaths();
+        // Skip disk-level auto-loading under PHPUnit so a developer's real
+        // ~/.superagent/skills directory doesn't colour test runs. Tests that
+        // want to exercise the loaders call them explicitly on a fresh instance.
+        if (getenv('PHPUNIT_RUNNING') !== '1') {
+            $this->loadUserDir();
+            $this->loadProjectDir();
+            $this->loadConfiguredPaths();
+        }
+    }
+
+    /**
+     * Canonical directory where `superagent skills install` drops user-
+     * authored skill files. Cross-platform (HOME on POSIX, USERPROFILE on
+     * Windows, sys temp as last resort). Matches the user-config convention
+     * established by `ModelCatalog::userOverridePath()` and
+     * `MCPManager::userConfigPath()`.
+     */
+    public static function userSkillsDir(): string
+    {
+        $home = getenv('HOME') ?: getenv('USERPROFILE') ?: sys_get_temp_dir();
+        return rtrim($home, '/\\') . '/.superagent/skills';
+    }
+
+    /**
+     * Project-local skills directory (optional, loaded if present). Matches
+     * the pattern of project-local mcp config: lets a repo ship skills that
+     * travel with the codebase without touching the user's home dir.
+     */
+    public static function projectSkillsDir(?string $projectRoot = null): string
+    {
+        $root = $projectRoot ?? self::findProjectRoot();
+        return rtrim($root, '/\\') . '/.superagent/skills';
+    }
+
+    /**
+     * Auto-loader for the user skills dir. Silent no-op on absent dir —
+     * a first-run install has no dir yet. Called from the constructor so
+     * every `SkillManager` instance (including test `new SkillManager()`)
+     * picks up the user's skills without extra wiring.
+     */
+    public function loadUserDir(): void
+    {
+        $dir = self::userSkillsDir();
+        if (is_dir($dir)) {
+            $this->loadFromDirectory($dir, recursive: true);
+        }
+    }
+
+    /**
+     * Auto-loader for the project-local skills dir. Same silent-absence
+     * semantics as `loadUserDir()`.
+     */
+    public function loadProjectDir(?string $projectRoot = null): void
+    {
+        $dir = self::projectSkillsDir($projectRoot);
+        if (is_dir($dir)) {
+            $this->loadFromDirectory($dir, recursive: true);
+        }
     }
 
     /**

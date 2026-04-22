@@ -35,6 +35,11 @@ class MCPManager
     private function loadConfiguredSources(): void
     {
         try {
+            // Always try the canonical SuperAgent user config first — this
+            // works in both Laravel and standalone CLI modes and is the
+            // file `superagent mcp add/remove` writes to.
+            $this->loadFromUserConfig();
+
             if (!$this->isLaravelAvailable()) {
                 return;
             }
@@ -53,6 +58,86 @@ class MCPManager
         } catch (\Throwable $e) {
             error_log('[SuperAgent] MCP config loading skipped: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Load MCP servers from the canonical SuperAgent user config path
+     * `~/.superagent/mcp.json`. Accepts both SuperAgent (`servers`) and
+     * Claude-Code (`mcpServers`) envelope keys so users can drop either
+     * shape into the file.
+     *
+     * Silent no-op when the file doesn't exist — every first-time user
+     * starts without one.
+     */
+    public function loadFromUserConfig(?string $path = null): void
+    {
+        $path ??= self::userConfigPath();
+        if (! is_file($path)) {
+            return;
+        }
+        $this->loadFromJsonFile($path);
+    }
+
+    /**
+     * Canonical path for the SuperAgent-managed MCP config. Same home-dir
+     * resolution pattern as `ModelCatalog::userOverridePath()` so the two
+     * user-level config files live side by side.
+     */
+    public static function userConfigPath(): string
+    {
+        $home = getenv('HOME') ?: getenv('USERPROFILE') ?: sys_get_temp_dir();
+        return rtrim($home, '/\\') . '/.superagent/mcp.json';
+    }
+
+    /**
+     * Write (or merge into) the SuperAgent user config. Used by the
+     * `superagent mcp add` / `remove` CLI subcommands. Other loaders remain
+     * read-only — this is the only writer, which keeps auditing simple.
+     *
+     * @param array<string, array<string, mixed>> $servers name → {type, command/url, args?, env?, headers?}
+     */
+    public static function writeUserConfig(array $servers, ?string $path = null): void
+    {
+        $path ??= self::userConfigPath();
+        $dir = dirname($path);
+        if (! is_dir($dir) && ! @mkdir($dir, 0755, true) && ! is_dir($dir)) {
+            throw new \RuntimeException("Failed to create directory: {$dir}");
+        }
+
+        $payload = ['servers' => $servers];
+        $tmp = $path . '.tmp';
+        if (file_put_contents($tmp, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n") === false) {
+            throw new \RuntimeException("Failed to write temp file: {$tmp}");
+        }
+        if (! rename($tmp, $path)) {
+            @unlink($tmp);
+            throw new \RuntimeException("Failed to promote temp file: {$path}");
+        }
+        @chmod($path, 0644);
+    }
+
+    /**
+     * Read the current user config as `name → serverConfig` map. Missing
+     * file returns `[]`. Accepts both `servers` and `mcpServers` envelopes.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public static function readUserConfig(?string $path = null): array
+    {
+        $path ??= self::userConfigPath();
+        if (! is_file($path)) {
+            return [];
+        }
+        $raw = file_get_contents($path);
+        if ($raw === false) {
+            return [];
+        }
+        $data = json_decode($raw, true);
+        if (! is_array($data)) {
+            return [];
+        }
+        $servers = $data['servers'] ?? ($data['mcpServers'] ?? []);
+        return is_array($servers) ? $servers : [];
     }
 
     /**

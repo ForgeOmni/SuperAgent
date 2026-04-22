@@ -13,6 +13,9 @@
         <testsuite name="Smoke">
             <directory>tests/Smoke</directory>
         </testsuite>
+        <testsuite name="Compat">
+            <directory>tests/Compat</directory>
+        </testsuite>
     </testsuites>
     <php>
         <env name="ANTHROPIC_API_KEY" value="" force="false"/>

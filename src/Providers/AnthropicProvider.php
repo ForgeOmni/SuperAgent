@@ -15,11 +15,21 @@ use SuperAgent\Messages\Message;
 use SuperAgent\Messages\Usage;
 use SuperAgent\StreamingHandler;
 use SuperAgent\Prompt\SystemPromptBuilder;
+use SuperAgent\Providers\Capabilities\SupportsThinking;
 use SuperAgent\Thinking\ThinkingConfig;
 use SuperAgent\Tools\Tool;
 
-class AnthropicProvider implements LLMProvider
+class AnthropicProvider implements LLMProvider, SupportsThinking
 {
+    public function thinkingRequestFragment(int $budgetTokens): array
+    {
+        // Anthropic extended thinking: explicit budget in tokens.
+        return ['thinking' => [
+            'type' => 'enabled',
+            'budget_tokens' => max(1, $budgetTokens),
+        ]];
+    }
+
     protected Client $client;
 
     protected string $model;
