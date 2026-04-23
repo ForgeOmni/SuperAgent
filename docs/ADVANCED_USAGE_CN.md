@@ -7169,3 +7169,304 @@ Runtime         →  并行分派 3 个，阻塞到全部完成
 
 见 `tests/Unit/AgentToolProductivityTest.php`，锁定五种场景：有写入的 `completed`、无写入的 `completed`（advisory warning）、`completed_empty`、路径去重、缺 `file_path` 的畸形 tool_use。
 
+
+## 35. Kimi thinking + 上下文缓存（请求级，post-0.8.9）
+
+> Kimi thinking **不是**换模型名 —— 同一 model id，改请求字段。0.8.9 那版假的 `kimi-k2-thinking-preview` 已移除。会话级 prompt cache 有独立接口 `SupportsPromptCacheKey`，区别于 Anthropic 的块级 `SupportsContextCaching`。
+
+### Thinking 实际下发
+
+```php
+$provider->chat($messages, $tools, $system, [
+    'features' => ['thinking' => ['budget' => 4000]],
+]);
+```
+
+发到 Kimi 的 JSON：
+```json
+{"model":"kimi-k2-6",...,"reasoning_effort":"medium","thinking":{"type":"enabled"}}
+```
+
+Budget 分桶：`<2000 → low`、`2000..8000 → medium`（默认 4000 落这里）、`>8000 → high`。来自 `KimiProvider::thinkingRequestFragment()`，`FeatureDispatcher` 负责深度合并。
+
+### Prompt cache —— 会话级，不是块级
+
+Kimi 缓存共享同一个 caller 提供的 key 的请求前缀。传你的 session id 进去，Moonshot 自动记账 cached tokens（首次命中后输入免费）。
+
+```php
+// 走 feature dispatcher（推荐，便于将来扩展到其他 provider）：
+$provider->chat($messages, $tools, $system, [
+    'features' => ['prompt_cache_key' => ['session_id' => $sessionId]],
+]);
+
+// 走 extra_body 直通口（同样 wire shape，不经 adapter）：
+$provider->chat($messages, $tools, $system, [
+    'extra_body' => ['prompt_cache_key' => $sessionId],
+]);
+```
+
+Usage 解析从两个位置读 cached tokens：`usage.prompt_tokens_details.cached_tokens`（OpenAI 新 shape）和 `usage.cached_tokens`（legacy），统一落在 `Usage::$cacheReadInputTokens`。
+
+### `SupportsPromptCacheKey` 接口
+
+实现了就走原生路径。目前只有 Kimi。自己加一个：
+
+```php
+class MyProvider extends ChatCompletionsProvider implements SupportsPromptCacheKey
+{
+    public function promptCacheKeyFragment(string $sessionId): array
+    {
+        return $sessionId === '' ? [] : ['my_cache_key' => $sessionId];
+    }
+}
+```
+
+不支持的 provider 静默跳过（`required: true` 时抛 `FeatureNotSupportedException`）。缓存是性能优化，降级到别的 fallback 反而会让用户困惑。
+
+
+## 36. 活动 `/models` 目录刷新
+
+> `resources/models.json` 从"权威源"降级为"离线 fallback"。权威源现在是每家 provider 自己的 `/models` endpoint。一条命令刷全家。
+
+### 逐 provider 刷
+
+```bash
+superagent models refresh              # 所有有 env 凭证的 provider
+superagent models refresh openai       # 只刷一家
+```
+
+缓存到 `~/.superagent/models-cache/<provider>.json`（原子写、chmod 0644）。`ModelCatalog::ensureLoaded()` 自动 overlay 这些文件 —— 刷一次，之后每个 agent run 都用新目录，不用重启。
+
+### 支持的 provider 和端点
+
+| Provider | Endpoint | Auth header |
+|---|---|---|
+| openai | `https://api.openai.com/v1/models` | `Authorization: Bearer $OPENAI_API_KEY` |
+| anthropic | `https://api.anthropic.com/v1/models` | `x-api-key` + `anthropic-version: 2023-06-01` |
+| openrouter | `https://openrouter.ai/api/v1/models` | `Authorization: Bearer $OPENROUTER_API_KEY` |
+| kimi | `https://api.moonshot.{ai,cn}/v1/models` | `Authorization: Bearer $KIMI_API_KEY` |
+| glm | `https://{api.z.ai,open.bigmodel.cn}/api/paas/v4/models` | `Authorization: Bearer $GLM_API_KEY` |
+| minimax | `https://api.minimax{.io,i.com}/v1/models` | `Authorization: Bearer $MINIMAX_API_KEY` |
+| qwen | `https://dashscope{-intl,-us,-hk,}.aliyuncs.com/compatible-mode/v1/models` | `Authorization: Bearer $QWEN_API_KEY` |
+
+Gemini / Ollama / Bedrock 暂不支持 —— `/models` 响应结构差异较大，需要各自适配。强刷会抛 `RuntimeException("Unsupported provider for live catalog refresh")`。
+
+### 合并语义
+
+Overlay 到 catalog 时：
+- 缓存新增/更新 `context_length`、`display_name`、`description` 等
+- Bundled 定价（`input` / `output` per-1M-token）**保留** —— 因为 `/models` 通常不返回价格
+- 运行时 `ModelCatalog::register()` 始终最高优先级（测试 / 运维覆盖路径）
+
+### 编程式 API
+
+```php
+use SuperAgent\Providers\ModelCatalogRefresher;
+
+$models = ModelCatalogRefresher::refresh('openai', [
+    'api_key' => getenv('OPENAI_API_KEY'),  // 显式覆盖，缺省读 env
+    'timeout' => 20,
+]);
+
+$results = ModelCatalogRefresher::refreshAll(timeout: 20);
+// ['openai' => ['ok' => true, 'count' => 42], 'anthropic' => ['ok' => false, 'error' => '...'], ...]
+```
+
+测试提示：`ModelCatalogRefresher::$clientFactory` 是公开的 closure 测试 DI seam，用于注入 mock HTTP。参考 `tests/Unit/Providers/ModelCatalogRefresherTest::mockFactory`。
+
+
+## 37. OAuth 设备码流程 + Kimi Code
+
+> Kimi 有**三个** endpoint，不是两个。`api.moonshot.ai`（intl, API key）和 `api.moonshot.cn`（cn, API key）早就有了；这次加上 `api.kimi.com/coding/v1` —— Kimi Code 订阅 endpoint —— 走 RFC 8628 设备码 OAuth。
+
+### CLI
+
+```bash
+superagent auth login kimi-code
+# → 显示验证 URL + user code
+# → 尝试自动打开浏览器（尊重 SUPERAGENT_NO_BROWSER / CI / PHPUNIT_RUNNING）
+# → 轮询 auth.kimi.com/api/oauth/token 直到你批准
+# → 持久化到 ~/.superagent/credentials/kimi-code.json（CredentialStore 默认 AES-256-GCM）
+
+export KIMI_REGION=code
+superagent chat -p kimi "用 Python 写斐波那契"
+# ↑ 现在走 api.kimi.com/coding/v1 + OAuth bearer
+
+superagent auth logout kimi-code   # 删凭证文件
+```
+
+### `resolveBearer()` 选 token 顺序
+
+`region: 'code'` 时：
+1. `KimiCodeCredentials::currentAccessToken()` —— 过期前 60 秒自动调 refresh_token
+2. Fallback 到 `$config['access_token']`（调用方自管 OAuth）
+3. Fallback 到 `$config['api_key']`（允许 API-key 覆盖 OAuth 默认）
+4. 抛 `ProviderException`，消息里提示跑 `superagent auth login kimi-code`
+
+### 设备识别 header
+
+每个 Kimi 请求（三个 region 都发）带上 Moonshot 设备 header 家族：
+- `X-Msh-Platform` —— `macos` / `linux` / `windows` / `bsd`
+- `X-Msh-Version` —— 读 composer.json
+- `X-Msh-Device-Id` —— 持久化到 `~/.superagent/device.json` 的 UUIDv4
+- `X-Msh-Device-Name` —— hostname
+- `X-Msh-Device-Model` —— macOS 用 `sysctl hw.model`，其他用 `uname -m`
+- `X-Msh-Os-Version` —— `uname -r`
+
+这些是识别 header，不是 auth。Moonshot 后端用来做 per-install 限流和 abuse 检测 —— 不发的话会被悄悄降优先级。
+
+### 做自己的 OAuth provider
+
+`DeviceCodeFlow` 是通用 RFC 8628，任何带 device-authorization / token endpoint 的 provider 都能用：
+
+```php
+use SuperAgent\Auth\DeviceCodeFlow;
+
+$flow = new DeviceCodeFlow(
+    clientId:      'your-client-id',
+    deviceCodeUrl: 'https://auth.example/api/oauth/device_authorization',
+    tokenUrl:      'https://auth.example/api/oauth/token',
+    scopes:        ['openid'],
+);
+$token = $flow->authenticate();
+```
+
+配上 `CredentialStore`（at-rest 加密）就是完整的 ~30 行登录实现。
+
+
+## 38. YAML agent spec + `extend:` 继承
+
+> agent 定义以前是 `.php` 类或 Markdown-带-frontmatter。现在 YAML 加入，并且 YAML / Markdown 都支持 `extend: <name>` 继承 —— 对齐 Claude Code / Codex / kimi-cli 都收敛到的模式。
+
+### 投递路径
+
+spec 放在任意位置：
+- `~/.superagent/agents/` （用户级，自动加载）
+- `<project>/.superagent/agents/` （项目级，自动加载）
+- `.claude/agents/` （`superagent.agents.load_claude_code` 开启时 —— 兼容路径）
+- 任何显式传给 `AgentManager::loadFromDirectory()` 的目录
+
+`.yaml` / `.yml` / `.md` / `.php` 四种扩展名都会被扫描。
+
+### 最小 YAML spec
+
+```yaml
+# ~/.superagent/agents/reviewer.yaml
+name: reviewer
+description: 审代码，不写代码
+category: review
+read_only: true
+
+system_prompt: |
+  你是代码审查者。读文件、给意见、写在文本里返回。
+  点名文件和行号。发现 pattern 时说是全局一致还是局部异常。
+
+allowed_tools: [Read, Grep, Glob]
+exclude_tools: [Write, Edit, MultiEdit, NotebookEdit]
+```
+
+### `extend:` —— 模板继承
+
+```yaml
+# ~/.superagent/agents/strict-reviewer.yaml
+extend: reviewer                   # 在 user + project + 已加载目录里查 yaml/yml/md
+name: strict-reviewer
+description: 聚焦并发 bug 的审查
+
+# 只覆盖想改的字段：
+system_prompt: |
+  你是代码审查者，特别关注并发正确性。
+  找 race condition、共享可变状态、未加锁的临界区。
+```
+
+合并语义：
+- 标量（`name`、`description`、`read_only`、`model`、`category`）—— 子覆盖
+- `system_prompt` —— 子给就子赢；没给就继承父 body（空 body 的 markdown 子自动拿父 prompt）
+- `allowed_tools`、`disallowed_tools`、`exclude_tools` —— **累加**，加工具不用重复父列表
+- `features` —— 子覆盖（结构化 map，不累加）
+- `extend` 本身消费掉，不出现在最终 spec 里
+
+深度限制为 10，抓循环。
+
+### 跨格式继承
+
+YAML 子 extend Markdown 父完全可以。Loader 查父时按 `.yaml` → `.yml` → `.md` 顺序在每个搜索目录里找；第一个命中胜出。保持 agent 名字在跨格式下唯一，不然自己坑自己。
+
+```yaml
+# YAML 子 extend markdown 父
+extend: base-coder        # 找 base-coder.yaml / .yml / .md
+name: my-coder
+allowed_tools: [Bash]     # 累加到父的列表
+```
+
+### 自带参考 spec
+
+`resources/agents/` 里有 `base-coder.yaml` 和 `reviewer.yaml`（后者 extend 前者）作为抄了改的起点。看 `resources/agents/README.md`。
+
+
+## 39. Wire Protocol v1（stdio JSON 流 → IDE / CI）
+
+> Agent loop 发出的每个 event 现在都是**版本化、自描述的 JSON 记录**。IDE 桥、CI 管道、编辑器集成都能消费同一个流，不用去抓 `StreamEvent` 子类。
+
+### `--output json-stream`
+
+```bash
+superagent "分析日志" --output json-stream > events.ndjson
+```
+
+输出格式：每事件一行 JSON，`\n` 结尾。每行都自描述：
+
+```json
+{"wire_version":1,"type":"tool_started","timestamp":1713792000.123,"tool_name":"Read","tool_use_id":"toolu_1","tool_input":{"file_path":"/tmp/x"}}
+{"wire_version":1,"type":"text_delta","timestamp":1713792000.456,"delta":"Hello"}
+{"wire_version":1,"type":"tool_completed","timestamp":1713792000.789,"tool_name":"Read","tool_use_id":"toolu_1","output_length":42,"is_error":false}
+```
+
+Error 以 `type: error` 记录发出，不走 stderr 文本 —— 消费者只需要一个流。
+
+### 消费者保证（v1）
+
+- 每个 event 顶层都有 `wire_version` + `type`
+- 加 optional 新字段**不**算破坏性 —— pin `wire_version: 1` 的消费者继续工作
+- 删字段或改字段类型**会**升 `wire_version` 到 2
+- `type` 集合（当前：`turn_complete` / `text_delta` / `thinking_delta` / `tool_started` / `tool_completed` / `agent_complete` / `compaction` / `error` / `status` / `permission_request`）可能扩，消费者应容忍未知 type
+
+### 编程式输出
+
+```php
+use SuperAgent\Harness\Wire\WireStreamOutput;
+
+$out = new WireStreamOutput(STDOUT);
+foreach ($harness->stream($prompt) as $event) {
+    if ($event instanceof \SuperAgent\Harness\Wire\WireEvent) {
+        $out->emit($event);
+    }
+}
+```
+
+`WireStreamOutput` 防御性：写失败（对端断链）静默吞掉，IDE 插件断开不会 crash agent loop。
+
+### 投射权限审批
+
+`WireProjectingPermissionCallback` 是装饰器 —— 包住任何 `PermissionCallbackInterface` 实现，每次 tool 调用需要审批时在 wire 流发 `PermissionRequestEvent`，不改本地决策逻辑：
+
+```php
+use SuperAgent\Harness\Wire\WireProjectingPermissionCallback;
+
+$inner = new ConsolePermissionCallback(...);
+$wrapped = new WireProjectingPermissionCallback(
+    $inner,
+    fn ($event) => $wireEmitter->emit($event),
+);
+// 把 $wrapped 交给 PermissionEngine。IDE 在流上看到 pending approval，
+// TTY 用户仍然看到交互 prompt。
+```
+
+### 迁移状态（Phase 8a / 8b / 8c）
+
+- **Phase 8a** —— `WireEvent` interface + `JsonStreamRenderer`。已完成。
+- **Phase 8b** —— `StreamEvent` 基类 implements `WireEvent`；所有 10 个子类（TurnComplete / ToolStarted / ToolCompleted / TextDelta / ThinkingDelta / AgentComplete / Compaction / Error / Status / PermissionRequest）自动合规。已完成。
+- **Phase 8c** —— stdio MVP 通过 `WireStreamOutput` + `--output json-stream`。已完成。IDE 插件用的 socket / HTTP 传输放 ACP 跟进 PR。
+
+完整 event 目录和字段规格见 `docs/WIRE_PROTOCOL.md`。
+

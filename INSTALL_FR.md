@@ -188,6 +188,44 @@ Deux garde-fous pratiques :
 
 Pour lancer plusieurs agents en parallèle, émettez tous les appels `AgentTool` comme **des blocs `tool_use` séparés dans un même message assistant** — le runtime les fan-out et bloque jusqu'à la fin de chaque enfant. **Ne pas** mettre `run_in_background: true` pour ça ; le mode background est fire-and-forget et renvoie `async_launched` sans résultat à consolider.
 
+### Ajouts de la branche Unreleased — référence CLI rapide
+
+```bash
+# ── OAuth Kimi Code (le 3e endpoint Kimi : api.kimi.com/coding/v1) ──
+superagent auth login kimi-code         # flux RFC 8628 device-code contre auth.kimi.com
+superagent auth logout kimi-code
+export KIMI_REGION=code                 # route le chat via l'endpoint OAuth
+
+# ── Rafraîchissement live du catalogue modèles (/models par fournisseur) ──
+superagent models refresh               # tous les fournisseurs ayant des creds en env
+superagent models refresh openai        # un seul
+# Caché dans ~/.superagent/models-cache/<provider>.json
+
+# ── Groupe de sous-commandes MCP complété ──
+superagent mcp auth <name>              # flux device-code OAuth pour serveurs MCP oauth-gated
+superagent mcp reset-auth <name>        # efface le token stocké
+superagent mcp test <name>              # sonde la joignabilité (stdio : binary, http : URL)
+
+# ── Sortie stream Wire Protocol v1 (pipelines IDE / CI) ──
+superagent "analyse les logs" --output json-stream > events.ndjson
+# Une ligne par événement en JSON wire_version:1 — compatible `jq -c`
+
+# ── Specs YAML d'agent auto-chargées depuis ──
+# ~/.superagent/agents/*.yaml          utilisateur
+# <project>/.superagent/agents/*.yaml  projet
+# Supporte `extend: <name>` inter-formats (.yaml / .yml / .md)
+
+# ── Échappatoire avancée en code ──
+$provider->chat($messages, $tools, $system, [
+    'extra_body' => ['prompt_cache_key' => $sessionId],  // ou tout champ spécifique au fournisseur
+]);
+
+# ── Prompt cache Kimi via features ──
+$provider->chat($messages, $tools, $system, [
+    'features' => ['prompt_cache_key' => ['session_id' => $sessionId]],
+]);
+```
+
 ### Désinstallation
 
 ```bash

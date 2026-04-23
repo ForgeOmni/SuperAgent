@@ -188,6 +188,44 @@ Two practical guardrails:
 
 To run multiple agents in parallel, emit all `AgentTool` calls as **separate `tool_use` blocks in a single assistant message** — the runtime fans them out and blocks until every child finishes. Do **not** set `run_in_background: true` for that; background mode is fire-and-forget and returns `async_launched` with no result to consolidate.
 
+### Unreleased additions — CLI quick reference
+
+```bash
+# ── Kimi Code OAuth (the third Kimi endpoint, api.kimi.com/coding/v1) ──
+superagent auth login kimi-code         # RFC 8628 device-code flow against auth.kimi.com
+superagent auth logout kimi-code
+export KIMI_REGION=code                 # route chat through the OAuth endpoint
+
+# ── Live model catalog refresh (per-provider /models) ──
+superagent models refresh               # every provider with env creds
+superagent models refresh openai        # single provider
+# Cached at ~/.superagent/models-cache/<provider>.json
+
+# ── MCP subcommand group completion ──
+superagent mcp auth <name>              # OAuth device flow for oauth-gated MCP servers
+superagent mcp reset-auth <name>        # clear stored token
+superagent mcp test <name>              # probe reachability (stdio binary or http URL)
+
+# ── Wire Protocol v1 stream output (IDE / CI pipelines) ──
+superagent "analyse logs" --output json-stream > events.ndjson
+# One line of wire_version:1 JSON per event; `jq -c` friendly
+
+# ── YAML agent specs auto-loaded from ──
+# ~/.superagent/agents/*.yaml          user-level
+# <project>/.superagent/agents/*.yaml  project-level
+# Supports `extend: <name>` inheritance across .yaml / .yml / .md
+
+# ── Power-user escape hatch in code ──
+$provider->chat($messages, $tools, $system, [
+    'extra_body' => ['prompt_cache_key' => $sessionId],  // or any vendor-specific field
+]);
+
+# ── Kimi prompt cache via features ──
+$provider->chat($messages, $tools, $system, [
+    'features' => ['prompt_cache_key' => ['session_id' => $sessionId]],
+]);
+```
+
 ### Uninstall
 
 ```bash

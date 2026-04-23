@@ -6444,3 +6444,308 @@ The `productivityWarning` is informational for these cases — it tells you the 
 
 See `tests/Unit/AgentToolProductivityTest.php` for the locked-down scenarios: `completed` with writes, `completed` without writes (advisory warning), `completed_empty`, deduped paths, and malformed tool_use without a `file_path`.
 
+
+## 35. Kimi thinking + context caching (request-level, post-0.8.9)
+
+> Kimi's thinking mode is **NOT** a model-name swap. Same model id, different request fields — the 0.8.9-era `kimi-k2-thinking-preview` assumption was wrong and has been removed. Session-level prompt caching has its own capability interface, distinct from Anthropic's block-level `SupportsContextCaching`.
+
+### Thinking — what the wire carries
+
+```php
+$provider->chat($messages, $tools, $system, [
+    'features' => ['thinking' => ['budget' => 4000]],   // advisory token count
+]);
+```
+
+Over the wire to Kimi:
+```json
+{"model": "kimi-k2-6", ..., "reasoning_effort": "medium", "thinking": {"type": "enabled"}}
+```
+
+Budget buckets: `<2000 → low`, `2000..8000 → medium` (the default 4000 lands here), `>8000 → high`. Map comes from `KimiProvider::thinkingRequestFragment()` which `FeatureDispatcher` deep-merges into the request body.
+
+### Prompt cache — session-keyed, not block-marked
+
+Kimi caches the shared prefix of requests that share a caller-supplied key. Pass your session id and Moonshot transparently attributes cached tokens (free input after the first hit).
+
+```php
+// Via the feature dispatcher (preferred — lets us extend to other providers):
+$provider->chat($messages, $tools, $system, [
+    'features' => ['prompt_cache_key' => ['session_id' => $sessionId]],
+]);
+
+// Via the extra_body escape hatch (same wire shape, no adapter involvement):
+$provider->chat($messages, $tools, $system, [
+    'extra_body' => ['prompt_cache_key' => $sessionId],
+]);
+```
+
+Usage parsing reads cached tokens from both `usage.prompt_tokens_details.cached_tokens` (current OpenAI shape) and `usage.cached_tokens` (legacy) and surfaces them on `Usage::$cacheReadInputTokens`.
+
+### The `SupportsPromptCacheKey` interface
+
+Providers that implement this get the feature routed natively. Today: Kimi only. Add your own:
+
+```php
+class MyProvider extends ChatCompletionsProvider implements SupportsPromptCacheKey
+{
+    public function promptCacheKeyFragment(string $sessionId): array
+    {
+        return $sessionId === '' ? [] : ['my_cache_key' => $sessionId];
+    }
+}
+```
+
+Non-supporting providers silently skip (`required: true` raises `FeatureNotSupportedException`). Prompt caching is a perf optimization; falling back to anything would be user-surprising.
+
+
+## 36. Live `/models` catalog refresh
+
+> `resources/models.json` used to be the source of truth for model ids + pricing. As of this release it's the offline fallback — the authoritative source is each provider's own `/models` endpoint. One command refreshes all of them.
+
+### Per-provider refresh
+
+```bash
+superagent models refresh              # all providers with env credentials
+superagent models refresh openai       # one provider
+superagent models refresh anthropic
+superagent models refresh kimi
+```
+
+Cached at `~/.superagent/models-cache/<provider>.json` (atomic write, chmod 0644). `ModelCatalog::ensureLoaded()` overlays these files automatically — refresh once, and every subsequent agent run uses the new model list without restart.
+
+### Supported providers and endpoint shapes
+
+| Provider   | Endpoint                                                       | Auth header                                   |
+|------------|----------------------------------------------------------------|-----------------------------------------------|
+| openai     | `https://api.openai.com/v1/models`                             | `Authorization: Bearer $OPENAI_API_KEY`       |
+| anthropic  | `https://api.anthropic.com/v1/models`                          | `x-api-key` + `anthropic-version: 2023-06-01` |
+| openrouter | `https://openrouter.ai/api/v1/models`                          | `Authorization: Bearer $OPENROUTER_API_KEY`   |
+| kimi       | `https://api.moonshot.{ai,cn}/v1/models`                       | `Authorization: Bearer $KIMI_API_KEY`         |
+| glm        | `https://{api.z.ai,open.bigmodel.cn}/api/paas/v4/models`       | `Authorization: Bearer $GLM_API_KEY`          |
+| minimax    | `https://api.minimax{.io,i.com}/v1/models`                     | `Authorization: Bearer $MINIMAX_API_KEY`      |
+| qwen       | `https://dashscope{-intl,-us,-hk,}.aliyuncs.com/compatible-mode/v1/models` | `Authorization: Bearer $QWEN_API_KEY` |
+
+Gemini, Ollama, and Bedrock are NOT currently supported by live refresh — their `/models` response shapes differ enough to warrant per-provider adapters. Refresh one of these, and `ModelCatalogRefresher::refresh()` throws `RuntimeException("Unsupported provider for live catalog refresh")`.
+
+### Merge semantics
+
+On overlay into the catalog:
+- Cache adds / updates fields like `context_length`, `display_name`, `description`.
+- Bundled pricing (`input` / `output` per-1M-token rates) is **preserved** when the cache doesn't carry it — which is normal because `/models` rarely lists price.
+- Runtime `ModelCatalog::register()` calls still win over everything (testing / operator override path).
+
+### Programmatic API
+
+```php
+use SuperAgent\Providers\ModelCatalogRefresher;
+
+$models = ModelCatalogRefresher::refresh('openai', [
+    'api_key' => getenv('OPENAI_API_KEY'),  // explicit override; falls back to env
+    'timeout' => 20,
+]);
+// Returns: [['id' => 'gpt-5', 'context_length' => 400000, '_raw' => [...]], ...]
+
+$results = ModelCatalogRefresher::refreshAll(timeout: 20);
+// Returns: ['openai' => ['ok' => true, 'count' => 42], 'anthropic' => ['ok' => false, 'error' => 'no API key in env'], ...]
+```
+
+Testing tip: `ModelCatalogRefresher::$clientFactory` is a public closure seam for injecting mock HTTP responses. `tests/Unit/Providers/ModelCatalogRefresherTest::mockFactory` shows the pattern.
+
+
+## 37. OAuth Device Authorization Grant + Kimi Code
+
+> Kimi has three endpoints, not two. `api.moonshot.ai` (intl, API key) and `api.moonshot.cn` (cn, API key) were already in place; this release adds `api.kimi.com/coding/v1` — the Kimi Code subscription endpoint — via RFC 8628 device-code OAuth.
+
+### CLI
+
+```bash
+superagent auth login kimi-code
+# → presents verification URL + user code
+# → tries to open the browser automatically (respects SUPERAGENT_NO_BROWSER / CI / PHPUNIT_RUNNING)
+# → polls auth.kimi.com/api/oauth/token until you approve
+# → persists to ~/.superagent/credentials/kimi-code.json (AES-256-GCM via CredentialStore)
+
+export KIMI_REGION=code
+superagent chat -p kimi "Write a fibonacci in Python"
+# ↑ now flows through api.kimi.com/coding/v1 with the OAuth bearer
+
+superagent auth logout kimi-code   # deletes the credential file
+```
+
+### How `resolveBearer()` picks the token
+
+`KimiProvider::resolveBearer()` for `region: 'code'`:
+1. Check `KimiCodeCredentials::currentAccessToken()` — auto-refreshes 60s before expiry via `auth.kimi.com/api/oauth/token` with `grant_type=refresh_token`.
+2. Fall back to `$config['access_token']` (caller-managed OAuth).
+3. Fall back to `$config['api_key']` (lets API-key users override the OAuth default).
+4. Raise `ProviderException` with a region-specific hint pointing at `superagent auth login kimi-code`.
+
+### Device identification headers
+
+Every Kimi request (all three regions) now carries the Moonshot device header family:
+- `X-Msh-Platform` — `macos` / `linux` / `windows` / `bsd`
+- `X-Msh-Version` — SuperAgent version from composer.json
+- `X-Msh-Device-Id` — stable UUIDv4 persisted at `~/.superagent/device.json`
+- `X-Msh-Device-Name` — hostname
+- `X-Msh-Device-Model` — `sysctl hw.model` on macOS, `uname -m` elsewhere
+- `X-Msh-Os-Version` — `uname -r`
+
+These are identification, not auth. Moonshot's backend uses them for per-install rate limiting and abuse detection; absence silently down-tiers your request priority.
+
+### Rolling your own OAuth provider
+
+The `DeviceCodeFlow` class is generic RFC 8628 — any provider with a device-authorization / token endpoint works:
+
+```php
+use SuperAgent\Auth\DeviceCodeFlow;
+
+$flow = new DeviceCodeFlow(
+    clientId:      'your-client-id',
+    deviceCodeUrl: 'https://auth.example/api/oauth/device_authorization',
+    tokenUrl:      'https://auth.example/api/oauth/token',
+    scopes:        ['openid'],
+);
+$token = $flow->authenticate();   // returns TokenResponse, throws on denial / timeout
+```
+
+Pair it with `CredentialStore` (encrypted at-rest) and you have a complete login path in ~30 lines.
+
+
+## 38. YAML agent specs with `extend:` inheritance
+
+> Agent definitions used to be `.php` classes or Markdown-with-frontmatter. YAML joins the club, and both YAML and Markdown now support `extend: <name>` inheritance — matching what Claude Code, Codex, and kimi-cli all converge on.
+
+### Drop-in conventions
+
+Place agent specs in any of:
+- `~/.superagent/agents/` (user-level, auto-loaded)
+- `<project>/.superagent/agents/` (project-level, auto-loaded)
+- `.claude/agents/` (if `superagent.agents.load_claude_code` is on — compatibility path)
+- Anything passed to `AgentManager::loadFromDirectory()` explicitly.
+
+Files with `.yaml`, `.yml`, `.md`, or `.php` extensions are all picked up.
+
+### Minimal YAML spec
+
+```yaml
+# ~/.superagent/agents/reviewer.yaml
+name: reviewer
+description: Reviews code, never writes.
+category: review
+read_only: true
+
+system_prompt: |
+  You are a code reviewer. Read files, form an opinion, return findings inline.
+  Name files and line numbers. Flag patterns — say whether they're consistent
+  or anomalous.
+
+allowed_tools: [Read, Grep, Glob]
+exclude_tools: [Write, Edit, MultiEdit, NotebookEdit]
+```
+
+### `extend:` — template inheritance
+
+```yaml
+# ~/.superagent/agents/strict-reviewer.yaml
+extend: reviewer                   # searches yaml/yml/md in user + project + loaded dirs
+name: strict-reviewer
+description: Reviews with a focus on concurrency bugs.
+
+# Only the fields you want to override:
+system_prompt: |
+  You are a code reviewer with a bias toward correctness under concurrency.
+  Focus on race conditions, shared mutable state, unlocked critical sections.
+```
+
+Merge semantics:
+- Scalars (`name`, `description`, `read_only`, `model`, `category`) — child overrides.
+- `system_prompt` — child wins when set; otherwise parent's body inherits (empty-body markdown children get the parent's prompt automatically).
+- `allowed_tools`, `disallowed_tools`, `exclude_tools` — **accumulate**, so adding tools is additive without repeating the parent list.
+- `features` — child overrides (no accumulation; features are structured maps).
+- `extend` itself is consumed and dropped from the final spec.
+
+Depth-limited to 10 to catch cycles.
+
+### Cross-format inheritance
+
+A YAML child extending a Markdown parent works identically. The loader's parent lookup tries `.yaml` → `.yml` → `.md` in that order across each search directory; first hit wins. Keep agent names unique across formats or you'll surprise yourself.
+
+```yaml
+# YAML child extending a markdown parent
+extend: base-coder        # finds base-coder.yaml, .yml, or .md
+name: my-coder
+allowed_tools: [Bash]     # accumulates with parent's
+```
+
+### Bundled reference specs
+
+`resources/agents/` ships `base-coder.yaml` and `reviewer.yaml` (the latter extends the former) as copy-and-tweak starting points. See `resources/agents/README.md`.
+
+
+## 39. Wire Protocol v1 (stdio JSON stream → IDE / CI)
+
+> Every event our agent loop emits is now a versioned, self-describing JSON record. IDE bridges, CI pipelines, and editor integrations can all consume the same stream without scraping `StreamEvent` subclasses.
+
+### `--output json-stream`
+
+```bash
+superagent "analyse logs" --output json-stream > events.ndjson
+```
+
+Output format: one line per event, JSON-encoded, terminated with `\n`. Every line is self-describing:
+
+```json
+{"wire_version":1,"type":"tool_started","timestamp":1713792000.123,"tool_name":"Read","tool_use_id":"toolu_1","tool_input":{"file_path":"/tmp/x"}}
+{"wire_version":1,"type":"text_delta","timestamp":1713792000.456,"delta":"Hello"}
+{"wire_version":1,"type":"tool_completed","timestamp":1713792000.789,"tool_name":"Read","tool_use_id":"toolu_1","output_length":42,"is_error":false}
+```
+
+Errors are emitted as `type: error` records instead of stderr text — consumers stay on a single stream.
+
+### Consumer guarantees (v1)
+
+- Every event has `wire_version` and `type` at the top level.
+- Adding new optional fields is NOT breaking — pin `wire_version: 1` and keep parsing.
+- Removing or changing the type of an existing field WILL bump the version to 2.
+- The set of `type` slugs (today: `turn_complete`, `text_delta`, `thinking_delta`, `tool_started`, `tool_completed`, `agent_complete`, `compaction`, `error`, `status`, `permission_request`) may grow; consumers should tolerate unknown types.
+
+### Programmatic emission
+
+```php
+use SuperAgent\Harness\Wire\WireStreamOutput;
+
+$out = new WireStreamOutput(STDOUT);
+foreach ($harness->stream($prompt) as $event) {
+    if ($event instanceof \SuperAgent\Harness\Wire\WireEvent) {
+        $out->emit($event);
+    }
+}
+```
+
+`WireStreamOutput` is robust: write failures (dead peer) are swallowed so a disconnected IDE doesn't crash the agent loop.
+
+### Projecting permission approvals
+
+`WireProjectingPermissionCallback` is a decorator — wrap any `PermissionCallbackInterface` implementation and it'll emit a `PermissionRequestEvent` on the wire stream every time a tool call needs approval, without changing how decisions get made locally:
+
+```php
+use SuperAgent\Harness\Wire\WireProjectingPermissionCallback;
+
+$inner = new ConsolePermissionCallback(...);
+$wrapped = new WireProjectingPermissionCallback(
+    $inner,
+    fn ($event) => $wireEmitter->emit($event),
+);
+// Hand $wrapped to the PermissionEngine. IDEs see pending approvals on
+// the stream while TTY users still see the interactive prompt.
+```
+
+### Migration status (Phases 8a / 8b / 8c)
+
+- **Phase 8a** — `WireEvent` interface + `JsonStreamRenderer`. Landed.
+- **Phase 8b** — `StreamEvent` base class implements `WireEvent`; all 10 concrete event classes (TurnComplete, ToolStarted, ToolCompleted, TextDelta, ThinkingDelta, AgentComplete, Compaction, Error, Status, PermissionRequest) are compliant. Landed.
+- **Phase 8c** — stdio MVP via `WireStreamOutput` + `--output json-stream`. Landed. Socket / HTTP transport for ACP IDE plugins sits on the same renderer and is deferred to a follow-up.
+
+See `docs/WIRE_PROTOCOL.md` for the complete event catalog and field-level spec.
+

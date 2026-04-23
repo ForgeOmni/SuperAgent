@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 💻 Summary
+
+**Post-0.8.9 development block, inspired by a close read of MoonshotAI's kimi-cli.** Eight Phase work packages plus one round of follow-up hardening. Focus: Kimi correctness (thinking was wrong, endpoint landscape was incomplete), a live `/models` catalog that kills drift, an OAuth foundation that generalizes across providers, YAML agent specs with inheritance, MCP subcommand polish, and the v1 Wire Protocol (interface + base-class migration + stdio bridge MVP) so future IDE integrations have a shared ground truth.
+
+**Zero public method signatures changed.** Everything is additive. Version number intentionally unassigned — maintainer's call.
+
+### Added
+
+#### Providers
+- **`SupportsPromptCacheKey` capability interface** (`src/Providers/Capabilities/SupportsPromptCacheKey.php`) — distinct from Anthropic's block-level `SupportsContextCaching` because Kimi's prompt cache keys on a caller-supplied session id rather than per-block markers. KimiProvider implements it via `promptCacheKeyFragment($sessionId)` → `['prompt_cache_key' => $sessionId]`.
+- **`PromptCacheKeyAdapter`** feature adapter (`src/Providers/Features/PromptCacheKeyAdapter.php`) — routes `$options['features']['prompt_cache_key']['session_id']` to providers implementing `SupportsPromptCacheKey`. Silent skip on non-supporting providers (caching is a perf optimization, not correctness). Registered in `FeatureDispatcher::registerDefaults()`.
+- **`ModelCatalogRefresher`** (`src/Providers/ModelCatalogRefresher.php`) — pulls the live model list from each provider's `GET /models` endpoint and caches it at `~/.superagent/models-cache/<provider>.json`. Supported: OpenAI, OpenRouter, Kimi, GLM, MiniMax, Qwen, Anthropic. Per-provider path + auth-header mapping (Bearer for most, `x-api-key + anthropic-version` for Anthropic). Writes atomically (temp + rename, chmod 0644). Test DI seam (`$clientFactory`) keeps HTTP mockable.
+- **`ModelCatalog::overlayRefresherCache()`** — auto-merges per-provider cache overlays above the user override, below runtime `register()`. Cache adds/updates capabilities and `context_length`; bundled pricing is preserved when `/models` omits it (which it usually does).
+- **`superagent models refresh [<provider>]`** CLI subcommand — triggers `ModelCatalogRefresher::refresh()` for one provider or `refreshAll()` for every provider with env credentials.
+- **Kimi Code region + OAuth**: KimiProvider now accepts `region: 'code'` → `https://api.kimi.com/coding/v1`, consulting `KimiCodeCredentials` for a bearer token before falling back to `api_key`. Companion `region: 'intl'` and `region: 'cn'` unchanged.
+- **Moonshot `X-Msh-*` device headers** (`src/Auth/DeviceIdentity.php`) — every Kimi request now carries `X-Msh-Platform / Version / Device-Id / Device-Name / Device-Model / Os-Version`, matching kimi-cli. Stable per-install UUID at `~/.superagent/device.json`.
+- **`KimiCodeCredentials`** (`src/Auth/KimiCodeCredentials.php`) — thin wrapper around `CredentialStore` for the Kimi Code OAuth flow. Handles load/save/refresh/currentAccessToken, with automatic token refresh 60s before expiry. Backed by Moonshot's public `auth.kimi.com` endpoints and `client_id` `17e5f671-d194-4dfb-9706-5516cb48c098`.
+- **`superagent auth login kimi-code`** / `logout kimi-code` — full RFC 8628 device authorization grant against `auth.kimi.com`, delegates polling + browser launch to the existing `DeviceCodeFlow`, persists via `KimiCodeCredentials::save()`.
+- **`$options['extra_body']` escape hatch** on every `ChatCompletionsProvider` — deep-merged at the top level of the outgoing request body after `customizeRequestBody` and `FeatureDispatcher`. Lets power users ship vendor-specific fields before we ship a capability adapter for them (e.g. `extra_body.prompt_cache_key` on Kimi, `extra_body.reasoning_effort` override on Kimi). Merge semantics match `FeatureAdapter::merge()`: scalars overwrite, assoc recurses, indexed arrays replace wholesale.
+- **`KimiServerBuiltinTool`** abstract base + **`KimiMoonshotWebSearchTool`** (`$web_search`) — Moonshot server-hosted tools send `{"type": "builtin_function", "function": {"name": "$xxx"}}` without a client-side schema. KimiProvider's overridden `convertTools()` detects the `$`-prefix and emits the special shape; any name-starts-with-`$` Tool gets the same treatment automatically.
+- **`KimiMediaUploadTool`** — uploads a video or image to Kimi's `/v1/files` with `purpose=video|image`, returns an `ms://<id>` URI callers reference from `video_url` / `image_url` content parts. Declares `network, cost, sensitive` for `ToolSecurityValidator`.
+
+#### Agents
+- **`YamlAgentDefinition`** + **`AgentSpecLoader`** (`src/Agent/`) — YAML agent specs matching kimi-cli's `.agents/*.yaml` shape. Supports `extend: <name>` inheritance across `.yaml` / `.yml` / `.md` formats; tool-list fields (`allowed_tools`, `disallowed_tools`, `exclude_tools`) accumulate across parent/child; depth-limited to catch cycles.
+- **Markdown agent `extend:` support** — shared resolver with YAML; a markdown child with empty body auto-inherits parent's `system_prompt`.
+- **`AgentManager::userAgentsDir()` + `projectAgentsDir()`** auto-loaders — `~/.superagent/agents/` and `<project>/.superagent/agents/` are scanned at construction time (under `autoLoadDisk: true`, skipped under `PHPUNIT_RUNNING`). Matches SkillManager's pattern.
+- **Bundled sample agents** (`resources/agents/base-coder.yaml` + `reviewer.yaml`) — reference specs that exercise `extend:` and tool-list accumulation, plus a README pointing users at user/project dir conventions.
+
+#### MCP
+- **`superagent mcp auth <name>` / `reset-auth <name>` / `test <name>`** — complete the subcommand group. `auth` runs `McpOAuth::authenticate()` against a server declaring an `oauth` block in its mcp config; `reset-auth` clears the cached token; `test` probes stdio command availability (via `command -v`) or HTTP URL reachability (5s `get_headers`). `list` now tags oauth-gated servers as `[auth: ok]` / `[auth: needed]`.
+
+#### Harness — Wire Protocol v1
+- **`WireEvent`** interface + **`JsonStreamRenderer`** (`src/Harness/Wire/`) — one-line NDJSON per event, self-describing (`wire_version` + `type` at top level). Auto-injects those fields if an implementation forgets.
+- **`StreamEvent` implements `WireEvent`** — Phase 8b migration: every concrete event class (`TurnCompleteEvent`, `ToolStartedEvent`, `ToolCompletedEvent`, `TextDeltaEvent`, `ThinkingDeltaEvent`, `AgentCompleteEvent`, `CompactionEvent`, `ErrorEvent`, `StatusEvent`) is wire-compliant for free. `toArray()` now carries `wire_version: 1`; the pre-migration `type` + `timestamp` fields stay at their existing positions (additive, byte-compatible with pre-existing consumers).
+- **`PermissionRequestEvent`** — new wire event projecting pending tool-call approvals onto the stream so IDE bridges can render the prompt.
+- **`ApprovalRuntime`** + **`WireProjectingPermissionCallback`** — decorator that wraps any `PermissionCallbackInterface` and emits `PermissionRequestEvent` before delegating to the inner callback. Non-invasive: callers that don't wrap see zero behaviour change.
+- **`WireStreamOutput`** + **`--output json-stream`** CLI flag — stream wire events as NDJSON to stdout for IDE / CI consumers. `ChatCommand::runOneShot()` routes to a new `AgentFactory::makeJsonStreamEmitter()` when the flag is set; errors are emitted as `type: error` wire events instead of stderr text. Phase 8c MVP.
+- **`docs/WIRE_PROTOCOL.md`** — complete v1 spec with event catalog, shape diagrams, consumer guarantees (`wire_version: 1` contract), and migration plan.
+
+### Changed
+
+- **`KimiProvider::thinkingRequestFragment()`** no longer swaps in a fake `kimi-k2-thinking-preview` model. Correct wire shape per kimi-cli: `reasoning_effort: low|medium|high` + `thinking: {type: "enabled"}` on the same model id. Budget buckets: `<2000 → low`, `2000..8000 → medium` (includes default 4000), `>8000 → high`.
+- **`resources/models.json`** — removed the fake `kimi-k2-thinking-preview` entry; updated `kimi-k2-6` description to reflect the correct request shape. `capabilities.thinking: true` stays.
+- **`FeatureDispatcher::registerDefaults()`** now registers `PromptCacheKeyAdapter` alongside thinking / agent_teams / code_interpreter.
+- **`ChatCompletionsProvider::parseSSEStream()`** reads cached tokens from both `usage.prompt_tokens_details.cached_tokens` (current OpenAI shape) and `usage.cached_tokens` (legacy shape) — Kimi emits the former.
+- **`AgentManager::loadFromDirectory()`** now picks up `.yaml` / `.yml` files in addition to `.php` and `.md`. Tracks every loaded dir on `$loadedDirs` so YAML `extend:` resolution can look up parents across directories.
+- **`docs/NATIVE_PROVIDERS.md`** (three languages) — new §5.1 documenting `extra_body`; Kimi's "Thinking (request-level)" row replaces the stale "model switch" description.
+- **`docs/FEATURES_MATRIX.md`** (three languages) — added `prompt_cache_key` row; Kimi moved into the native column for `thinking`.
+
+### Why — context the code alone won't surface
+
+- **The Kimi thinking fix is a correctness repair, not a feature.** Our 0.8.8 implementation sent `{"model": "kimi-k2-thinking-preview"}` — a model id Moonshot never published. Production calls would have 400'd with "unknown model". Caught via kimi-cli snapshot tests showing the real shape.
+- **The Wire Protocol migration was cheaper than estimated** (3-5 days in the design doc; landed in ~15 minutes of PHP). Reason: `StreamEvent` was already close to `WireEvent`'s shape — implementing the interface on the base class propagates compliance to every subclass without touching any of them.
+- **Kimi Code's third endpoint (`api.kimi.com/coding/v1`) was missing from our region map.** It's the managed-subscription endpoint kimi-cli uses exclusively — distinct from the metered `api.moonshot.{ai,cn}` endpoints that take an API key.
+- **`extra_body` is OpenAI's Python SDK convention, not part of the wire.** What goes on the wire is just top-level fields. Our implementation deep-merges at top level, which produces the correct JSON without users having to know the SDK quirk.
+
+### Compat Red Lines (All Green)
+
+- No public method signature changed. `AgentManager::__construct()` gained an optional `$autoLoadDisk = true` parameter — callers that passed zero args keep working.
+- `StreamEvent::toArray()` gains one key (`wire_version`); pre-existing consumers that pick specific keys are unaffected.
+- `KimiProvider` still accepts region `intl` / `cn` identically; `code` is purely additive.
+- `resources/models.json` v1 catalogs continue to parse. The fake `kimi-k2-thinking-preview` entry was never referenced outside `KimiProvider::thinkingRequestFragment()`, which no longer returns it.
+- Every existing `FeatureDispatcher` adapter continues to register; `PromptCacheKeyAdapter` is purely additive.
+
+### Tests
+
+All new code ships with unit tests. Touched test directories: `tests/Unit/Agent/`, `tests/Unit/Auth/`, `tests/Unit/CLI/`, `tests/Unit/Harness/`, `tests/Unit/Providers/`, `tests/Unit/Tools/Providers/`. The full aggregate (new tests + Compat lockdown) runs in <0.5s.
+
+Coverage of note:
+- `tests/Unit/Providers/Features/ThinkingAdapterTest::test_kimi_thinking_budget_buckets_into_effort_tiers` pins the budget→effort mapping.
+- `tests/Unit/Providers/ExtraBodyMergingTest` locks merge semantics, including extra_body winning over FeatureDispatcher adapters.
+- `tests/Unit/Providers/ModelCatalogRefresherTest` covers normalize, cache roundtrip, overlay conflict resolution (no cross-provider leaks), bundled pricing preservation, live HTTP path (mock), and CLI-level integration via `tests/Unit/CLI/ModelsCommandRefreshTest`.
+- `tests/Unit/Auth/KimiCodeCredentialsTest` pins the OAuth credential shape including refresh flow.
+- `tests/Unit/CLI/AuthCommandKimiCodeTest` pins the login / logout path with a stub DeviceCodeFlow so we exercise the glue without network.
+- `tests/Unit/Agent/YamlAgentDefinitionTest` + `MarkdownExtendTest` + `UserAgentsDirLoadTest` pin agent-spec loading across YAML / Markdown / user-dir auto-load.
+- `tests/Unit/CLI/McpCommandTest` gained 7 scenarios for `auth` / `reset-auth` / `test` subcommands and auth-status tagging.
+- `tests/Unit/Tools/Providers/KimiServerBuiltinToolTest` + `KimiMediaUploadToolTest` cover the `$`-prefix wire shape and the video/image upload path.
+- `tests/Unit/Harness/` now has `WireEventTest`, `StreamEventWireCompatTest` (proof Phase 8b migration works for every concrete subclass), `ApprovalRuntimeTest`, `WireProjectingPermissionCallbackTest`, `WireStreamOutputTest`.
+
+### What's still on the roadmap (explicitly deferred)
+
+- Full integration tests hitting real vendor endpoints (gated behind `SUPERAGENT_INTEGRATION=1`).
+- Phase 8c ACP over socket/HTTP — stdio MVP shipped; socket transport lives on the same renderer.
+- Extraction of `src/Providers/` + `src/Messages/` into a standalone composer sub-package (kimi-cli's "kosong" split). Multi-day refactor, parked to 1.x.
+- More Moonshot server-hosted builtins — only `$web_search` is confirmed from kimi-cli's snapshot tests. `$web_fetch` / `$code_interpreter` likely exist but need vendor confirmation.
+- `QwenProvider` is not a `ChatCompletionsProvider` subclass, so `$options['extra_body']` is currently no-op there. Either widen the base or extend Qwen with the same hook — decision deferred.
+
 ## [0.8.9] - 2026-04-22
 
 ### 💻 Summary
