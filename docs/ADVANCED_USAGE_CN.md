@@ -7470,3 +7470,223 @@ $wrapped = new WireProjectingPermissionCallback(
 
 完整 event 目录和字段规格见 `docs/WIRE_PROTOCOL.md`。
 
+
+## 40. Qwen 走 OpenAI-兼容端点（roadmap 后的新默认）
+
+> 默认 `qwen` provider 现在走 Alibaba 自家 qwen-code CLI 唯一使用的
+> `/compatible-mode/v1/chat/completions` 端点。老的 DashScope 原生 shape
+> （`input.messages` + `parameters.*`）作为 legacy opt-in，通过 `qwen-native` 继续可用。
+
+### 默认路径
+
+```php
+$qwen = ProviderRegistry::create('qwen', [
+    'api_key' => getenv('QWEN_API_KEY') ?: getenv('DASHSCOPE_API_KEY'),
+    'region'  => 'intl',   // intl / us / cn / hk
+]);
+
+// Thinking 请求级 —— 此端点**没有** thinking_budget
+foreach ($qwen->chat($messages, $tools, $system, [
+    'features' => ['thinking' => ['budget' => 4000]],  // budget 只为接口兼容，wire 上不发
+]) as $response) { ... }
+```
+
+Wire body 顶层带 `enable_thinking: true`。Budget 分桶在这条路径上是 no-op；需要 budget 控制请用 `qwen-native`。
+
+### `qwen-native`（legacy）
+
+```php
+$qwen = ProviderRegistry::create('qwen-native', [
+    'api_key' => getenv('QWEN_API_KEY'),
+    'region'  => 'intl',
+]);
+// 只有这个 provider 认识 parameters.thinking_budget / parameters.enable_code_interpreter
+```
+
+两个 provider 的 `name()` 都返回 `'qwen'`，观测性 / 成本归因保持一致。
+
+### 块级 prompt 缓存（仅 Qwen）
+
+```php
+$qwen->chat($messages, $tools, $system, [
+    'features' => ['dashscope_cache_control' => ['enabled' => true]],
+]);
+```
+
+无条件 `X-DashScope-CacheControl: enable` header + Anthropic 风格 `cache_control: {type: 'ephemeral'}` markers 钉在 system msg、最后一个 tool、以及（`stream: true` 时）最新 history msg。对应 qwen-code `provider/dashscope.ts:40-54`。
+
+### 视觉模型自动 flag
+
+匹配 `qwen-vl*` / `qwen3-vl*` / `qwen3.5-plus*` / `qwen3-omni*` 的模型自动加 `vl_high_resolution_images: true`。不加的话服务器会下采样大图，影响 OCR / 细节任务。直接测：`QwenProvider::isVisionModel($id)`。
+
+### DashScope UserAgent + metadata 信封
+
+每次 Qwen 请求带 `X-DashScope-UserAgent: SuperAgent/<版本>` header + `metadata: {sessionId, promptId, channel: "superagent"}` body envelope。`channel` 总是 superagent；`sessionId` / `promptId` 只在 caller 传 `$options['session_id']` / `$options['prompt_id']` 时下发。Alibaba 用来做 per-client 归因和配额仪表盘。
+
+
+## 41. Qwen Code OAuth（PKCE 设备码流程 + `resource_url`）
+
+> Qwen Code 是 Alibaba 的付费订阅端点，和计量 API-key 端点不同。认证是 RFC 8628 设备码 + PKCE S256，对 `chat.qwen.ai`。每个账号 token response 里带 `resource_url` —— 账号级 API base URL，覆盖默认 DashScope host。
+
+### CLI
+
+```bash
+superagent auth login qwen-code
+# → 显示验证 URL + user code
+# → 自动开浏览器（尊重 SUPERAGENT_NO_BROWSER）
+# → poll chat.qwen.ai/api/v1/oauth2/token 直到批准
+# → 持久化到 ~/.superagent/credentials/qwen-code.json（AES-256-GCM）
+# → 登录后提示 account-specific resource_url
+
+export QWEN_REGION=code
+superagent chat -p qwen "用 Python 写斐波那契"
+# ↑ 走该账号的 per-account DashScope host，OAuth bearer 自动 refresh
+
+superagent auth logout qwen-code
+```
+
+### Base URL 如何解析
+
+`QwenProvider::regionToBaseUrl('code')`：
+1. 读 `QwenCodeCredentials::resourceUrl()`。存在就用它（若没 `/compatible-mode/v1` 后缀则追加）。
+2. 回落到 `https://dashscope.aliyuncs.com/compatible-mode/v1`。然后 bearer 解析失败 → 抛登录提示。
+
+### PKCE S256 helper
+
+`DeviceCodeFlow::generatePkcePair()` 返回 `{code_verifier, code_challenge, code_challenge_method}`，跟 qwen-code 完全一样的派生。Qwen Code 登录用它；其他需要 PKCE 的 provider 可以穿过同样的 `DeviceCodeFlow` 构造参数复用。
+
+### 跨进程 refresh 安全
+
+Qwen Code（和 Kimi Code、Anthropic）的 OAuth refresh 都走 `CredentialStore::withLock()` —— 按 provider 加 OS 级 `flock()`，stale 检测（pid + 30s freshness）。并发 SuperAgent session 不会互相覆盖。
+
+
+## 42. `LoopDetector` —— 路径异常保护
+
+> 5 种检测器，全 provider 通用。catch 常见的无人值守异常：同 tool + 同 args 永动、参数抖动、文件读不停、文字重复、思考重复。可选 —— 默认关，不激活的调用方行为不变。
+
+### 5 种检测器（默认阈值）
+
+| 检测器         | 触发条件                                           | 默认阈值  |
+|--------------|---------------------------------------------------|---------|
+| `TOOL_LOOP`      | 同 tool + 同 args 连续 N 次                          | 5       |
+| `STAGNATION`     | 同 tool 名字连续 N 次（args 变）                        | 8       |
+| `FILE_READ_LOOP` | 最近 M 个 tool call 里 ≥N 个是 read-like（cold-start 门） | 8 / 15  |
+| `CONTENT_LOOP`   | 同 50 字符滑动窗口在 assistant 文本里重复 N 次            | 10      |
+| `THOUGHT_LOOP`   | 同 thinking 文本（trim 后）重复 N 次                   | 3       |
+
+Cold-start 豁免：`FILE_READ_LOOP` 在第一次非 read tool 触发前一直 dormant。开局探索合法，直到 agent 开始"行动"才启用。
+
+### 接入
+
+```php
+$detector = new LoopDetector([
+    'TOOL_CALL_LOOP_THRESHOLD' => 10,  // 松一点 —— 可选
+]);
+
+$wrapped = LoopDetectionHarness::wrap(
+    inner: $userHandler,
+    detector: $detector,
+    onViolation: function (LoopViolation $v) use ($wireEmitter): void {
+        $wireEmitter->emit(LoopDetectedEvent::fromViolation($v));
+        // 策略决定：抛异常停 turn、只 log、等等
+    },
+);
+$agent->prompt($prompt, $wrapped);
+```
+
+或走 CLI factory：
+
+```php
+[$handler, $detector] = $factory->maybeWrapWithLoopDetection(
+    $userHandler,
+    ['loop_detection' => true],   // 或 threshold map
+    $wireEmitter,
+);
+```
+
+### Wire 事件
+
+```json
+{
+  "wire_version": 1,
+  "type": "loop_detected",
+  "timestamp": ...,
+  "loop_type": "tool_loop",
+  "message":   "Tool 'Edit' called 5 times with identical arguments",
+  "metadata":  {"tool": "Edit", "count": 5}
+}
+```
+
+消费者自己决定渲染 / 阻断 turn / 只 warn。策略在 caller，事件只负责 signal。
+
+
+## 43. Shadow-git 文件级 checkpoint
+
+> Agent run 的文件级 undo 层。**独立**的 bare git repo 在 `~/.superagent/history/<project-hash>/shadow.git`，和 JSON checkpoint 并列。**不碰**用户自己的 `.git`。Restore 回退 tracked 文件但保留 untracked —— undo 保持可恢复。
+
+### 用法
+
+```php
+use SuperAgent\Checkpoint\{GitShadowStore, CheckpointManager, CheckpointStore};
+
+$shadow = new GitShadowStore($projectRoot);
+$mgr    = new CheckpointManager(
+    new CheckpointStore('/path/to/state'),
+    interval: 5,
+    shadowStore: $shadow,
+);
+
+// createCheckpoint() 调用完全不变：
+$cp = $mgr->createCheckpoint(
+    sessionId: $session,
+    messages: $messages,
+    turnCount: $n,
+    totalCostUsd: $cost,
+    turnOutputTokens: $tokens,
+    model: $model,
+    prompt: $prompt,
+);
+// cp->metadata['shadow_commit'] 现在带 git sha。
+
+// 以后 —— 还原文件到该快照：
+$mgr->restoreFiles($cp);
+```
+
+Shadow 快照失败（git 不在 PATH、worktree 权限）会 log + 吞掉 —— JSON checkpoint 仍然落盘。`restoreFiles()` 在 git 失败时抛 —— 方便 caller 明确 fallback 到"至少会话状态还在"。
+
+### 安全性质
+
+- **永远不写用户的 `.git`**。shadow 仓库在 `~/.superagent/history/` 里的 bare repo，完全独立。
+- **尊重 project 的 `.gitignore`**。`git add -A` 读取 project 的 gitignore，因为 shadow-repo 的 worktree 就是 project dir。`.gitignore` 里列出的 secrets 不会被捕获。
+- **项目隔离**。sha256 前缀（16 hex）做目录名，两个 project 碰撞概率极低。
+- **Restore 保留新增文件**。快照之后创建的文件不会被删 —— 用户可以重新 snapshot 来恢复错误的 restore。
+
+### Shell out 到 `git`
+
+`GitShadowStore` 用 `proc_open` + 显式 arg 数组 —— 没有 shell 元字符到 shell，hash 在传给 `git checkout` 前用 regex 校验。`init()` 在 `git` 二进制不在 PATH 时干净抛错。
+
+
+## 44. SSE parser 加固
+
+> 共享的 `ChatCompletionsProvider::parseSSEStream()` 里有两个 bug，影响所有 OpenAI-兼容 provider（OpenAI / Kimi / GLM / MiniMax / Qwen / OpenRouter）。mock 驱动的测试不会暴露，因为 mock 从来不把 tool call 拆成 N 个 chunk。
+
+### Bug 1 —— tool call 碎片化
+
+Streaming tool call 分 N 个 chunk 到达。chunk 1 带 `id` + `function.name` + 部分 `arguments`；之后的 chunk（同一个 `index`）只带参数片段。老 parser 每个 chunk 发一个 ContentBlock（一个真实 call 产生 N 个碎片）+ 每个 chunk 调一次 `onToolUse`。
+
+**修复**：按 `index` 累积到单个 accumulator。第一个非空 id / name 被保留不被后面的空 chunk 清空。流结束时：args 一次性 decode（unclosed object 一次修复，append `}`），每个 tool 发一个 `ContentBlock` + 一次 `onToolUse`。
+
+### Bug 2 —— DashScope `error_finish`
+
+Alibaba 兼容端在 mid-stream 限流 / 瞬时错误时，发一个 final chunk 带 `finish_reason: "error_finish"` + 错误文本在 `delta.content`。老 parser 把错误文字当成正常内容累加，返回截断响应。
+
+**修复**：content 累积**前**检测 `error_finish`，抛 `StreamContentError`（extends `ProviderException`），`retryable: true` + `statusCode: 429`，现有 retry loop 接管。
+
+### 小修
+
+- 空 `content` chunk 跳过（不膨胀消息）。
+- `onText` 同时发 `$delta` + `$fullText` —— 匹配 `StreamingHandler` 的文档契约（老 call site 只传一个 arg）。
+- `AssistantMessage` 改成无参构造 + 属性赋值（老代码用了 class 从未接受的命名参数 —— 静默破坏）。
+
+所有 OpenAI-兼容 provider 都受益，不需要 per-provider opt-in。
+

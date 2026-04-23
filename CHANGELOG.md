@@ -92,7 +92,94 @@ Coverage of note:
 - Phase 8c ACP over socket/HTTP — stdio MVP shipped; socket transport lives on the same renderer.
 - Extraction of `src/Providers/` + `src/Messages/` into a standalone composer sub-package (kimi-cli's "kosong" split). Multi-day refactor, parked to 1.x.
 - More Moonshot server-hosted builtins — only `$web_search` is confirmed from kimi-cli's snapshot tests. `$web_fetch` / `$code_interpreter` likely exist but need vendor confirmation.
-- `QwenProvider` is not a `ChatCompletionsProvider` subclass, so `$options['extra_body']` is currently no-op there. Either widen the base or extend Qwen with the same hook — decision deferred.
+
+---
+
+## Second wave — qwen-code-inspired roadmap
+
+**Eight more Phase work packages, this time driven by a close read of Alibaba's qwen-code CLI.** Fixes a Qwen-specific correctness bug the same shape as the Kimi one, adds PKCE OAuth for Qwen Code, hardens the SSE parser every OpenAI-compat provider shares, ports a loop detector that generalizes to every provider, and lands shadow-git checkpoints that file-snapshot alongside the existing JSON state.
+
+See `design/QWEN_CODE_INSPIRED_ROADMAP.md` for the Phase-by-Phase analysis.
+
+### Added
+
+#### Qwen natives
+- **New `QwenProvider extends ChatCompletionsProvider`** — OpenAI-compatible default path against `<region>/compatible-mode/v1/chat/completions`. This is what Alibaba's own qwen-code uses **exclusively** (`packages/core/src/core/openaiContentGenerator/constants.ts:5`). The old DashScope-native `text-generation/generation` body shape stays reachable as `QwenNativeProvider` via `ProviderRegistry::create('qwen-native', $config)` — legacy opt-in for callers that depended on `parameters.thinking_budget` or `parameters.enable_code_interpreter`.
+- **Qwen thinking on the OpenAI-compat path** — emits `enable_thinking: true` at the body root. The `thinking_budget` field does NOT exist on this endpoint (grep through qwen-code confirms zero hits); callers that pass a budget get a debug warning on `SUPERAGENT_DEBUG=1` and an ignored value. Budget control requires `qwen-native`.
+- **DashScope prompt-cache adapter** — new `DashScopeCacheControlAdapter` (FEATURE_NAME: `dashscope_cache_control`). Pins Anthropic-style `cache_control: {type: 'ephemeral'}` markers on the system message + last tool + latest streaming message, plus `X-DashScope-CacheControl: enable` header on every Qwen request (header unconditional, markers opt-in). Mirrors `provider/dashscope.ts:40-54` in qwen-code.
+- **Qwen Code region + OAuth**: `region: 'code'` in QwenProvider routes through RFC 8628 device flow with **PKCE S256** against `chat.qwen.ai`, client_id `f0304373b74a44d2b584a3fb70ca9e56`. Alibaba's token response carries a `resource_url` field (per-account API base URL) — `QwenProvider::regionToBaseUrl('code')` reads it at construction and rewrites the Guzzle base URI accordingly.
+- **`superagent auth login qwen-code`** / `logout qwen-code` — companion CLI to the Kimi Code flow. Generates a fresh PKCE verifier + challenge pair per login; surfaces the account-specific resource_url as a post-login hint.
+- **`X-DashScope-UserAgent: SuperAgent/<composer-version>`** header + `metadata: {sessionId, promptId, channel: "superagent"}` body envelope on every Qwen request — Alibaba uses these for per-client attribution and per-install dashboards.
+- **Vision auto-flag** — Qwen VL-class models (`qwen-vl*`, `qwen3-vl*`, `qwen3.5-plus*`, `qwen3-omni*`) automatically get `vl_high_resolution_images: true` injected into the request body. Without it, large images get downsampled server-side, hurting OCR.
+
+#### Auth generics
+- **`CredentialStore::withLock()`** — cross-process `flock()` wrapper on a `.lock` sidecar per provider. Stale-detection via recorded pid + 30s freshness window + `posix_kill($pid, 0)` liveness probe; stale locks get stolen exactly once before timeout. Wraps the OAuth refresh path for Kimi Code, Qwen Code, and Anthropic — parallel SuperAgent sessions refreshing the same credential no longer race-write each other's state. Port of qwen-code's `SharedTokenManager` pattern.
+- **`QwenCodeCredentials`** (`src/Auth/QwenCodeCredentials.php`) — mirror of `KimiCodeCredentials` plus the `resource_url` bookkeeping. Refresh path wraps itself in `withLock()` with a double-check inside the lock to skip redundant HTTP when another process already refreshed.
+- **`DeviceCodeFlow` PKCE support** — new optional constructor params `pkceCodeVerifier / pkceCodeChallenge / pkceChallengeMethod`. When set, the device-authorization request carries `code_challenge` + method; the token poll carries `code_verifier`. Kimi Code / GitHub / Codex paths default to null (unchanged). `DeviceCodeFlow::generatePkcePair()` returns an S256 pair that matches qwen-code's implementation byte-for-byte.
+- **`TokenResponse::$extra`** — optional array for vendor-specific token-response fields that aren't part of RFC 8628. `pollForToken()` strips the standard keys and routes the rest into `extra`. Used by Qwen for `resource_url`; future providers can extend similarly.
+
+#### Providers
+- **SSE parser hardening** (`ChatCompletionsProvider::parseSSEStream`) — two real bugs fixed:
+  1. **Tool-call assembly by `index`** — a single tool call split across N streaming chunks used to produce N fragmented ContentBlocks (most with empty id / name / partial JSON). Now we accumulate per-index and emit exactly one block per assembled tool, firing `emitToolUse` once per tool rather than once per chunk.
+  2. **`finish_reason: "error_finish"`** — DashScope compat-mode's mid-stream throttle signal was silently swallowed (the error text in `delta.content` got appended to the response body). Now raises `StreamContentError extends ProviderException` with `retryable: true` + `statusCode: 429`, hooking into the existing retry loop.
+  Plus: empty-content chunks no longer inflate the message, `onText` gets both the delta and the accumulated-so-far string (matches the documented contract), and truncated tool-call JSON gets a one-shot repair attempt (`str_repeat('}')` for unclosed objects) before falling back to an empty arg dict.
+
+#### Guardrails
+- **`LoopDetector`** (`src/Guardrails/LoopDetector.php`) — five detectors that generalize to every provider:
+  - `TOOL_LOOP` — same tool + same args 5× in a row (args normalized via recursive ksort)
+  - `STAGNATION` — same tool name 8× in a row regardless of args (parameter-thrashing variant)
+  - `FILE_READ_LOOP` — ≥8 of last 15 tool calls are read-like (`read_*` / `list_*` prefixes + `read_file` / `Read` / `Grep` / `Glob` canonical names), gated by cold-start exemption (opening exploration is legitimate until the first non-read tool fires)
+  - `CONTENT_LOOP` — same 50-char rolling-window slice appears 10× in streamed assistant content
+  - `THOUGHT_LOOP` — same thinking-channel text appears 3× (threshold lower because thinking loops are rarer)
+  Thresholds all overridable via constructor config. `LoopViolation` is sticky after first trigger until `reset()` — reads from `lastViolation()` stay stable.
+- **`LoopDetectedEvent`** — new wire event (inherits `StreamEvent` → wire-compliant automatically via Phase 8b), carries `loop_type` enum value + message + per-detector metadata.
+- **`LoopDetectionHarness::wrap()`** — decorator that takes an existing `StreamingHandler` and observes every text / thinking / tool-use chunk through a `LoopDetector`, firing an `onViolation` closure the first time a detector trips. Every other event (tool_result / turn / final / raw) passes through untouched — the decoration is transparent to the outer UI.
+- **`AgentFactory::maybeWrapWithLoopDetection($inner, $options, $wireEmitter)`** — factory helper that gates loop detection on `$options['loop_detection']`. Option can be `true` (defaults), `false` (explicit off), or an array of threshold overrides. Violations fan out as `loop_detected` wire events on the provided emitter.
+
+#### Checkpoints
+- **`GitShadowStore`** (`src/Checkpoint/GitShadowStore.php`) — file-level snapshots via a **separate** bare git repo at `~/.superagent/history/<project-hash>/shadow.git`. Never touches the user's own `.git`. Operations: `init` (idempotent), `snapshot($label)` (`git add -A && commit --allow-empty`), `restore($hash)` (tracked files revert; untracked files LEFT in place for safety), `list()` (newest first), `has($hash)` (cheap existence probe). Project's own `.gitignore` is respected because the worktree IS the project dir. Shells out to `git` via `proc_open` with explicit arg arrays — no shell-metacharacter escape needed.
+- **`CheckpointManager` shadow integration** — new optional `GitShadowStore` constructor parameter + `setShadowStore()` runtime hook. When attached, every `createCheckpoint()` also triggers a shadow snapshot whose commit hash lands in `Checkpoint::$metadata['shadow_commit']` (no schema break — piggybacks on the existing metadata field). New `restoreFiles(Checkpoint)` method plays the snapshot back. Shadow failures are logged and swallowed — JSON checkpoints stay saved even when git chokes.
+
+### Changed
+
+- **`QwenProvider`** — renamed the previous class to `QwenNativeProvider` (marked `@deprecated`, reachable via `qwen-native` registry key). The `qwen` key now binds to the new OpenAI-compat provider. `ProviderRegistry::createFromEnv('qwen')` / `createFromEnv('qwen-native')` both read the same `QWEN_API_KEY` / `DASHSCOPE_API_KEY` env.
+- **`QwenLongFileTool`** now resolves the `/v1/files` upload endpoint against the provider's HOST directly (strips `/compatible-mode/v1` when present). Works under both `qwen` (chat-completions base) and `qwen-native` (bare host) without per-provider logic.
+- **`ChatCompletionsProvider::parseSSEStream`** rewritten — see SSE hardening bullet above. Public signature unchanged; internals now robust against the real-world chunk shapes qwen-code battle-tested.
+- **`AgentFactory::resolveStoredAuth`** — Anthropic refresh path now runs under `CredentialStore::withLock()`. Double-check inside the lock skips the HTTP call when another process already refreshed.
+- **`resources/models.json`** — `qwen3.6-max-preview` description rewritten to reflect the OpenAI-compat shape; `code_interpreter` capability removed from the default row (only `qwen-native` exposes it).
+- **`docs/FEATURES_MATRIX.md`** (three languages) — `code_interpreter` row moved to `qwen-native`; `dashscope_cache_control` added.
+- **`docs/NATIVE_PROVIDERS.md`** §3.2 (three languages) — rewritten for the compat-mode default + `qwen-native` escape hatch.
+
+### Why — context the code alone won't surface
+
+- **Our `QwenProvider` was targeting an endpoint Alibaba's own CLI never uses.** Production calls would either silently lose fields or fail outright. Same shape of bug as the Kimi thinking issue we fixed in the first wave.
+- **PKCE is not optional for Qwen Code.** Alibaba's device-authorization endpoint returns a confusing error when `code_challenge` is absent — specifically, the user approves in the browser but the token poll keeps returning `authorization_pending` forever.
+- **`resource_url` is genuinely per-account.** Different Qwen Code subscriptions route through different DashScope hosts (`portal.qwen.ai/v1`, `dashscope-coding.aliyuncs.com/v1`, etc). Hard-coding a single base URL would hit 404 for a non-trivial fraction of users.
+- **The SSE tool-call bug was live in production but hidden by mocks.** Every existing provider test fed pre-assembled tool_calls in one chunk, so the fragmented-assembly bug never surfaced locally. It only fires when a real streaming provider splits a call across chunks — which all of them do.
+- **LoopDetector's cold-start exemption is load-bearing.** Opening exploration (list_directory + several parallel read_file calls) looks exactly like a FILE_READ_LOOP on paper — the cold-start gate is what keeps legitimate first-turn discovery from being flagged.
+
+### Compat Red Lines (All Green)
+
+- `qwen` provider registry key still resolves; legacy native shape reachable as `qwen-native`.
+- Every pre-wave test still passes (verified end-to-end — 671 tests, 1776 assertions).
+- `CheckpointManager` default behaviour byte-exact with null shadowStore.
+- `LoopDetector` is purely additive — callers that don't invoke `LoopDetectionHarness::wrap()` or `AgentFactory::maybeWrapWithLoopDetection()` see zero behaviour change.
+- `DeviceCodeFlow` pre-existing `requestDeviceCode` / `pollForToken` signatures unchanged; PKCE params are all optional with `null` defaults.
+- `TokenResponse::$extra` is optional-null.
+
+### Tests (second wave)
+
+Coverage of note:
+- `tests/Unit/Providers/QwenProviderTest` + `QwenNativeProviderTest` split — chat-completions shape vs native shape locked in separately.
+- `tests/Unit/Providers/Features/DashScopeCacheControlAdapterTest` — nine scenarios covering marker placement rules, streaming-only last-message gate, caller-supplied markers preserved.
+- `tests/Unit/Auth/CredentialStoreLockTest` — happy path, exception-in-critical releases lock, timeout → RuntimeException, stale-lock steal, per-provider lock isolation, path-traversal sanitization.
+- `tests/Unit/Auth/QwenCodeCredentialsTest` + `DeviceCodeFlowPkceTest` — load/save/expire/refresh roundtrip, PKCE S256 determinism + uniqueness, `resource_url` scheme normalization.
+- `tests/Unit/CLI/AuthCommandQwenCodeTest` — login success path with `resource_url`, login without resource_url, login failure returns 1, logout deletes credentials.
+- `tests/Unit/Providers/ChatCompletionsSseParserTest` — 9 scenarios covering fragmented tool-call assembly, two-tool indices, id/name preservation across empty chunks, empty content skip, `error_finish` raise + partialContent preserved, truncated JSON repair, unrepairable fallback, once-per-tool handler fire.
+- `tests/Unit/Guardrails/LoopDetectorTest` — 15 scenarios each with a positive trigger + negative control, cold-start exemption + lift, sticky-violation semantics, threshold override.
+- `tests/Unit/Harness/LoopDetectionHarnessTest` + `tests/Unit/CLI/LoopDetectionFactoryTest` — 11 scenarios covering decorator transparency, once-per-prompt callback, wire event emission, factory opt-in shape.
+- `tests/Unit/Checkpoint/GitShadowStoreTest` — 12 scenarios including init idempotency, snapshot+restore roundtrip, untracked-file preservation after restore, `.gitignore` respected, bogus-hash rejection, multi-project isolation.
+- `tests/Unit/Checkpoint/CheckpointManagerShadowIntegrationTest` — 5 scenarios for JSON-only fallback, shadow_commit in metadata, restoreFiles reverts, missing-shadow-commit / missing-shadow-store returns false.
 
 ## [0.8.9] - 2026-04-22
 

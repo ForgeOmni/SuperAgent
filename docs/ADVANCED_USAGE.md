@@ -6749,3 +6749,299 @@ $wrapped = new WireProjectingPermissionCallback(
 
 See `docs/WIRE_PROTOCOL.md` for the complete event catalog and field-level spec.
 
+
+## 40. Qwen on the OpenAI-compatible endpoint (post-roadmap default)
+
+> The default `qwen` provider now speaks the same
+> `/compatible-mode/v1/chat/completions` endpoint Alibaba's own
+> qwen-code CLI uses exclusively. The previous DashScope-native
+> shape (`input.messages` + `parameters.*`) still works as a
+> legacy opt-in via `qwen-native`.
+
+### Default path
+
+```php
+$qwen = ProviderRegistry::create('qwen', [
+    'api_key' => getenv('QWEN_API_KEY') ?: getenv('DASHSCOPE_API_KEY'),
+    'region'  => 'intl',   // intl / us / cn / hk
+]);
+
+// Thinking is request-level — NO thinking_budget on this endpoint.
+foreach ($qwen->chat($messages, $tools, $system, [
+    'features' => ['thinking' => ['budget' => 4000]],   // budget accepted for interface compat, ignored on wire
+]) as $response) { ... }
+```
+
+Wire body carries `enable_thinking: true` at the top level. Budget bucketing is a no-op on this path; if you need budget control, use `qwen-native`.
+
+### `qwen-native` (legacy)
+
+```php
+$qwen = ProviderRegistry::create('qwen-native', [
+    'api_key' => getenv('QWEN_API_KEY'),
+    'region'  => 'intl',
+]);
+// parameters.thinking_budget / parameters.enable_code_interpreter
+// are honored here — only on this provider.
+```
+
+Both providers report `name() === 'qwen'` so observability / cost
+attribution stays uniform.
+
+### Block-level prompt caching (Qwen only)
+
+```php
+$qwen->chat($messages, $tools, $system, [
+    'features' => ['dashscope_cache_control' => ['enabled' => true]],
+]);
+```
+
+Emits `X-DashScope-CacheControl: enable` header (unconditional for
+all Qwen requests) + Anthropic-style `cache_control: {type: 'ephemeral'}`
+markers on the system message, last tool definition, and (when
+`stream: true`) the latest history message. Mirrors qwen-code's
+`provider/dashscope.ts:40-54`.
+
+### Vision auto-flag
+
+Models matching `qwen-vl*` / `qwen3-vl*` / `qwen3.5-plus*` /
+`qwen3-omni*` automatically get `vl_high_resolution_images: true`
+injected into the request body. Without it, large images get
+downsampled server-side, hurting OCR / detailed-image tasks.
+Test the predicate directly via `QwenProvider::isVisionModel($id)`.
+
+### DashScope UserAgent + metadata envelope
+
+Every Qwen request carries `X-DashScope-UserAgent: SuperAgent/<version>`
++ a `metadata: {sessionId, promptId, channel: "superagent"}` body
+envelope. `channel` is always set; `sessionId` / `promptId` only
+when the caller passes them via `$options['session_id']` /
+`$options['prompt_id']`. Alibaba uses these for per-client attribution
+and quota dashboards.
+
+
+## 41. Qwen Code OAuth (PKCE device flow + `resource_url`)
+
+> Qwen Code is Alibaba's managed subscription endpoint, distinct
+> from the metered public DashScope API-key endpoint. Authentication
+> is RFC 8628 device-code with PKCE S256 against `chat.qwen.ai`.
+> Each account's token response carries a `resource_url` — an
+> account-specific API base URL that overrides the default DashScope
+> host for that account.
+
+### CLI
+
+```bash
+superagent auth login qwen-code
+# → displays verification URL + user code
+# → opens the browser automatically (respects SUPERAGENT_NO_BROWSER)
+# → polls chat.qwen.ai/api/v1/oauth2/token until approval
+# → persists to ~/.superagent/credentials/qwen-code.json (AES-256-GCM)
+# → surfaces the account's resource_url as a hint after login
+
+export QWEN_REGION=code
+superagent chat -p qwen "Write a Fibonacci in Python"
+# ↑ routes through the per-account DashScope host, OAuth bearer auto-refresh
+
+superagent auth logout qwen-code
+```
+
+### How the base URL resolves
+
+`QwenProvider::regionToBaseUrl('code')`:
+1. Load `QwenCodeCredentials::resourceUrl()`. If present, use it as the base (appending `/compatible-mode/v1` when the returned URL doesn't already include that suffix).
+2. Fall back to `https://dashscope.aliyuncs.com/compatible-mode/v1`. The provider will then fail bearer resolution with a login hint if no OAuth credential is stored.
+
+### PKCE S256 helper
+
+`DeviceCodeFlow::generatePkcePair()` returns
+`{code_verifier, code_challenge, code_challenge_method}` matching
+qwen-code's derivation byte-for-byte. The Qwen Code login path uses
+it; other providers that require PKCE can thread the pair through
+the same `DeviceCodeFlow` constructor params.
+
+### Cross-process refresh safety
+
+Qwen Code (and Kimi Code and Anthropic) OAuth refreshes all run
+under `CredentialStore::withLock()` — an OS-level `flock()` on
+a per-provider `.lock` sidecar with stale-detection (pid + 30s
+freshness). Parallel SuperAgent sessions refreshing the same
+credential at the same moment can't race-write each other's state.
+
+
+## 42. `LoopDetector` — pathological-loop safety net
+
+> Five detectors that generalize to every provider. Catches the most
+> common unattended-run failures: same tool + same args forever,
+> parameter-thrashing, stuck-reading-files, repeating text, repeating
+> thoughts. Opt-in — default-off; no behaviour change for callers
+> who don't activate it.
+
+### The five detectors (default thresholds)
+
+| Detector        | Trips when                                                      | Default threshold |
+|-----------------|-----------------------------------------------------------------|-------------------|
+| `TOOL_LOOP`     | Same tool + same args N times in a row                          | 5                 |
+| `STAGNATION`    | Same tool NAME N times in a row (args vary)                     | 8                 |
+| `FILE_READ_LOOP`| ≥N of last M tool calls are read-like (cold-start gated)        | 8 of 15           |
+| `CONTENT_LOOP`  | Same 50-char window repeats N times in assistant text           | 10                |
+| `THOUGHT_LOOP`  | Same thinking text (trimmed) repeats N times                    | 3                 |
+
+Cold-start exemption: `FILE_READ_LOOP` stays dormant until at least
+one non-read tool has fired. Opens exploration stays legitimate
+until the agent starts acting on what it read.
+
+### Wire into a run
+
+```php
+$detector = new LoopDetector([
+    'TOOL_CALL_LOOP_THRESHOLD' => 10,  // loosen — optional
+]);
+
+$wrapped = LoopDetectionHarness::wrap(
+    inner: $userHandler,
+    detector: $detector,
+    onViolation: function (LoopViolation $v) use ($wireEmitter): void {
+        $wireEmitter->emit(LoopDetectedEvent::fromViolation($v));
+        // policy decision: throw to stop the turn, just log, etc.
+    },
+);
+$agent->prompt($prompt, $wrapped);
+```
+
+Or via the CLI factory (one-shot opt-in):
+
+```php
+[$handler, $detector] = $factory->maybeWrapWithLoopDetection(
+    $userHandler,
+    ['loop_detection' => true],            // or threshold map
+    $wireEmitter,
+);
+```
+
+### Wire event shape
+
+```json
+{
+  "wire_version": 1,
+  "type": "loop_detected",
+  "timestamp": ...,
+  "loop_type": "tool_loop",
+  "message":   "Tool 'Edit' called 5 times with identical arguments",
+  "metadata":  {"tool": "Edit", "count": 5}
+}
+```
+
+Consumers render it to the user and decide whether to stop the turn
+or just warn. Policy lives at the caller — this event only signals.
+
+
+## 43. Shadow-git file checkpoints
+
+> File-level undo layer for agent runs. A **separate** bare git repo
+> at `~/.superagent/history/<project-hash>/shadow.git` captures the
+> worktree state alongside each JSON checkpoint. Never touches the
+> user's own `.git`. Restore reverts tracked files but leaves
+> untracked files in place — so undo stays reversible.
+
+### Usage
+
+```php
+use SuperAgent\Checkpoint\{GitShadowStore, CheckpointManager, CheckpointStore};
+
+$shadow = new GitShadowStore($projectRoot);
+$mgr    = new CheckpointManager(
+    new CheckpointStore('/path/to/state'),
+    interval: 5,
+    shadowStore: $shadow,
+);
+
+// Same createCheckpoint() call you always made:
+$cp = $mgr->createCheckpoint(
+    sessionId: $session,
+    messages: $messages,
+    turnCount: $n,
+    totalCostUsd: $cost,
+    turnOutputTokens: $tokens,
+    model: $model,
+    prompt: $prompt,
+);
+// cp->metadata['shadow_commit'] now carries the git sha.
+
+// Later — revert files to that snapshot:
+$mgr->restoreFiles($cp);
+```
+
+Shadow snapshot failures (git not on PATH, worktree permission
+denied, etc.) are logged + swallowed — the JSON checkpoint still
+saves. `restoreFiles()` throws on git failure so callers can
+explicitly fall back to "at least we have conversation state."
+
+### Safety properties
+
+- **Never writes to the project's `.git`.** The shadow repo is a
+  bare repo in `~/.superagent/history/`, completely separate.
+- **Respects project `.gitignore`.** `git add -A` reads the
+  project's own gitignore because the shadow-repo's worktree IS
+  the project dir. Secrets listed there are excluded.
+- **Distinct projects ≠ distinct shadow dirs.** Two project roots
+  with the same hash bucket would collide; sha256 prefix (16 hex)
+  makes that vanishingly rare.
+- **Restore preserves untracked work.** Files added after the
+  snapshot aren't deleted — user can re-snapshot and recover
+  if the restore was a mistake.
+
+### Shells out to `git`
+
+`GitShadowStore` uses `proc_open` with explicit arg arrays — no
+shell metacharacters hit a shell, and hash strings are regex-
+validated before being passed to `git checkout`. `init()` throws
+cleanly if the `git` binary isn't on PATH.
+
+
+## 44. SSE parser hardening
+
+> Two bugs in the shared `ChatCompletionsProvider::parseSSEStream()`
+> that affected every OpenAI-compat provider (OpenAI / Kimi / GLM /
+> MiniMax / Qwen / OpenRouter). Neither surfaced in mock-driven
+> tests because the mocks never fragmented tool calls across chunks.
+
+### Bug 1 — fragmented tool calls
+
+Streaming tool calls arrive across N chunks. Chunk 1 carries
+`id` + `function.name` + a partial `arguments` string; subsequent
+chunks for the same `index` carry only argument fragments. The old
+parser emitted a `ContentBlock` per chunk (producing N fragmented
+tools per real call) and fired `onToolUse` per chunk.
+
+**Fix:** assemble by `index` into a single accumulator per tool.
+First non-empty id / name we see is preserved against later empty
+chunks. At end-of-stream, decode arguments once (with a one-shot
+repair attempt for truncated JSON — appends `}` for unclosed
+objects before giving up), emit exactly one `ContentBlock` and fire
+`onToolUse` once per tool.
+
+### Bug 2 — DashScope `error_finish`
+
+Alibaba's compat-mode endpoint signals mid-stream throttle / transient
+errors by sending a final chunk with `finish_reason: "error_finish"`
+and the error text in `delta.content`. The old parser accumulated
+that text into the response body and returned truncated content.
+
+**Fix:** detect `error_finish` before content accumulation, throw
+`StreamContentError` (extends `ProviderException`) with
+`retryable: true` + `statusCode: 429` so the existing retry loop
+picks it up.
+
+### Small items
+
+- Empty-string `content` chunks are skipped (don't inflate the message).
+- `onText` fires with both `$delta` and `$fullText` — matches the
+  `StreamingHandler` contract the old call site was violating.
+- `AssistantMessage` is now constructed via its actual no-arg
+  constructor + property assignment (the old code passed named args
+  the class never accepted — silent breakage).
+
+These hardening items apply to every current and future OpenAI-compat
+provider — no per-provider opt-in required.
+

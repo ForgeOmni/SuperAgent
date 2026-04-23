@@ -224,6 +224,38 @@ $provider->chat($messages, $tools, $system, [
 $provider->chat($messages, $tools, $system, [
     'features' => ['prompt_cache_key' => ['session_id' => $sessionId]],
 ]);
+
+# ── Qwen Code OAuth（PKCE 设备码流程，对 chat.qwen.ai）──
+superagent auth login qwen-code         # OAuth + PKCE S256；每账号存 resource_url
+superagent auth logout qwen-code
+export QWEN_REGION=code                 # chat 走 OAuth endpoint
+
+# ── Legacy DashScope native 端点（旧的 text-generation/generation shape）──
+# 默认 qwen provider 现在走 OpenAI-兼容的 `/compatible-mode/v1/chat/completions`。
+# 需要 `parameters.thinking_budget` 或 `parameters.enable_code_interpreter`:
+$provider = ProviderRegistry::create('qwen-native', ['api_key' => $key]);
+# 不要用 'qwen'。
+
+# ── DashScope 块级 prompt cache（仅 Qwen）──
+$provider->chat($messages, $tools, $system, [
+    'features' => ['dashscope_cache_control' => ['enabled' => true]],
+]);
+
+# ── Loop 检测 —— 可选的路径异常保护（所有 provider 通用）──
+# 代码里：
+$wrapped = $factory->maybeWrapWithLoopDetection(
+    $userHandler,
+    ['loop_detection' => true],         # 或传阈值 array，比如
+                                         # ['loop_detection' => ['TOOL_CALL_LOOP_THRESHOLD' => 10]]
+    $wireEmitter,                        # 触发时发 'loop_detected' wire 事件
+);
+
+# ── Shadow-git 文件级 checkpoint（可撤销的文件系统层）──
+# 代码里：
+$shadow = new GitShadowStore($projectRoot);          # ~/.superagent/history/<project-hash>/shadow.git
+$mgr    = new CheckpointManager($store, shadowStore: $shadow);
+$cp     = $mgr->createCheckpoint(/* 常规参数 */);    # 同时捕获文件
+$mgr->restoreFiles($cp);                             # 还原 tracked 文件；untracked 保留
 ```
 
 ### 卸载

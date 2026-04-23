@@ -224,6 +224,39 @@ $provider->chat($messages, $tools, $system, [
 $provider->chat($messages, $tools, $system, [
     'features' => ['prompt_cache_key' => ['session_id' => $sessionId]],
 ]);
+
+# ── OAuth Qwen Code (flux device-code PKCE contre chat.qwen.ai) ──
+superagent auth login qwen-code         # OAuth + PKCE S256 ; resource_url stocké par compte
+superagent auth logout qwen-code
+export QWEN_REGION=code                 # route le chat via l'endpoint OAuth
+
+# ── Endpoint natif DashScope legacy (la forme 'text-generation/generation') ──
+# Le provider qwen par défaut passe maintenant par l'OpenAI-compat
+# `/compatible-mode/v1/chat/completions`. Si vous avez besoin de
+# `parameters.thinking_budget` ou `parameters.enable_code_interpreter` :
+$provider = ProviderRegistry::create('qwen-native', ['api_key' => $key]);
+# ... au lieu de 'qwen'.
+
+# ── Cache de prompt DashScope niveau bloc (Qwen seulement) ──
+$provider->chat($messages, $tools, $system, [
+    'features' => ['dashscope_cache_control' => ['enabled' => true]],
+]);
+
+# ── Détection de boucle — garde-fou pathologique opt-in (tous fournisseurs) ──
+# En code :
+$wrapped = $factory->maybeWrapWithLoopDetection(
+    $userHandler,
+    ['loop_detection' => true],          # ou tableau de seuils, p.ex.
+                                          # ['loop_detection' => ['TOOL_CALL_LOOP_THRESHOLD' => 10]]
+    $wireEmitter,                         # les violations émettent des événements wire 'loop_detected'
+);
+
+# ── Checkpoints fichiers shadow-git (couche fichier annulable) ──
+# En code :
+$shadow = new GitShadowStore($projectRoot);          # ~/.superagent/history/<hash-projet>/shadow.git
+$mgr    = new CheckpointManager($store, shadowStore: $shadow);
+$cp     = $mgr->createCheckpoint(/* args habituels */); # capture aussi les fichiers
+$mgr->restoreFiles($cp);                             # restaure les fichiers trackés ; untracked conservés
 ```
 
 ### Désinstallation
