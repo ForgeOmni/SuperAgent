@@ -50,18 +50,40 @@ class CheckpointManager
     /** Config-level toggle */
     private bool $configEnabled;
 
+    /**
+     * Optional shadow git store. When set, every saved checkpoint
+     * also captures a file-level snapshot of the user's worktree
+     * — the resulting commit hash is stashed under
+     * `metadata['shadow_commit']`. `restoreFiles()` plays it back.
+     * When null (the default), checkpoints stay JSON-only and
+     * behave exactly as before — pure backwards-compat extension.
+     */
+    private ?GitShadowStore $shadowStore = null;
+
     public function __construct(
         CheckpointStore $store,
         int $interval = 5,
         int $maxPerSession = 5,
         bool $configEnabled = true,
         ?LoggerInterface $logger = null,
+        ?GitShadowStore $shadowStore = null,
     ) {
         $this->store = $store;
         $this->interval = max(1, $interval);
         $this->maxPerSession = $maxPerSession;
         $this->configEnabled = $configEnabled;
         $this->logger = $logger ?? new NullLogger();
+        $this->shadowStore = $shadowStore;
+    }
+
+    /**
+     * Attach (or swap) the shadow git store after construction —
+     * useful for DI containers that configure the checkpoint manager
+     * before the project root is known.
+     */
+    public function setShadowStore(?GitShadowStore $shadowStore): void
+    {
+        $this->shadowStore = $shadowStore;
     }
 
     /**
@@ -140,6 +162,27 @@ class CheckpointManager
     ): Checkpoint {
         $serializedMessages = MessageSerializer::serializeAll($messages);
 
+        // Optional filesystem snapshot alongside the JSON state. The
+        // commit hash lives under metadata['shadow_commit'] so
+        // restoreFiles() can find it without schema changes to
+        // the Checkpoint value object.
+        if ($this->shadowStore !== null) {
+            try {
+                $this->shadowStore->init();
+                $hash = $this->shadowStore->snapshot(
+                    "checkpoint @ turn {$turnCount}"
+                );
+                $metadata = $metadata + ['shadow_commit' => $hash];
+            } catch (\Throwable $e) {
+                // A git failure must not kill the JSON checkpoint —
+                // they're independent, and the JSON path has always
+                // been best-effort. Log and continue.
+                $this->logger->warning('Shadow snapshot failed; JSON checkpoint saved without it', [
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         $checkpoint = new Checkpoint(
             id: Checkpoint::generateId($sessionId, $turnCount),
             sessionId: $sessionId,
@@ -208,6 +251,39 @@ class CheckpointManager
     public function getLatest(string $sessionId): ?Checkpoint
     {
         return $this->store->getLatest($sessionId);
+    }
+
+    /**
+     * Restore the project worktree to the filesystem state captured
+     * when the given checkpoint was saved. Only works when the
+     * checkpoint was created with a shadow store configured AND the
+     * same shadow store is attached now.
+     *
+     * Returns true on success, false if the checkpoint didn't carry
+     * a `shadow_commit` (either no shadow store was set at save time,
+     * or that attempt failed silently). Throws on git failure — we
+     * surface restore errors so callers can fall back to "at least
+     * we have the JSON state" behaviour explicitly.
+     *
+     * Untracked files created after the snapshot are LEFT IN PLACE
+     * by the underlying GitShadowStore — restore is reversible via
+     * a subsequent checkpoint.
+     */
+    public function restoreFiles(Checkpoint $checkpoint): bool
+    {
+        if ($this->shadowStore === null) {
+            $this->logger->warning('restoreFiles() called without a shadow store attached');
+            return false;
+        }
+        $hash = $checkpoint->metadata['shadow_commit'] ?? null;
+        if (!is_string($hash) || $hash === '') {
+            return false;
+        }
+        $this->shadowStore->restore($hash);
+        $this->logger->info("Restored project worktree from shadow commit {$hash}", [
+            'checkpoint' => $checkpoint->id,
+        ]);
+        return true;
     }
 
     // ── Delegation to store ────────────────────────────────────────
