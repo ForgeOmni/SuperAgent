@@ -147,4 +147,93 @@ class McpCommandTest extends TestCase
         $this->assertSame(0, $code);
         $this->assertStringContainsString('mcp.json', $out);
     }
+
+    public function test_auth_on_unknown_server_returns_1(): void
+    {
+        ob_start();
+        $code = (new McpCommand())->execute(['mcp_args' => ['auth', 'nope']]);
+        ob_end_clean();
+        $this->assertSame(1, $code);
+    }
+
+    public function test_auth_on_server_without_oauth_block_returns_2(): void
+    {
+        MCPManager::writeUserConfig([
+            'plain' => ['type' => 'stdio', 'command' => 'echo'],
+        ]);
+        ob_start();
+        $code = (new McpCommand())->execute(['mcp_args' => ['auth', 'plain']]);
+        $out = ob_get_clean();
+        $this->assertSame(2, $code);
+        $this->assertStringContainsString('oauth', $out);
+    }
+
+    public function test_reset_auth_always_succeeds(): void
+    {
+        // Even without a prior token, reset-auth should be a no-op success
+        // — this matches logout-style semantics in other tools.
+        ob_start();
+        $code = (new McpCommand())->execute(['mcp_args' => ['reset-auth', 'any-name']]);
+        ob_end_clean();
+        $this->assertSame(0, $code);
+    }
+
+    public function test_reset_auth_requires_name(): void
+    {
+        ob_start();
+        $code = (new McpCommand())->execute(['mcp_args' => ['reset-auth']]);
+        ob_end_clean();
+        $this->assertSame(2, $code);
+    }
+
+    public function test_test_on_stdio_server_with_existing_binary(): void
+    {
+        MCPManager::writeUserConfig([
+            'echo' => ['type' => 'stdio', 'command' => 'echo'],
+        ]);
+        ob_start();
+        $code = (new McpCommand())->execute(['mcp_args' => ['test', 'echo']]);
+        ob_end_clean();
+        $this->assertSame(0, $code);
+    }
+
+    public function test_test_on_stdio_server_with_nonexistent_binary(): void
+    {
+        MCPManager::writeUserConfig([
+            'bogus' => ['type' => 'stdio', 'command' => 'definitely-not-a-real-binary-x91234'],
+        ]);
+        ob_start();
+        $code = (new McpCommand())->execute(['mcp_args' => ['test', 'bogus']]);
+        ob_end_clean();
+        $this->assertSame(1, $code);
+    }
+
+    public function test_test_requires_name(): void
+    {
+        ob_start();
+        $code = (new McpCommand())->execute(['mcp_args' => ['test']]);
+        ob_end_clean();
+        $this->assertSame(2, $code);
+    }
+
+    public function test_list_tags_oauth_servers_as_auth_needed(): void
+    {
+        MCPManager::writeUserConfig([
+            'linear' => [
+                'type' => 'http',
+                'url' => 'https://mcp.linear.app/sse',
+                'oauth' => [
+                    'client_id' => 'test-client',
+                    'device_endpoint' => 'https://auth.linear.app/oauth/device',
+                    'token_endpoint' => 'https://auth.linear.app/oauth/token',
+                ],
+            ],
+        ]);
+        ob_start();
+        $code = (new McpCommand())->execute(['mcp_args' => ['list']]);
+        $out = ob_get_clean();
+        $this->assertSame(0, $code);
+        $this->assertStringContainsString('linear', $out);
+        $this->assertStringContainsString('auth: needed', $out);
+    }
 }
