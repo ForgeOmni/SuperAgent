@@ -397,7 +397,8 @@ abstract class ChatCompletionsProvider implements LLMProvider
     {
         $buffer = '';
         $messageContent = '';
-        $toolCalls = [];
+        /** @var array<int|string, array{id:string, name:string, arguments:string}> */
+        $toolCallsByIndex = [];
         $usage = null;
         $stopReason = null;
 
@@ -421,24 +422,74 @@ abstract class ChatCompletionsProvider implements LLMProvider
                     continue;
                 }
 
+                // Check for DashScope-compat's `error_finish` BEFORE
+                // touching the content accumulator — the terminating
+                // chunk carries the error text in delta.content, and
+                // we don't want that text mistaken for legitimate
+                // response content on the way out via partialContent.
+                $finishReasonEarly = $json['choices'][0]['finish_reason'] ?? null;
+                if ($finishReasonEarly === 'error_finish') {
+                    throw new \SuperAgent\Exceptions\StreamContentError(
+                        provider: $this->providerName(),
+                        partialContent: $messageContent,
+                        errorMessage: $json['choices'][0]['delta']['content']
+                            ?? $json['choices'][0]['message']['content']
+                            ?? 'upstream error (no body)',
+                    );
+                }
+
                 if (isset($json['choices'][0]['delta'])) {
                     $delta = $json['choices'][0]['delta'];
 
-                    if (isset($delta['content'])) {
+                    // `content` may arrive as '' in some chunks — skip
+                    // empty strings so they don't inflate the message.
+                    if (isset($delta['content']) && $delta['content'] !== '') {
                         $messageContent .= $delta['content'];
-                        $handler?->onText($delta['content']);
+                        $handler?->emitText($delta['content'], $messageContent);
                     }
 
-                    if (isset($delta['tool_calls'])) {
-                        foreach ($delta['tool_calls'] as $toolCall) {
-                            if (isset($toolCall['function'])) {
-                                $toolCalls[] = $toolCall;
-                                $handler?->onToolUse(
-                                    $toolCall['id'] ?? '',
-                                    $toolCall['function']['name'] ?? '',
-                                    json_decode($toolCall['function']['arguments'] ?? '{}', true) ?? [],
-                                );
+                    if (isset($delta['tool_calls']) && is_array($delta['tool_calls'])) {
+                        foreach ($delta['tool_calls'] as $toolCallDelta) {
+                            if (! is_array($toolCallDelta)) {
+                                continue;
                             }
+                            // Most OpenAI-compat providers include an
+                            // `index` on every chunk. Fall back to the
+                            // delta's `id` if absent and finally to 0
+                            // so a single-tool stream works even on
+                            // servers that omit the field.
+                            $idx = $toolCallDelta['index']
+                                ?? $toolCallDelta['id']
+                                ?? 0;
+                            if (! is_int($idx)) {
+                                $idx = (string) $idx;
+                            }
+
+                            if (! isset($toolCallsByIndex[$idx])) {
+                                $toolCallsByIndex[$idx] = [
+                                    'id' => '',
+                                    'name' => '',
+                                    'arguments' => '',
+                                ];
+                            }
+                            $acc = &$toolCallsByIndex[$idx];
+
+                            // id / name are usually only in the first
+                            // chunk — keep the first non-empty value
+                            // we see rather than letting a later empty
+                            // chunk wipe them.
+                            if (isset($toolCallDelta['id']) && $toolCallDelta['id'] !== '') {
+                                $acc['id'] = (string) $toolCallDelta['id'];
+                            }
+                            if (isset($toolCallDelta['function']['name'])
+                                && $toolCallDelta['function']['name'] !== ''
+                            ) {
+                                $acc['name'] = (string) $toolCallDelta['function']['name'];
+                            }
+                            if (isset($toolCallDelta['function']['arguments'])) {
+                                $acc['arguments'] .= (string) $toolCallDelta['function']['arguments'];
+                            }
+                            unset($acc);
                         }
                     }
                 }
@@ -473,21 +524,62 @@ abstract class ChatCompletionsProvider implements LLMProvider
         if ($messageContent !== '') {
             $content[] = new ContentBlock('text', $messageContent);
         }
-        foreach ($toolCalls as $toolCall) {
-            $content[] = new ContentBlock(
+        // Build one ContentBlock per assembled tool call. Each call's
+        // `arguments` string has been accumulated across N chunks;
+        // parse once, apply a cheap repair if the JSON is malformed
+        // (some providers emit truncated argument strings when the
+        // model hits max_tokens mid-tool-call), and emit a single
+        // `onToolUse` event to the handler.
+        foreach ($toolCallsByIndex as $idx => $acc) {
+            $args = self::decodeToolArguments($acc['arguments']);
+            $block = new ContentBlock(
                 'tool_use',
                 null,
-                $toolCall['id'] ?? '',
-                $toolCall['function']['name'] ?? '',
-                json_decode($toolCall['function']['arguments'] ?? '{}', true) ?? [],
+                $acc['id'],
+                $acc['name'],
+                $args,
             );
+            $content[] = $block;
+            $handler?->emitToolUse($block);
         }
 
-        yield new AssistantMessage(
-            content: $content,
-            usage: $usage,
-            stopReason: $stopReason ?? StopReason::EndTurn,
-        );
+        $msg = new AssistantMessage();
+        $msg->content = $content;
+        $msg->usage = $usage;
+        $msg->stopReason = $stopReason ?? StopReason::EndTurn;
+        yield $msg;
+    }
+
+    /**
+     * Decode an accumulated tool-call arguments string. Empty input
+     * becomes `[]`; valid JSON object decodes normally; invalid JSON
+     * gets one cheap repair attempt (append `}` for obvious truncation)
+     * before giving up and returning an empty array — an empty arg
+     * dict is a better signal to the agent loop than an unhandled
+     * JSON-parse error escaping the SSE parser.
+     *
+     * @return array<string, mixed>
+     */
+    protected static function decodeToolArguments(string $raw): array
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+        // One-shot repair: unclosed object → append `}`. Doesn't fix
+        // deeper truncation (unclosed strings, missing commas) but
+        // catches the most common max-tokens-mid-object case.
+        if (substr_count($raw, '{') > substr_count($raw, '}')) {
+            $decoded = json_decode($raw . str_repeat('}', substr_count($raw, '{') - substr_count($raw, '}')), true);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+        return [];
     }
 
     protected function mapStopReason(string $finishReason): StopReason
