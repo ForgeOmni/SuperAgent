@@ -422,12 +422,57 @@ class ModelCatalog
                 }
             }
 
+            // Per-provider live cache overlay — populated by
+            // ModelCatalogRefresher on `superagent models refresh`. Runs
+            // AFTER the user override so a fresh live pull wins over an
+            // aging manual file, but BEFORE runtime overrides so test
+            // fixtures and `register()` calls still take precedence.
+            self::overlayRefresherCache();
+
             self::$sourcesLoaded = true;
         }
 
         // Apply runtime overrides last so they take precedence over file sources.
         foreach (self::$overrides as $id => $entry) {
             self::insert($id, $entry);
+        }
+    }
+
+    /**
+     * Merge per-provider live cache files (`~/.superagent/models-cache/<p>.json`)
+     * into the in-memory catalog. Each cached entry adds or replaces the
+     * matching id for its provider; existing capability / pricing rows
+     * from the bundled catalog are kept unless the refresher carries a
+     * new value for the same key (kimi-cli's add/update semantics).
+     */
+    private static function overlayRefresherCache(): void
+    {
+        foreach (ModelCatalogRefresher::supportedProviders() as $provider) {
+            $models = ModelCatalogRefresher::readCache($provider);
+            if ($models === []) {
+                continue;
+            }
+            foreach ($models as $model) {
+                if (! isset($model['id'])) {
+                    continue;
+                }
+                $id = (string) $model['id'];
+                $existing = self::$byId[$id] ?? [];
+                // Stable fields from the cache win (context_length,
+                // display_name); pricing/description/aliases fall back
+                // to the bundled entry when the cache doesn't carry
+                // them (which is normal — `/models` rarely lists price).
+                $merged = array_merge(
+                    ['provider' => $provider],
+                    $existing,
+                    array_filter(
+                        $model,
+                        static fn ($v, $k) => $k !== '_raw' && $v !== null,
+                        ARRAY_FILTER_USE_BOTH,
+                    ),
+                );
+                self::insert($id, $merged);
+            }
         }
     }
 

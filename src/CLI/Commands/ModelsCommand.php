@@ -6,6 +6,7 @@ namespace SuperAgent\CLI\Commands;
 
 use SuperAgent\CLI\Terminal\Renderer;
 use SuperAgent\Providers\ModelCatalog;
+use SuperAgent\Providers\ModelCatalogRefresher;
 
 /**
  * `superagent models` — manage the local model catalog.
@@ -32,12 +33,61 @@ class ModelsCommand
         $rest = array_slice($args, 1);
 
         return match ($sub) {
-            'list'   => $this->list($renderer, $rest),
-            'update' => $this->update($renderer, $rest),
-            'status' => $this->status($renderer),
-            'reset'  => $this->reset($renderer),
-            default  => $this->usage($renderer, $sub),
+            'list'    => $this->list($renderer, $rest),
+            'update'  => $this->update($renderer, $rest),
+            'refresh' => $this->refresh($renderer, $rest),
+            'status'  => $this->status($renderer),
+            'reset'   => $this->reset($renderer),
+            default   => $this->usage($renderer, $sub),
         };
+    }
+
+    /**
+     * `superagent models refresh [<provider>]` — hit each provider's
+     * own `/models` endpoint and cache the result per-provider.
+     * Differs from `update` (which pulls a single pre-built catalog
+     * JSON from `SUPERAGENT_MODELS_URL`).
+     */
+    private function refresh(Renderer $renderer, array $rest): int
+    {
+        $target = $rest[0] ?? null;
+
+        if ($target !== null && $target !== '--all') {
+            $renderer->info("Refreshing /models for: {$target}");
+            try {
+                $models = ModelCatalogRefresher::refresh($target);
+            } catch (\Throwable $e) {
+                $renderer->error('Refresh failed: ' . $e->getMessage());
+                return 1;
+            }
+            $renderer->success(sprintf(
+                "Cached %d %s models → %s",
+                count($models),
+                $target,
+                ModelCatalogRefresher::cachePath($target),
+            ));
+            ModelCatalog::invalidate();
+            return 0;
+        }
+
+        $renderer->info('Refreshing /models for every provider with env credentials…');
+        $results = ModelCatalogRefresher::refreshAll();
+        ModelCatalog::invalidate();
+
+        $ok = 0;
+        $fail = 0;
+        foreach ($results as $p => $r) {
+            if ($r['ok'] ?? false) {
+                $renderer->line(sprintf('  %-11s  %d models', $p, $r['count']));
+                $ok++;
+            } else {
+                $renderer->line(sprintf('  %-11s  skipped: %s', $p, $r['error'] ?? 'unknown'));
+                $fail++;
+            }
+        }
+        $renderer->newLine();
+        $renderer->info(sprintf('Done: %d ok, %d skipped.', $ok, $fail));
+        return $ok > 0 ? 0 : 1;
     }
 
     private function list(Renderer $renderer, array $rest): int
@@ -174,6 +224,7 @@ class ModelsCommand
         $renderer->line('Usage:');
         $renderer->line('  superagent models list [--provider <p>]   List merged catalog');
         $renderer->line('  superagent models update [--url <u>]      Fetch remote catalog (SUPERAGENT_MODELS_URL)');
+        $renderer->line('  superagent models refresh [<provider>]    Hit each provider\'s /models live');
         $renderer->line('  superagent models status                  Show source + last update');
         $renderer->line('  superagent models reset                   Remove user override');
         return 2;
