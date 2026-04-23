@@ -17,6 +17,16 @@ class AgentManager
     private array $agents = [];
 
     /**
+     * Directories that have been fed through `loadFromDirectory()`.
+     * Retained so YAML `extend:` resolution can look across loaded
+     * dirs even when the parent spec lives in a different one than
+     * the child (built-in parent → user-dir override, etc.).
+     *
+     * @var list<string>
+     */
+    private array $loadedDirs = [];
+
+    /**
      * @deprecated Use constructor injection instead.
      */
     public static function getInstance(): self
@@ -27,11 +37,62 @@ class AgentManager
         return self::$instance;
     }
 
-    public function __construct()
+    public function __construct(bool $autoLoadDisk = true)
     {
         $this->loadBuiltinAgents();
         $this->loadConfiguredPaths();
+
+        // Mirror SkillManager's pattern: auto-load ~/.superagent/agents/
+        // (user-level) and <project>/.superagent/agents/ (project-level)
+        // so users can drop YAML / Markdown agent specs there without
+        // explicit wiring. Skipped under PHPUnit so tests that want a
+        // clean registry can opt out.
+        if ($autoLoadDisk && getenv('PHPUNIT_RUNNING') !== '1') {
+            $this->loadUserAgentsDir();
+            $this->loadProjectAgentsDir();
+        }
     }
+
+    /**
+     * Canonical user-level agents directory. Matches the convention
+     * established by SkillManager::userSkillsDir() and
+     * MCPManager::userConfigPath().
+     */
+    public static function userAgentsDir(): string
+    {
+        $home = getenv('HOME') ?: getenv('USERPROFILE') ?: sys_get_temp_dir();
+        return rtrim($home, '/\\') . '/.superagent/agents';
+    }
+
+    /**
+     * Project-local agents directory. Lets a repo ship agent specs
+     * that travel with the codebase without touching the user's home.
+     */
+    public static function projectAgentsDir(?string $projectRoot = null): string
+    {
+        $root = $projectRoot ?? self::findProjectRoot();
+        return rtrim($root, '/\\') . '/.superagent/agents';
+    }
+
+    /**
+     * Silent no-op on absent dir — first-run installs have no dir yet.
+     */
+    public function loadUserAgentsDir(): void
+    {
+        $dir = self::userAgentsDir();
+        if (is_dir($dir)) {
+            $this->loadFromDirectory($dir, recursive: true);
+        }
+    }
+
+    public function loadProjectAgentsDir(?string $projectRoot = null): void
+    {
+        $dir = self::projectAgentsDir($projectRoot);
+        if (is_dir($dir)) {
+            $this->loadFromDirectory($dir, recursive: true);
+        }
+    }
+
 
     /**
      * Register an agent definition.
@@ -141,6 +202,13 @@ class AgentManager
             return;
         }
 
+        // Remember this dir so YAML `extend:` can cross directory
+        // boundaries (child in ~/.superagent/agents/, parent in
+        // bundled built-ins, etc.).
+        if (!in_array($directory, $this->loadedDirs, true)) {
+            $this->loadedDirs[] = $directory;
+        }
+
         // Load PHP files
         $phpFiles = $recursive
             ? $this->globRecursive($directory, '*Agent.php')
@@ -158,10 +226,20 @@ class AgentManager
         foreach ($mdFiles as $file) {
             $this->loadMarkdownFile($file, throw: false);
         }
+
+        // Load YAML files — both .yaml and .yml.
+        foreach (['*.yaml', '*.yml'] as $pattern) {
+            $yamlFiles = $recursive
+                ? $this->globRecursive($directory, $pattern)
+                : (glob($directory . '/' . $pattern) ?: []);
+            foreach ($yamlFiles as $file) {
+                $this->loadYamlFile($file, throw: false);
+            }
+        }
     }
 
     /**
-     * Load a single agent definition file (PHP or Markdown).
+     * Load a single agent definition file (PHP, Markdown, or YAML).
      */
     public function loadFromFile(string $filePath): void
     {
@@ -174,8 +252,27 @@ class AgentManager
         match ($ext) {
             'php' => $this->loadPhpFile($filePath, throw: true),
             'md' => $this->loadMarkdownFile($filePath, throw: true),
+            'yaml', 'yml' => $this->loadYamlFile($filePath, throw: true),
             default => throw new \RuntimeException("Unsupported agent file format: {$ext} ({$filePath})"),
         };
+    }
+
+    /**
+     * Load a YAML agent spec. Supports `extend: <name>` inheritance —
+     * parents are resolved against the child's own directory first, then
+     * against every dir already registered via `loadFromDirectory()`.
+     */
+    private function loadYamlFile(string $file, bool $throw): void
+    {
+        try {
+            $loader = new AgentSpecLoader($this->loadedDirs ?? []);
+            $agent = $loader->loadFile($file);
+            $this->register($agent);
+        } catch (\RuntimeException $e) {
+            if ($throw) {
+                throw $e;
+            }
+        }
     }
 
     /**
@@ -215,13 +312,31 @@ class AgentManager
 
     /**
      * Load an agent definition from a Markdown file.
+     *
+     * Honours `extend: <name>` in the frontmatter — parent lookup goes
+     * through `AgentSpecLoader::resolveSpec()` which searches across
+     * yaml / yml / md extensions and across the dirs already fed to
+     * `loadFromDirectory()`. A child with an empty markdown body
+     * transparently inherits the parent's `system_prompt`; a child
+     * with a non-empty body overrides.
      */
     private function loadMarkdownFile(string $file, bool $throw): void
     {
         try {
             $parsed = MarkdownFrontmatter::parseFile($file);
-            $frontmatter = $parsed['frontmatter'];
-            $body = $parsed['body'];
+            $frontmatter = is_array($parsed['frontmatter'] ?? null) ? $parsed['frontmatter'] : [];
+            $body = trim((string) ($parsed['body'] ?? ''));
+
+            // Promote the child body onto frontmatter so inheritance
+            // merges it the same way YAML's `system_prompt` does.
+            if ($body !== '' && !isset($frontmatter['system_prompt'])) {
+                $frontmatter['system_prompt'] = $body;
+            }
+
+            if (!empty($frontmatter['extend'])) {
+                $loader = new AgentSpecLoader($this->loadedDirs);
+                $frontmatter = $loader->resolveSpec($frontmatter, dirname($file));
+            }
 
             if (empty($frontmatter['name'])) {
                 if ($throw) {
@@ -230,7 +345,16 @@ class AgentManager
                 return;
             }
 
-            $agent = new MarkdownAgentDefinition($frontmatter, $body);
+            // Reconstruct the (frontmatter, body) tuple the
+            // MarkdownAgentDefinition constructor expects: after
+            // inheritance, the effective body is whatever
+            // `system_prompt` now carries, falling back to the child's
+            // own body if no parent supplied one.
+            $effectiveBody = is_string($frontmatter['system_prompt'] ?? null)
+                ? (string) $frontmatter['system_prompt']
+                : $body;
+
+            $agent = new MarkdownAgentDefinition($frontmatter, $effectiveBody);
             $this->register($agent);
         } catch (\RuntimeException $e) {
             if ($throw) {
