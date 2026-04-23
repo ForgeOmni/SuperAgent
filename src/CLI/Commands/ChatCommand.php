@@ -41,14 +41,25 @@ class ChatCommand
     private function runOneShot(AgentFactory $factory, $agent, array $options, Renderer $renderer): int
     {
         $prompt = $options['prompt'];
-        $rich = ($options['rich'] ?? true) && ! ($options['json'] ?? false);
+        $outputMode = (string) ($options['output'] ?? '');
+        $jsonStream = $outputMode === 'json-stream';
+        $rich = ($options['rich'] ?? true) && ! ($options['json'] ?? false) && ! $jsonStream;
 
-        if (! $rich) {
+        if (! $rich && ! $jsonStream) {
             $renderer->info("Running: {$prompt}");
             $renderer->separator();
         }
 
         try {
+            if ($jsonStream) {
+                // One line of JSON per wire event to stdout — no summary
+                // line, no prompt echo. IDE bridges / CI pipelines
+                // consume the stream directly with `jq -c` / similar.
+                $emitter = $factory->makeJsonStreamEmitter();
+                $factory->runOneShot($agent, $prompt, $emitter);
+                return 0;
+            }
+
             if ($rich) {
                 // Rich renderer prints thinking, tool activity, streaming text,
                 // and a footer with turn / tokens / cost on its own.
@@ -70,6 +81,22 @@ class ChatCommand
 
             return 0;
         } catch (\Throwable $e) {
+            if ($jsonStream) {
+                // Error envelope in wire v1 shape so consumers don't
+                // have to special-case stderr.
+                fwrite(
+                    STDOUT,
+                    json_encode([
+                        'wire_version' => 1,
+                        'type' => 'error',
+                        'timestamp' => microtime(true),
+                        'message' => $e->getMessage(),
+                        'recoverable' => false,
+                        'code' => null,
+                    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n"
+                );
+                return 1;
+            }
             $renderer->error($e->getMessage());
             return 1;
         }

@@ -236,6 +236,33 @@ class AgentFactory
     }
 
     /**
+     * Build a StreamEventEmitter that writes the wire protocol (v1)
+     * as newline-delimited JSON to the provided stream — used by
+     * `--output json-stream` mode for IDE bridges, CI logs, and any
+     * other pipeline consumer that wants structured events rather
+     * than a rich terminal.
+     *
+     * Every event that flows through the emitter also implements
+     * `WireEvent` (see `StreamEvent`'s base-class migration in Phase
+     * 8b), so the output is self-describing — consumers pinning
+     * `wire_version: 1` can latch on without prior state.
+     *
+     * @param resource $stream Writable resource (defaults to STDOUT).
+     */
+    public function makeJsonStreamEmitter($stream = null): StreamEventEmitter
+    {
+        $stream ??= defined('STDOUT') ? STDOUT : fopen('php://stdout', 'w');
+        $out = new \SuperAgent\Harness\Wire\WireStreamOutput($stream);
+        $emitter = new StreamEventEmitter();
+        $emitter->on(static function ($event) use ($out) {
+            if ($event instanceof \SuperAgent\Harness\Wire\WireEvent) {
+                $out->emit($event);
+            }
+        });
+        return $emitter;
+    }
+
+    /**
      * Run a one-shot prompt and return the result.
      *
      * When $emitter is provided, a StreamingHandler is built from it and

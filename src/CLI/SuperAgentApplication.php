@@ -119,6 +119,12 @@ class SuperAgentApplication
                 $options['thinking'] = 'hidden';
             } elseif ($arg === '--plain') {
                 $options['plain'] = true;
+            } elseif ($arg === '--output') {
+                // `--output json-stream` — emit one-line NDJSON per
+                // wire event (v1 protocol) to stdout. See
+                // docs/WIRE_PROTOCOL.md. Other values reserved for
+                // future transport modes (e.g. `acp`).
+                $options['output'] = (string) ($args[++$i] ?? '');
             } elseif (! str_starts_with($arg, '-')) {
                 $positional[] = $arg;
             }
