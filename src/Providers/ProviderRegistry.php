@@ -47,6 +47,24 @@ class ProviderRegistry
     protected static ?CredentialPool $credentialPool = null;
 
     /**
+     * Host-config adapters — translate a normalized host-shape config
+     * (api_key / base_url / model / max_tokens / region / credentials / extra)
+     * into each provider's concrete constructor shape.
+     *
+     * See `createForHost()` for the contract. Providers whose constructor
+     * shape differs from the default (`bedrock` and future cloud-credential
+     * providers) register a custom adapter below via `registerHostConfigAdapter()`.
+     *
+     * Default (built-in below): passes through `api_key`, `base_url`, `model`,
+     * `max_tokens`, `region` — which covers every ChatCompletions-style
+     * provider (Anthropic / OpenAI / OpenAI-Responses / OpenRouter / Ollama /
+     * LMStudio / Gemini / Kimi / Qwen / Qwen-native / GLM / MiniMax).
+     *
+     * @var array<string, callable(array):array>
+     */
+    protected static array $hostConfigAdapters = [];
+
+    /**
      * Default configurations for providers.
      * 
      * @var array<string, array>
@@ -214,6 +232,129 @@ class ProviderRegistry
     {
         $config['region'] = $region;
         return self::create($name, $config);
+    }
+
+    /**
+     * Register a host-config adapter for a provider key.
+     *
+     * The adapter receives a normalized host-shape array and returns the
+     * provider's concrete constructor config. See `createForHost()`.
+     *
+     * Use this when a provider's constructor needs field names that don't
+     * match the host-shape defaults — the canonical example is `bedrock`,
+     * which wants `access_key` / `secret_key` / `region` instead of a
+     * single `api_key`.
+     *
+     * @param callable(array):array $adapter
+     */
+    public static function registerHostConfigAdapter(string $sdkKey, callable $adapter): void
+    {
+        self::ensureBuiltinHostAdapters();
+        self::$hostConfigAdapters[$sdkKey] = $adapter;
+    }
+
+    /**
+     * Instantiate a provider from a normalized host-shape config.
+     *
+     * Shape:
+     *   - api_key      string|null  Primary credential. Some providers
+     *                               ignore this (e.g. lmstudio — synthetic
+     *                               header) or require an adapter to split
+     *                               into sub-credentials (e.g. bedrock).
+     *   - base_url     string|null  Override base URL (BYO-proxy, Azure,
+     *                               self-hosted).
+     *   - model        string|null  Resolved model name. null → SDK default.
+     *   - max_tokens   int|null     Provider-default when omitted.
+     *   - region       string|null  For region-aware providers
+     *                               (kimi/glm/minimax/qwen/bedrock).
+     *   - credentials  array        Opaque blob of host-side extras — the
+     *                               adapter picks what it needs. Example:
+     *                               bedrock reads aws_access_key_id /
+     *                               aws_secret_access_key / aws_region.
+     *   - extra        array        Any additional passthrough (reasoning
+     *                               effort, verbosity, store, organization,
+     *                               etc.) — the adapter may deep-merge these
+     *                               into the constructor config.
+     *
+     * The goal: hosts that persist a normalized provider row can call this
+     * with the same shape for every provider key. New provider types
+     * shipped by future SDK upgrades bring their own adapter (if needed)
+     * and work without host code changes.
+     */
+    public static function createForHost(string $sdkKey, array $hostConfig): LLMProvider
+    {
+        self::ensureBuiltinHostAdapters();
+
+        $adapter = self::$hostConfigAdapters[$sdkKey] ?? [self::class, 'defaultHostConfigAdapter'];
+        $providerConfig = $adapter($hostConfig);
+
+        // Drop null / empty-string keys so provider defaults kick in.
+        $providerConfig = array_filter(
+            $providerConfig,
+            static fn ($v) => $v !== null && $v !== ''
+        );
+
+        return self::create($sdkKey, $providerConfig);
+    }
+
+    /**
+     * Default host-config adapter — passes the common fields through to
+     * any ChatCompletions-style provider. Override for providers with
+     * non-standard constructor shapes (see `registerHostConfigAdapter()`).
+     */
+    protected static function defaultHostConfigAdapter(array $host): array
+    {
+        $out = [
+            'api_key'    => $host['api_key']    ?? null,
+            'base_url'   => $host['base_url']   ?? null,
+            'model'      => $host['model']      ?? null,
+            'max_tokens' => $host['max_tokens'] ?? null,
+            'region'     => $host['region']     ?? null,
+        ];
+
+        // Host-side `extra` blob is merged last — lets hosts pipe
+        // provider-specific knobs (organization / reasoning / verbosity /
+        // store / extra_body / http_headers / env_http_headers / ...)
+        // straight through to the provider constructor without adapter
+        // changes. Nulls/empties get filtered by createForHost().
+        if (!empty($host['extra']) && is_array($host['extra'])) {
+            foreach ($host['extra'] as $k => $v) {
+                // Never let extra overwrite already-provided top-level fields.
+                if (array_key_exists($k, $out) && $out[$k] !== null && $out[$k] !== '') {
+                    continue;
+                }
+                $out[$k] = $v;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Register built-in adapters for providers whose constructor shape
+     * differs from the host-shape defaults. Idempotent — safe to call
+     * multiple times.
+     */
+    protected static function ensureBuiltinHostAdapters(): void
+    {
+        if (isset(self::$hostConfigAdapters['__bootstrapped__'])) {
+            return;
+        }
+        self::$hostConfigAdapters['__bootstrapped__'] = static fn () => [];
+
+        // Bedrock: AWS cloud credentials — not a single `api_key`.
+        // Host writes `credentials.aws_access_key_id`, `credentials.aws_secret_access_key`,
+        // and `credentials.aws_region` into `extra_config`.
+        self::$hostConfigAdapters['bedrock'] = static function (array $host): array {
+            $creds = $host['credentials'] ?? [];
+            return [
+                'access_key' => $creds['aws_access_key_id']     ?? $host['api_key'] ?? null,
+                'secret_key' => $creds['aws_secret_access_key'] ?? null,
+                'region'     => $creds['aws_region']            ?? $host['region']  ?? 'us-east-1',
+                'model'      => $host['model']      ?? null,
+                'max_tokens' => $host['max_tokens'] ?? null,
+            ];
+        };
     }
 
     /**

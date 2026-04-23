@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-04-23
+
+### 💻 Summary
+
+**Host-config adapter pattern: decouple consumers from provider-type switches.** `ProviderRegistry` gains `createForHost()` — a factory accepting a normalized host-shape array (`api_key` / `base_url` / `model` / `max_tokens` / `region` / `credentials` / `extra`) and dispatching to the right concrete provider constructor via per-key adapters. Default adapter handles every ChatCompletions-style provider (Anthropic / OpenAI / OpenAI-Responses / OpenRouter / Ollama / LMStudio / Gemini / Kimi / Qwen / Qwen-native / GLM / MiniMax) by passing common fields through; Bedrock ships a built-in adapter that splits `credentials.aws_*` into AWS SDK's `access_key` / `secret_key` / `region` shape. New registry keys added in future SDK upgrades register their own adapters (or ride the default one), so host-side factory code no longer grows a `match` arm per type.
+
+**Rationale.** Host integrations (SuperAICore, SuperTeam, SuperPilot) were duplicating a `match ($providerType) { … }` for every provider class — Bedrock's AWS credentials, OpenAI's `organization`, OpenAIResponses' `reasoning`/`verbosity`, LMStudio's default port. Every SDK release that added a provider (`openai-responses` + `lmstudio` landed in 0.9.1) forced hosts to patch their switch. `createForHost()` moves that dispatch into the SDK, where the provider class itself owns its constructor-shape adapter. Hosts now bundle AiProvider row fields into one call and never revisit it when upgrading.
+
+**Zero public method signatures broke.** `createForHost()` is additive; existing `create()` callers are unaffected. `registerHostConfigAdapter()` lets hosts override a built-in adapter if they need to customize it.
+
+### Added
+
+#### Provider registry
+- **`ProviderRegistry::createForHost(string $sdkKey, array $hostConfig): LLMProvider`** — normalized-shape factory. `hostConfig` accepts:
+  - `api_key` (string|null) — primary credential
+  - `base_url` (string|null) — override for BYO-proxy / Azure / self-hosted
+  - `model` (string|null) — resolved model name; null → SDK default
+  - `max_tokens` (int|null)
+  - `region` (string|null) — for region-aware providers (kimi / glm / minimax / qwen / bedrock)
+  - `credentials` (array) — opaque blob; adapter picks what it needs (bedrock reads `aws_access_key_id` / `aws_secret_access_key` / `aws_region`)
+  - `extra` (array) — provider-specific passthrough (organization, reasoning, verbosity, store, etc.) — default adapter merges without overwriting top-level fields, so hosts can ship novel knobs without adapter changes
+- **`ProviderRegistry::registerHostConfigAdapter(string $sdkKey, callable $adapter)`** — hosts or plugins override per-key adapters. `callable(array):array` transforms host-shape into provider-constructor shape.
+- **Built-in `bedrock` adapter** — splits `credentials.aws_access_key_id` / `aws_secret_access_key` / `aws_region` into BedrockProvider's constructor fields. Everything else uses the default adapter.
+
+### Migration path
+
+Hosts currently doing `match ($type) { 'bedrock' => new BedrockProvider([...]), 'openai' => new OpenAIProvider([...]), … }` collapse to:
+
+```php
+$sdkKey = $typeRegistry->get($aiProvider->type)?->sdkProvider ?: $aiProvider->type;
+return ProviderRegistry::createForHost($sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,
+    'base_url'    => $aiProvider->base_url,
+    'model'       => $resolvedModel,
+    'max_tokens'  => $extra['max_tokens'] ?? null,
+    'region'      => $extra['region'] ?? null,
+    'credentials' => $extra,
+    'extra'       => $extra,
+]);
+```
+
+After this migration, new SDK provider keys (whether openai-responses-style ChatCompletions clones or novel shapes) work without any host change — the provider's adapter is the extension point.
+
 ## [0.9.1] - 2026-04-23
 
 ### 💻 Summary
