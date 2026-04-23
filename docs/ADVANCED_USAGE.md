@@ -6445,7 +6445,7 @@ The `productivityWarning` is informational for these cases — it tells you the 
 See `tests/Unit/AgentToolProductivityTest.php` for the locked-down scenarios: `completed` with writes, `completed` without writes (advisory warning), `completed_empty`, deduped paths, and malformed tool_use without a `file_path`.
 
 
-## 35. Kimi thinking + context caching (request-level, post-0.8.9)
+## 35. Kimi thinking + context caching (request-level, v0.9.0)
 
 > Kimi's thinking mode is **NOT** a model-name swap. Same model id, different request fields — the 0.8.9-era `kimi-k2-thinking-preview` assumption was wrong and has been removed. Session-level prompt caching has its own capability interface, distinct from Anthropic's block-level `SupportsContextCaching`.
 
@@ -6750,7 +6750,7 @@ $wrapped = new WireProjectingPermissionCallback(
 See `docs/WIRE_PROTOCOL.md` for the complete event catalog and field-level spec.
 
 
-## 40. Qwen on the OpenAI-compatible endpoint (post-roadmap default)
+## 40. Qwen on the OpenAI-compatible endpoint (v0.9.0 default)
 
 > The default `qwen` provider now speaks the same
 > `/compatible-mode/v1/chat/completions` endpoint Alibaba's own

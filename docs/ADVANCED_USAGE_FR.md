@@ -7625,7 +7625,7 @@ Le `productivityWarning` est informatif pour ces cas — il vous dit que l'enfan
 Voir `tests/Unit/AgentToolProductivityTest.php` pour les scénarios verrouillés : `completed` avec écritures, `completed` sans écritures (avertissement consultatif), `completed_empty`, chemins dédupliqués, et tool_use malformé sans `file_path`.
 
 
-## 35. Thinking Kimi + cache de contexte (niveau requête, post-0.8.9)
+## 35. Thinking Kimi + cache de contexte (niveau requête, v0.9.0)
 
 > Le mode thinking de Kimi **n'est PAS** un changement d'id de modèle — même modèle, champs de requête différents. L'hypothèse 0.8.9-era `kimi-k2-thinking-preview` était fausse et a été retirée. Le cache de prompt au niveau session a sa propre interface `SupportsPromptCacheKey`, distincte du `SupportsContextCaching` d'Anthropic (niveau bloc).
 
@@ -7926,7 +7926,7 @@ $wrapped = new WireProjectingPermissionCallback(
 Voir `docs/WIRE_PROTOCOL.md` pour le catalogue complet et la spec par champ.
 
 
-## 40. Qwen sur l'endpoint OpenAI-compatible (nouveau défaut post-roadmap)
+## 40. Qwen sur l'endpoint OpenAI-compatible (nouveau défaut v0.9.0)
 
 > Le provider `qwen` par défaut parle maintenant l'endpoint
 > `/compatible-mode/v1/chat/completions` qu'Alibaba utilise

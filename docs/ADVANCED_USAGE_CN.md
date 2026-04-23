@@ -7170,7 +7170,7 @@ Runtime         →  并行分派 3 个，阻塞到全部完成
 见 `tests/Unit/AgentToolProductivityTest.php`，锁定五种场景：有写入的 `completed`、无写入的 `completed`（advisory warning）、`completed_empty`、路径去重、缺 `file_path` 的畸形 tool_use。
 
 
-## 35. Kimi thinking + 上下文缓存（请求级，post-0.8.9）
+## 35. Kimi thinking + 上下文缓存（请求级，v0.9.0）
 
 > Kimi thinking **不是**换模型名 —— 同一 model id，改请求字段。0.8.9 那版假的 `kimi-k2-thinking-preview` 已移除。会话级 prompt cache 有独立接口 `SupportsPromptCacheKey`，区别于 Anthropic 的块级 `SupportsContextCaching`。
 
@@ -7471,7 +7471,7 @@ $wrapped = new WireProjectingPermissionCallback(
 完整 event 目录和字段规格见 `docs/WIRE_PROTOCOL.md`。
 
 
-## 40. Qwen 走 OpenAI-兼容端点（roadmap 后的新默认）
+## 40. Qwen 走 OpenAI-兼容端点（v0.9.0 新默认）
 
 > 默认 `qwen` provider 现在走 Alibaba 自家 qwen-code CLI 唯一使用的
 > `/compatible-mode/v1/chat/completions` 端点。老的 DashScope 原生 shape

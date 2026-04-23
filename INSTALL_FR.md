@@ -188,7 +188,7 @@ Deux garde-fous pratiques :
 
 Pour lancer plusieurs agents en parallèle, émettez tous les appels `AgentTool` comme **des blocs `tool_use` séparés dans un même message assistant** — le runtime les fan-out et bloque jusqu'à la fin de chaque enfant. **Ne pas** mettre `run_in_background: true` pour ça ; le mode background est fire-and-forget et renvoie `async_launched` sans résultat à consolider.
 
-### Ajouts de la branche Unreleased — référence CLI rapide
+### v0.9.0 — référence CLI rapide (double portage kimi-cli + qwen-code)
 
 ```bash
 # ── OAuth Kimi Code (le 3e endpoint Kimi : api.kimi.com/coding/v1) ──

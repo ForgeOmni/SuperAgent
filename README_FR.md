@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8.9-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.9.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
@@ -11,6 +11,36 @@
 SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
 
 ## ✨ Fonctionnalités Principales
+
+### 🆕 v0.9.0 — refonte inspirée de kimi-cli + qwen-code (16 phases, 671 tests / 1776 assertions, 0 échec)
+
+Deux lectures serrées des CLI upstream (MoonshotAI `kimi-cli` et Alibaba `qwen-code`) transformées en seize paquets de travail ciblés. Points saillants :
+
+**Correctness des providers natifs** — forme de thinking Kimi corrigée (paramètres de requête, pas un nom de modèle fantôme), Qwen pivoté depuis un endpoint que le CLI d'Alibaba n'utilise jamais vers l'OpenAI-compat par défaut. Les deux shapes legacy restent accessibles en opt-in (`kimi-k2-thinking-preview` entièrement retiré ; legacy Qwen via `qwen-native`).
+
+**OAuth généralisé** — flux device-code RFC 8628 complet désormais actif pour `kimi-code` et `qwen-code` (avec PKCE S256 + base URL dynamique `resource_url` par compte) plus un verrou de fichier cross-process (`CredentialStore::withLock()`) qui durcit chaque refresh OAuth contre les sessions parallèles qui se marcheraient dessus.
+
+**Catalogue `/models` live** — `superagent models refresh [<provider>]` tire l'endpoint `/models` de chaque vendeur et cache par provider. `resources/models.json` devient un fallback ; la dérive disparaît.
+
+**Specs YAML d'agent avec héritage `extend:`** — les fichiers `.yaml` / `.yml` / `.md` d'agent se chargent auto depuis `~/.superagent/agents/` et `<project>/.superagent/agents/`. Héritage inter-format ; accumulation des listes d'outils.
+
+**Finition des sous-commandes MCP** — `superagent mcp auth/reset-auth/test` complètent le groupe ; flux device-code OAuth pour les serveurs MCP qui l'exigent.
+
+**Wire Protocol v1** — interface `WireEvent` + `JsonStreamRenderer` + migration de la base `StreamEvent` (les 10 événements concrets sont conformes gratuitement) + drapeau CLI `--output json-stream` + `WireStreamOutput` + `ApprovalRuntime`. Fondation pour le pont IDE ACP.
+
+**Extras DashScope** — adapter `cache_control` niveau bloc + header `X-DashScope-CacheControl` + `X-DashScope-UserAgent` + enveloppe metadata session/prompt + auto-flag vision (`vl_high_resolution_images`).
+
+**Durcissement du parseur SSE** — deux vrais bugs dans le `ChatCompletionsProvider::parseSSEStream()` partagé affectant tous les providers OpenAI-compat : assemblage de tool-call par `index` (produisait N blocs fragmentés par call réel) + détection `finish_reason: "error_finish"` (avalait silencieusement les erreurs de throttle). Plus quatre items plus petits.
+
+**LoopDetector** — cinq détecteurs (tool / stagnation / file-read / content / thought) avec exemption cold-start, violation sticky, projection vers l'événement wire, opt-in via `AgentFactory::maybeWrapWithLoopDetection`.
+
+**Checkpoints shadow-git** — couche d'annulation au niveau fichier via un dépôt git bare **séparé** dans `~/.superagent/history/<hash-projet>/shadow.git`. Ne touche jamais le `.git` de l'utilisateur. S'intègre avec le `CheckpointManager` existant ; restore ramène les fichiers trackés et laisse les untracked en place.
+
+**Échappatoire `$options['extra_body']`** sur chaque `ChatCompletionsProvider` — la convention Python du SDK OpenAI portée en PHP. Les power users expédient des champs spécifiques au vendeur sans attendre un adapter de capacité.
+
+**Capacité `SupportsPromptCacheKey`** — le cache session-keyed de Kimi (distinct du `SupportsContextCaching` niveau bloc d'Anthropic), routé via un nouveau `PromptCacheKeyAdapter`.
+
+Suite complète : **671 tests / 1776 assertions / 0 échec**. Zéro signature de méthode publique changée. Tous les champs nouveaux sont additifs. Voir `CHANGELOG.md` `[0.9.0]` pour le découpage exhaustif par Phase et `design/{KIMI_CLI,QWEN_CODE}_INSPIRED_ROADMAP.md` pour l'analyse amont.
 
 ### 🆕 v0.8.9 — Instrumentation de productivité pour `AgentTool` (filet de sécurité pour l'orchestration multi-agents)
 

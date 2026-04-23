@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-22
+
 ### 💻 Summary
 
-**Post-0.8.9 development block, inspired by a close read of MoonshotAI's kimi-cli.** Eight Phase work packages plus one round of follow-up hardening. Focus: Kimi correctness (thinking was wrong, endpoint landscape was incomplete), a live `/models` catalog that kills drift, an OAuth foundation that generalizes across providers, YAML agent specs with inheritance, MCP subcommand polish, and the v1 Wire Protocol (interface + base-class migration + stdio bridge MVP) so future IDE integrations have a shared ground truth.
+**Two-wave post-0.8.9 development block, driven by close reads of MoonshotAI's `kimi-cli` and Alibaba's `qwen-code`.** Sixteen Phase work packages across Kimi correctness, a live `/models` catalog, an OAuth foundation that generalizes across providers, YAML agent specs with inheritance, MCP subcommand polish, the v1 Wire Protocol (interface + base-class migration + stdio bridge MVP), Qwen endpoint correctness + OAuth (PKCE + per-account `resource_url`), DashScope cache-control adapter, cross-process OAuth-refresh locking, SSE-parser hardening that touches every OpenAI-compat provider, a `LoopDetector` safety net generalizing to every provider, and file-level shadow-git checkpoints.
 
 **Zero public method signatures changed.** Everything is additive. Version number intentionally unassigned — maintainer's call.
 

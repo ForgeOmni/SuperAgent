@@ -3,7 +3,7 @@
 [![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.8.9-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.9.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
 > **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
@@ -11,6 +11,36 @@
 SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
 
 ## ✨ 核心特性
+
+### 🆕 v0.9.0 — kimi-cli + qwen-code 启发的重构（16 个 Phase，671 tests / 1776 assertions，0 failures）
+
+把 MoonshotAI 的 `kimi-cli` 和 Alibaba 的 `qwen-code` 两个上游 CLI 做了两轮精读，落地成 16 个聚焦的 Phase。亮点：
+
+**原生 provider 正确性** —— 修掉 Kimi thinking 的错误 shape（请求参数而不是幻想的模型名），Qwen 从 Alibaba 自己 CLI 从来不用的端点切到 OpenAI-兼容主路径。两种 legacy shape 都作为 opt-in 保留（`kimi-k2-thinking-preview` 彻底移除；Qwen legacy 通过 `qwen-native` 继续可用）。
+
+**OAuth 通用化** —— 完整 RFC 8628 设备码流程覆盖 `kimi-code` 和 `qwen-code`（PKCE S256 + per-account `resource_url` 动态 base URL），加上跨进程文件锁（`CredentialStore::withLock()`）硬化每次 OAuth refresh 对抗并发。
+
+**活动 `/models` catalog 刷新** —— `superagent models refresh [<provider>]` 打每家自己的 `/models` 并 per-provider 缓存。`resources/models.json` 降级为 fallback，drift 消失。
+
+**YAML agent spec + `extend:` 继承** —— `.yaml` / `.yml` / `.md` agent 文件自动从 `~/.superagent/agents/` 和 `<project>/.superagent/agents/` 加载。跨格式继承；工具列表累加。
+
+**MCP 子命令补齐** —— `superagent mcp auth/reset-auth/test` 补全子命令组；需要 OAuth 的 MCP server 走设备码流程。
+
+**Wire Protocol v1** —— `WireEvent` interface + `JsonStreamRenderer` + `StreamEvent` 基类迁移（10 个具体事件类自动合规）+ `--output json-stream` CLI flag + `WireStreamOutput` + `ApprovalRuntime`。ACP IDE 桥接的基础。
+
+**DashScope 增强** —— 块级 `cache_control` adapter + `X-DashScope-CacheControl` header + `X-DashScope-UserAgent` + session/prompt metadata 信封 + 视觉模型自动 flag（`vl_high_resolution_images`）。
+
+**SSE parser 加固** —— 共享 `ChatCompletionsProvider::parseSSEStream()` 里的两个真 bug 影响所有 OpenAI-兼容 provider：tool-call 按 `index` 累积（之前每个真实 call 产生 N 个碎片）+ `finish_reason: "error_finish"` 检测（之前静默吞掉限流错误）。外加四个小项。
+
+**LoopDetector** —— 5 种检测器（tool / stagnation / file-read / content / thought）+ cold-start 豁免 + sticky violation + wire 事件投射，通过 `AgentFactory::maybeWrapWithLoopDetection` 可选接入。
+
+**Shadow-git checkpoint** —— 文件级 undo 层，**独立** bare git 仓库在 `~/.superagent/history/<project-hash>/shadow.git`。**不碰**用户自己的 `.git`。接入现有 `CheckpointManager`；restore 回退 tracked 文件，保留 untracked。
+
+**`$options['extra_body']` 直通口** —— OpenAI Python SDK 约定的 PHP 移植。高级用户不用等 adapter 就能发厂商特定字段。
+
+**`SupportsPromptCacheKey`** 能力 —— Kimi 的会话 key 缓存（区别于 Anthropic 块级 `SupportsContextCaching`），通过新的 `PromptCacheKeyAdapter` 路由。
+
+全量测试：**671 tests / 1776 assertions / 0 failures**。零个公开方法签名变更；所有新字段纯加法。完整分 Phase 明细见 `CHANGELOG.md` `[0.9.0]`，上游分析见 `design/{KIMI_CLI,QWEN_CODE}_INSPIRED_ROADMAP.md`。
 
 ### 🆕 v0.8.9 — `AgentTool` 子 Agent 生产力观测（为多 Agent 编排加护栏）
 
