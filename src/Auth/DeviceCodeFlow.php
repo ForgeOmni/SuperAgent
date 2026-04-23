@@ -6,6 +6,12 @@ namespace SuperAgent\Auth;
  * OAuth 2.0 Device Authorization Grant (RFC 8628).
  * Used for authenticating with providers like GitHub Copilot that require
  * browser-based login from CLI applications.
+ *
+ * Optionally supports PKCE (RFC 7636) for providers that require it — Qwen
+ * Code does, others don't. When `$pkceChallengeMethod !== null`, the
+ * `code_challenge` is included in the device-authorization request and a
+ * matching `code_verifier` is sent with the token poll. See
+ * `generatePkcePair()` for the S256 helper.
  */
 class DeviceCodeFlow
 {
@@ -22,8 +28,31 @@ class DeviceCodeFlow
         private array $scopes = [],
         private int $timeout = self::DEFAULT_TIMEOUT,
         ?callable $outputCallback = null, // fn(string $message) for display
+        private ?string $pkceCodeVerifier = null,       // RFC 7636 PKCE verifier (raw 43-128 chars)
+        private ?string $pkceCodeChallenge = null,      // SHA-256 base64url of $pkceCodeVerifier (S256)
+        private ?string $pkceChallengeMethod = null,    // 'S256' | 'plain' | null to disable PKCE
     ) {
         $this->outputCallback = $outputCallback;
+    }
+
+    /**
+     * Generate a PKCE code_verifier + code_challenge pair (S256).
+     *
+     * Equivalent to qwen-code's `generatePKCEPair()` in
+     * `packages/core/src/qwen/qwenOAuth2.ts:70-77`: 32 random bytes →
+     * base64url for the verifier; sha256 → base64url for the challenge.
+     *
+     * @return array{code_verifier:string, code_challenge:string, code_challenge_method:string}
+     */
+    public static function generatePkcePair(): array
+    {
+        $verifier = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+        return [
+            'code_verifier' => $verifier,
+            'code_challenge' => $challenge,
+            'code_challenge_method' => 'S256',
+        ];
     }
 
     /**
@@ -33,10 +62,17 @@ class DeviceCodeFlow
      */
     public function requestDeviceCode(): DeviceCodeResponse
     {
-        $payload = http_build_query([
+        $params = [
             'client_id' => $this->clientId,
             'scope' => implode(' ', $this->scopes),
-        ]);
+        ];
+        // PKCE: include code_challenge + method only when enabled. Qwen
+        // Code requires this; Kimi Code / GitHub don't care if omitted.
+        if ($this->pkceChallengeMethod !== null && $this->pkceCodeChallenge !== null) {
+            $params['code_challenge'] = $this->pkceCodeChallenge;
+            $params['code_challenge_method'] = $this->pkceChallengeMethod;
+        }
+        $payload = http_build_query($params);
 
         $context = stream_context_create([
             'http' => [
@@ -80,11 +116,17 @@ class DeviceCodeFlow
         while (time() < $deadline) {
             sleep($interval);
 
-            $payload = http_build_query([
+            $tokenParams = [
                 'client_id' => $this->clientId,
                 'device_code' => $deviceCode->deviceCode,
                 'grant_type' => 'urn:ietf:params:oauth:grant-type:device_code',
-            ]);
+            ];
+            // PKCE verifier pairs with the challenge we sent in
+            // requestDeviceCode() — completes the RFC 7636 loop.
+            if ($this->pkceChallengeMethod !== null && $this->pkceCodeVerifier !== null) {
+                $tokenParams['code_verifier'] = $this->pkceCodeVerifier;
+            }
+            $payload = http_build_query($tokenParams);
 
             $context = stream_context_create([
                 'http' => [
@@ -101,12 +143,19 @@ class DeviceCodeFlow
 
             $data = json_decode($response, true);
             if (isset($data['access_token'])) {
+                // Collect vendor-specific extras (resource_url, id_token,
+                // etc.) that aren't part of RFC 8628 — callers that
+                // care (e.g. QwenCodeCredentials → resource_url for
+                // dynamic base URL) pull them off `extra`.
+                $standard = ['access_token', 'token_type', 'scope', 'refresh_token', 'expires_in'];
+                $extra = array_diff_key($data, array_flip($standard));
                 return new TokenResponse(
                     accessToken: $data['access_token'],
                     tokenType: $data['token_type'] ?? 'bearer',
                     scope: $data['scope'] ?? '',
                     refreshToken: $data['refresh_token'] ?? null,
                     expiresIn: $data['expires_in'] ?? null,
+                    extra: $extra !== [] ? $extra : null,
                 );
             }
 

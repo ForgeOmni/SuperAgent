@@ -218,6 +218,106 @@ class QwenProviderTest extends TestCase
         $this->assertArrayNotHasKey('vl_high_resolution_images', $body);
     }
 
+    // ── Phase 4: code region (OAuth) + resource_url dynamic base URL ─
+
+    public function test_code_region_with_explicit_access_token_constructs(): void
+    {
+        // region=code is OAuth-only — pass access_token so the
+        // resolveBearer path succeeds without touching the real
+        // credential store.
+        $p = new QwenProvider([
+            'region' => 'code',
+            'access_token' => 'oauth-tok',
+        ]);
+        $this->assertSame('code', $p->getRegion());
+        // With no stored resource_url, falls back to the default
+        // DashScope compat endpoint.
+        $this->assertSame('dashscope.aliyuncs.com', $this->host($p));
+        $this->assertStringContainsString('/compatible-mode/v1/', $this->baseUri($p));
+    }
+
+    public function test_code_region_without_oauth_or_api_key_throws_with_qwen_hint(): void
+    {
+        $origHome = getenv('HOME');
+        $tmp = sys_get_temp_dir() . '/superagent-qwen-bearer-' . bin2hex(random_bytes(4));
+        mkdir($tmp, 0755, true);
+        putenv('HOME=' . $tmp);
+        try {
+            $this->expectException(ProviderException::class);
+            $this->expectExceptionMessageMatches('/OAuth login|qwen-code/');
+            new QwenProvider(['region' => 'code']);
+        } finally {
+            @rmdir($tmp);
+            putenv($origHome === false ? 'HOME' : 'HOME=' . $origHome);
+        }
+    }
+
+    public function test_code_region_reads_resource_url_from_oauth_creds(): void
+    {
+        $origHome = getenv('HOME');
+        $tmp = sys_get_temp_dir() . '/superagent-qwen-resource-' . bin2hex(random_bytes(4));
+        mkdir($tmp . '/.superagent/credentials', 0755, true);
+        putenv('HOME=' . $tmp);
+
+        $store = new \SuperAgent\Auth\CredentialStore(
+            baseDir: $tmp . '/.superagent/credentials',
+            encryptionEnabled: false,
+        );
+        $creds = new \SuperAgent\Auth\QwenCodeCredentials($store);
+        $creds->save([
+            'access_token' => 'oauth-tok',
+            'resource_url' => 'https://portal.qwen.ai/v1',
+            'expires_at' => time() + 3600,
+        ]);
+
+        try {
+            $p = new QwenProvider(['region' => 'code']);
+            $this->assertSame('portal.qwen.ai', $this->host($p));
+            $this->assertStringContainsString('/v1/compatible-mode/v1', $this->baseUri($p));
+        } finally {
+            @unlink($tmp . '/.superagent/credentials/qwen-code.json');
+            @rmdir($tmp . '/.superagent/credentials');
+            @rmdir($tmp . '/.superagent');
+            @rmdir($tmp);
+            putenv($origHome === false ? 'HOME' : 'HOME=' . $origHome);
+        }
+    }
+
+    public function test_code_region_does_not_double_compatible_mode_suffix(): void
+    {
+        // Some accounts return resource_url that already ends in
+        // /compatible-mode/v1 — we must not append a second copy.
+        $origHome = getenv('HOME');
+        $tmp = sys_get_temp_dir() . '/superagent-qwen-resource-' . bin2hex(random_bytes(4));
+        mkdir($tmp . '/.superagent/credentials', 0755, true);
+        putenv('HOME=' . $tmp);
+
+        $store = new \SuperAgent\Auth\CredentialStore(
+            baseDir: $tmp . '/.superagent/credentials',
+            encryptionEnabled: false,
+        );
+        $creds = new \SuperAgent\Auth\QwenCodeCredentials($store);
+        $creds->save([
+            'access_token' => 'oauth-tok',
+            'resource_url' => 'https://account.example/compatible-mode/v1',
+            'expires_at' => time() + 3600,
+        ]);
+
+        try {
+            $p = new QwenProvider(['region' => 'code']);
+            $this->assertStringNotContainsString(
+                '/compatible-mode/v1/compatible-mode/v1',
+                $this->baseUri($p),
+            );
+        } finally {
+            @unlink($tmp . '/.superagent/credentials/qwen-code.json');
+            @rmdir($tmp . '/.superagent/credentials');
+            @rmdir($tmp . '/.superagent');
+            @rmdir($tmp);
+            putenv($origHome === false ? 'HOME' : 'HOME=' . $origHome);
+        }
+    }
+
     // ── helpers ───────────────────────────────────────────────────
 
     private function buildBody(

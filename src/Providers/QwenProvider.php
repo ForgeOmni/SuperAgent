@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Providers;
 
+use SuperAgent\Auth\QwenCodeCredentials;
 use SuperAgent\Exceptions\ProviderException;
 use SuperAgent\Providers\Capabilities\SupportsThinking;
 
@@ -77,21 +78,66 @@ class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
 
     protected function regionToBaseUrl(string $region): string
     {
-        // Region map matches QwenNativeProvider so users switching between
-        // the two providers don't have to re-pick a region. The `/compatible-mode/v1`
-        // suffix lives in the base URL because chatCompletionsPath() returns
-        // just `chat/completions`.
+        // `code` region is the Qwen Code subscription (OAuth, per-account
+        // API host). We resolve its base URL from the OAuth `resource_url`
+        // Alibaba returns in the token response — a per-account endpoint
+        // that overrides the shared DashScope host. Falls back to the
+        // default compatible-mode host when no OAuth creds are stored
+        // (which just means the provider will fail bearer resolution
+        // with a login hint a moment later).
+        if ($region === 'code') {
+            $resourceUrl = (new QwenCodeCredentials())->resourceUrl();
+            if ($resourceUrl !== null) {
+                // resource_url may or may not already include /compatible-mode/v1.
+                // Only append when absent so we don't end up doubling it.
+                if (! str_contains($resourceUrl, '/compatible-mode/v1')) {
+                    $resourceUrl .= '/compatible-mode/v1';
+                }
+                return $resourceUrl;
+            }
+            // No stored resource_url — fall back to the default compat
+            // endpoint. The provider will still try to resolveBearer()
+            // via OAuth, and if that fails it raises a login hint.
+            return 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+        }
+
+        // Public region map matches QwenNativeProvider so users switching
+        // between the two providers don't have to re-pick a region. The
+        // `/compatible-mode/v1` suffix lives in the base URL because
+        // chatCompletionsPath() returns just `chat/completions`.
         $host = match ($region) {
             'intl' => 'https://dashscope-intl.aliyuncs.com',
             'us'   => 'https://dashscope-us.aliyuncs.com',
             'cn'   => 'https://dashscope.aliyuncs.com',
             'hk'   => 'https://cn-hongkong.dashscope.aliyuncs.com',
             default => throw new ProviderException(
-                "Unknown region '{$region}' for qwen (expected: intl, us, cn, hk)",
+                "Unknown region '{$region}' for qwen (expected: intl, us, cn, hk, code)",
                 'qwen',
             ),
         };
         return $host . '/compatible-mode/v1';
+    }
+
+    /**
+     * On `code` region, OAuth access token wins. Fall back to api_key
+     * for any region so existing QWEN_API_KEY users keep working.
+     *
+     * @param array<string, mixed> $config
+     */
+    protected function resolveBearer(array $config): ?string
+    {
+        $region = (string) ($config['region'] ?? $this->defaultRegion());
+        if ($region === 'code') {
+            $oauth = new QwenCodeCredentials();
+            $token = $oauth->currentAccessToken();
+            if ($token !== null && $token !== '') {
+                return $token;
+            }
+            if (! empty($config['access_token'])) {
+                return (string) $config['access_token'];
+            }
+        }
+        return parent::resolveBearer($config);
     }
 
     protected function defaultModel(): string
@@ -110,6 +156,12 @@ class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
 
     protected function missingBearerMessage(array $config): string
     {
+        $region = (string) ($config['region'] ?? $this->defaultRegion());
+        if ($region === 'code') {
+            return 'Qwen Code requires OAuth login (region=code). No credentials found at '
+                . '~/.superagent/credentials/qwen-code.json — run `superagent auth login qwen-code` '
+                . 'or pass an api_key/access_token explicitly.';
+        }
         return 'QWEN_API_KEY (or DASHSCOPE_API_KEY) is required';
     }
 

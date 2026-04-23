@@ -11,6 +11,7 @@ use SuperAgent\Auth\CredentialStore;
 use SuperAgent\Auth\DeviceCodeFlow;
 use SuperAgent\Auth\GeminiCliCredentials;
 use SuperAgent\Auth\KimiCodeCredentials;
+use SuperAgent\Auth\QwenCodeCredentials;
 use SuperAgent\CLI\Terminal\Renderer;
 
 /**
@@ -52,6 +53,7 @@ class AuthCommand
             'codex', 'openai' => $this->loginCodex(),
             'gemini', 'gemini-cli', 'google' => $this->loginGeminiCli(),
             'kimi-code', 'kimi' => $this->loginKimiCode(),
+            'qwen-code', 'qwen' => $this->loginQwenCode(),
             '' => $this->usage(),
             default => $this->usage("Unknown provider: {$provider}"),
         };
@@ -104,6 +106,72 @@ class AuthCommand
 
         $r->success('Logged in to Kimi Code.');
         $r->hint('Use this account by setting KIMI_REGION=code when running SuperAgent.');
+        return 0;
+    }
+
+    /**
+     * Qwen Code OAuth device flow with PKCE S256. Mirrors Kimi Code
+     * except:
+     *   - `chat.qwen.ai/api/v1/oauth2/device/code` endpoints
+     *   - PKCE verifier + S256 challenge (Alibaba requires them)
+     *   - Token response includes `resource_url`, a per-account
+     *     DashScope base URL that `QwenProvider` picks up at
+     *     construction time when `region=code`.
+     */
+    protected function loginQwenCode(?QwenCodeCredentials $credsOverride = null, ?DeviceCodeFlow $flowOverride = null): int
+    {
+        $r = $this->renderer;
+        $creds = $credsOverride ?? new QwenCodeCredentials($this->store);
+        $host = rtrim($creds->host(), '/');
+
+        // RFC 7636 PKCE — Alibaba requires S256; omit entirely and the
+        // device-code request fails with a confusing error. Generate
+        // once, include in both the device-code request and the
+        // token poll via DeviceCodeFlow constructor args.
+        $pkce = DeviceCodeFlow::generatePkcePair();
+
+        $flow = $flowOverride ?? new DeviceCodeFlow(
+            clientId:            QwenCodeCredentials::CLIENT_ID,
+            deviceCodeUrl:       $host . QwenCodeCredentials::DEVICE_AUTH_PATH,
+            tokenUrl:            $host . QwenCodeCredentials::TOKEN_PATH,
+            scopes:              explode(' ', QwenCodeCredentials::DEFAULT_SCOPE),
+            outputCallback:      static fn (string $msg) => $r->line($msg),
+            pkceCodeVerifier:    $pkce['code_verifier'],
+            pkceCodeChallenge:   $pkce['code_challenge'],
+            pkceChallengeMethod: $pkce['code_challenge_method'],
+        );
+
+        $r->info('Starting Qwen Code OAuth device flow...');
+
+        try {
+            $token = $flow->authenticate();
+        } catch (AuthenticationException $e) {
+            $r->error('Login failed: ' . $e->getMessage());
+            return 1;
+        } catch (\Throwable $e) {
+            $r->error('Unexpected error during login: ' . $e->getMessage());
+            return 1;
+        }
+
+        // `resource_url` lives in the extras map — Alibaba's token
+        // response spec carries it alongside the standard fields.
+        $resourceUrl = is_array($token->extra ?? null)
+            ? ($token->extra['resource_url'] ?? null)
+            : null;
+
+        $creds->save([
+            'access_token'  => $token->accessToken,
+            'refresh_token' => $token->refreshToken,
+            'expires_at'    => $token->expiresIn !== null ? time() + $token->expiresIn : null,
+            'resource_url'  => is_string($resourceUrl) ? $resourceUrl : null,
+            'scopes'        => $token->scope !== '' ? explode(' ', $token->scope) : [],
+        ]);
+
+        $r->success('Logged in to Qwen Code.');
+        $r->hint('Use this account by setting QWEN_REGION=code when running SuperAgent.');
+        if (is_string($resourceUrl) && $resourceUrl !== '') {
+            $r->hint("Account-specific DashScope base URL: {$resourceUrl}");
+        }
         return 0;
     }
 
@@ -255,6 +323,7 @@ class AuthCommand
             'codex', 'openai' => 'openai',
             'gemini', 'gemini-cli', 'google' => 'gemini',
             'kimi-code', 'kimi' => KimiCodeCredentials::CREDENTIAL_NAME,  // = 'kimi-code'
+            'qwen-code', 'qwen' => QwenCodeCredentials::CREDENTIAL_NAME,  // = 'qwen-code'
             default => null,
         };
         if ($key === null) {
@@ -308,8 +377,9 @@ class AuthCommand
         $this->renderer->line('  superagent auth login codex');
         $this->renderer->line('  superagent auth login gemini');
         $this->renderer->line('  superagent auth login kimi-code');
+        $this->renderer->line('  superagent auth login qwen-code');
         $this->renderer->line('  superagent auth status');
-        $this->renderer->line('  superagent auth logout <claude-code|codex|gemini|kimi-code>');
+        $this->renderer->line('  superagent auth logout <claude-code|codex|gemini|kimi-code|qwen-code>');
         return $error !== null ? 1 : 0;
     }
 }
