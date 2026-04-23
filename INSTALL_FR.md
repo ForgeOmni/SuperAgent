@@ -1,36 +1,83 @@
-# Guide d'Installation SuperAgent (v0.8.6)
+# SuperAgent — Installation
 
-> **🌍 Langue**: [English](INSTALL.md) | [中文](INSTALL_CN.md) | [Français](INSTALL_FR.md)  
-> **📖 Documentation**: [README](README.md) | [README 中文](README_CN.md) | [README Français](README_FR.md)
+> **🌍 Langue**: [English](INSTALL.md) | [中文](INSTALL_CN.md) | [Français](INSTALL_FR.md)
+> **📖 Documentation**: [README_FR](README_FR.md) · [CHANGELOG](CHANGELOG.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md)
 
-## Table des Matières
-- [Installation CLI Standalone (v0.8.6+)](#installation-cli-standalone-v086)
-- [Prérequis Système](#prérequis-système)
-- [Étapes d'Installation](#étapes-dinstallation)
-- [Configuration](#configuration)
-- [Configuration Multi-Agents](#configuration-multi-agents)
+## Sommaire
+
+- [Prérequis système](#prérequis-système)
+- [Chemins d'installation](#chemins-dinstallation)
+- [Authentification](#authentification)
+- [Configuration première exécution](#configuration-première-exécution)
+- [Configuration des fonctionnalités optionnelles](#configuration-des-fonctionnalités-optionnelles)
+  - [API OpenAI Responses](#api-openai-responses)
+  - [OAuth abonnement ChatGPT](#oauth-abonnement-chatgpt)
+  - [Azure OpenAI](#azure-openai)
+  - [Modèles locaux (Ollama / LM Studio)](#modèles-locaux-ollama--lm-studio)
+  - [Catalogue MCP + sync](#catalogue-mcp--sync)
+  - [Transports wire-protocol](#transports-wire-protocol)
+  - [Checkpoints shadow-git](#checkpoints-shadow-git)
 - [Vérification](#vérification)
 - [Dépannage](#dépannage)
-- [Guide de Mise à Jour](#guide-de-mise-à-jour)
+- [Mise à jour](#mise-à-jour)
+- [Désinstallation](#désinstallation)
 
-## Installation CLI Standalone (v0.8.6+)
+---
 
-Depuis la v0.8.6, SuperAgent fournit un binaire CLI standalone — aucun projet Laravel requis.
+## Prérequis système
 
-### Installation
+| Exigence | Minimum |
+|---|---|
+| PHP | 8.1 |
+| Composer | 2.0 |
+| Extensions | `curl`, `json`, `mbstring`, `openssl` |
+| Optionnel | `pcntl` (swarm par fork), `proc_open` (ProcessBackend des sous-agents — activé par défaut sur POSIX), `sockets` (transport unix-socket du wire protocol) |
+| OS | Linux / macOS / Windows (WSL recommandé sous Windows) |
+
+Vérifier PHP + extensions :
 
 ```bash
-# Option A : Composer global
+php -v
+php -m | grep -E 'curl|json|mbstring|openssl|pcntl|sockets'
+```
+
+Pour l'intégration Laravel :
+
+| Exigence | Minimum |
+|---|---|
+| Laravel | 10.0 |
+| Base de données | MySQL 8 / PostgreSQL 14 / SQLite 3.35 (pour `ai_usage_logs` si utilisé) |
+
+---
+
+## Chemins d'installation
+
+### CLI autonome (v0.8.6+)
+
+Un binaire — sans projet Laravel. Déployable sur toute votre flotte, appelable depuis n'importe quel shell, intégrable en CI.
+
+**Option A — Composer global :**
+
+```bash
 composer global require forgeomni/superagent
+# Assurez-vous que ~/.composer/vendor/bin (ou le bin Composer configuré) est dans PATH
+```
 
-# Option B : Clone + lien
-git clone https://github.com/forgeomni/superagent.git
-cd superagent
-composer install
-# puis ajoutez bin/ au PATH, ou créez un lien symbolique bin/superagent vers /usr/local/bin
+**Option B — clone + lien symbolique :**
 
-# Option C : scripts de bootstrap en une ligne
+```bash
+git clone https://github.com/forgeomni/superagent.git ~/.local/src/superagent
+cd ~/.local/src/superagent
+composer install --no-dev
+ln -s "$PWD/bin/superagent" /usr/local/bin/superagent
+```
+
+**Option C — scripts de bootstrap :**
+
+```bash
+# POSIX :
 curl -sSL https://raw.githubusercontent.com/forgeomni/superagent/main/install.sh | bash
+
 # Windows PowerShell :
 iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps1 | iex
 ```
@@ -38,1387 +85,431 @@ iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps
 Vérifier :
 
 ```bash
-superagent --version        # SuperAgent v0.8.6
+superagent --version    # SuperAgent v0.9.1
 superagent --help
 ```
 
-### Authentification
+### Dépendance Laravel
 
-Trois options, au choix :
-
-**1. Réutiliser une connexion Claude Code / Codex existante (recommandé — sans jongler avec les clés API) :**
 ```bash
-# Nécessite Claude Code ou Codex déjà installé et connecté localement
-superagent auth login claude-code    # importe ~/.claude/.credentials.json
-superagent auth login codex          # importe ~/.codex/auth.json
-superagent auth login gemini         # importe ~/.gemini/*.json ou la variable GEMINI_API_KEY
-superagent auth status               # vérifier
+composer require forgeomni/superagent
+php artisan vendor:publish --tag=superagent-config
 ```
-Les credentials sont stockés dans `~/.superagent/credentials/{anthropic,openai}.json` en mode `0600`, renouvelés 60 s avant expiration.
 
-**2. Assistant interactif :**
+`config/superagent.php` existe maintenant — renseignez les clés provider et défauts agent. Le service provider, la façade (`SuperAgent`) et les commandes Artisan (`superagent:chat`, `superagent:mcp`, `superagent:models`, `superagent:health`) s'enregistrent automatiquement.
+
+---
+
+## Authentification
+
+Configurez exactement une méthode d'auth par provider utilisé. Les méthodes se composent — une clé API OpenAI et un login OAuth ChatGPT stocké peuvent coexister, l'agent choisit selon `auth_mode`.
+
+### 1. Clé API en variable d'environnement
+
+Option la moins friction. Fonctionne pour tout provider avec endpoint bearer.
+
+```bash
+# ~/.bashrc, ~/.zshrc, ou un .env de déploiement — selon votre workflow :
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+export GEMINI_API_KEY=...
+export KIMI_API_KEY=...
+export QWEN_API_KEY=...            # partagé par 'qwen' et 'qwen-native'
+export GLM_API_KEY=...
+export MINIMAX_API_KEY=...
+export OPENROUTER_API_KEY=...
+```
+
+En-têtes de scoping optionnels (depuis v0.9.1 — déclarez-les une fois sur l'agent, ils s'omettent si l'env n'est pas défini) :
+
+```bash
+export OPENAI_ORGANIZATION=org-...
+export OPENAI_PROJECT=proj-...
+```
+
+### 2. Réutiliser un login CLI existant
+
+Si vous utilisez déjà Claude Code, Codex CLI ou Gemini CLI localement, SuperAgent peut importer leurs tokens OAuth.
+
+```bash
+superagent auth login claude-code     # importe le token OAuth Claude Code sur disque
+superagent auth login codex           # importe la connexion Codex
+superagent auth login gemini          # importe la connexion Gemini CLI
+superagent auth status                # providers avec credentials stockés
+```
+
+### 3. Login device-code (hébergé provider)
+
+Pour les providers qui exposent un flux device RFC 8628 directement.
+
+```bash
+superagent auth login kimi-code       # abonnement Moonshot Kimi Code (depuis v0.9.0)
+superagent auth login qwen-code       # abonnement Alibaba Qwen Code, PKCE S256 (depuis v0.9.0)
+```
+
+Chaque commande affiche l'URL de vérification + code utilisateur ; validez dans le navigateur, le token persiste à `~/.superagent/credentials/<name>.json`.
+
+### 4. Config explicite
+
+Bon pour CI / environnements pilotés par secret-manager :
+
+```php
+new Agent([
+    'provider'     => 'openai-responses',
+    'access_token' => $vaultSecrets['openai_oauth'],
+    'account_id'   => $vaultSecrets['openai_account_id'],
+    'auth_mode'    => 'oauth',
+]);
+```
+
+### Sécurité du refresh OAuth
+
+Les workers parallèles partageant un même `~/.superagent/credentials/<name>.json` ne se marchent pas dessus — `CredentialStore::withLock()` sérialise l'appel HTTP via verrous de fichier cross-process, avec récupération des verrous bloqués (depuis v0.9.0). Aucune action requise, activé par défaut.
+
+---
+
+## Configuration première exécution
+
+Initialiser le répertoire utilisateur :
+
 ```bash
 superagent init
-# Demande le provider (Anthropic / OpenAI / Ollama / OpenRouter),
-# détecte les clés env existantes, demande une clé si absente,
-# écrit ~/.superagent/config.php (mode 0600).
 ```
 
-**3. Variable d'environnement simple :**
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-# ou
-export OPENAI_API_KEY=sk-...
-superagent "votre première tâche"
-```
-
-### Première exécution
-
-```bash
-# One-shot
-superagent "explique ce codebase"
-superagent -m claude-opus-4-5 "refactor le module auth"
-superagent -p openai -m gpt-5 "écris un test unitaire pour X"
-superagent --json "liste les TODOs du repo" | jq .
-
-# REPL interactif
-superagent
-> /help                                 # liste toutes les commandes slash
-> /model                                # sélecteur numéroté pour le provider actif
-> /model 1                              # passe au modèle #1
-> /session save my-session              # persiste l'état
-> /compact                              # compaction forcée du contexte
-> /cost                                 # dépense cumulée
-> /quit
-```
-
-### Drapeaux CLI
-
-| Drapeau | Description |
-| --- | --- |
-| `-m, --model <model>` | Nom ou alias de modèle (`opus`, `claude-sonnet-4-5`, `gpt-5`, …) |
-| `-p, --provider <name>` | `anthropic` / `openai` / `ollama` / `openrouter` |
-| `--max-turns <n>` | Plafond de tours agent (défaut 50) |
-| `-s, --system-prompt <txt>` | Prompt système custom (ajouté après le bloc d'identité OAuth en mode OAuth) |
-| `--project <path>` | Définit le répertoire de travail de l'agent |
-| `--json` | Sortie JSON lisible par machine en mode one-shot |
-| `--verbose-thinking` | Affiche le stream de thinking complet |
-| `--no-thinking` | Masque complètement le thinking |
-| `--plain` | Désactive ANSI / contrôle de curseur (pipes, logs CI) |
-| `--no-rich` | Utilise le renderer minimal legacy |
-
-### Caveats OAuth
-
-- **Contraintes de modèle :** les tokens OAuth Claude Code n'autorisent que les modèles de génération actuelle. Les ids legacy comme `claude-3-5-sonnet-20241022` renvoient HTTP 429 avec un `rate_limit_error` obfusqué. Le CLI les réécrit silencieusement vers `claude-opus-4-5`
-- **Exigence system prompt :** l'endpoint OAuth Anthropic rejette toute requête dont le premier bloc système n'est pas la chaîne d'identité Claude Code littérale. Le CLI l'injecte automatiquement ; votre `-s "…"` est préservé en deuxième bloc immédiatement après
-- **Source des tokens :** le CLI lit les tokens OAuth que Claude Code / Codex ont déjà stockés localement — il **n'exécute pas son propre flux OAuth**. Anthropic / OpenAI ne publient pas de `client_id` OAuth tiers. Le refresh utilise les client_ids embarqués par ces CLIs. Le risque ToS vous revient
-
-### Structure de fichiers
+Crée :
 
 ```
 ~/.superagent/
-├── config.php                   # produit par `superagent init` (mode 0600)
-├── credentials/                 # produit par `superagent auth login …`
-│   ├── anthropic.json           # OAuth / api_key pour Anthropic (mode 0600)
-│   └── openai.json              # OAuth / api_key pour OpenAI   (mode 0600)
-├── models.json                  # v0.8.7+ override utilisateur modèles / tarifs
-├── mcp.json                     # v0.8.8+ config serveur MCP (`superagent mcp …`)
-├── skills/                      # v0.8.8+ fichiers skill markdown installés par l'utilisateur
-├── mcp-auth.json                # v0.8.8+ tokens OAuth serveurs MCP (mode 0600)
-├── cost_ledger.json             # v0.8.8+ registre quotidien CostLimiter (mode 0600)
-├── features.json                # v0.8.8+ fichier FeatureFlags (optionnel)
-└── storage/
-    ├── sessions/                # état /session save
-    └── palace/                  # Memory Palace (si activé)
+├── credentials/         # tokens OAuth (mode 0600)
+├── models-cache/        # réponses /models mises en cache par provider
+├── storage/             # scratch runtime
+├── agents/              # définitions d'agents utilisateur (YAML/MD)
+└── device.json          # UUID stable par installation
 ```
 
-### Commandes CLI v0.8.8 (référence rapide)
+Vérifier qu'un provider est joignable :
 
 ```bash
-# Kimi / Qwen / GLM / MiniMax natifs — une fois les env ci-dessus définies :
-superagent chat -p kimi "Résume ce dépôt"
-superagent chat -p qwen -m qwen3.6-max-preview "..."
-superagent chat -p glm "..."
-superagent chat -p minimax "..."
-
-# Serveurs MCP (partagés par tous les cerveaux principaux)
-superagent mcp add filesystem stdio npx --arg -y --arg @modelcontextprotocol/server-filesystem --arg /tmp
-superagent mcp list
-superagent mcp remove filesystem
-
-# Skills utilisateur
-superagent skills install ./my-skill.md
-superagent skills list
-superagent skills show my-skill
-
-# Orchestration Swarm (plan + exécution ; --plan-only pour dry-run)
-superagent swarm "Analyse ce dépôt et rédige un deck"
-superagent swarm "..." --provider kimi --max-sub-agents 50
-superagent swarm "..." --role chercheur:collecter --role rédacteur:écrire   # route vers MiniMax
-superagent swarm "..." --json --plan-only                                    # sortie plan JSON
-
-# Health checks (programmatique)
-php -r 'require "vendor/autoload.php"; print_r(\SuperAgent\Providers\ProviderRegistry::healthCheck("kimi"));'
+superagent health             # probe cURL 5s de chaque provider configuré
+# Provider      Status    Latency     Reason
+# ────────────────────────────────────────────────
+# openai        ✓ ok      142ms
+# anthropic     ✓ ok       98ms
+# kimi          ✗ fail    —           no API key in environment
 ```
 
-### v0.8.9 — Champs de productivité d'AgentTool (mise à niveau orchestration)
-
-Pas de nouvelle surface CLI ; la modification porte sur chaque payload de succès d'`AgentTool`. Les orchestrateurs (incluant `/team`, `superagent swarm`, et tout code custom à base d'`AgentManager`) devraient désormais lire ces champs pour décider si un sous-agent a vraiment fait son travail :
-
-```php
-$result = $agentTool->execute([
-    'description' => 'Analyser les logs',
-    'prompt'      => 'Lis logs/*.jsonl et écris findings.md',
-]);
-
-// status : 'completed' (normal), 'completed_empty' (zéro appel d'outil — re-dispatcher),
-//          ou 'async_launched' (uniquement si run_in_background: true a été passé).
-$result['status'];
-
-$result['filesWritten'];         // list<string> de chemins absolus (Write/Edit/MultiEdit/NotebookEdit/Create)
-$result['toolCallsByName'];      // ['Read' => 3, 'Bash' => 1, 'Write' => 1]
-$result['totalToolUseCount'];    // appels d'outils observés — pas le nombre de tours
-$result['productivityWarning'];  // null si propre ; chaîne consultative sinon
-```
-
-Deux garde-fous pratiques :
-
-1. **Toujours traiter `status === 'completed_empty'` comme un échec.** L'enfant a fait zéro appel d'outil — le modèle a décrit ce qu'il allait faire au lieu de le faire. Re-dispatcher avec une instruction "invoque des outils" plus explicite, ou choisir un modèle plus fort.
-2. **`completed` + `filesWritten` vide n'est pas automatiquement un échec.** Les consultations d'avis, les récupérations de recherche pure, et les smoke tests Bash-only sont tous légitimes. Inspectez `productivityWarning` et décidez selon le contrat de votre tâche si des fichiers étaient attendus.
-
-Pour lancer plusieurs agents en parallèle, émettez tous les appels `AgentTool` comme **des blocs `tool_use` séparés dans un même message assistant** — le runtime les fan-out et bloque jusqu'à la fin de chaque enfant. **Ne pas** mettre `run_in_background: true` pour ça ; le mode background est fire-and-forget et renvoie `async_launched` sans résultat à consolider.
-
-### v0.9.0 — référence CLI rapide (double portage kimi-cli + qwen-code)
+Premier vrai run :
 
 ```bash
-# ── OAuth Kimi Code (le 3e endpoint Kimi : api.kimi.com/coding/v1) ──
-superagent auth login kimi-code         # flux RFC 8628 device-code contre auth.kimi.com
-superagent auth logout kimi-code
-export KIMI_REGION=code                 # route le chat via l'endpoint OAuth
-
-# ── Rafraîchissement live du catalogue modèles (/models par fournisseur) ──
-superagent models refresh               # tous les fournisseurs ayant des creds en env
-superagent models refresh openai        # un seul
-# Caché dans ~/.superagent/models-cache/<provider>.json
-
-# ── Groupe de sous-commandes MCP complété ──
-superagent mcp auth <name>              # flux device-code OAuth pour serveurs MCP oauth-gated
-superagent mcp reset-auth <name>        # efface le token stocké
-superagent mcp test <name>              # sonde la joignabilité (stdio : binary, http : URL)
-
-# ── Sortie stream Wire Protocol v1 (pipelines IDE / CI) ──
-superagent "analyse les logs" --output json-stream > events.ndjson
-# Une ligne par événement en JSON wire_version:1 — compatible `jq -c`
-
-# ── Specs YAML d'agent auto-chargées depuis ──
-# ~/.superagent/agents/*.yaml          utilisateur
-# <project>/.superagent/agents/*.yaml  projet
-# Supporte `extend: <name>` inter-formats (.yaml / .yml / .md)
-
-# ── Échappatoire avancée en code ──
-$provider->chat($messages, $tools, $system, [
-    'extra_body' => ['prompt_cache_key' => $sessionId],  // ou tout champ spécifique au fournisseur
-]);
-
-# ── Prompt cache Kimi via features ──
-$provider->chat($messages, $tools, $system, [
-    'features' => ['prompt_cache_key' => ['session_id' => $sessionId]],
-]);
-
-# ── OAuth Qwen Code (flux device-code PKCE contre chat.qwen.ai) ──
-superagent auth login qwen-code         # OAuth + PKCE S256 ; resource_url stocké par compte
-superagent auth logout qwen-code
-export QWEN_REGION=code                 # route le chat via l'endpoint OAuth
-
-# ── Endpoint natif DashScope legacy (la forme 'text-generation/generation') ──
-# Le provider qwen par défaut passe maintenant par l'OpenAI-compat
-# `/compatible-mode/v1/chat/completions`. Si vous avez besoin de
-# `parameters.thinking_budget` ou `parameters.enable_code_interpreter` :
-$provider = ProviderRegistry::create('qwen-native', ['api_key' => $key]);
-# ... au lieu de 'qwen'.
-
-# ── Cache de prompt DashScope niveau bloc (Qwen seulement) ──
-$provider->chat($messages, $tools, $system, [
-    'features' => ['dashscope_cache_control' => ['enabled' => true]],
-]);
-
-# ── Détection de boucle — garde-fou pathologique opt-in (tous fournisseurs) ──
-# En code :
-$wrapped = $factory->maybeWrapWithLoopDetection(
-    $userHandler,
-    ['loop_detection' => true],          # ou tableau de seuils, p.ex.
-                                          # ['loop_detection' => ['TOOL_CALL_LOOP_THRESHOLD' => 10]]
-    $wireEmitter,                         # les violations émettent des événements wire 'loop_detected'
-);
-
-# ── Checkpoints fichiers shadow-git (couche fichier annulable) ──
-# En code :
-$shadow = new GitShadowStore($projectRoot);          # ~/.superagent/history/<hash-projet>/shadow.git
-$mgr    = new CheckpointManager($store, shadowStore: $shadow);
-$cp     = $mgr->createCheckpoint(/* args habituels */); # capture aussi les fichiers
-$mgr->restoreFiles($cp);                             # restaure les fichiers trackés ; untracked conservés
-```
-
-### Désinstallation
-
-```bash
-superagent auth logout claude-code
-superagent auth logout codex
-rm -rf ~/.superagent
-composer global remove forgeomni/superagent
-```
-
-
-## Prérequis Système
-
-### Configuration Minimale
-- **PHP**: 8.1 ou supérieur
-- **Laravel**: 10.0 ou supérieur
-- **Composer**: 2.0 ou supérieur
-- **Mémoire**: Au moins 256MB de limite de mémoire PHP
-- **Espace Disque**: Au moins 100MB d'espace disponible
-
-### Extensions PHP Requises
-```bash
-# Extensions principales
-- json        # Traitement JSON
-- mbstring    # Chaînes multi-octets
-- openssl     # Cryptage
-- curl        # Requêtes HTTP
-- fileinfo    # Informations sur les fichiers
-```
-
-### Extensions PHP Optionnelles
-```bash
-# Fonctionnalités avancées
-- redis       # Support du cache Redis
-- pcntl       # Contrôle de processus (collaboration multi-agents)
-- yaml        # Fichiers de configuration YAML
-- zip         # Compression de fichiers
-- pdo_sqlite  # Stockage de sessions SQLite avec recherche FTS5 (v0.8.0+)
-```
-
-### Vérification de l'Environnement
-
-```bash
-# Vérifier la version PHP
-php -v
-
-# Vérifier les extensions installées
-php -m
-
-# Vérifier la version Laravel
-php artisan --version
-
-# Vérifier la version Composer
-composer --version
-```
-
-## Étapes d'Installation
-
-### 1️⃣ Installation via Composer
-
-#### Installation Standard (Recommandée)
-```bash
-composer require forgeomni/superagent
-```
-
-#### Installer la Version de Développement
-```bash
-composer require forgeomni/superagent:dev-main
-```
-
-#### Installer une Version Spécifique
-```bash
-composer require forgeomni/superagent:^1.0
-```
-
-### 2️⃣ Enregistrer le Fournisseur de Services
-
-Laravel 10+ enregistrera automatiquement. Pour l'enregistrement manuel, éditez `config/app.php`:
-
-```php
-'providers' => [
-    // Autres fournisseurs...
-    SuperAgent\SuperAgentServiceProvider::class,
-],
-
-'aliases' => [
-    // Autres alias...
-    'SuperAgent' => SuperAgent\Facades\SuperAgent::class,
-],
-```
-
-### 3️⃣ Publier les Fichiers de Ressources
-
-```bash
-# Publier toutes les ressources
-php artisan vendor:publish --provider="SuperAgent\SuperAgentServiceProvider"
-
-# Ou publier séparément
-php artisan vendor:publish --provider="SuperAgent\SuperAgentServiceProvider" --tag="config"
-php artisan vendor:publish --provider="SuperAgent\SuperAgentServiceProvider" --tag="migrations"
-```
-
-### 4️⃣ Exécuter les Migrations de Base de Données
-
-Si vous utilisez le système de mémoire et les fonctionnalités de gestion des tâches:
-
-```bash
-php artisan migrate
-```
-
-### 5️⃣ Configurer les Variables d'Environnement
-
-Éditez votre fichier `.env` et ajoutez la configuration nécessaire:
-
-```env
-# ========== Configuration de Base SuperAgent ==========
-
-# Fournisseur IA par défaut
-# anthropic | openai | gemini | bedrock | ollama | openrouter
-# v0.8.8 ajoute : kimi | qwen | glm | minimax (voir ci-dessous)
-SUPERAGENT_PROVIDER=anthropic
-
-# Configuration Anthropic Claude
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
-ANTHROPIC_MODEL=claude-4.6-haiku-latest
-ANTHROPIC_MAX_TOKENS=4096
-ANTHROPIC_TEMPERATURE=0.7
-
-# Configuration OpenAI (optionnel)
-OPENAI_API_KEY=sk-xxxxxxxxxxxxx
-OPENAI_MODEL=gpt-5.4
-OPENAI_ORG_ID=org-xxxxxxxxxxxxx
-
-# Configuration AWS Bedrock (optionnel)
-AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXX
-AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxx
-AWS_DEFAULT_REGION=us-east-1
-BEDROCK_MODEL=anthropic.claude-v2
-
-# Modèles Ollama Locaux (optionnel)
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama2
-
-# Google Gemini natif (optionnel — appel direct de l'API, pas via OpenRouter)
-GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx    # ou GOOGLE_API_KEY
-GEMINI_MODEL=gemini-2.0-flash
-
-# ========== v0.8.8 fournisseurs natifs (tous optionnels) ==========
-# Moonshot Kimi (K2.6, Agent Swarm, File-Extract, Batches)
-KIMI_API_KEY=sk-moonshot-xxxxxxxxxxxxx    # ou alias MOONSHOT_API_KEY
-KIMI_REGION=intl                           # intl | cn (clé liée à l'hôte)
-
-# Alibaba Qwen (natif DashScope — thinking, code-interpreter, long-file)
-QWEN_API_KEY=sk-dashscope-xxxxxxxxxxxxx   # ou alias DASHSCOPE_API_KEY
-QWEN_REGION=intl                           # intl (Singapour) | us (Virginie) | cn (Pékin) | hk
-
-# Z.AI / BigModel — GLM-5, outils Web Search / Reader / OCR / ASR
-GLM_API_KEY=your-zai-key                   # ou alias ZAI_API_KEY / ZHIPU_API_KEY
-GLM_REGION=intl                            # intl (api.z.ai) | cn (open.bigmodel.cn)
-
-# MiniMax (M2.7 Agent Teams, TTS, musique, vidéo, image)
-MINIMAX_API_KEY=your-minimax-key
-MINIMAX_GROUP_ID=your-group-id             # optionnel — ajoute l'en-tête X-GroupId
-MINIMAX_REGION=intl                        # intl | cn
-
-# Catalogue de modèles dynamique (v0.8.7+) — synchroniser les modèles/tarifs sans release
-# SUPERAGENT_MODELS_URL=https://your-cdn/models.json
-# SUPERAGENT_MODELS_AUTO_UPDATE=1           # auto-refresh avec vérification de fraîcheur 7 jours
-
-# Couche de sécurité (v0.8.8+)
-# SUPERAGENT_OFFLINE=1                      # bloque tout appel d'outil marqué `network`
-# SUPERAGENT_DISABLE=thinking,cost_limit    # liste séparée par virgule des fonctionnalités à désactiver
-
-# ========== Bascules de Fonctionnalités ==========
-
-# Sortie en flux
-SUPERAGENT_STREAMING=true
-
-# Fonctionnalité de cache
-SUPERAGENT_CACHE_ENABLED=true
-SUPERAGENT_CACHE_TTL=3600
-
-# Mode débogage
-SUPERAGENT_DEBUG=false
-
-# Observabilité (interrupteur principal — tous les sous-systèmes désactivés si faux)
-SUPERAGENT_TELEMETRY_ENABLED=false
-SUPERAGENT_TELEMETRY_LOGGING=false
-SUPERAGENT_TELEMETRY_METRICS=false
-SUPERAGENT_TELEMETRY_EVENTS=false
-SUPERAGENT_TELEMETRY_COST_TRACKING=false
-
-# Garde-fous de sécurité
-SUPERAGENT_SECURITY_GUARDRAILS=false
-
-# Fonctionnalités expérimentales (interrupteur principal — tous les indicateurs activés si vrai)
-SUPERAGENT_EXPERIMENTAL=true
-
-# ========== Configuration des Permissions ==========
-
-# Modes de permission:
-# bypass - Ignorer toutes les vérifications de permissions
-# acceptEdits - Approuver automatiquement les modifications de fichiers
-# plan - Toutes les opérations nécessitent confirmation
-# default - Jugement intelligent
-# dontAsk - Refuser automatiquement les opérations nécessitant confirmation
-# auto - Classification automatique par IA
-SUPERAGENT_PERMISSION_MODE=default
-
-# ========== Configuration du Stockage ==========
-
-SUPERAGENT_STORAGE_DISK=local
-SUPERAGENT_STORAGE_PATH=superagent
-```
-
-### 6️⃣ Créer les Répertoires Nécessaires
-
-```bash
-# Créer les répertoires de stockage
-mkdir -p storage/app/superagent/{snapshots,memories,tasks,cache}
-
-# Définir les permissions
-chmod -R 755 storage/app/superagent
-
-# Si vous utilisez un serveur web
-chown -R www-data:www-data storage/app/superagent  # Ubuntu/Debian
-chown -R nginx:nginx storage/app/superagent        # CentOS/RHEL
-```
-
-## Configuration
-
-### Fichier de Configuration Principal
-
-Éditez `config/superagent.php`:
-
-```php
-<?php
-
-return [
-    /*
-    |--------------------------------------------------------------------------
-    | Fournisseur IA par Défaut
-    |--------------------------------------------------------------------------
-    */
-    'default_provider' => env('SUPERAGENT_PROVIDER', 'anthropic'),
-    
-    /*
-    |--------------------------------------------------------------------------
-    | Configuration des Fournisseurs IA
-    |--------------------------------------------------------------------------
-    */
-    'providers' => [
-        'anthropic' => [
-            'api_key' => env('ANTHROPIC_API_KEY'),
-            'model' => env('ANTHROPIC_MODEL', 'claude-4.6-haiku-latest'),
-            'max_tokens' => env('ANTHROPIC_MAX_TOKENS', 4096),
-            'temperature' => env('ANTHROPIC_TEMPERATURE', 0.7),
-            'timeout' => 60,
-        ],
-        
-        'openai' => [
-            'api_key' => env('OPENAI_API_KEY'),
-            'model' => env('OPENAI_MODEL', 'gpt-5.4'),
-            'organization' => env('OPENAI_ORG_ID'),
-            'max_tokens' => 4096,
-            'temperature' => 0.7,
-        ],
-    ],
-    
-    /*
-    |--------------------------------------------------------------------------
-    | Configuration des Outils
-    |--------------------------------------------------------------------------
-    */
-    'tools' => [
-        // Liste des outils activés
-        'enabled' => [
-            \SuperAgent\Tools\Builtin\FileReadTool::class,
-            \SuperAgent\Tools\Builtin\FileWriteTool::class,
-            \SuperAgent\Tools\Builtin\FileEditTool::class,
-            \SuperAgent\Tools\Builtin\BashTool::class,
-            \SuperAgent\Tools\Builtin\WebSearchTool::class,
-            \SuperAgent\Tools\Builtin\WebFetchTool::class,
-        ],
-        
-        // Paramètres de permission des outils
-        'permissions' => [
-            'bash' => [
-                'commands' => [
-                    'allow' => ['ls', 'cat', 'grep', 'find'],
-                    'deny' => ['rm -rf', 'sudo', 'chmod 777'],
-                ],
-            ],
-            'file_write' => [
-                'paths' => [
-                    'deny' => ['.env', 'database.php', '/etc/*'],
-                ],
-            ],
-        ],
-    ],
-    
-    /*
-    |--------------------------------------------------------------------------
-    | Gestion du Contexte
-    |--------------------------------------------------------------------------
-    */
-    'context' => [
-        'max_tokens' => 100000,
-        'auto_compact' => true,
-        'compact_threshold' => 80000,
-        'compact_strategy' => 'smart',
-    ],
-    
-    /*
-    |--------------------------------------------------------------------------
-    | Configuration du Cache
-    |--------------------------------------------------------------------------
-    */
-    'cache' => [
-        'enabled' => env('SUPERAGENT_CACHE_ENABLED', true),
-        'driver' => env('CACHE_DRIVER', 'file'),
-        'ttl' => env('SUPERAGENT_CACHE_TTL', 3600),
-    ],
-    // Memory Palace (v0.8.5, activé par défaut)
-    'palace' => [
-        'enabled' => env('SUPERAGENT_PALACE_ENABLED', true),
-        'base_path' => env('SUPERAGENT_PALACE_PATH'),          // par défaut : {memory}/palace
-        'default_wing' => env('SUPERAGENT_PALACE_DEFAULT_WING'),
-        'vector' => [
-            'enabled' => env('SUPERAGENT_PALACE_VECTOR_ENABLED', false),
-            'embed_fn' => null,                                // passez un callable(string): float[]
-        ],
-        'dedup' => [
-            'enabled' => env('SUPERAGENT_PALACE_DEDUP_ENABLED', true),
-            'threshold' => (float) env('SUPERAGENT_PALACE_DEDUP_THRESHOLD', 0.85),
-        ],
-        'scoring' => [
-            'keyword' => 1.0,
-            'vector'  => 2.0,
-            'recency' => 0.5,
-            'access'  => 0.3,
-        ],
-    ],
-];
-```
-
-### Memory Palace (NOUVEAU dans v0.8.5, activé par défaut)
-
-Mémoire hiérarchique inspirée de MemPalace (96,6% LongMemEval). Se branche dans
-le `MemoryProviderManager` existant comme provider externe — **ne remplace pas**
-le flux intégré `MEMORY.md`.
-
-```env
-# Interrupteur principal Memory Palace (par défaut : true)
-SUPERAGENT_PALACE_ENABLED=true
-
-# Optionnel : fixer le Wing par défaut pour le routage
-# SUPERAGENT_PALACE_DEFAULT_WING=wing_myproject
-
-# Optionnel : score vectoriel (nécessite un callable embed_fn injecté à l'exécution)
-# SUPERAGENT_PALACE_VECTOR_ENABLED=false
-
-# Optionnel : ajuster le seuil de détection de quasi-doublons (Jaccard 5-grammes)
-# SUPERAGENT_PALACE_DEDUP_THRESHOLD=0.85
-```
-
-Disposition sur disque :
-
-```
-{memory_path}/palace/
-  identity.txt                         # L0 identité (~50 tok, toujours chargé)
-  critical_facts.md                    # L1 faits critiques (~120 tok)
-  wings.json                           # registre des Wings
-  tunnels.json                         # liens inter-Wings
-  wings/{wing_slug}/
-    wing.json
-    halls/{hall}/rooms/{room_slug}/
-      room.json
-      closet.json
-      drawers/{drawer_id}.md           # contenu verbatim brut
-      drawers/{drawer_id}.emb          # sidecar d'embedding optionnel
-```
-
-**CLI Wake-Up** — charger L0+L1 (~600–900 tok) sans scan complet :
-
-```bash
-php artisan superagent:wake-up
-php artisan superagent:wake-up --wing=wing_myproject
-php artisan superagent:wake-up --wing=wing_myproject --search="auth decisions"
-php artisan superagent:wake-up --stats
-```
-
-**Activer le score vectoriel** — injectez un callable d'embedding à
-l'exécution (par exemple dans un Service Provider après la construction du
-`MemoryProviderManager`) :
-
-```php
-use SuperAgent\Memory\Palace\PalaceBundle;
-
-$bundle = app(PalaceBundle::class);
-// Fournissez votre propre fonction d'embedding : fn(string $text): float[]
-// (par ex. encapsulez un endpoint OpenAI ou local de votre choix)
-```
-
-**Ce qui est explicitement NON inclus** : le dialecte AAAK — le propre README
-de MemPalace indique qu'AAAK régresse actuellement de 12,4 points sur
-LongMemEval vs mode brut. Le Palace de SuperAgent utilise le stockage verbatim
-brut — la source du chiffre de 96,6% — sans la couche de compression avec perte.
-
-## Configuration Multi-Agents
-
-### Configuration du Mode Automatique (NOUVEAU en v0.6.7)
-
-Activer l'orchestration multi-agents automatique:
-
-```env
-# Activer la détection multi-agents automatique
-SUPERAGENT_AUTO_MODE=true
-
-# Nombre maximum d'agents simultanés
-SUPERAGENT_MAX_CONCURRENT_AGENTS=10
-
-# Pool de ressources d'agents
-SUPERAGENT_AGENT_POOL_SIZE=20
-
-# Surveillance WebSocket
-SUPERAGENT_WEBSOCKET_MONITORING=true
-SUPERAGENT_WEBSOCKET_PORT=8080
-```
-
-### Utilisation Multi-Agents de Base
-
-```php
-use SuperAgent\Agent;
-use SuperAgent\Config\Config;
-
-// Créer l'agent principal avec mode automatique
-$config = Config::fromArray([
-    'provider' => [
-        'type' => 'anthropic',
-        'api_key' => env('ANTHROPIC_API_KEY'),
-    ],
-    'multi_agent' => [
-        'auto_mode' => true,
-        'max_concurrent' => 10,
-    ],
-]);
-
-$agent = new Agent($provider, $config);
-$agent->enableAutoMode();
-
-// L'agent décide automatiquement mode unique vs multi-agents
-$result = $agent->run("Tâche complexe en plusieurs étapes...");
-```
-
-### Pipeline de Collaboration Multi-Agents (v0.8.2)
-
-```php
-// Pipeline de Collaboration Multi-Agents (v0.8.2)
-'task_routing' => [
-    'enabled' => env('SUPERAGENT_TASK_ROUTING', true),
-    'tier_models' => [
-        1 => ['provider' => 'anthropic', 'model' => 'claude-opus-4'],   // Tier Puissance
-        2 => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4'], // Tier Équilibre
-        3 => ['provider' => 'anthropic', 'model' => 'claude-haiku-4'],  // Tier Vitesse
-    ],
-],
-```
-
-### Configuration Manuelle d'Équipes d'Agents
-
-```php
-use SuperAgent\Tools\Builtin\AgentTool;
-use SuperAgent\Swarm\ParallelAgentCoordinator;
-
-// Configurer l'équipe d'agents
-$coordinator = ParallelAgentCoordinator::getInstance();
-$coordinator->configure([
-    'max_concurrent' => 10,
-    'timeout' => 300, // 5 minutes par agent
-    'checkpoint_interval' => 60, // Sauvegarder l'état chaque minute
-]);
-
-// Créer des agents spécialisés
-$agentTool = new AgentTool();
-
-// Agent de recherche
-$chercheur = $agentTool->execute([
-    'description' => 'Recherche',
-    'prompt' => 'Rechercher les meilleures pratiques',
-    'subagent_type' => 'researcher',
-    'run_in_background' => true,
-]);
-
-// Agent d'écriture de code
-$codeur = $agentTool->execute([
-    'description' => 'Implémentation',
-    'prompt' => 'Écrire le code d\'implémentation',
-    'subagent_type' => 'code-writer',
-    'run_in_background' => true,
-]);
-
-// Surveiller le progrès
-$status = $coordinator->getTeamStatus();
-foreach ($status['agents'] as $agentId => $info) {
-    echo "Agent {$agentId}: {$info['status']} - {$info['progress']}%\n";
-}
-```
-
-### Système de Boîte aux Lettres d'Agents
-
-Configurer la communication persistante entre agents:
-
-```php
-// config/superagent.php
-'mailbox' => [
-    'enabled' => true,
-    'storage' => 'redis', // ou 'database', 'file'
-    'ttl' => 3600, // TTL des messages en secondes
-    'max_messages' => 1000, // Nombre max de messages par agent
-],
-```
-
-Utilisation:
-
-```php
-use SuperAgent\Tools\Builtin\SendMessageTool;
-
-$messageTool = new SendMessageTool();
-
-// Message direct
-$messageTool->execute([
-    'to' => 'agent-123',
-    'message' => 'Mise à jour prioritaire',
-    'summary' => 'Mise à jour',
-]);
-
-// Diffusion
-$messageTool->execute([
-    'to' => '*',
-    'message' => 'Annonce à l\'équipe',
-    'summary' => 'Annonce',
-]);
-```
-
-### Tableau de Bord de Surveillance WebSocket
-
-Activer la surveillance en temps réel:
-
-```bash
-# Démarrer le serveur WebSocket
-php artisan superagent:websocket
-
-# Accéder au tableau de bord
-open http://localhost:8080/superagent/monitor
-```
-
-Fonctionnalités du tableau de bord:
-- État des agents en temps réel
-- Utilisation de tokens par agent
-- Agrégation des coûts
-- Visualisation du progrès
-- Surveillance de la file de messages
-
-### Configuration des Rôles d'Agents
-
-Définir des rôles d'agents spécialisés:
-
-```php
-// config/superagent.php
-'agent_roles' => [
-    'researcher' => [
-        'model' => 'claude-3-haiku-20240307',
-        'tools' => ['web_search', 'web_fetch'],
-        'max_tokens' => 8192,
-    ],
-    'code-writer' => [
-        'model' => 'claude-3-sonnet-20240229',
-        'tools' => ['file_read', 'file_write', 'file_edit'],
-        'max_tokens' => 16384,
-    ],
-    'reviewer' => [
-        'model' => 'claude-3-opus-20240229',
-        'tools' => ['file_read', 'grep'],
-        'max_tokens' => 4096,
-    ],
-],
-```
-
-### Point de Contrôle & Reprise pour Workflows Multi-Agents
-
-```php
-// Activer les points de contrôle
-$coordinator->enableCheckpoints([
-    'interval' => 60, // Sauvegarder toutes les 60 secondes
-    'storage' => 'database',
-]);
-
-// Reprendre depuis un point de contrôle après échec
-$coordinator->resumeFromCheckpoint($checkpointId);
-```
-
-### Pool de Ressources & Contrôle de Concurrence
-
-```php
-// Configurer le pool d'agents
-use SuperAgent\Swarm\AgentPool;
-
-$pool = new AgentPool([
-    'max_agents' => 20,
-    'max_concurrent' => 10,
-    'queue_timeout' => 300,
-]);
-
-// Soumettre des tâches au pool
-$taskIds = [];
-foreach ($tasks as $task) {
-    $taskIds[] = $pool->submit($task);
-}
-
-// Attendre la complétion
-$results = $pool->waitAll($taskIds);
-```
-
-### Optimisation des Performances Multi-Agents
-
-```env
-# Optimiser pour l'exécution parallèle
-SUPERAGENT_PARALLEL_CHUNK_SIZE=5
-SUPERAGENT_PARALLEL_TIMEOUT=300
-SUPERAGENT_PARALLEL_RETRY_COUNT=3
-
-# Optimisation de la mémoire
-SUPERAGENT_AGENT_MEMORY_LIMIT=256M
-SUPERAGENT_SHARED_CONTEXT_CACHE=true
-
-# Optimisation réseau
-SUPERAGENT_API_CONNECTION_POOL=50
-SUPERAGENT_API_KEEPALIVE=true
-```
-
-## Notes de Mise à Jour v0.7.9
-
-v0.7.9 est une version de renforcement architectural pur. **Aucun changement de configuration requis. Entièrement rétrocompatible.**
-
-Changements clés :
-- Les méthodes `getInstance()` de 19 classes singleton sont maintenant `@deprecated` — le code existant continue de fonctionner, mais l'injection par constructeur est préférée pour le nouveau code
-- 14 outils intégrés utilisent maintenant `ToolStateManager` au lieu de propriétés `private static` — injectez une instance partagée en mode Swarm pour la cohérence inter-processus
-- `SessionManager` est décomposé en `SessionStorage` + `SessionPruner` — l'API publique est inchangée
-- `executeProcessParallel()` traite maintenant par lots de `$maxParallel` (défaut 5) — auparavant lançait un nombre illimité de processus concurrents
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.7.0
-
-v0.7.0 ajoute 13 optimisations de performance (5 token + 8 exécution). **Toutes sauf Batch API sont activées par défaut. Aucune modification de configuration requise.**
-
-Pour désactiver une optimisation, définissez la variable d'environnement correspondante à `false` :
-```env
-SUPERAGENT_OPT_TOOL_COMPACTION=false
-SUPERAGENT_OPT_SELECTIVE_TOOLS=false
-SUPERAGENT_OPT_MODEL_ROUTING=false
-SUPERAGENT_OPT_RESPONSE_PREFILL=false
-SUPERAGENT_OPT_CACHE_PINNING=false
-```
-
-Le modèle rapide pour le routage est par défaut `claude-haiku-4-5-20251001`. Remplacez avec `SUPERAGENT_OPT_FAST_MODEL=votre-modele-id`.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.6.19
-
-v0.6.19 ajoute `NdjsonStreamingHandler` pour la journalisation des agents exécutés in-process. **Aucune modification de configuration requise.**
-
-Auparavant, seuls les processus enfants (via `agent-runner.php`) émettaient des logs NDJSON. Désormais les appels `$agent->prompt()` in-process peuvent aussi écrire du NDJSON compatible CC vers des fichiers de log via `NdjsonStreamingHandler::create()` ou `createWithWriter()`, les rendant visibles dans le moniteur de processus.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.6.18
-
-v0.6.18 met à niveau la journalisation des agents enfants du protocole personnalisé vers le NDJSON compatible Claude Code. **Aucune modification de configuration requise.**
-
-Les processus enfants émettent désormais des événements NDJSON standard sur stderr (`{"type":"assistant",...}`, `{"type":"result",...}`) au lieu du protocole préfixé `__PROGRESS__:`. Le `ProcessBackend` du parent détecte automatiquement les deux formats, assurant une compatibilité ascendante complète.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.6.17
-
-v0.6.17 ajoute la surveillance en temps réel de la progression des agents enfants. **Aucune modification de configuration requise.**
-
-Auparavant, lorsque les sous-agents s'exécutaient dans des processus OS séparés via `ProcessBackend`, le moniteur de processus ne pouvait pas afficher leur progression (outils utilisés, compteurs de tokens, etc.). Désormais les processus enfants émettent des événements de progression structurés via stderr en utilisant le protocole `__PROGRESS__:`, et le parent les parse dans `AgentProgressTracker` — rendant l'activité des agents enfants visible dans `ParallelAgentDisplay` et les tableaux de bord WebSocket.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.6.16
-
-v0.6.16 garantit que les processus enfants des sous-agents ont accès à toutes les définitions d'agents et configs MCP du parent. **Aucune modification de configuration requise.**
-
-Le parent sérialise désormais ces enregistrements et les transmet via JSON stdin — les processus enfants fonctionnent de manière identique avec ou sans Laravel.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.6.15
-
-v0.6.15 ajoute le partage automatique des serveurs MCP. **Aucune modification de configuration requise.**
-
-Quand l'agent parent se connecte à un serveur MCP stdio (ex. Valhalla), un pont TCP est démarré automatiquement. Les agents enfants se connectent au pont au lieu de démarrer leur propre processus MCP.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.6.12
-
-v0.6.12 corrige trois problèmes où les processus enfants des sous-agents ne pouvaient pas accéder aux services Laravel, aux identifiants API ou à l'ensemble complet des outils. **Aucune modification de configuration requise.**
-
-Si vous utilisez des définitions d'agents personnalisées dans `.claude/agents/`, des skills dans `.claude/commands/` ou des serveurs MCP configurés via `config('superagent.mcp')`, ceux-ci fonctionnent désormais correctement dans les processus sous-agents.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.6.11
-
-v0.6.11 remplace le backend d'exécution par défaut des sous-agents. **Aucune modification de configuration requise** — le nouveau comportement est automatique.
-
-**Ce qui change :** `AgentTool` lance désormais chaque sous-agent dans un processus OS séparé via `proc_open()` au lieu d'utiliser les Fibers PHP dans le même processus. Cela fournit un vrai parallélisme — 5 agents concurrents terminent en ~544ms vs ~2500ms en séquentiel.
-
-**Changement incompatible pour le code de test uniquement :** Si vos tests mockent `InProcessBackend` ou reposent sur l'exécution par Fiber, ils peuvent nécessiter une mise à jour. Le code de production qui appelle simplement `AgentTool` n'est pas affecté.
-
-**Prérequis :** `proc_open()` doit être disponible (c'est le cas sur les installations PHP standard). Si désactivé, `AgentTool` se replie automatiquement sur `InProcessBackend`.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Notes de Mise à Jour v0.6.10
-
-v0.6.10 est une version de correction de bugs sans modification de configuration. Si vous utilisez des agents synchrones en processus (`run_in_background: false` avec le backend `in-process`), cette mise à jour résout un blocage critique où la fiber de l'agent n'était jamais démarrée, provoquant un timeout de 5 minutes à chaque appel.
-
-**Changement incompatible pour le code de test uniquement** : Le résultat synchrone de `AgentTool::execute()` retourne maintenant `'agentId'` (camelCase) et `'status' => 'completed'` au lieu de l'ancien format asynchrone inaccessible. Mettez à jour vos assertions de test en conséquence.
-
-```bash
-composer update forgeomni/superagent
-```
-
-## Configuration des Fonctionnalités v0.6.9
-
-### URL de Base Personnalisée avec Préfixe de Chemin
-
-Les providers gèrent maintenant correctement les valeurs `base_url` incluant un préfixe de chemin (passerelles API, proxies inverses) :
-
-```php
-// Passerelle compatible Anthropic avec chemin personnalisé
-$agent = new Agent([
-    'provider'  => 'anthropic',
-    'api_key'   => env('ANTHROPIC_API_KEY'),
-    'base_url'  => 'https://gateway.example.com/anthropic', // préfixe de chemin préservé
-    'model'     => 'claude-sonnet-4-6',
-]);
-
-// Proxy compatible OpenAI
-$agent = new Agent([
-    'provider'  => 'openai',
-    'api_key'   => env('OPENAI_API_KEY'),
-    'base_url'  => 'https://proxy.example.com/openai',      // préfixe de chemin préservé
-    'model'     => 'gpt-4o',
-]);
-
-// Ollama local derrière un proxy inverse à sous-chemin
-$agent = new Agent([
-    'provider'  => 'ollama',
-    'base_url'  => 'http://localhost:8080/ollama',          // préfixe de chemin préservé
-    'model'     => 'llama3',
-]);
-```
-
-> **Note** : Dans les versions v0.6.8 et antérieures, les valeurs `base_url` avec préfixe de chemin échouaient silencieusement pour OpenAI, OpenRouter et Ollama — le résolveur RFC 3986 de Guzzle supprimait le chemin lors de l'utilisation d'un chemin de requête absolu. Les quatre providers sont maintenant corrigés.
-
-## Configuration des Fonctionnalités v0.6.8
-
-### Contexte Incrémental
-
-```php
-use SuperAgent\IncrementalContext\IncrementalContextManager;
-
-$manager = new IncrementalContextManager([
-    'auto_compress'       => true,
-    'compress_threshold'  => 4000,
-    'auto_checkpoint'     => true,
-    'checkpoint_interval' => 10,
-    'compression_level'   => 'balanced',
-]);
-
-$manager->initialize($messages);
-$delta  = $manager->getDelta();
-$full   = $manager->applyDelta($delta, $base);
-$manager->restoreCheckpoint($checkpointId);
-$window = $manager->getSmartWindow(maxTokens: 8000);
-```
-
-### Chargement Paresseux du Contexte
-
-```php
-use SuperAgent\LazyContext\LazyContextManager;
-
-$lazy = new LazyContextManager(['cache_ttl' => 600]);
-
-$lazy->registerContext('system-rules', [
-    'type' => 'system', 'priority' => 9,
-    'tags' => ['rules'], 'size' => 200,
-    'source' => '/path/to/rules.json',
-]);
-
-$context = $lazy->getContextForTask('refactoriser le service PHP');
-$window  = $lazy->getSmartWindow(maxTokens: 12000, focusArea: 'php');
-```
-
-### Chargement Différé des Outils
-
-```php
-use SuperAgent\Tools\ToolLoader;
-
-$loader = new ToolLoader(['lazy_load' => true]);
-$tools  = $loader->loadForTask('rechercher et éditer des fichiers PHP');
-$agent  = new Agent(['provider' => 'anthropic', 'tools' => $tools]);
-```
-
-### Recherche Web Sans Clé API
-
-`WebSearchTool` se replie automatiquement sur DuckDuckGo quand `SEARCH_API_KEY` n'est pas définie. Pour la production :
-
-```env
-SEARCH_API_KEY=votre_cle_serper
-SEARCH_ENGINE=serper
-```
-
-## Vérification
-
-### 1️⃣ Exécuter la Vérification de Santé
-
-Créer le script de vérification de santé `check-superagent.php`:
-
-```php
-<?php
-
-require 'vendor/autoload.php';
-
-$checks = [
-    'Version PHP' => version_compare(PHP_VERSION, '8.1.0', '>='),
-    'Installation Laravel' => class_exists('Illuminate\Foundation\Application'),
-    'Installation SuperAgent' => class_exists('SuperAgent\Agent'),
-    'Extension JSON' => extension_loaded('json'),
-    'Extension CURL' => extension_loaded('curl'),
-    'Extension OpenSSL' => extension_loaded('openssl'),
-];
-
-echo "Vérification de l'Installation SuperAgent\n";
-echo "========================================\n\n";
-
-$allPassed = true;
-foreach ($checks as $name => $result) {
-    $status = $result ? '✅' : '❌';
-    echo "$status $name\n";
-    if (!$result) $allPassed = false;
-}
-
-if ($allPassed) {
-    echo "\n🎉 Toutes les vérifications réussies! SuperAgent est prêt.\n";
-} else {
-    echo "\n⚠️ Certaines vérifications ont échoué, veuillez résoudre les problèmes ci-dessus.\n";
-    exit(1);
-}
-```
-
-Exécuter la vérification:
-```bash
-php check-superagent.php
-```
-
-### 2️⃣ Tester les Fonctionnalités de Base
-
-```php
-use SuperAgent\Agent;
-use SuperAgent\Config\Config;
-use SuperAgent\Providers\AnthropicProvider;
-
-// Tester une requête de base
-$config = Config::fromArray([
-    'provider' => [
-        'type' => 'anthropic',
-        'api_key' => env('ANTHROPIC_API_KEY'),
-        'model' => 'claude-3-haiku-20240307',
-    ],
-]);
-
-$provider = new AnthropicProvider($config->provider);
-$agent = new Agent($provider, $config);
-
-$response = $agent->query("Dites 'Installation réussie!'");
-echo $response->content;
-```
-
-### 3️⃣ Tester les Outils CLI
-
-```bash
-# Lister les outils disponibles
-php artisan superagent:tools
-
-# Tester la fonctionnalité de chat
-php artisan superagent:chat
-
-# Exécuter une requête simple
-php artisan superagent:run --prompt="Qu'est-ce que 2+2?"
-```
-
-## Dépannage
-
-### ❓ L'Installation Composer Échoue
-
-**Message d'erreur**:
-```
-Your requirements could not be resolved to an installable set of packages
-```
-
-**Solution**:
-```bash
-# Vider le cache
-composer clear-cache
-
-# Mettre à jour les dépendances
-composer update --with-dependencies
-
-# Utiliser un miroir domestique (utilisateurs français)
-composer config repo.packagist composer https://packagist.fr
-```
-
-### ❓ Fournisseur de Services Non Trouvé
-
-**Message d'erreur**:
-```
-Class 'SuperAgent\SuperAgentServiceProvider' not found
-```
-
-**Solution**:
-```bash
-# Régénérer l'autoload
-composer dump-autoload
-
-# Vider le cache Laravel
-php artisan optimize:clear
-```
-
-### ❓ Clé API Invalide
-
-**Message d'erreur**:
-```
-Invalid API key provided
-```
-
-**Solution**:
-1. Vérifier que la clé API dans le fichier `.env` est correcte
-2. S'assurer qu'il n'y a pas d'espaces ou de guillemets supplémentaires autour de la clé
-3. Vérifier que la clé est activée et non expirée
-4. Vider le cache de configuration: `php artisan config:clear`
-
-### ❓ Mémoire Épuisée
-
-**Message d'erreur**:
-```
-Allowed memory size of X bytes exhausted
-```
-
-**Solution**:
-
-Éditer `php.ini`:
-```ini
-memory_limit = 512M
-```
-
-Ou définir temporairement dans le code:
-```php
-ini_set('memory_limit', '512M');
-```
-
-### ❓ Permission Refusée
-
-**Message d'erreur**:
-```
-Permission denied
-```
-
-**Solution**:
-```bash
-# Définir les permissions correctes
-chmod -R 755 storage
-chmod -R 755 bootstrap/cache
-
-# Définir le propriétaire (ajuster selon le système)
-chown -R www-data:www-data storage
-chown -R www-data:www-data bootstrap/cache
-```
-
-## Guide de Mise à Jour
-
-### De 0.x à 1.0
-
-```bash
-# 1. Sauvegarder les données existantes
-php artisan backup:run
-
-# 2. Mettre à jour les dépendances
-composer update forgeomni/superagent
-
-# 3. Exécuter les nouvelles migrations
-php artisan migrate
-
-# 4. Mettre à jour les fichiers de configuration
-php artisan vendor:publish --provider="SuperAgent\SuperAgentServiceProvider" --tag="config" --force
-
-# 5. Vider tous les caches
-php artisan optimize:clear
-```
-
-### Matrice de Compatibilité des Versions
-
-| SuperAgent | Laravel | PHP   | Notes |
-|------------|---------|-------|-------|
-| 0.8.0      | 10.x+   | 8.1+ | 19 améliorations : SQLite+FTS5 (avec chiffrement), compression contexte unifiée, détection injection prompt (intégrée au prompt builder), pool credentials (intégrée au provider registry), routage complexité, détection conflits écriture, interface memory provider (vector + épisodique), SecurityCheckChain (validation bash composable), divulgation skills, écriture stream sécurisée, I/O FileSnapshot par lots, limites mémoire AutoDream, validation ReplayStore, sanitization PromptHook, diagramme Mermaid. 18 corrections tests. 1687 tests, 0 échec |
-| 0.7.8      | 10.x+   | 8.1+  | Mode Agent Harness + sous-systèmes entreprise : tâches & sessions persistantes, événements stream, boucle REPL, auto-compacteur, scénarios E2E, middleware retry API, backend iTerm2, système de plugins, état d'app observable, rechargement à chaud des hooks, hooks prompt/agent, passerelle multi-canal, protocole backend, flux OAuth device code, règles de permission par chemin, notifications coordinateur. 628 nouveaux tests |
-| 0.7.7      | 10.x+   | 8.1+  | Renforcement déboguabilité : journalisation de 27 exceptions silencieuses, tests unitaires Agent (31 tests), framework de revue de code docs/REVIEW.md |
-| 0.7.6      | 10.x+   | 8.1+  | 6 sous-systèmes innovants : Replay d'Agent & Débogage Temporel, Fork de Conversation, Protocole de Débat, Prédiction de Coûts, Garde-fous en Langage Naturel, Pipelines Auto-Réparateurs |
-| 0.7.5      | 10.x+   | 8.1+  | Compatibilité noms d'outils Claude Code : ToolNameResolver bidirectionnel, résolution auto dans définitions d'agents et système de permissions |
-| 0.7.2      | 10.x+   | 8.1+  | Correction résolution chemins .claude/ : racine du projet au lieu de cwd pour AgentManager, SkillManager, MCPManager |
-| 0.7.1      | 10.x+   | 8.1+  | Correction AgentTool PermissionMode 'bypass' enum incompatible |
-| 0.7.0      | 10.x+   | 8.1+  | 13 optimisations de performance : compaction token, outils sélectifs, routage modèle, prefill, cache pinning + outils parallèles, dispatch streaming, pool connexions, prefetch, tokens adaptatifs, API batch, zéro-copie : compaction résultats, schéma sélectif, routage modèle, prefill réponse, épinglage cache |
-| 0.6.19     | 10.x+   | 8.1+  | Journalisation NDJSON in-process via `NdjsonStreamingHandler` pour visibilité moniteur |
-| 0.6.18     | 10.x+   | 8.1+  | Journalisation structurée NDJSON compatible Claude Code remplace le protocole `__PROGRESS__:` |
-| 0.6.17     | 10.x+   | 8.1+  | Surveillance en temps réel de la progression des agents enfants via protocole stderr `__PROGRESS__:` |
-| 0.6.16     | 10.x+   | 8.1+  | Propagation des enregistrements agent/MCP parent vers enfant via sérialisation stdin |
-| 0.6.15     | 10.x+   | 8.1+  | Partage de serveurs MCP via pont TCP — N agents enfants partagent 1 processus MCP |
-| 0.6.12     | 10.x+   | 8.1+  | Bootstrap Laravel dans processus enfants, correction sérialisation provider, ensemble complet d'outils |
-| 0.6.11     | 10.x+   | 8.1+  | Vrais sous-agents parallèles au niveau processus (proc_open remplace Fiber), accélération 4.6x |
-| 0.6.10     | 10.x+   | 8.1+  | Correction de l'exécution synchrone multi-agents (blocage fiber, incompatibilité type backend, tracker de progression) |
-| 0.6.9      | 10.x+   | 8.1+  | Correction du chemin base URL Guzzle (providers OpenAI / OpenRouter / Ollama) |
-| 0.6.8      | 10.x+   | 8.1+  | Contexte incrémental, chargement paresseux contexte/outils, héritage provider sous-agent, repli WebSearch sans clé, renforcement WebFetch |
-| 0.6.7      | 10.x+   | 8.1+  | Suivi d'Agents Parallèles Multi & Mode Auto |
-| 0.6.6      | 10.x+   | 8.1+  | Fenêtre de Contexte Intelligent (888 tests) |
-| 0.6.5      | 10.x+   | 8.1+  | Distillation de Compétences, Point de Contrôle & Reprise (865 tests) |
-| 0.6.2      | 10.x+   | 8.1+  | Pipeline DSL, Autopilote de Coûts, Feedback Adaptatif (776 tests) |
-| 0.6.1      | 10.x+   | 8.1+  | Guardrails DSL (644 tests) |
-| 0.6.0      | 10.x+   | 8.1+  | Mode Bridge |
-| 0.5.7      | 10.x+   | 8.1+  | Interrupteur principal télémétrie, garde-fous de sécurité (452 tests) |
-
-## Déploiement en Production
-
-### Optimisation des Performances
-
-```bash
-# Cache de configuration
-php artisan config:cache
-
-# Cache des routes
-php artisan route:cache
-
-# Optimiser l'autoloader
-composer install --optimize-autoloader --no-dev
-```
-
-### Configurer les Files d'Attente
-
-Créer la configuration Supervisor `/etc/supervisor/conf.d/superagent.conf`:
-
-```ini
-[program:superagent-worker]
-process_name=%(program_name)s_%(process_num)02d
-command=php /path/to/artisan queue:work --queue=superagent
-autostart=true
-autorestart=true
-user=www-data
-numprocs=4
-redirect_stderr=true
-stdout_logfile=/var/log/superagent-worker.log
-```
-
-### Configurer Nginx
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-    root /path/to/public;
-    
-    index index.php;
-    
-    location / {
-        try_files $uri $uri/ /index.php?$query_string;
-    }
-    
-    location ~ \.php$ {
-        fastcgi_pass unix:/var/run/php/php8.1-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
-        include fastcgi_params;
-    }
-    
-    # Support de réponse en streaming
-    location /superagent/stream {
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 3600;
-    }
-}
-```
-
-## Obtenir de l'Aide
-
-### 📚 Ressources
-
-- 📖 [Documentation Officielle](https://superagent-docs.example.com)
-- 💬 [Forum Communautaire](https://forum.superagent.dev)
-- 🐛 [Suivi des Problèmes](https://github.com/yourusername/superagent/issues)
-- 📺 [Tutoriels Vidéo](https://youtube.com/@superagent)
-
-### 💼 Support Technique
-
-- Support communautaire: [GitHub Discussions](https://github.com/yourusername/superagent/discussions)
-- Support par email: mliz1984@gmail.com
-- Serveur Discord: [Rejoindre notre communauté](https://discord.gg/superagent)
-
-### 🔍 Conseils de Débogage
-
-Activer le mode débogage:
-```env
-SUPERAGENT_DEBUG=true
-APP_DEBUG=true
-```
-
-Consulter les logs:
-```bash
-# Logs Laravel
-tail -f storage/logs/laravel.log
-
-# Logs spécifiques SuperAgent
-tail -f storage/logs/superagent.log
-
-# Débogage en temps réel
-php artisan tinker
+superagent "liste les trois fichiers les plus récents du répertoire"
 ```
 
 ---
 
-© 2024-2026 SuperAgent. Tous droits réservés.
+## Configuration des fonctionnalités optionnelles
+
+Chaque fonctionnalité ci-dessous est opt-in. Ignorez celles dont vous n'avez pas besoin.
+
+### API OpenAI Responses
+
+Sélectionnez le provider dédié au lieu de `openai` :
+
+```php
+new Agent([
+    'provider' => 'openai-responses',
+    'model'    => 'gpt-5',
+]);
+```
+
+Config Laravel :
+
+```php
+// config/superagent.php
+'providers' => [
+    'openai-responses' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'model'   => 'gpt-5',
+        'store'   => true,    // requis pour previous_response_id
+    ],
+],
+```
+
+Ensemble complet des fonctionnalités (reasoning effort, prompt cache key, verbosity, service tier, continuation) dans la section [API OpenAI Responses](README_FR.md#api-openai-responses) du README.
+
+*Depuis v0.9.1*
+
+### OAuth abonnement ChatGPT
+
+Nécessite un abonnement Plus / Pro / Business + un access_token ChatGPT stocké. Après `superagent auth login codex` (ou un import spécifique au host), le provider Responses route automatiquement vers `chatgpt.com/backend-api/codex`.
+
+```php
+new Agent([
+    'provider'     => 'openai-responses',
+    'access_token' => $token,          // depuis ~/.superagent/credentials/...
+    'account_id'   => $accountId,      // ajoute l'en-tête chatgpt-account-id
+]);
+```
+
+Pas besoin de surcharger la base URL — le basculement de routage est automatique avec `auth_mode: 'oauth'`.
+
+*Depuis v0.9.1*
+
+### Azure OpenAI
+
+Pointez `base_url` sur votre ressource Azure. Détection automatique via six marqueurs (`openai.azure.*`, `cognitiveservices.azure.*`, `aoai.azure.*`, `azure-api.*`, `azurefd.*`, `windows.net/openai`).
+
+```bash
+export AZURE_OPENAI_API_KEY=...
+export AZURE_OPENAI_BASE=https://my-resource.openai.azure.com/openai/deployments/gpt-5
+```
+
+```php
+new Agent([
+    'provider'          => 'openai-responses',
+    'base_url'          => getenv('AZURE_OPENAI_BASE'),
+    'api_key'           => getenv('AZURE_OPENAI_API_KEY'),
+    'azure_api_version' => '2025-04-01-preview',   // défaut ; surcharger pour deployments plus anciens
+]);
+```
+
+Les en-têtes `api-key` ET `Authorization: Bearer ...` sont envoyés — Azure honore celui que sa gateway attend.
+
+*Depuis v0.9.1*
+
+### Modèles locaux (Ollama / LM Studio)
+
+Tous deux sans auth — le SDK envoie un Bearer token placeholder pour que Guzzle passe.
+
+**Ollama** (port 11434 par défaut) :
+
+```bash
+# Installer + pull un modèle (hors SuperAgent) :
+ollama pull llama3.2
+ollama serve &
+```
+
+```php
+new Agent(['provider' => 'ollama', 'model' => 'llama3.2']);
+```
+
+**LM Studio** (port 1234 par défaut, depuis v0.9.1) :
+
+```bash
+# Lancez LM Studio, chargez un modèle, activez le serveur OpenAI-compat.
+```
+
+```php
+new Agent(['provider' => 'lmstudio', 'model' => 'qwen2.5-coder-7b-instruct']);
+```
+
+Surcharger host/port via `base_url` :
+
+```php
+new Agent([
+    'provider' => 'lmstudio',
+    'base_url' => 'http://10.0.0.2:9876',
+]);
+```
+
+### Catalogue MCP + sync
+
+Configuration MCP déclarative — déposez un catalogue dans votre projet, exécutez `sync`, obtenez un `.mcp.json` consommable par SuperAgent et tout client MCP compatible.
+
+**Étape 1 — créer le catalogue :**
+
+```bash
+mkdir -p .mcp-servers
+cat > .mcp-servers/catalog.json <<'EOF'
+{
+  "mcpServers": {
+    "sqlite":     {"command": "uvx",  "args": ["mcp-server-sqlite", "--db", "./app.db"]},
+    "brave":      {"command": "npx",  "args": ["@brave/mcp"], "env": {"BRAVE_API_KEY": "${BRAVE_API_KEY}"}},
+    "filesystem": {"command": "npx",  "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]}
+  },
+  "domains": {
+    "baseline": ["filesystem"],
+    "research": ["filesystem", "brave"],
+    "all":      ["filesystem", "brave", "sqlite"]
+  }
+}
+EOF
+```
+
+**Étape 2 — prévisualiser et appliquer :**
+
+```bash
+superagent mcp sync --dry-run            # montre ce qui changerait
+superagent mcp sync                      # catalogue complet
+superagent mcp sync --domain=baseline    # seulement le domaine "baseline"
+superagent mcp sync --servers=brave,sqlite
+```
+
+Contrat non destructif — les fichiers édités par l'utilisateur sont préservés. Un manifest à `<project>/.superagent/mcp-manifest.json` trace ce que nous écrivons ; les re-syncs ne touchent que les fichiers qui étaient à nous.
+
+*Depuis v0.9.1*
+
+### Transports wire-protocol
+
+Diffuser les événements structurés vers : stdout, stderr, fichier, socket TCP, socket unix. Les ponts IDE utilisent les variantes listen, de sorte que le plugin éditeur se connecte après le démarrage de l'agent.
+
+```bash
+# Défaut (stdout) :
+superagent --output json-stream "corrige le bug"
+
+# Persister dans un fichier pour replay post-hoc :
+superagent --output json-stream "corrige le bug" > runs/$(date +%s).ndjson
+```
+
+Mode listen programmatique (l'IDE se connecte) :
+
+```php
+$factory = new SuperAgent\CLI\AgentFactory();
+[$emitter, $transport] = $factory->makeWireEmitterForDsn('listen://unix//tmp/agent.sock');
+
+$agent = new Agent([
+    'provider' => 'openai',
+    'options'  => ['wire_emitter' => $emitter],
+]);
+$agent->run($prompt);
+$transport->close();
+```
+
+*Transports socket / TCP / file depuis v0.9.1.*
+
+### Checkpoints shadow-git
+
+Annulation au niveau fichier des éditions pilotées par l'agent. Le repo shadow vit sous `~/.superagent/history/<project-hash>/shadow.git` — ne touche jamais au `.git` de votre projet.
+
+```php
+use SuperAgent\Checkpoint\CheckpointManager;
+use SuperAgent\Checkpoint\GitShadowStore;
+
+$mgr = new CheckpointManager(
+    shadowStore: new GitShadowStore(getcwd()),
+);
+$mgr->createCheckpoint($agentState, label: 'before-refactor');
+
+// Après un run destructif :
+$list = $mgr->list();
+$mgr->restoreFiles($list[0]);   // réverse les fichiers suivis vers le snapshot
+```
+
+Pas de config supplémentaire — le repo shadow est créé à la demande au premier snapshot. `git` doit être dans PATH.
+
+*Depuis v0.9.0*
+
+---
+
+## Vérification
+
+### Smoke tests
+
+```bash
+superagent --version
+superagent --help
+superagent health --all --json    # probe tous les providers connus
+```
+
+### Run end-to-end
+
+```bash
+superagent "quelle version de PHP ce projet cible ? lis composer.json pour répondre"
+```
+
+Doit afficher la version et sortir 0. Si ça bloque, le SSE idle timeout (5 min par défaut) finit par tuer la connexion — ajustez via `stream_idle_timeout_ms` si votre réseau est particulièrement lent.
+
+### Smoke CI
+
+```bash
+set -e
+superagent health --json | tee health.json
+jq -e '. | map(select(.ok == true)) | length > 0' health.json
+```
+
+Sortie non nulle si un provider configuré échoue.
+
+---
+
+## Dépannage
+
+**`superagent: command not found`** — le bin global de Composer n'est pas dans `PATH`. Exécutez `composer global config bin-dir --absolute` et ajoutez le résultat à votre profile shell.
+
+**`No API key in environment`** — la variable `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. n'est pas définie dans le shell où `superagent` tourne. Vérifiez `env | grep _API_KEY`. Sous PHP-FPM, assurez-vous que la clé est exportée dans l'env du worker (pas seulement en shell interactif).
+
+**L'API Responses renvoie `UsageNotIncludedException`** — votre plan ChatGPT n'inclut pas le modèle demandé. Changez de modèle, upgradez le plan, ou basculez sur `provider: 'openai'` avec clé API.
+
+**`ContextWindowExceededException` sur longues sessions OpenAI Responses** — basculez au pattern de continuation `previous_response_id` (envoyez seulement le nouveau tour), ou compactez l'historique avant le run suivant. Voir la section [API OpenAI Responses](README_FR.md#api-openai-responses) du README.
+
+**L'agent bloque 5 minutes puis timeout** — le flux SSE est devenu inactif. C'est la garde `stream_idle_timeout_ms` qui se déclenche ; le problème sous-jacent est habituellement un chemin réseau défaillant ou une panne provider. `superagent health` pour confirmer.
+
+**`ProviderException: stream closed before response.completed` sur l'API Responses** — le provider a abandonné le flux avant l'événement terminal. Retry une fois ; si récurrent, ouvrez un ticket de support avec le request id retourné par OpenAI (visible via `--verbose`).
+
+**`McpCommand sync` écrit `user-edited` au lieu de `written`** — vous avez édité à la main `.mcp.json`. Soit annulez vos éditions, soit supprimez le fichier, soit supprimez l'entrée correspondante de `<project>/.superagent/mcp-manifest.json` pour laisser le prochain sync le régénérer.
+
+**PHP-FPM sous un shell parent Claude Code** — la garde de récursion de claude déclenche sur les variables d'env `CLAUDECODE=*` héritées. Unsettez-les dans la config du pool :
+
+```ini
+env[CLAUDECODE] =
+env[CLAUDE_CODE_ENTRYPOINT] =
+env[CLAUDE_CODE_SSE_PORT] =
+```
+
+**Le login OAuth MCP bloque** — le flux device attend que vous approuviez dans un navigateur. La CLI affiche l'URL + code utilisateur sur stderr ; copiez l'URL, ouvrez-la où vous voulez (pour atteindre le provider), entrez le code, approuvez. Le login reprend dans ~30 secondes.
+
+**Le transport wire unix-socket échoue au bind** — un fichier socket obsolète existe. `WireTransport` unlink automatiquement les sockets `listen://unix` obsolètes avant le bind ; si ça échoue encore, `lsof -U | grep <sock-path>` pour trouver qui détient le socket.
+
+---
+
+## Mise à jour
+
+### CLI autonome
+
+```bash
+# Si installé via composer global :
+composer global update forgeomni/superagent
+
+# Si installé via clone :
+cd ~/.local/src/superagent && git pull && composer install --no-dev
+
+# Vérifier :
+superagent --version
+```
+
+### Dépendance Laravel
+
+```bash
+composer update forgeomni/superagent
+php artisan vendor:publish --tag=superagent-config --force   # optionnel — re-publie la config
+```
+
+Aucune migration de base ne ship avec cette release. Les migrations des versions précédentes (Laravel-only) restent applicables — `php artisan migrate` si pas déjà fait.
+
+### Compatibilité ascendante de la config
+
+Chaque addition 0.9.1 est additive avec des défauts raisonnables. Les `config/superagent.php` existants n'ont besoin d'aucun changement. Pour opt-in aux fonctionnalités 0.9.1 :
+
+- Ajoutez un bloc `'openai-responses'` pour le nouveau provider
+- Ajoutez `'lmstudio'` si vous faites tourner un serveur LM Studio local
+- Passez `'request_max_retries'` / `'stream_max_retries'` / `'stream_idle_timeout_ms'` sur tout provider nécessitant un retry ajusté
+
+---
+
+## Désinstallation
+
+```bash
+# CLI autonome :
+composer global remove forgeomni/superagent
+# Ou retirez le lien + clone si vous avez choisi cette voie :
+rm /usr/local/bin/superagent
+rm -rf ~/.local/src/superagent
+
+# Données utilisateur (credentials, cache models, historique shadow-git) :
+rm -rf ~/.superagent/
+
+# Dépendance Laravel :
+composer remove forgeomni/superagent
+# Nettoyer la config + migrations si vous les avez publiées :
+rm config/superagent.php
+```
+
+Rien dans `/etc` ni `/var` n'est touché par SuperAgent — tout vit sous `~/.superagent/` et l'arbre du projet.

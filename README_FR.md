@@ -1,675 +1,818 @@
-# SuperAgent - SDK d'Orchestration Multi-Agents Laravel de Niveau Entreprise 🚀
+# SuperAgent
 
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.9.1-purple)](https://github.com/forgeomni/superagent)
 
-> **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
-> **📖 Documentation**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [Utilisation Avancée](docs/ADVANCED_USAGE_FR.md) | [Docs API](docs/)
+> **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
+> **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
 
-SuperAgent est un SDK Laravel AI Agent de niveau entreprise puissant qui offre des capacités au niveau de Claude avec orchestration multi-agents, surveillance en temps réel et mise à l'échelle distribuée. Construisez et déployez des équipes d'agents IA qui travaillent en parallèle avec détection automatique de tâches et gestion intelligente des ressources.
+SDK d'agent IA pour PHP — exécutez la boucle agentique complète (tour LLM → appel d'outil → résultat → tour suivant) en processus, avec douze providers, streaming temps réel, orchestration multi-agents et un protocole wire lisible par machine. Utilisable en CLI autonome ou comme dépendance Laravel.
 
-## ✨ Fonctionnalités Principales
-
-### 🆕 v0.9.0 — refonte inspirée de kimi-cli + qwen-code (16 phases, 671 tests / 1776 assertions, 0 échec)
-
-Deux lectures serrées des CLI upstream (MoonshotAI `kimi-cli` et Alibaba `qwen-code`) transformées en seize paquets de travail ciblés. Points saillants :
-
-**Correctness des providers natifs** — forme de thinking Kimi corrigée (paramètres de requête, pas un nom de modèle fantôme), Qwen pivoté depuis un endpoint que le CLI d'Alibaba n'utilise jamais vers l'OpenAI-compat par défaut. Les deux shapes legacy restent accessibles en opt-in (`kimi-k2-thinking-preview` entièrement retiré ; legacy Qwen via `qwen-native`).
-
-**OAuth généralisé** — flux device-code RFC 8628 complet désormais actif pour `kimi-code` et `qwen-code` (avec PKCE S256 + base URL dynamique `resource_url` par compte) plus un verrou de fichier cross-process (`CredentialStore::withLock()`) qui durcit chaque refresh OAuth contre les sessions parallèles qui se marcheraient dessus.
-
-**Catalogue `/models` live** — `superagent models refresh [<provider>]` tire l'endpoint `/models` de chaque vendeur et cache par provider. `resources/models.json` devient un fallback ; la dérive disparaît.
-
-**Specs YAML d'agent avec héritage `extend:`** — les fichiers `.yaml` / `.yml` / `.md` d'agent se chargent auto depuis `~/.superagent/agents/` et `<project>/.superagent/agents/`. Héritage inter-format ; accumulation des listes d'outils.
-
-**Finition des sous-commandes MCP** — `superagent mcp auth/reset-auth/test` complètent le groupe ; flux device-code OAuth pour les serveurs MCP qui l'exigent.
-
-**Wire Protocol v1** — interface `WireEvent` + `JsonStreamRenderer` + migration de la base `StreamEvent` (les 10 événements concrets sont conformes gratuitement) + drapeau CLI `--output json-stream` + `WireStreamOutput` + `ApprovalRuntime`. Fondation pour le pont IDE ACP.
-
-**Extras DashScope** — adapter `cache_control` niveau bloc + header `X-DashScope-CacheControl` + `X-DashScope-UserAgent` + enveloppe metadata session/prompt + auto-flag vision (`vl_high_resolution_images`).
-
-**Durcissement du parseur SSE** — deux vrais bugs dans le `ChatCompletionsProvider::parseSSEStream()` partagé affectant tous les providers OpenAI-compat : assemblage de tool-call par `index` (produisait N blocs fragmentés par call réel) + détection `finish_reason: "error_finish"` (avalait silencieusement les erreurs de throttle). Plus quatre items plus petits.
-
-**LoopDetector** — cinq détecteurs (tool / stagnation / file-read / content / thought) avec exemption cold-start, violation sticky, projection vers l'événement wire, opt-in via `AgentFactory::maybeWrapWithLoopDetection`.
-
-**Checkpoints shadow-git** — couche d'annulation au niveau fichier via un dépôt git bare **séparé** dans `~/.superagent/history/<hash-projet>/shadow.git`. Ne touche jamais le `.git` de l'utilisateur. S'intègre avec le `CheckpointManager` existant ; restore ramène les fichiers trackés et laisse les untracked en place.
-
-**Échappatoire `$options['extra_body']`** sur chaque `ChatCompletionsProvider` — la convention Python du SDK OpenAI portée en PHP. Les power users expédient des champs spécifiques au vendeur sans attendre un adapter de capacité.
-
-**Capacité `SupportsPromptCacheKey`** — le cache session-keyed de Kimi (distinct du `SupportsContextCaching` niveau bloc d'Anthropic), routé via un nouveau `PromptCacheKeyAdapter`.
-
-Suite complète : **671 tests / 1776 assertions / 0 échec**. Zéro signature de méthode publique changée. Tous les champs nouveaux sont additifs. Voir `CHANGELOG.md` `[0.9.0]` pour le découpage exhaustif par Phase et `design/{KIMI_CLI,QWEN_CODE}_INSPIRED_ROADMAP.md` pour l'analyse amont.
-
-### 🆕 v0.8.9 — Instrumentation de productivité pour `AgentTool` (filet de sécurité pour l'orchestration multi-agents)
-
-Release petite et chirurgicale. Tout sous-agent dispatché via `AgentTool` renvoie désormais des preuves concrètes de ce que l'enfant a vraiment fait — pas seulement `success: true`. Corrige un mode d'échec récurrent de `/team` où les orchestrateurs faisaient confiance au `success: true` auto-déclaré de l'enfant alors qu'il n'avait produit que de la prose (aucun appel d'outil, aucun fichier).
-
-- **Quatre nouveaux champs sur chaque payload de succès d'`AgentTool`** — `filesWritten` (chemins absolus écrits via `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create`, dédupliqués), `toolCallsByName` (ex. `['Read' => 2, 'Bash' => 5, 'Write' => 1]`), `productivityWarning` (chaîne consultative ou null), et un `totalToolUseCount` affûté qui privilégie les appels d'outils **observés** plutôt que le compte de tours auto-rapporté
-- **Trois statuts de productivité** — `completed` (normal), `completed_empty` (zéro appel d'outil observé — le modèle a décrit le plan au lieu de l'exécuter ; toujours un signal d'échec de dispatch, re-dispatcher ou choisir un modèle plus fort), `async_launched` (inchangé depuis 0.8.8, uniquement pour `run_in_background: true`)
-- **`completed_no_writes` explicitement supprimé** — une révision intermédiaire marquait "a appelé des outils mais n'a rien écrit" comme statut d'échec. Les orchestrateurs adossés à MiniMax le lisaient comme échec terminal et se rabattaient sur l'auto-impersonation en plein run. Rétrogradé en `productivityWarning` **consultatif** qui garde le statut `completed` — les consultations d'avis renvoient souvent leurs conclusions via le texte sans persister de fichiers, et c'est légitime
-- **`AgentTool::description()` et schéma `run_in_background` affûtés** — énoncent explicitement le contrat de parallélisme (émettre plusieurs blocs `tool_use` d'agent dans le même message assistant pour le fan-out parallèle ; `run_in_background: true` est fire-and-forget et **mauvais** pour tout workflow qui doit consolider les sorties enfants) et documentent chaque valeur de statut pour que les orchestrateurs n'aient pas à deviner
-- **Observationnel, pas heuristique** — le runtime compte les événements `tool_use` qu'il a vraiment vus streamer depuis l'enfant (via le chemin canonique de message `assistant` et le chemin legacy `__PROGRESS__`), pas la narration de l'enfant lui-même
-- **Compat préservée** — zéro signature publique modifiée ; les nouveaux champs sont purement additifs ; les appelants pré-0.8.9 qui déstructurent des clés connues ne sont pas affectés
-
-Suite complète toujours verte : **2476 tests / 6891 assertions / 0 échec** (en hausse de 2471 / 6879 à 0.8.8 — 5 nouveaux scénarios `AgentToolProductivityTest`).
+```bash
+superagent "corrige le bug de connexion dans src/Auth/"
+```
 
 ```php
-// Chaque appel AgentTool renvoie maintenant cette forme en plus des champs 0.8.8 :
-$result = $agentTool->execute([
-    'description' => 'Analyser les logs',
-    'prompt'      => 'Lis logs/*.jsonl et écris findings.md',
-]);
-// $result['status']               // 'completed' | 'completed_empty' | 'async_launched'
-// $result['filesWritten']         // ['/abs/path/findings.md']
-// $result['toolCallsByName']      // ['Read' => 3, 'Write' => 1]
-// $result['totalToolUseCount']    // 4 — observé, pas le nombre de tours
-// $result['productivityWarning']  // null si productif, chaîne consultative sinon
-```
-
-### 🆕 v0.8.8 — Kimi / Qwen / GLM / MiniMax natifs, pipeline de fonctionnalités dirigé par capacités, couche de sécurité (+375 tests)
-
-Dix fournisseurs enregistrés, avec les quatre asiatiques désormais **natifs de premier ordre** — leurs propres cartes de régions, catalogues de modèles et points d'entrée de capacités natives. La boucle d'agent, la pile MCP et le système Skills se composent identiquement sur les dix.
-
-- **Quatre fournisseurs natifs** — `KimiProvider` (Moonshot), `QwenProvider` (DashScope natif), `GlmProvider` (Z.AI / BigModel), `MiniMaxProvider`. Trois partagent une base neutre `ChatCompletionsProvider` (dans laquelle `OpenAIProvider` et `OpenRouterProvider` ont aussi été refactorisés — de 395 / 430 lignes à ~130 chacun). Qwen est autonome car la forme du body `text-generation/generation` de DashScope n'est pas chat-completions
-- **Conscience des régions partout** — Kimi (intl/cn), Qwen (intl/us/cn/hk), GLM (intl/cn), MiniMax (intl/cn). `ProviderRegistry::createWithRegion()` + entrées de `CredentialPool` étiquetées par région empêchent les clés cn de fuir vers les endpoints intl
-- **Famille d'interfaces de capacités** — 13 interfaces `Supports*` (Thinking / Swarm / ContextCaching / FileExtract / WebSearch / CodeInterpreter / OCR / Skills / Batch / TTS / Music / Video / Image). Les fournisseurs implémentent ce qu'ils supportent nativement ; `FeatureDispatcher` route `$options['features']` vers le bon fragment ou se replie gracieusement
-- **Adaptateurs de fonctionnalité** — `ThinkingAdapter` (natif Anthropic / Qwen / GLM / Kimi, repli CoT prompt ailleurs), `AgentTeamsAdapter` (natif MiniMax M2.7, repli scaffold), `CodeInterpreterAdapter` (natif Qwen, repli indice sandbox-tool). Les nouveaux s'enregistrent dans `FeatureDispatcher::registerDefaults()`
-- **Specialty-as-Tool (11 outils)** — tout cerveau principal (Claude / GPT / Gemini…) peut appeler `glm_web_search` / `glm_web_reader` / `glm_ocr` / `glm_asr` / `kimi_file_extract` / `kimi_batch` / `kimi_swarm` / `qwen_long_file` / `minimax_tts` / `minimax_music` / `minimax_video` / `minimax_image` comme `Tool` standards. `ProviderToolBase` partagé gère attributs, helpers de polling, réutilisation du client Guzzle
-- **CLI `superagent mcp` / `skills` / `swarm`** — configuration `~/.superagent/mcp.json` en écriture atomique ; skills markdown install/list/show/remove/path ; `superagent swarm <prompt>` planifie + exécute (`native_swarm` via `KimiSwarmTool`, `agent_teams` via chat MiniMax, `local_swarm` délégué à `src/Swarm/`)
-- **`SkillInjector` + ponts fournisseur** — le chemin universel fusionne le corps du skill dans `$options['system_prompt']` avec un en-tête idempotent `## Skill: <name>`. `KimiSkillBridge` / `MiniMaxSkillBridge` enregistrés via `SkillInjector::registerBridge()` — MiniMax M2.7 obtient un cadre "contrat comportemental" qui s'appuie sur son taux d'adhérence 97% entraîné
-- **Couche de sécurité** — `src/Security/` : `NetworkPolicy` respecte `SUPERAGENT_OFFLINE=1` ; `CostLimiter` applique des plafonds par-appel / par-outil-quotidien / quotidien-global via `~/.superagent/cost_ledger.json` (bascule UTC auto, écriture atomique, chmod 0600) ; `ToolSecurityValidator` compose les deux et délègue Bash à `BashSecurityValidator` existant (23 vérifications inchangées, 57 tests toujours verts)
-- **`CapabilityRouter` + `SwarmRouter`** — choisit automatiquement le bon fournisseur / région / stratégie. Le routeur classe par liste préférée, nombre de fonctionnalités natives, puis coût mixte (`input + 4·output` par 1M tokens) comme bris d'égalité
-- **`ProviderRegistry::healthCheck()`** — sonde cURL 5s par fournisseur renvoyant `{ok, latency_ms, reason}` — valide auth + joignabilité, pas seulement les variables d'env
-- **`FeatureFlags`** — override runtime > env `SUPERAGENT_DISABLE=a,b,c` > `~/.superagent/features.json` > défaut (activé). Tuer sélectivement des capacités sans code
-- **`pollIterator()` non-bloquant** — variante `Generator` de `pollUntilDone()` pour que les workers de queue Laravel puissent `release($delay)` entre sondages au lieu de brûler un worker sur un rendu vidéo de 15 minutes
-- **Workflow CI** — `.github/workflows/test.yml` lance Unit + Smoke + Compat sur PHP 8.1 / 8.2 / 8.3 ; job Integration (vrais endpoints vendeur) gardé derrière `SUPERAGENT_INTEGRATION=1`
-- **Documentation trilingue** — `docs/NATIVE_PROVIDERS{,_CN,_FR}.md`, `docs/FEATURES_MATRIX{,_CN,_FR}.md`, `docs/MIGRATION_NATIVE{,_CN,_FR}.md`. Le guide de migration montre le diff d'une ligne pour passer de `OpenAIProvider+base_url` au natif
-
-Lignes rouges de compatibilité (toutes vertes) : aucune signature de méthode publique changée, `BashSecurityValidator` intouché, comportement `OpenAIProvider` au byte près (verrouillé par le test OAuth existant), `resources/models.json` v1 se charge inchangé, clés sans région dans `CredentialPool` fonctionnent toujours. Suite complète : **2471 tests / 6879 assertions / 0 échec** (en hausse de 2060 / 5675 à 0.8.7).
-
-Démarrage rapide pour les quatre nouveaux fournisseurs :
-
-```bash
-export KIMI_API_KEY=sk-moonshot-...   # ou MOONSHOT_API_KEY
-export QWEN_API_KEY=sk-dashscope-...  # ou DASHSCOPE_API_KEY
-export GLM_API_KEY=...                 # ou ZAI_API_KEY / ZHIPU_API_KEY
-export MINIMAX_API_KEY=...
-export QWEN_REGION=intl                # intl | us | cn | hk (optionnel)
-
-superagent chat -p kimi "Écris une fonction Fibonacci en Python"
-superagent swarm "Analyse ce dépôt et rédige un rapport" --max-sub-agents 50
-```
-
-### 🆕 v0.8.7 — Fournisseur Gemini natif + catalogue de modèles actualisable via CLI (+36 tests)
-- **Intégration Gemini de premier ordre** — un `GeminiProvider` natif, drapeau CLI (`-p gemini`), entrée dans l'assistant init, sélecteur `/model`, suivi des coûts, import de credentials en une commande depuis `@google/gemini-cli`
-- **`ModelCatalog` — registre modèles+prix à 3 niveaux** — référence embarquée + override utilisateur (`~/.superagent/models.json`) + URL distant opt-in. Nouvelle CLI `superagent models list|update|status|reset`
-
-### 🆕 v0.8.6 — SuperAgent CLI : commande `superagent` (standalone + Laravel, connexion OAuth, REPL style Claude Code)
-SuperAgent n'est plus limité à Laravel. Le binaire **`superagent`** (`bin/superagent` / `bin/superagent.bat`) fournit un REPL complet style Claude Code, un exécuteur de tâches one-shot, la gestion de sessions et l'authentification OAuth. Le CLI détecte automatiquement les projets Laravel et utilise le `config()` / conteneur de l'hôte ; sinon il démarre un conteneur minimal via `Foundation\Application` — sans une seule ligne de PHP, vous avez accès à tout le SDK (Memory Palace, sous-agents, Guardrails, AutoCompaction, TaskRouter, outils MCP, Skills).
-
-- **REPL interactif** (`src/CLI/Commands/ChatCommand.php`, `src/Harness/HarnessLoop.php`) — rendu streaming style Claude Code avec deltas texte en direct, aperçus de thinking, cartes d'appel d'outils, compteurs de coût. Commandes slash : `/help`, `/status`, `/tasks`, `/compact`, `/continue`, `/session list|save|load|delete`, `/clear`, `/model`, `/cost`, `/quit`
-- **Mode one-shot** — `superagent "répare ce bug"` exécute une seule tâche et sort. `--json` émet `{content, cost, turns, usage}` exploitables par script / CI
-- **Assistant de première utilisation** — `superagent init` guide le choix du provider (Anthropic / OpenAI / Ollama / OpenRouter), capture la clé API depuis l'env ou une saisie secrète, choisit le modèle par défaut, et écrit `~/.superagent/config.php` (`0600`)
-- **Connexion OAuth en important vos tokens Claude Code / Codex** — `superagent auth login claude-code` lit `~/.claude/.credentials.json` ; `superagent auth login codex` lit `~/.codex/auth.json`. Pas de deuxième connexion, pas de copier-coller de clé API. Tokens stockés atomiquement dans `~/.superagent/credentials/{anthropic,openai}.json` (mode `0600`), rafraîchis 60 s avant expiration
-- **Providers conscients de l'OAuth** (`src/Providers/AnthropicProvider.php`, `OpenAIProvider.php`) — mode Bearer + `anthropic-beta: oauth-2025-04-20` ; ajoute automatiquement le bloc système requis `"You are Claude Code, Anthropic's official CLI for Claude."` ; réécrit les ids legacy (`claude-3*`) vers `claude-opus-4-5` puisque les tokens OAuth n'autorisent que les modèles actuels. Côté OpenAI : header `chatgpt-account-id` pour le trafic d'abonnement ChatGPT Codex
-- **Sélecteur `/model` interactif** (`src/Harness/CommandRouter.php`) — catalogue numéroté conscient du provider (Opus/Sonnet/Haiku 4.5, famille GPT-5, OpenRouter, Ollama), modèle actif marqué d'un `*`. `/model 2` par numéro, `/model <id>` par identifiant
-- **Rendu riche** (`src/Console/Output/RealTimeCliRenderer.php`) — drapeaux `--verbose-thinking` / `--no-thinking` / `--plain` / `--no-rich`. `--plain` retire les ANSI, idéal pour pipes et logs CI
-- **Intégration conteneur** — `Foundation\Application::bootstrap()` lie notre `ConfigRepository` au singleton `Container::getInstance()` de Laravel en mode standalone, pour que les 14 classes Optimization / Performance basées sur `config()` fonctionnent silencieusement hors Laravel
-- **Compatible Windows** — `CredentialStore` retombe sur `USERPROFILE` si `HOME` est vide ; lanceur batch `bin/superagent.bat`
-
-**Première session type :**
-```bash
-composer global require forgeomni/superagent      # ou clone + composer install
-superagent auth login claude-code                  # réutilise la connexion Claude Code existante
-superagent "explique ce codebase"                  # one-shot, sans clé API
-
-superagent                                         # REPL interactif
-> /model                                           # liste les modèles disponibles
-> /model 1                                         # bascule sur Opus 4.5
-> /session save my-session                         # persiste l'état
-> /quit
-```
-
-**Sans installation locale de Claude Code :**
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-superagent init              # configuration interactive → ~/.superagent/config.php
-superagent "review ce PR"
-```
-
-### 🆕 v0.8.5 — Memory Palace : Mémoire Hiérarchique Inspirée de MemPalace (activé par défaut, 6 nouveaux tests)
-- **Memory Palace** (`src/Memory/Palace/`) — Module de mémoire hiérarchique inspiré de MemPalace (96,6% LongMemEval). Wings (personnes / projets / agents) → Halls (5 corridors de types de mémoire) → Rooms (sujets) → Drawers (contenu verbatim brut). Des Tunnels automatiques relient la même Room entre différents Wings. Se branche dans le `MemoryProviderManager` existant comme provider externe sans remplacer le flux `MEMORY.md` intégré
-- **Filtrage Wing + Room** (`PalaceRetriever`) — Les filtres de métadonnées structurés pilotent le retrieveur ; les benchmarks MemPalace attribuent +34% R@10 à ce pattern. Score hybride : recouvrement de mots-clés + similarité cosinus optionnelle + décroissance de récence + boost par nombre d'accès. Itération des Drawers basée sur générateur — pas de chargement intégral en mémoire
-- **Pile de Mémoire à 4 Couches** (`Layers/MemoryLayer`, `LayerManager`) — L0 Identité (~50 tok) et L1 Faits Critiques (~120 tok) toujours chargés ; L2 Rappel de Room et L3 Recherche Profonde à la demande. `wakeUp()` émet une charge de démarrage de session de ~600–900 tok
-- **Graphe de Connaissances Temporel** — `KnowledgeEdge` gagne `validFrom` / `validUntil` ; `KnowledgeGraph` gagne `addTriple()`, `invalidate()`, `queryEntity($entity, asOf:)`, `timeline()`. Nouveaux `NodeType::ENTITY` + `EdgeType::RELATES_TO`. Entièrement rétrocompatible (champs vides par défaut)
-- **Journaux d'Agents** (`Diary/AgentDiary.php`) — Wing dédié de type AGENT avec une Room `hall_events/diary` par agent. Chaque agent spécialiste (reviewer, architect, ops…) maintient son propre historique séparé de la mémoire partagée
-- **Vérificateur de Faits** (`FactChecker.php`) — Détection de contradictions basée sur le KG avec 3 sévérités (`attribution_conflict`, `stale`, `unsupported`). **Aucun appel LLM** — pure traversée de graphe
-- **Détection de Quasi-Doublons** (`MemoryDeduplicator.php`) — Correspondance exacte par hash + recouvrement Jaccard de 5-grammes (seuil par défaut 0,85), dédupliqué par Room par défaut car le contexte compte
-- **CLI Wake-Up** (`php artisan superagent:wake-up [--wing=] [--search=]`) — Charge L0+L1 plus une recherche Drawer optionnelle limitée à un Wing. Conçu pour amorcer des sessions IA externes sans chargement complet de la mémoire
-- **Score Vectoriel Opt-In** — `palace.vector.enabled` + un callable `embed_fn`. Sans cela, le retrieveur fonctionne entièrement hors-ligne sur mots-clés + récence + nombre d'accès
-- **Activé par Défaut** — `palace.enabled=true`. Disposition du stockage : `{memory}/palace/wings/{slug}/halls/{hall}/rooms/{room}/drawers/*.md`. Suite complète : **1851 tests, 5234 assertions, 0 échecs**
-
-### 🆕 v0.8.2 — Pipeline de Collaboration Multi-Agents, Routage Intelligent & Exécution Parallèle (10 améliorations, 48 nouveaux tests)
-- **Pipeline de Collaboration** (`src/Coordinator/`) — Orchestration multi-agents par phases avec tri topologique DAG, 4 stratégies d'échec (fail-fast, continue, retry, fallback), exécution conditionnelle de phases, et 8 événements de cycle de vie. Les agents d'une phase s'exécutent en vrai parallèle via ProcessBackend (processus OS) ou InProcessBackend (Fibres)
-- **Routeur de Tâches Intelligent** (`src/Coordinator/TaskRouter.php`) — Routage automatique tâche→modèle : recherche/chat → Tier 3 (Haiku, économique), code/debug/analyse → Tier 2 (Sonnet, équilibré), synthèse/coordination → Tier 1 (Opus, puissant). Surcharges de complexité : très complexe promu, simple rétrogradé. `withAutoRouting()` sur pipeline ou phase. `withAgentProvider()` explicite toujours prioritaire
-- **Injection de Contexte Inter-Phases** (`src/Coordinator/PhaseContextInjector.php`) — Partage de contexte : les agents de la phase N reçoivent automatiquement les résumés des phases 1..N-1 via `<prior-phase-results>` dans le prompt système. Budget tokens par phase (2K) et total (8K) avec troncature intelligente. Économise les tokens en évitant la redécouverte
-- **Patterns de Fournisseurs** — 3 modes de collaboration : `sameProvider` (credentials partagés + rotation CredentialPool), `crossProvider` (mélange Anthropic/OpenAI/Ollama dans un pipeline), `withFallbackChain` (failover ordonné)
-- **Politique de Retry par Agent** — Backoff exponentiel/linéaire/fixe avec jitter par agent. Classification d'erreurs (auth/rate-limit/serveur/réseau). Rotation de credentials sur 429. Changement de fournisseur sur échec persistant. Presets : `default()`, `aggressive()`, `none()`, `crossProvider()`
-- **Retry ProcessBackend** — Les agents échoués en exécution parallèle sont maintenant réessayés individuellement avec rotation complète de credentials et fallback de fournisseur
-- **Polling stream_select** — ProcessBackend utilise `stream_select()` sur Linux/macOS pour I/O événementiel (avant : boucle active 50ms). Fallback automatique usleep sur Windows
-- **Buffering AgentMailbox** — Écritures tamponnées en mémoire, flush disque tous les 10 messages. Élimine les I/O disque O(n²) pour les messages en masse
-- **3 Corrections de Bugs** — Tri `loadLatest()` SQLite (clé secondaire rowid), assertion WebSearch fallback (accepte succès DuckDuckGo), `$agentConfig` non défini dans le bloc catch retry
-- **48 Nouveaux Tests** — `TaskRouterTest` (26), `PhaseContextInjectorTest` (12), `CollaborationPipelineTest` (+10). Suite complète : **1945 tests, 5729 assertions, 0 échec**
-
-### 🆕 v0.8.1 — Pipeline Middleware, Erreurs Typées & Cache d'Outils (6 améliorations, 32 nouveaux tests)
-- **Pipeline Middleware** (`src/Middleware/`) — Chaîne middleware composable modèle oignon pour requêtes LLM. `MiddlewareInterface` avec tri par priorité. 5 middleware intégrés : `RateLimitMiddleware` (seau à jetons), `RetryMiddleware` (backoff exponentiel + jitter), `CostTrackingMiddleware` (application du budget), `LoggingMiddleware` (journalisation structurée), `GuardrailMiddleware` (validateurs entrée/sortie). Config : `middleware`
-- **Sortie Structurée** (`src/Providers/ResponseFormat.php`) — Objet valeur `ResponseFormat` pour forcer la sortie JSON des LLM. Supporte les modes `text()`, `json()`, `jsonSchema()` avec conversion spécifique au fournisseur (`toAnthropicFormat()`, `toOpenAIFormat()`)
-- **Cache de Résultats par Outil** (`src/Tools/ToolResultCache.php`) — Cache mémoire avec TTL pour résultats d'outils en lecture seule. Hachage d'entrée indépendant de l'ordre, invalidation ciblée par nom d'outil ou chemin fichier, éviction LRU, exclusion des erreurs. Config : `optimization.tool_cache`
-- **Hiérarchie d'Exceptions Améliorée** — `SuperAgentException` gagne `context` array, `isRetryable()`, `toArray()`. `ProviderException` ajoute `retryable`, `retryAfterSeconds`, `fromHttpStatus()`. `ToolException` ajoute `toolInput`. Nouveaux : `BudgetExceededException`, `ContextOverflowException`, `ValidationException`
-- **Compression de Contexte Proactive** — `ContextCompressor::compressIfNeeded()` vérifie automatiquement le budget tokens et compresse uniquement si dépassé. Nouveaux `estimateTokenCount()`, `getCompressionStats()` pour intégration par message
-- **Extension Plugins Middleware & Fournisseurs** — `PluginInterface` supporte maintenant `middleware()` et `providers()`. Les plugins peuvent enregistrer du middleware et des drivers LLM personnalisés. `PluginManager::collectMiddleware()`, `registerMiddleware()`, `registerProviders()`
-
-### 🆕 v0.8.0 — Mise à Niveau Architecturale Inspirée de Hermes-Agent (19 améliorations, 74 nouveaux tests)
-- **Stockage SQLite + Recherche FTS5** (`src/Session/SqliteSessionStorage.php`) — Backend SQLite WAL avec recherche plein texte FTS5. Retry avec jitter, checkpointing WAL passif, chiffrement SQLCipher optionnel. `SessionManager::search()` pour recherche inter-sessions. Double écriture avec fallback fichier
-- **Compression de Contexte Unifiée** (`src/Optimization/ContextCompression/ContextCompressor.php`) — Compression hiérarchique en 4 phases : élaguer → protéger tête/queue → résumé LLM → mises à jour itératives. Protection queue par budget de tokens (8K), résumé structuré 5 sections
-- **Détection d'Injection de Prompt** (`src/Guardrails/PromptInjectionDetector.php`) — 7 catégories de menaces, 4 niveaux de sévérité, scan de fichiers, nettoyage Unicode invisible. Auto-intégré dans `SystemPromptBuilder::withContextFiles()` — menaces haute/critique exclues, moyennes nettoyées
-- **Pool de Credentials** (`src/Providers/CredentialPool.php`) — Failover multi-credentials, 4 stratégies de rotation. Suivi d'état par credential, cooldown automatique. Auto-intégré dans `ProviderRegistry::create()` pour rotation transparente des clés
-- **Routeur de Complexité de Requête** (`src/Optimization/QueryComplexityRouter.php`) — Routage basé sur le contenu : détecte code, URLs, mots-clés de complexité. Requêtes simples vers modèle rapide
-- **Détection de Conflits d'Écriture par Chemin** — Outils d'écriture sur chemins différents en parallèle ; chemins chevauchants en séquentiel. Détection de commandes bash destructives
-- **Interface Memory Provider** (`src/Memory/Contracts/MemoryProviderInterface.php`) — Fournisseur de mémoire enfichable, 10 hooks. Deux implémentations : `VectorMemoryProvider` (similarité cosinus) et `EpisodicMemoryProvider` (mémoire épisodique temporelle). Isolation des erreurs
-- **SecurityCheckChain** (`src/Permissions/SecurityCheckChain.php`) — Chaîne de vérification composable enveloppant les 23 checks BashSecurityValidator. Interface `SecurityCheck` + adaptateur `LegacyValidatorCheck`. `add()`, `insertAt()`, `disableById()` pour politiques personnalisées
-- **Divulgation Progressive de Skills** (`src/Tools/Builtin/SkillCatalogTool.php`) — Chargement en deux phases : métadonnées → instructions complètes à la demande
-- **Écriture Stream Sécurisée** (`src/Output/SafeStreamWriter.php`) — Protection pipes cassés pour daemon/conteneur
-- **Renforcement Architectural** — FileSnapshotManager I/O par lots (batch=5), limites mémoire AutoDreamConsolidator (500 gather / 1000 consolidate), validation JSON ReplayStore, sanitization $ARGUMENTS PromptHook
-- **Diagramme d'Architecture** (`docs/ARCHITECTURE.md`) — Graphe Mermaid 80+ nœuds, diagramme de flux, statistiques sous-systèmes
-- **18 Corrections de Tests** — Suite complète : **1687 tests, 4713 assertions, 0 échec**
-
-### 🆕 v0.7.9 — Injection de Dépendances & Renforcement Architectural (63 nouveaux tests unitaires)
-- **Singleton → Injection par Constructeur** — 19 classes singleton (`AgentManager`, `TaskManager`, `MCPManager`, `ParallelAgentCoordinator`, `EventDispatcher`, `CostTracker`, etc.) ont maintenant des constructeurs publics avec `getInstance()` marqué `@deprecated`. 25 sites d'appel mis à jour pour accepter les dépendances injectées avec fallback rétrocompatible. Permet l'isolation correcte des tests et l'exécution Swarm sûre pour les processus
-- **ToolStateManager** (`src/Tools/ToolStateManager.php`) — Conteneur d'état injectable centralisé remplaçant les propriétés `private static` dispersées dans 14 classes d'outils intégrés (`EnterPlanModeTool`, `ToolSearchTool`, `MonitorTool`, `REPLTool`, `SkillTool`, `WorkflowTool`, `BriefTool`, `ConfigTool`, `SnipTool`, `TodoWriteTool`, `AskUserQuestionTool`, `TerminalCaptureTool`, `VerifyPlanExecutionTool`). État basé sur des buckets avec IDs auto-incrémentés, helpers de collection et reset par outil. Injectez une instance partagée en mode Swarm pour la cohérence inter-processus
-- **Décomposition de SessionManager** — Extraction de `SessionStorage` (I/O fichier atomique, scan de répertoires, résolution de chemins) et `SessionPruner` (nettoyage par âge + par comptage) du `SessionManager` de 631 lignes. Le gestionnaire délègue maintenant aux deux, réduit à la pure orchestration
-- **Limite de Concurrence des Processus** — `ParallelToolExecutor::executeProcessParallel()` respecte maintenant `$maxParallel` (défaut 5), traitant les blocs d'outils par lots au lieu de lancer un nombre illimité de processus OS concurrents
-- **Tests Unitaires pour les Fonctionnalités v0.7.6** — 63 nouveaux tests unitaires dans 4 classes de test dédiées : `ForkTest` (20 tests : cycle de vie des branches, gestion de session, stratégies de scoring, classement des résultats), `DebateTest` (12 tests : API fluide de config, données de rounds, agrégation de résultats), `CostPredictionTest` (18 tests : détection type/complexité, estimation de tokens, vérification de budget, comparaison de modèles), `ReplayTest` (13 tests : types d'événements, capture par enregistreur, comptage de pas, intervalles de snapshots)
-
-### 🆕 v0.7.8 — Mode Agent Harness + Sous-systèmes Entreprise (20 sous-systèmes, 628 tests)
-- **Gestionnaire de Tâches Persistant** (`src/Tasks/PersistentTaskManager.php`) — Persistance sur fichier avec index JSON + logs de sortie par tâche. `appendOutput()` / `readOutput()` pour le streaming de logs, `watchProcess()` + `pollProcesses()` pour la surveillance non-bloquante, marquage automatique des tâches obsolètes comme échouées au redémarrage, nettoyage par âge. Config : `persistence.tasks`
-- **Gestionnaire de Sessions** (`src/Session/SessionManager.php`) — Sauvegarde/chargement/liste/suppression de snapshots de conversation dans `~/.superagent/sessions/`. `loadLatest()` avec filtrage CWD pour la reprise par projet, extraction automatique de résumé, assainissement des ID de session, nettoyage par comptage + âge. Config : `persistence.sessions`
-- **Architecture d'Événements Stream** (`src/Harness/`) — 9 types d'événements unifiés (`TextDelta`, `ThinkingDelta`, `TurnComplete`, `ToolStarted`, `ToolCompleted`, `Compaction`, `Status`, `Error`, `AgentComplete`). `StreamEventEmitter` avec dispatch multi-écouteurs et pont `toStreamingHandler()` pour intégration QueryEngine sans modification
-- **Boucle REPL Harness** (`src/Harness/HarnessLoop.php`) — Boucle agent interactive avec `CommandRouter` (10 commandes intégrées : `/help`, `/status`, `/tasks`, `/compact`, `/continue`, `/session`, `/clear`, `/model`, `/cost`, `/quit`). Verrouillage d'occupation, `continue_pending()` pour la reprise de boucles d'outils interrompues, sauvegarde automatique de session, enregistrement de commandes personnalisées
-- **Auto-Compacteur** (`src/Harness/AutoCompactor.php`) — Compaction à deux niveaux : micro (tronquer les anciens résultats d'outils, sans LLM) → complet (résumé LLM via ContextManager). Disjoncteur d'échec, émission de `CompactionEvent`. `maybeCompact()` à chaque début de tour
-- **Framework de Scénarios E2E** (`src/Harness/Scenario.php`, `ScenarioRunner.php`) — Définitions de scénarios structurées avec builder fluide, gestion d'espace de travail temporaire, suivi transparent des appels d'outils, validation 3D (outils requis + texte attendu + closure personnalisée), filtrage par tags, résumé réussite/échec/erreur
-- **QueryEngine `continue_pending()`** — `hasPendingContinuation()` + `continuePending()` reprennent les boucles d'outils interrompues sans nouveau message utilisateur. Boucle interne extraite en méthode partagée `runLoop()`
-- **Gestionnaire de Worktrees** (`src/Swarm/WorktreeManager.php`) — Gestion autonome du cycle de vie git worktree : création avec liens symboliques pour les grands répertoires (node_modules, vendor, .venv), persistance des métadonnées, reprise, nettoyage. Extrait de ProcessBackend
-- **Backend Tmux** (`src/Swarm/Backends/TmuxBackend.php`) — Débogage visuel multi-agents : chaque agent s'exécute dans un panneau tmux. Auto-détection (`$TMUX` + `which tmux`), repli gracieux. `BackendType::TMUX`
-- **Paramètres Prioritaires sur Config** — Tous les nouveaux sous-systèmes acceptent `array $overrides` dans `fromConfig()` avec priorité : `$overrides` > fichier de config > défauts. Permet d'activer des fonctionnalités désactivées en config directement à l'appel
-- **Middleware de Retry API** (`src/Providers/RetryMiddleware.php`) — Backoff exponentiel avec jitter, support `Retry-After`, classification d'erreurs (auth/rate_limit/transient/unrecoverable), max retries configurable, journal de retry pour l'observabilité. Factory statique `wrap()`
-- **Backend iTerm2** (`src/Swarm/Backends/ITermBackend.php`) — Débogage d'agents par panneaux via AppleScript, auto-détection (`$ITERM_SESSION_ID`), arrêt gracieux + arrêt forcé. `BackendType::ITERM2`
-- **Système de Plugins** (`src/Plugins/`) — `PluginManifest` (parsé depuis `plugin.json`), `LoadedPlugin` (skills/hooks/MCP résolus), `PluginLoader` (découverte depuis `~/.superagent/plugins/` et `.superagent/plugins/`, activation/désactivation, installation/désinstallation, collecte à travers tous les plugins activés)
-- **État d'Application Observable** (`src/State/`) — `AppState` objet valeur immuable avec `with()` pour mises à jour partielles. `AppStateStore` magasin observable avec `subscribe()` (retourne un callable de désabonnement), notification auto des écouteurs
-- **Rechargement à Chaud des Hooks** (`src/Hooks/HookReloader.php`) — Surveille le mtime du fichier de config, recharge `HookRegistry` en cas de changement. Formats JSON et PHP. `forceReload()`, `hasChanged()`, factory `fromDefaults()`
-- **Hooks Prompt & Agent** (`src/Hooks/PromptHook.php`, `AgentHook.php`) — Validation basée sur LLM : envoie un prompt avec injection `$ARGUMENTS`, attend `{"ok": true/false, "reason": "..."}`. `AgentHook` avec contexte étendu et timeout 60s. Les deux supportent `blockOnFailure` et patterns de matcher
-- **Passerelle Multi-Canal** (`src/Channels/`) — `ChannelInterface`, `BaseChannel` avec ACL, `MessageBus` (inbound/outbound basé sur SplQueue), `ChannelManager` pour enregistrement/dispatch, `WebhookChannel` pour webhooks HTTP, objets valeur `InboundMessage`/`OutboundMessage`
-- **Protocole Backend** (`src/Harness/BackendProtocol.php`, `FrontendRequest.php`) — Protocole JSON-lines (préfixe `SAJSON:`) pour la communication frontend ↔ backend. 8 émetteurs d'événements, `readRequest()`, `createStreamBridge()`. `FrontendRequest` pour le parsing typé de requêtes
-- **Flux OAuth Device Code** (`src/Auth/`) — Implémentation RFC 8628 avec ouverture auto du navigateur. `CredentialStore` stockage fichier avec écritures atomiques et permissions 0600. DTOs immuables `TokenResponse`/`DeviceCodeResponse`
-- **Règles de Permission par Chemin** (`src/Permissions/`) — `PathRule` règles allow/deny basées sur glob, `CommandDenyPattern` patterns fnmatch, `PathRuleEvaluator` évaluation chaînée (deny prioritaire). Factory `fromConfig()`
-- **Notification de Tâche Coordinateur** (`src/Coordinator/TaskNotification.php`) — Notification XML structurée pour la complétion de sous-agents avec `toXml()`/`toText()`/`fromXml()`/`fromResult()`. Fidélité aller-retour XML
-- **Auto-Compacteur Amélioré** — Seuil dynamique (`contextWindow - 20K - 13K`), padding d'estimation de tokens (`raw * 4/3`), `contextWindowForModel()`, `setContextWindow()` pour override
-- **Exécution Parallèle d'Outils Améliorée** — Nouveau `executeProcessParallel()` pour vrai parallélisme OS via `proc_open`, `getStrategy()` retourne `process`/`fiber`/`sequential`, config : `performance.process_parallel_execution.enabled`
-- **Isolation de Session par Projet** — Sessions stockées dans des sous-répertoires par projet : `sessions/{basename}-{sha1[:12]}/`. Rétrocompatible avec les sessions à plat
-
-### 🆕 v0.7.7 — Déboguabilité & Renforcement Qualité
-- **Journalisation des Exceptions Silencieuses** — Ajout de `error_log('[SuperAgent] ...')` aux 27 blocs catch silencieux dans 24 fichiers (Performance, Optimization, ProcessBackend, MCPManager, etc.). Les problèmes de production invisibles sont maintenant traçables via le préfixe `[SuperAgent]`
-- **Tests Unitaires Agent** (`tests/Unit/AgentTest.php`) — 31 tests, 44 assertions couvrant la construction, le routage de providers, le chaînage fluide, la gestion d'outils, le mode bridge, le mode auto et l'injection de config provider dans les sous-agents
-- **Framework de Revue de Code** (`docs/REVIEW.md`) — Modèle d'évaluation architecturale périodique avec métriques, analyse forces/faiblesses, lacunes de couverture de tests, actions prioritaires et scoring par version (actuel : 7.6/10)
-
-### 🆕 v0.7.6 — Suite d'Intelligence Agent Innovante (6 nouveaux sous-systèmes)
-- **Replay d'Agent & Débogage Temporel** (`src/Replay/`) — Enregistrez les traces d'exécution complètes (appels LLM, appels d'outils, créations d'agents, messages inter-agents) et rejouez-les pas à pas. `ReplayPlayer` supporte la navigation avant/arrière, l'inspection d'état d'agent à n'importe quel pas, la recherche, le fork depuis n'importe quel pas, et la timeline formatée avec coût cumulé. Traces persistées en NDJSON via `ReplayStore` avec nettoyage par âge. Config : `replay.enabled`, `replay.snapshot_interval`
-- **Fork de Conversation** (`src/Fork/`) — Branchez les conversations à n'importe quel point pour explorer N approches en parallèle, puis sélectionnez automatiquement le meilleur résultat. `ForkManager` crée des `ForkSession` avec plusieurs `ForkBranch`, exécutés en vrai parallèle via `proc_open` (`ForkExecutor`), et notés avec des stratégies intégrées (`ForkScorer::costEfficiency`, `brevity`, `completeness`, `composite`). Config : `fork.enabled`, `fork.max_branches`
-- **Protocole de Débat Agent** (`src/Debate/`) — Trois modes de collaboration multi-agents structurée via `DebateOrchestrator` : **Débat** (Proposant → Critique → Juge avec réfutations), **Red Team** (Constructeur → Attaquant → Réviseur avec vecteurs d'attaque configurables), **Ensemble** (N agents résolvent indépendamment → Fusionneur combine les meilleurs éléments). Configuration fluide, sélection de modèle par agent, suivi des coûts par round. Config : `debate.enabled`, `debate.default_rounds`
-- **Moteur de Prédiction de Coûts** (`src/CostPrediction/`) — Estimez le coût avant exécution avec 3 stratégies : moyenne pondérée historique (confiance jusqu'à 95%), hybride type-moyenne, ou heuristique (estimation tokens × tarification modèle). `TaskAnalyzer` détecte le type de tâche (génération de code, refactoring, débogage, tests, analyse, chat) et la complexité. `CostPredictor::compareModels()` pour la comparaison instantanée multi-modèles. Config : `cost_prediction.enabled`
-- **Garde-fous en Langage Naturel** (`src/Guardrails/NaturalLanguage/`) — Définissez des règles de garde-fous en anglais simple. Compilation sans coût (pas d'appels LLM) via `RuleParser` gérant 6 types : restrictions d'outils, règles de coût, limites de débit, restrictions de fichiers, avertissements, et règles de contenu. API fluide : `NLGuardrailFacade::create()->rule('...')->compile()`. Scoring de confiance avec flag `needsReview`. Export YAML. Config : `nl_guardrails.enabled`, `nl_guardrails.rules`
-- **Pipelines Auto-Réparateurs** (`src/Pipeline/SelfHealing/`) — Nouvelle stratégie d'échec `self_heal` : diagnostiquer → planifier → muter → réessayer. `DiagnosticAgent` avec diagnostic basé sur règles + LLM pour 8 catégories d'erreurs. `StepMutator` applique 6 types de mutations (modifier le prompt, changer de modèle, ajuster le timeout, ajouter du contexte, simplifier la tâche, diviser l'étape). Config : `self_healing.enabled`, `self_healing.max_heal_attempts`
-
-### 🆕 v0.7.5 — Compatibilité des Noms d'Outils Claude Code
-- **`ToolNameResolver`** (`src/Tools/ToolNameResolver.php`) — Mappage bidirectionnel entre les noms PascalCase de Claude Code (`Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`, `Agent`, `WebSearch`, etc.) et les noms snake_case de SuperAgent (`read_file`, `write_file`, `edit_file`, `bash`, `glob`, `grep`, `agent`, `web_search`, etc.). 40+ mappages incluant les noms hérités CC (`Task` → `agent`)
-- **Résolution Automatique dans les Définitions d'Agents** — `MarkdownAgentDefinition::allowedTools()` et `disallowedTools()` résolvent automatiquement les noms CC via `ToolNameResolver::resolveAll()`. Les définitions de `.claude/agents/` acceptent les deux formats : `allowed_tools: [Read, Grep, Glob]` ou `allowed_tools: [read_file, grep, glob]`
-- **Compatibilité du Système de Permissions** — `QueryEngine::isToolAllowed()` vérifie les noms originaux et résolus. Les listes de permissions en format CC ou SA fonctionnent correctement
-- **Rétrocompatible** — Les noms d'outils SuperAgent existants continuent de fonctionner sans changement
-
-### 🆕 v0.7.0 — Suite d'Optimisation des Performances (13 stratégies, toutes configurables)
-- **Compaction des Résultats d'Outils** — Compacte automatiquement les anciens résultats d'outils (au-delà des N derniers tours) en résumés concis, réduisant les tokens d'entrée de 30-50%. Préserve les résultats d'erreur et le contexte récent. Config : `optimization.tool_result_compaction` (`enabled`, `preserve_recent_turns`, `max_result_length`)
-- **Schéma d'Outils Sélectif** — Sélectionne dynamiquement un sous-ensemble d'outils pertinents par tour selon la phase (exploration/édition/planification), économisant ~10K tokens. Inclut toujours les outils récemment utilisés. Config : `optimization.selective_tool_schema` (`enabled`, `max_tools`)
-- **Routage de Modèle par Tour** — Rétrograde automatiquement vers un modèle rapide (configurable, Haiku par défaut) pour les tours d'appels d'outils purs, remonte pour le raisonnement. Réduction de coût de 40-60%. Config : `optimization.model_routing` (`enabled`, `fast_model`, `min_turns_before_downgrade`)
-- **Préremplissage de Réponse** — Utilise le prefill assistant d'Anthropic pour guider le format de sortie après des séquences d'appels d'outils, encourageant la synthèse. Stratégie conservatrice : préremplissage uniquement après 3+ tours d'outils consécutifs. Config : `optimization.response_prefill` (`enabled`)
-- **Épinglage du Cache de Prompt** — Insère automatiquement un marqueur de frontière de cache dans les prompts système qui en manquent, séparant les sections statiques (descriptions d'outils, rôle) des dynamiques (mémoire, contexte). Taux de cache hit ~90%. Config : `optimization.prompt_cache_pinning` (`enabled`, `min_static_length`)
-- **Toutes les optimisations activées par défaut**, désactivables individuellement via variables d'environnement (`SUPERAGENT_OPT_TOOL_COMPACTION`, `SUPERAGENT_OPT_SELECTIVE_TOOLS`, `SUPERAGENT_OPT_MODEL_ROUTING`, `SUPERAGENT_OPT_RESPONSE_PREFILL`, `SUPERAGENT_OPT_CACHE_PINNING`)
-- **Aucun ID de modèle codé en dur** — Le modèle rapide est entièrement configurable via `SUPERAGENT_OPT_FAST_MODEL` ; la détection de modèles économiques utilise la correspondance heuristique de noms
-- **Exécution Parallèle d'Outils** — PHP Fibers pour outils en lecture seule en parallèle. Config : `performance.parallel_tool_execution`
-- **Dispatch Streaming** — Exécution dès réception du bloc tool_use en SSE. Config : `performance.streaming_tool_dispatch`
-- **Pool Connexions HTTP** — cURL keep-alive. Config : `performance.connection_pool`
-- **Pré-lecture Spéculative** — Pré-lit les fichiers liés après Read. Config : `performance.speculative_prefetch`
-- **Bash Streaming** — Troncature timeout + résumé. Config : `performance.streaming_bash`
-- **max_tokens Adaptatif** — 2048 outils, 8192 raisonnement. Config : `performance.adaptive_max_tokens`
-- **API Batch** — Anthropic Batches API (50% coût). Config : `performance.batch_api`
-- **Zéro-Copie** — Cache fichier Read/Edit/Write. Config : `performance.local_tool_zero_copy`
-
-### 🆕 v0.6.19 — Journalisation NDJSON In-Process pour le Moniteur de Processus
-- **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — Classe factory pour créer un `StreamingHandler` qui écrit du NDJSON compatible CC vers tout fichier de log ou flux. Intégration en une ligne pour l'exécution d'agents in-process (appels `$agent->prompt()` sans passer par `agent-runner.php`/`ProcessBackend`)
-- **`create(logTarget, agentId)`** — Retourne un `StreamingHandler` avec callbacks `onToolUse`, `onToolResult` et `onTurn` connectés à `NdjsonWriter`. Accepte un chemin de fichier (création automatique des répertoires) ou une ressource de flux inscriptible
-- **`createWithWriter(logTarget, agentId)`** — Retourne une paire `{handler, writer}` permettant d'émettre `writeResult()`/`writeError()` après l'exécution. Le writer et le handler partagent le même flux NDJSON
-- **Compatible Moniteur de Processus** — Les fichiers de log contiennent le même format NDJSON que le stderr des processus enfants, permettant à `parseStreamJsonIfNeeded()` d'afficher l'activité des outils (🔧 Read, Edit, Grep, etc.), les compteurs de tokens et le statut d'exécution pour les agents in-process
-
-### 🆕 v0.6.18 — Journalisation Structurée NDJSON Compatible Claude Code
-- **`NdjsonWriter`** (`src/Logging/NdjsonWriter.php`) — Nouvelle classe qui écrit des événements NDJSON (JSON délimité par des sauts de ligne) compatibles Claude Code vers tout flux inscriptible. Supporte 5 méthodes : `writeAssistant()` (tour LLM avec blocs text/tool_use + usage par tour), `writeToolUse()` (appel d'outil unique), `writeToolResult()` (résultat d'exécution d'outil en `type:user` avec `parent_tool_use_id`), `writeResult()` (succès avec usage/coût/durée), `writeError()` (erreur avec sous-type). Échappe les séparateurs de ligne U+2028/U+2029 comme le `ndjsonSafeStringify` de CC
-- **NDJSON Remplace le Protocole `__PROGRESS__:`** — `agent-runner.php` utilise désormais `NdjsonWriter` sur stderr au lieu du préfixe personnalisé `__PROGRESS__:`. Les événements sont des lignes NDJSON standard analysables par `extractActivities()` du bridge/sessionRunner de CC. Chaque événement assistant inclut le `usage` par tour (inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens) pour le suivi de tokens en temps réel
-- **Parsing NDJSON ProcessBackend** — `ProcessBackend::poll()` amélioré pour détecter les lignes NDJSON (objets JSON commençant par `{`) en plus des lignes `__PROGRESS__:` héritées. Les lignes stderr non-JSON (ex. messages `[agent-runner]`) continuent d'être transmises au logger PSR-3
-- **Support Format CC dans AgentTool** — `applyProgressEvents()` gère désormais le format NDJSON CC (`assistant` → extraction des blocs tool_use + usage, `user` → tool_result, `result` → usage final) et le format hérité, permettant une intégration transparente avec le moniteur de processus
-
-### 🆕 v0.6.17 — Surveillance en Temps Réel de la Progression des Agents Enfants
-- **Événements de Progression Structurés** — Les processus agents enfants émettent désormais des événements de progression JSON structurés sur stderr via le protocole `__PROGRESS__:`. Les événements incluent `tool_use` (nom de l'outil, entrée), `tool_result` (succès/erreur, taille du résultat) et `turn` (utilisation de tokens par tour LLM)
-- **StreamingHandler dans les Processus Enfants** — `agent-runner.php` crée un `StreamingHandler` avec des callbacks `onToolUse`, `onToolResult` et `onTurn` qui sérialisent les événements d'exécution vers le parent. Passage de `Agent::run()` à `Agent::prompt()` pour transmettre le handler
-- **Parsing d'Événements ProcessBackend** — `ProcessBackend::poll()` détecte désormais les lignes préfixées `__PROGRESS__:` dans stderr, les parse en JSON et les met en file d'attente par agent. Nouvelle méthode `consumeProgressEvents(agentId)` qui retourne et vide les événements en attente. Les lignes de log normales sont toujours transmises au logger
-- **Intégration AgentTool avec le Coordinateur** — `waitForProcessCompletion()` enregistre les agents enfants auprès de `ParallelAgentCoordinator` et injecte les événements de progression dans `AgentProgressTracker` à chaque cycle de polling. Le tracker met à jour en temps réel le nombre d'utilisations d'outils, la description de l'activité courante (ex. "Editing /src/Agent.php"), les compteurs de tokens et la liste des activités récentes
-- **Visibilité dans le Moniteur de Processus** — `ParallelAgentDisplay` affiche désormais la progression en direct des agents enfants (outil courant, compteur de tokens, nombre d'utilisations d'outils) sans modification du code d'affichage — l'UI existante lit les trackers du coordinateur qui sont maintenant alimentés pour les agents basés sur les processus
-
-### 🆕 v0.6.16 — Propagation des Enregistrements Parent vers Enfant
-- **Propagation des Définitions d'Agents** — Le processus parent sérialise toutes les définitions d'agents enregistrées (intégrés + personnalisés de `.claude/agents/`) via `AgentManager::exportDefinitions()` et les transmet dans le JSON stdin. Les processus enfants les importent via `importDefinitions()` — sans bootstrap Laravel ni accès au système de fichiers
-- **Propagation des Configs MCP** — Le parent sérialise toutes les configs de serveurs MCP (`ServerConfig::toArray()`) et les transmet aux enfants. Les processus enfants les enregistrent via `MCPManager::registerServer()`, rendant les outils MCP disponibles sans relire les fichiers de config
-- **Vérifié** — Le processus enfant reçoit 9 types d'agents (7 intégrés + 2 personnalisés avec prompts système complets), 2 serveurs MCP (stdio + http), 6 skills intégrés et 58 outils
-
-### 🆕 v0.6.15 — Partage de Serveurs MCP via Pont TCP
-- **Pont TCP MCP** (`MCPBridge`) — Quand le parent se connecte à un serveur MCP stdio, un proxy TCP léger est démarré automatiquement sur un port aléatoire. Les enfants découvrent le pont via un fichier registre et se connectent via `HttpTransport`. N agents enfants partagent 1 processus MCP
-- **Détection Automatique MCPManager** — `createTransport()` vérifie `MCPBridge::readRegistry()` avant de créer un `StdioTransport`. Si un pont parent existe, `HttpTransport` vers `localhost:{port}` est utilisé de façon transparente
-- **Polling du Pont ProcessBackend** — `poll()` appelle aussi `MCPBridge::poll()` pour traiter les requêtes TCP des processus enfants
-
-### 🆕 v0.6.12 — Bootstrap Laravel dans les Processus Enfants & Correction Provider
-- **Bootstrap Laravel dans les Processus Enfants** — `agent-runner.php` effectue désormais un bootstrap Laravel complet (`$app->make(Kernel)->bootstrap()`) lorsqu'un `base_path` est fourni. Les processus enfants accèdent à `config()`, `AgentManager`, `SkillManager`, `MCPManager`, répertoires `.claude/agents/` et tous les service providers — identique au processus parent
-- **Correction de la Sérialisation Provider** — Quand `Agent` était construit avec un objet `LLMProvider` (pas une chaîne), l'objet était sérialisé en JSON comme `{}`, privant les processus enfants d'identifiants API. `injectProviderConfigIntoAgentTools()` remplace désormais les objets par `$provider->name()`, récupère `api_key` depuis la config Laravel si absent, et définit toujours le nom du provider et le modèle
-- **Ensemble Complet d'Outils dans les Processus Enfants** — `ProcessBackend` définit `load_tools='all'` (58 outils) par défaut. Les agents enfants accèdent à agent, skill, mcp, web_search et tous les autres outils
-
-### 🆕 v0.6.11 — Vrais Sous-Agents Parallèles au Niveau Processus
-- **Sous-Agents Basés sur les Processus** — `AgentTool` utilise désormais `ProcessBackend` (`proc_open`) par défaut au lieu de `InProcessBackend` (Fiber). Chaque sous-agent s'exécute dans son propre processus OS avec sa propre connexion Guzzle, assurant un vrai parallélisme. Les Fibers PHP sont coopératives — les I/O bloquantes (appels HTTP, commandes bash) dans une fiber bloquent tout le processus, rendant l'ancienne approche séquentielle en pratique
-- **Réécriture de `bin/agent-runner.php`** — Exécuteur à usage unique : lit la config JSON depuis stdin, crée un vrai `SuperAgent\Agent` avec provider LLM complet et outils, exécute le prompt, écrit le résultat JSON sur stdout
-- **Refonte de `ProcessBackend`** — `spawn()` écrit la config via stdin puis le ferme ; `poll()` draine stdout/stderr de manière non-bloquante ; `waitAll()` attend la fin de tous les agents suivis. Vérifié : 5 agents dormant chacun 500ms terminent en 544ms au total (accélération 4.6x)
-- **Repli InProcessBackend** — Le backend basé sur les Fibers est conservé en repli quand `proc_open` n'est pas disponible
-
-### 🆕 v0.6.10 — Correction de l'Exécution Synchrone Multi-Agents
-- **Correction du Blocage d'Agent Synchrone** — `InProcessBackend::spawn()` crée désormais toujours la fiber d'exécution quel que soit le paramètre `runInBackground`. Auparavant, le mode synchrone ne créait jamais la fiber, provoquant un blocage infini de `waitForSynchronousCompletion()` (timeout de 5 minutes)
-- **Correction de l'Incompatibilité de Type Backend** — `AgentTool::$activeTasks` stocke désormais l'instance réelle du backend en plus de l'énumération `BackendType`. La boucle d'attente synchrone appelait `->getStatus()` et `instanceof InProcessBackend` sur la valeur de l'énumération, ce qui retournait toujours des résultats erronés
-- **Correction du Cycle de Vie des Fibers** — `ParallelAgentCoordinator::processAllFibers()` gère désormais les fibers non démarrées (`!$fiber->isStarted()` → `start()`). Correction de la propriété `$status` manquante sur `AgentProgressTracker` et des erreurs de type null usage dans les agents stub
-
-### 🆕 v0.6.9 — Correction du Chemin Base URL Guzzle
-- **Correction Base URL Multi-Providers** — `OpenAIProvider`, `OpenRouterProvider` et `OllamaProvider` ajoutent maintenant correctement un slash final à `base_uri` et utilisent des chemins de requête relatifs. Auparavant, tout `base_url` personnalisé avec un préfixe de chemin (ex. `https://gateway.example.com/openai`) voyait son préfixe silencieusement supprimé par le résolveur RFC 3986 de Guzzle lors de l'utilisation d'un chemin absolu comme `/v1/chat/completions`. Les quatre providers (`AnthropicProvider` était déjà corrigé en v0.6.8) suivent maintenant le bon patron
-
-### 🆕 v0.6.8 — Contexte Incrémental & Chargement Différé des Outils
-- **Contexte Incrémental** (`IncrementalContextManager`) — Synchronisation de contexte basée sur les deltas : seul le différentiel (messages ajoutés/modifiés/supprimés) est transmis au lieu de l'historique complet. Points de contrôle automatiques, restauration en une étape, compression automatique configurable sur seuil de tokens, et API `getSmartWindow(maxTokens)` pour la récupération de contexte dans un budget de tokens
-- **Chargement Paresseux du Contexte** (`LazyContextManager`) — Enregistrez des fragments de contexte avec métadonnées (type, priorité, tags, taille) sans charger leur contenu. Les fragments sont récupérés à la demande lors d'une requête de tâche, scorés par pertinence mot-clé/tag. Cache TTL, éviction LRU, `preloadPriority()`, `loadByTags()` et `getSmartWindow(maxTokens, focusArea)` pour une gestion mémoire fine
-- **Chargement Différé des Outils** (`ToolLoader` / `LazyToolResolver`) — Enregistrez les classes d'outils sans les instancier ; les outils sont chargés au moment où le modèle les appelle. `predictAndPreload(task)` préchauffe les outils selon les mots-clés de la tâche. `loadForTask(task)` retourne l'ensemble minimal d'outils. Déchargez les outils inutilisés entre les tâches pour libérer de la mémoire
-- **Héritage du Provider pour les Sous-Agents** — `AgentTool` reçoit désormais la config provider de l'agent parent (clé API, modèle, URL de base) et l'injecte dans chaque sous-agent via `AgentSpawnConfig::$providerConfig`. Les sous-agents créés par `InProcessBackend` sont de vraies instances `SuperAgent\Agent` avec une connexion LLM réelle
-- **Repli WebSearch sans Clé** — `WebSearchTool` ne retourne plus d'erreur immédiate quand `SEARCH_API_KEY` n'est pas définie. Il se replie automatiquement sur la recherche HTML DuckDuckGo via `WebFetchTool` (cURL préféré, User-Agent niveau navigateur)
-- **Renforcement WebFetch** — `WebFetchTool` préfère désormais cURL ; vérifie les codes de statut HTTP (4xx/5xx → erreur au lieu de retourner silencieusement la page d'erreur) ; message d'erreur clair quand cURL et `allow_url_fopen` sont tous les deux indisponibles
-
-### 🆕 Orchestration Multi-Agents (v0.6.7)
-- **Exécution d'Agents Parallèles** - Exécutez plusieurs agents simultanément avec suivi de progression en temps réel pour chaque agent
-- **Résultats Compatibles Claude Code** - Retourne les résultats au format exact de Claude Code pour une intégration transparente
-- **Détection Automatique de Tâches** - Analyse la complexité des tâches et décide automatiquement du mode agent unique vs multi-agents
-- **Gestion d'Équipes d'Agents** - Coordonne les équipes avec relations leader/membre et exécution basée sur les rôles
-- **Communication Inter-Agents** - Outil SendMessage pour la messagerie et coordination entre agents
-- **Système de Boîte aux Lettres Persistant** - Files d'attente de messages fiables avec filtrage, archivage et diffusion
-- **Agrégation de Progrès** - Comptage de tokens en temps réel, suivi d'activité et agrégation des coûts sur tous les agents
-- **Surveillance WebSocket** - Tableau de bord basé sur navigateur en direct pour surveiller l'exécution d'agents parallèles
-- **Pool de Ressources** - Pool d'agents intelligent avec limites de concurrence et gestion des dépendances
-- **Point de Contrôle & Reprise** - Récupération automatique d'état pour les workflows multi-agents de longue durée
-
-### 🎯 Détection de Mode Automatique
-- **Analyse de Tâches Intelligente** - Détermine automatiquement si la collaboration multi-agents est nécessaire
-- **Évaluation de Complexité** - Sélection automatique du mode d'exécution basée sur la complexité de la tâche
-- **Optimisation des Ressources** - Agent unique pour les tâches simples, exécution parallèle multi-agents pour les tâches complexes
-
-### 📊 Fonctionnalités Entreprise
-- **Surveillance WebSocket en Temps Réel** - Tableau de bord en temps réel basé sur navigateur
-- **Analyse de Performance** - Métriques de performance complètes et analyse de goulots d'étranglement
-- **Gestion des Dépendances** - Orchestration de workflows complexes avec tri topologique
-- **Mise à l'Échelle Distribuée** - Exécution d'agents sur plusieurs machines/processus
-- **Stockage Persistant** - Sauvegarde automatique de progression, récupération après crash
-- **Pool d'Agents** - Pool d'agents préchauffés pour attribution instantanée de tâches
-- **Système de Modèles** - 10+ modèles préconçus pour déploiement rapide de tâches courantes
-
-### 🔧 Ensemble d'Outils Puissants
-- **59+ Outils Intégrés** - Opérations sur fichiers, édition de code, recherche web, gestion de tâches, etc.
-- **Validateur de Sécurité** - 23 vérifications d'injection/obfuscation, classification de commandes
-- **Compression de Contexte Intelligente** - Compression de mémoire de session avec protection des frontières sémantiques
-- **Contrôle du Budget de Tokens** - Gestion dynamique du budget, contrôle intelligent des coûts
-
-### 🌍 Support Multi-Fournisseurs
-- **Claude (Anthropic)** - Dernières versions Claude 4.7 Opus / Sonnet, 4.5 Haiku (plus toutes les variantes 4.6 / 4.5 / 4)
-- **OpenAI** - GPT-5 / GPT-5-mini / GPT-5-nano, GPT-4o, o4-mini et modèles hérités
-- **Google Gemini (natif)** - `GeminiProvider` parle directement l'API Generative Language : streaming SSE, function calling, compatibilité complète MCP / Skills / sous-agents. `superagent -p gemini -m gemini-2.5-flash "…"`
-- **AWS Bedrock** - Claude via AWS avec support des derniers modèles
-- **Ollama** - Modèles locaux incluant Llama 3, Mistral et plus
-- **OpenRouter** - API unifiée pour 100+ modèles
-
-### 🔄 Catalogue de modèles dynamique (v0.8.7)
-- **`ModelCatalog`** — un seul JSON (`resources/models.json`) alimente la tarification `CostCalculator`, les alias `ModelResolver` et le sélecteur `/model`. Surchargeable via `~/.superagent/models.json` ou `SUPERAGENT_MODELS_URL`
-- **CLI** : `superagent models list | update | status | reset` pour rafraîchir la liste de modèles + tarifs sans nouvelle version du package
-- **Auto-refresh opt-in** avec `SUPERAGENT_MODELS_AUTO_UPDATE=1` (vérification de fraîcheur 7 jours au démarrage du CLI)
-
-## 📦 Installation
-
-### Prérequis Système
-- **PHP**: 8.1 ou supérieur
-- **Laravel**: 10.0 ou supérieur
-- **Composer**: 2.0 ou supérieur
-- **Extensions PHP**: json, mbstring, curl, openssl
-
-### Installation via Composer
-
-```bash
-composer require forgeomni/superagent
-```
-
-### Configuration Rapide
-
-```bash
-# Publier les fichiers de configuration
-php artisan vendor:publish --provider="SuperAgent\SuperAgentServiceProvider"
-
-# Configurer les variables d'environnement
-cp .env.example .env
-```
-
-Ajoutez à votre fichier `.env`:
-
-```env
-# Configuration Anthropic Claude
-ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
-ANTHROPIC_MODEL=claude-4.6-opus-latest
-
-# Configuration OpenAI (optionnel)
-OPENAI_API_KEY=sk-xxxxxxxxxxxxx
-OPENAI_MODEL=gpt-5.4
-
-# Configuration Gemini (optionnel)
-GEMINI_API_KEY=AIzaSy-xxxxxxxxxxxxx   # ou GOOGLE_API_KEY
-GEMINI_MODEL=gemini-2.0-flash
-
-# Catalogue de modèles auto-update (opt-in)
-SUPERAGENT_MODELS_URL=https://your-cdn/models.json
-SUPERAGENT_MODELS_AUTO_UPDATE=1
-```
-
-## 🚀 Démarrage Rapide
-
-### Agent Basique
-
-```php
-use SuperAgent\Agent;
-
-$agent = new Agent([
-    'provider' => 'anthropic',
-    'model' => 'claude-4.6-opus-latest',
+$agent = new SuperAgent\Agent([
+    'provider' => 'openai-responses',
+    'model'    => 'gpt-5',
 ]);
 
-$result = $agent->run("Analysez ce code et suggérez des améliorations");
-echo $result->message->content;
-```
-
-### Mode Multi-Agents Automatique (NOUVEAU en v0.6.7)
-
-```php
-use SuperAgent\Agent;
-
-// Activer le mode automatique - aucune configuration nécessaire!
-$agent = new Agent($provider, $config);
-$agent->enableAutoMode();
-
-// L'agent détecte automatiquement quand utiliser plusieurs agents
-$result = $agent->run("
-1. Rechercher les meilleures pratiques pour la conception d'API
-2. Écrire une API REST avec authentification
-3. Créer des tests complets
-4. Documenter les points de terminaison de l'API
-");
-
-// Le résultat contient les sorties agrégées de tous les agents
+$result = $agent->run('Résume docs/ADVANCED_USAGE.md en un paragraphe');
 echo $result->text();
-echo "Coût total: $" . $result->totalCostUsd();
 ```
-
-### Création Manuelle d'Équipes d'Agents
-
-```php
-use SuperAgent\Tools\Builtin\AgentTool;
-use SuperAgent\Swarm\ParallelAgentCoordinator;
-
-// Créer l'outil agent
-$agentTool = new AgentTool();
-
-// Générer plusieurs agents spécialisés
-$chercheur = $agentTool->execute([
-    'description' => 'Tâche de recherche',
-    'prompt' => 'Rechercher les meilleures pratiques pour la conception d\'API REST',
-    'subagent_type' => 'researcher',
-    'run_in_background' => true,
-]);
-
-$codeur = $agentTool->execute([
-    'description' => 'Implémentation de code',
-    'prompt' => 'Implémenter une API REST avec authentification JWT',
-    'subagent_type' => 'code-writer',
-    'run_in_background' => true,
-]);
-
-// Surveiller le progrès
-$coordinator = ParallelAgentCoordinator::getInstance();
-$teamResult = $coordinator->collectTeamResults();
-
-// Obtenir les résultats individuels des agents
-foreach ($teamResult->getResultsByAgent() as $agentName => $result) {
-    echo "Agent: $agentName\n";
-    echo $result->text() . "\n";
-}
-```
-
-### Communication Inter-Agents
-
-```php
-use SuperAgent\Tools\Builtin\SendMessageTool;
-
-$messageTool = new SendMessageTool();
-
-// Envoyer un message direct à un agent spécifique
-$messageTool->execute([
-    'to' => 'researcher-agent',
-    'message' => 'Veuillez prioriser les meilleures pratiques de sécurité',
-    'summary' => 'Mise à jour de priorité',
-]);
-
-// Diffuser à tous les agents
-$messageTool->execute([
-    'to' => '*',
-    'message' => 'Mise à jour de l\'équipe: Concentrez-vous sur l\'optimisation des performances',
-    'summary' => 'Annonce d\'équipe',
-]);
-```
-
-### Surveillance WebSocket en Temps Réel
-
-```bash
-# Démarrer le serveur WebSocket
-php artisan superagent:websocket
-
-# Accéder au tableau de bord
-open http://localhost:8080/superagent/monitor
-```
-
-Fonctionnalités du tableau de bord:
-- 🔴 Indicateurs d'état des agents en temps réel
-- 📊 Utilisation de tokens par agent
-- 💰 Agrégation des coûts et suivi du budget
-- 📈 Visualisation du progrès avec ETA
-- 📬 Surveillance de la file d'attente des messages
-
-## 🏗️ Architecture
-
-### Structure du Système
-
-```
-SuperAgent/
-├── Agent/              # Classes d'agents principales
-├── Swarm/              # Orchestration multi-agents
-│   ├── ParallelAgentCoordinator.php
-│   ├── AgentMailbox.php
-│   └── TeamContext.php
-├── Tools/              # Outils intégrés
-│   ├── AgentTool.php
-│   ├── SendMessageTool.php
-│   └── ...
-├── Providers/          # Fournisseurs IA
-├── Context/            # Gestion du contexte
-├── Memory/             # Système de mémoire
-└── Telemetry/          # Surveillance et métriques
-```
-
-### Flux Multi-Agents
-
-```mermaid
-graph TD
-    A[Tâche Utilisateur] --> B{Analyseur de Complexité}
-    B -->|Simple| C[Agent Unique]
-    B -->|Complexe| D[Coordinateur Multi-Agents]
-    D --> E[Agent 1: Recherche]
-    D --> F[Agent 2: Codage]
-    D --> G[Agent 3: Tests]
-    D --> H[Agent 4: Documentation]
-    E --> I[Agrégateur de Résultats]
-    F --> I
-    G --> I
-    H --> I
-    I --> J[Résultat Final]
-```
-
-## 📚 Documentation Avancée
-
-### Système de Mémoire
-
-SuperAgent maintient la mémoire de session à travers:
-- **Extraction en temps réel** - Déclencheur à 3 portes (10K init, 5K croissance, 3 appels d'outils)
-- **Journaux quotidiens KAIROS** - Journaux append-only
-- **Consolidation auto-dream** - Consolidation nocturne en MEMORY.md
-
-### Pensée Étendue
-
-```php
-use SuperAgent\Thinking\ThinkingConfig;
-
-// Pensée adaptative (le modèle décide quand penser)
-$agent = new Agent([
-    'options' => ['thinking' => ThinkingConfig::adaptive()],
-]);
-
-// Pensée à budget fixe
-$agent = new Agent([
-    'options' => ['thinking' => ThinkingConfig::enabled(budgetTokens: 20000)],
-]);
-```
-
-### Mode Coordinateur
-
-Architecture double mode pour l'orchestration multi-agents complexe:
-
-```env
-# Activer le mode coordinateur
-CLAUDE_CODE_COORDINATOR_MODE=1
-```
-
-Le coordinateur n'a que les outils Agent/SendMessage/TaskStop et délègue tout le travail aux agents workers isolés.
-
-### Compétence Batch
-
-Utiliser `/batch` pour paralléliser les changements à grande échelle:
-
-```bash
-# Dans le CLI de l'agent
-/batch migrer de react vers vue
-/batch remplacer toutes les utilisations de lodash par des équivalents natifs
-```
-
-Nécessite un dépôt git. Génère 5-30 agents isolés en worktree, chacun créant une PR.
-
-## 🔐 Sécurité
-
-### Validation des Commandes
-
-- 23 vérifications d'injection et d'obfuscation
-- Classification de commandes basée sur l'IA
-- Contrôles de permission granulaires
-- Isolation de l'environnement sandbox
-
-### Modes de Permission
-
-```php
-// config/superagent.php
-'permission_mode' => 'default', // Options: bypass, acceptEdits, plan, default, dontAsk, auto
-```
-
-## 📊 Performance et Mise à l'Échelle
-
-### Optimisation
-
-- **Pool d'agents** - Agents préchauffés pour attribution instantanée
-- **Cache de contexte partagé** - Réutilisation du contexte entre agents
-- **Compression intelligente** - Réduction automatique du contexte
-- **Exécution parallèle** - Jusqu'à 10 agents simultanés
-
-### Configuration de Production
-
-```env
-# Optimiser pour la production
-SUPERAGENT_MAX_CONCURRENT_AGENTS=20
-SUPERAGENT_AGENT_POOL_SIZE=50
-SUPERAGENT_SHARED_CONTEXT_CACHE=true
-SUPERAGENT_API_CONNECTION_POOL=100
-```
-
-## 🤝 Contribution
-
-Les contributions sont les bienvenues! Veuillez consulter notre [guide de contribution](CONTRIBUTING.md).
-
-### Développement
-
-```bash
-# Cloner le dépôt
-git clone https://github.com/yourusername/superagent.git
-
-# Installer les dépendances
-composer install
-
-# Exécuter les tests
-./vendor/bin/phpunit
-
-# Exécuter l'analyse statique
-./vendor/bin/phpstan analyse
-```
-
-## 📄 Licence
-
-SuperAgent est un logiciel open-source sous licence [MIT](LICENSE).
-
-## 🌟 Support
-
-- 📖 [Documentation Officielle](https://superagent-docs.example.com)
-- 💬 [Forum Communautaire](https://forum.superagent.dev)
-- 🐛 [Signaler un Problème](https://github.com/yourusername/superagent/issues)
-- 📺 [Tutoriels Vidéo](https://youtube.com/@superagent)
-- 📧 Support Email: mliz1984@gmail.com
-
-## 🙏 Remerciements
-
-Construit avec ❤️ par la communauté SuperAgent. Remerciements spéciaux à tous les contributeurs et utilisateurs qui ont rendu ce projet possible.
 
 ---
 
-© 2024-2026 SuperAgent. Tous droits réservés.
+## Table des matières
+
+- [Démarrage rapide](#démarrage-rapide)
+- [Providers et authentification](#providers-et-authentification)
+- [API OpenAI Responses](#api-openai-responses)
+- [Boucle d'agent](#boucle-dagent)
+- [Outils et multi-agents](#outils-et-multi-agents)
+- [Définitions d'agents](#définitions-dagents-yaml--markdown)
+- [Skills](#skills)
+- [Intégration MCP](#intégration-mcp)
+- [Wire Protocol](#wire-protocol)
+- [Retry, erreurs, observabilité](#retry-erreurs-observabilité)
+- [Garde-fous et checkpoints](#garde-fous-et-checkpoints)
+- [CLI autonome](#cli-autonome)
+- [Intégration Laravel](#intégration-laravel)
+- [Référence de configuration](#référence-de-configuration)
+
+Chaque section se termine par une ligne *Depuis* indiquant la version qui introduit la fonctionnalité. Notes de version complètes dans [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+## Démarrage rapide
+
+Installer :
+
+```bash
+# En CLI autonome :
+composer global require forgeomni/superagent
+
+# Ou en dépendance Laravel :
+composer require forgeomni/superagent
+```
+
+Matrice complète (prérequis système, auth, ponts IDE, CI) dans [INSTALL_FR.md](INSTALL_FR.md).
+
+Agent minimal :
+
+```php
+$agent = new SuperAgent\Agent(['provider' => 'anthropic']);
+$result = $agent->run('quel jour sommes-nous ?');
+echo $result->text();
+```
+
+Agent minimal avec outils :
+
+```php
+$agent = (new SuperAgent\Agent(['provider' => 'openai']))
+    ->loadTools(['read', 'write', 'bash']);
+
+$result = $agent->run('inspecte composer.json et dis-moi quelle version PHP ce projet cible');
+echo $result->text();
+```
+
+Appel unique via CLI :
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+superagent "inspecte composer.json et dis-moi quelle version PHP ce projet cible"
+```
+
+---
+
+## Providers et authentification
+
+Douze providers pilotés par un registre, avec URL de base par région et plusieurs modes d'authentification. Tous implémentent le même contrat `LLMProvider` — échanger un provider pour un autre est une seule ligne.
+
+| Clé de registre | Provider | Notes |
+|---|---|---|
+| `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké |
+| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` |
+| `openai-responses` | OpenAI Responses API (`/v1/responses`) | [Section dédiée ci-dessous](#api-openai-responses) |
+| `openrouter` | OpenRouter | Clé API |
+| `gemini` | Google Gemini | Clé API |
+| `kimi` | Moonshot Kimi | Clé API ; régions `intl` / `cn` / `code` (OAuth) |
+| `qwen` | Alibaba Qwen (OpenAI-compat par défaut) | Clé API ; régions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) |
+| `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
+| `glm` | BigModel GLM | Clé API ; régions `intl` / `cn` |
+| `minimax` | MiniMax | Clé API ; régions `intl` / `cn` |
+| `bedrock` | AWS Bedrock | AWS SigV4 |
+| `ollama` | Ollama local | Aucune auth — localhost:11434 par défaut |
+| `lmstudio` | Serveur LM Studio local | Auth placeholder — localhost:1234 par défaut *(depuis v0.9.1)* |
+
+Modes d'authentification, par priorité :
+
+1. **Clé API par variable d'environnement** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
+2. **Credentials OAuth stockés** à `~/.superagent/credentials/<name>.json`. Flux device-code — `superagent auth login <name>` :
+   - `claude-code` — réutilise une connexion Claude Code existante
+   - `codex` — réutilise une connexion Codex CLI
+   - `gemini` — réutilise une connexion Gemini CLI
+   - `kimi-code` — flux device RFC 8628 contre `auth.kimi.com` *(depuis v0.9.0)*
+   - `qwen-code` — flux device avec PKCE S256 + `resource_url` par compte *(depuis v0.9.0)*
+3. **Config explicite** — `api_key` / `access_token` / `account_id` dans les options d'agent.
+
+Le refresh OAuth est sérialisé inter-processus via `CredentialStore::withLock()` — des workers de queue parallèles partageant un même fichier de credentials ne se marchent pas dessus *(depuis v0.9.0)*.
+
+### En-têtes déclaratifs
+
+```php
+new Agent([
+    'provider'         => 'openai',
+    'env_http_headers' => [
+        'OpenAI-Project'      => 'OPENAI_PROJECT',      // ajouté uniquement si env défini et non vide
+        'OpenAI-Organization' => 'OPENAI_ORGANIZATION',
+    ],
+    'http_headers' => [
+        'x-app' => 'my-host-app',                       // en-tête statique
+    ],
+]);
+```
+
+*Depuis v0.9.1*
+
+### Catalogue de modèles
+
+Chaque provider embarque id + tarification dans `resources/models.json`. Rafraîchir à l'endpoint `/models` live du vendeur à tout moment :
+
+```bash
+superagent models refresh              # tous les providers avec creds en env
+superagent models refresh openai       # un provider
+superagent models list                 # catalogue fusionné
+superagent models status               # source + ancienneté
+```
+
+*Depuis v0.9.0*
+
+---
+
+## API OpenAI Responses
+
+Provider dédié : `provider: 'openai-responses'`. Frappe `/v1/responses` avec le shape moderne complet d'OpenAI.
+
+**Pourquoi plutôt que `openai` :**
+
+| Fonctionnalité | Responses | Chat Completions |
+|---|---|---|
+| Continuation via `previous_response_id` | ✅ — l'état reste côté serveur ; le nouveau tour évite de renvoyer le contexte | ❌ — doit renvoyer `messages[]` à chaque tour |
+| `reasoning.effort` (`minimal / low / medium / high / xhigh`) | ✅ natif | ❌ hacks d'id modèle pour la série o |
+| `reasoning.summary` | ✅ natif | ❌ |
+| `prompt_cache_key` (cache serveur) | ✅ natif | ❌ |
+| `text.verbosity` (`low / medium / high`) | ✅ natif | ❌ |
+| `service_tier` (`priority / default / flex / scale`) | ✅ natif | ❌ |
+| Erreurs classifiées | ✅ via les codes d'événement `response.failed` | Pattern-matching sur le body HTTP |
+
+```php
+$agent = new Agent([
+    'provider' => 'openai-responses',
+    'model'    => 'gpt-5',
+]);
+
+$result = $agent->run('analyse ce codebase et propose des refactos', [
+    'reasoning'        => ['effort' => 'high', 'summary' => 'auto'],
+    'verbosity'        => 'low',
+    'prompt_cache_key' => 'session:42',
+    'service_tier'     => 'priority',
+    'store'            => true,           // requis pour réutiliser previous_response_id au tour suivant
+]);
+
+// Continuer la conversation sans renvoyer l'historique :
+$provider = $agent->getProvider();
+$nextAgent = new Agent([
+    'provider' => 'openai-responses',
+    'options'  => ['previous_response_id' => $provider->lastResponseId()],
+]);
+$nextResult = $nextAgent->run('descends d\'un niveau sur la couche d\'auth');
+```
+
+### Routage par abonnement ChatGPT
+
+Passer `access_token` (ou `auth_mode: 'oauth'`) bascule le routage vers `chatgpt.com/backend-api/codex` — les abonnés Plus / Pro / Business facturent sur leur abonnement au lieu de se faire rejeter sur `api.openai.com`.
+
+```php
+new Agent([
+    'provider'     => 'openai-responses',
+    'access_token' => $token,
+    'account_id'   => $accountId,   // ajoute l'en-tête chatgpt-account-id
+]);
+```
+
+### Azure OpenAI
+
+Six marqueurs de base URL bascule automatiquement en mode Azure. Le paramètre `api-version` est ajouté (défaut `2025-04-01-preview`, surchargeable) ; l'en-tête `api-key` est envoyé à côté d'`Authorization`.
+
+```php
+new Agent([
+    'provider'          => 'openai-responses',
+    'base_url'          => 'https://my-resource.openai.azure.com/openai/deployments/gpt-5',
+    'api_key'           => $azureKey,
+    'azure_api_version' => '2024-12-01-preview',   // surcharge optionnelle
+]);
+```
+
+### Passthrough de trace-context
+
+Injecter un W3C `traceparent` dans `client_metadata` pour corréler les logs côté OpenAI avec votre trace distribué :
+
+```php
+$tc = SuperAgent\Support\TraceContext::fresh();              // en générer un
+// OU : SuperAgent\Support\TraceContext::parse($headerValue); // depuis un header HTTP entrant
+
+$agent->run($prompt, ['trace_context' => $tc]);
+// OU : $agent->run($prompt, ['traceparent' => '00-0af7-...', 'tracestate' => 'v=1']);
+```
+
+*Depuis v0.9.1*
+
+---
+
+## Boucle d'agent
+
+`Agent::run($prompt, $options)` pilote la boucle complète jusqu'à ce que le modèle cesse d'émettre des blocs `tool_use`. Coût, usage et messages de chaque tour alimentent `AgentResult`.
+
+```php
+$result = $agent->run('...', [
+    'model'             => 'claude-sonnet-4-5-20250929',  // surcharge par appel
+    'max_tokens'        => 8192,
+    'temperature'       => 0.3,
+    'response_format'   => ['type' => 'json_schema', 'json_schema' => [...]],
+    'idempotency_key'   => 'job-42:turn-7',               // depuis v0.9.1
+    'system_prompt'     => 'Tu es un analyste précis.',
+]);
+
+echo $result->text();
+$result->turns();          // nombre de tours
+$result->totalUsage();     // Usage{inputTokens, outputTokens, cache*}
+$result->totalCostUsd;     // float, sur tous les tours
+$result->idempotencyKey;   // passthrough pour déduplication de logs (depuis v0.9.1)
+```
+
+### Caps de budget et de tours
+
+```php
+$agent = (new Agent(['provider' => 'openai']))
+    ->withMaxTurns(50)
+    ->withMaxBudget(5.00);            // USD — cap dur ; abort en cours de boucle si dépassé
+```
+
+### Streaming
+
+```php
+foreach ($agent->stream('...') as $assistantMessage) {
+    echo $assistantMessage->text();
+}
+```
+
+Pour les flux d'événements lisibles par machine (JSON / NDJSON pour IDE / CI), voir la section [Wire Protocol](#wire-protocol).
+
+### Auto-mode (détection de tâche)
+
+```php
+new Agent([
+    'provider'  => 'anthropic',
+    'auto_mode' => true,               // délègue à TaskAnalyzer pour choisir modèle + outils
+]);
+```
+
+### Idempotence
+
+```php
+$result = $agent->run($prompt, ['idempotency_key' => $queueJobId . ':' . $turnNumber]);
+// $result->idempotencyKey tronqué à 80 caractères ; surfacé sur AgentResult
+// pour que les hosts qui écrivent ai_usage_logs puissent dédupliquer.
+```
+
+*Depuis v0.9.1*
+
+---
+
+## Outils et multi-agents
+
+Les outils sont des sous-classes de `SuperAgent\Tools\Tool`. Les outils intégrés — read / write / edit / bash / glob / grep / search / fetch — se chargent automatiquement. Les outils personnalisés s'enregistrent via `$agent->registerTool(new MyTool())`.
+
+```php
+$agent = (new Agent(['provider' => 'anthropic']))
+    ->loadTools(['read', 'write', 'bash'])
+    ->registerTool(new MyDomainTool());
+
+$result = $agent->run('applique le plan de refacto dans ./plan.md');
+```
+
+### Orchestration multi-agents (`AgentTool`)
+
+Dispatchez des sous-agents en parallèle en émettant plusieurs blocs `agent` tool_use dans un même message assistant :
+
+```php
+$agent->registerTool(new AgentTool());
+
+$result = $agent->run(<<<PROMPT
+Exécute ces trois investigations en parallèle :
+1. Lis CHANGELOG.md et résume les trois dernières releases
+2. Lis composer.json et liste toutes les dépendances runtime
+3. Grep les commentaires TODO dans src/
+Consolide les trois rapports.
+PROMPT);
+```
+
+Chaque sous-agent tourne dans son propre processus PHP (via `ProcessBackend`) ; l'I/O bloquante d'un enfant ne bloque pas les frères. Lorsque `proc_open` est désactivé, les fibres prennent le relais.
+
+#### Preuves de productivité
+
+Chaque résultat `AgentTool` porte des preuves concrètes de ce que l'enfant a réellement fait — pas juste `success: true` :
+
+```php
+[
+    'status'              => 'completed',          // ou 'completed_empty' / 'async_launched'
+    'filesWritten'        => ['/abs/path/a.md'],   // chemins absolus dédupliqués
+    'toolCallsByName'     => ['Read' => 3, 'Write' => 1],
+    'totalToolUseCount'   => 4,                    // observé, pas auto-reporté
+    'productivityWarning' => null,                 // ou chaîne consultative (localisée CJK — depuis v0.9.1)
+    'outputWarnings'      => [],                   // depuis v0.9.1 — résultats d'audit FS
+]
+```
+
+`completed_empty` — zéro appel d'outil observé. Re-dispatcher ou choisir un modèle plus solide.
+`completed` + `productivityWarning` non vide — l'enfant a invoqué des outils sans écrire de fichiers (souvent correct pour des consultations ; vérifier le texte).
+
+*Instrumentation de productivité depuis v0.8.9. Localisation CJK + audit FS depuis v0.9.1.*
+
+#### Audit du répertoire de sortie + injection de garde
+
+Passer `output_subdir` active à la fois (a) un bloc de garde préfixé au prompt de l'enfant (avec détection CJK) et (b) un scan FS post-sortie :
+
+```php
+$agent->run('...', [
+    'output_subdir' => '/abs/path/to/reports/analyst-1',
+]);
+// L'audit détecte :
+//   - extensions hors whitelist (défaut .md / .csv / .png)
+//   - noms de fichiers réservés au consolidator (summary.md / 摘要.md / mindmap.md / ...)
+//   - sous-répertoires de rôles frères (ceo / cfo / cto / marketing / ... ou slugs kebab-case)
+// Configurable via le constructeur AgentOutputAuditor. Ne modifie jamais le disque.
+```
+
+*Depuis v0.9.1*
+
+### Outils natifs par provider
+
+N'importe quel cerveau principal peut appeler ceux-ci comme des outils normaux — pas de changement de provider.
+
+**Builtins hébergés par Moonshot** (exécution côté serveur ; résultats inlinés dans la réponse assistant) :
+
+| Outil | Attributs | Depuis |
+|---|---|---|
+| `KimiMoonshotWebSearchTool` (`$web_search`) | network | v0.9.0 |
+| `KimiMoonshotWebFetchTool` (`$web_fetch`) | network | v0.9.1 |
+| `KimiMoonshotCodeInterpreterTool` (`$code_interpreter`) | network, cost, sensitive | v0.9.1 |
+
+**Autres familles d'outils natifs :**
+- Kimi — `KimiFileExtractTool`, `KimiBatchTool`, `KimiSwarmTool`, `KimiMediaUploadTool`
+- Qwen — `QwenLongFileTool` + feature `dashscope_cache_control`
+- GLM — `glm_web_search`, `glm_web_reader`, `glm_ocr`, `glm_asr`
+- MiniMax — `minimax_tts`, `minimax_music`, `minimax_video`, `minimax_image`
+
+---
+
+## Définitions d'agents (YAML / Markdown)
+
+Chargement automatique depuis `~/.superagent/agents/` (scope utilisateur) et `<project>/.superagent/agents/` (scope projet). Trois formats : `.yaml`, `.yml`, `.md`. Héritage cross-format via `extend:`.
+
+```yaml
+# ~/.superagent/agents/reviewer.yaml
+name: reviewer
+description: Revue de code stricte
+extend: base-coder              # peut être .yaml / .yml / .md
+system_prompt: |
+  Tu révises des PRs avec un focus sur la correction et l'état caché.
+allowed_tools: [read, grep, glob]
+disallowed_tools: [write, edit, bash]
+model: claude-sonnet-4-5-20250929
+```
+
+```markdown
+<!-- ~/.superagent/agents/analyst.md -->
+---
+name: analyst
+extend: reviewer
+model: gpt-5
+---
+Ton rôle est de faire émerger les risques architecturaux. Rends les conclusions en Markdown.
+```
+
+Les champs de listes d'outils (`allowed_tools`, `disallowed_tools`, `exclude_tools`) s'accumulent à travers les chaînes `extend:`. Profondeur limitée contre les cycles.
+
+*Depuis v0.9.0*
+
+---
+
+## Skills
+
+Capacités basées Markdown, enregistrables globalement et chargeables dans toute exécution d'agent :
+
+```bash
+superagent skills install ./my-skill.md
+superagent skills list
+superagent skills show review
+superagent skills remove review
+superagent skills path        # montre le répertoire d'installation
+```
+
+Le markdown de skill supporte un frontmatter avec `name`, `description`, `allowed_tools`, `system_prompt`. L'exécution de skill hérite du provider de l'appelant.
+
+---
+
+## Intégration MCP
+
+### Enregistrement de serveur
+
+```bash
+superagent mcp list
+superagent mcp add sqlite stdio uvx --arg mcp-server-sqlite
+superagent mcp add brave stdio npx --arg @brave/mcp --env BRAVE_API_KEY=...
+superagent mcp remove sqlite
+superagent mcp status
+superagent mcp path
+```
+
+La config est écrite atomiquement à `~/.superagent/mcp.json`.
+
+### Serveurs MCP avec OAuth
+
+```bash
+superagent mcp auth <name>          # flux device-code RFC 8628
+superagent mcp reset-auth <name>    # efface le token stocké
+superagent mcp test <name>          # probe disponibilité (stdio `command -v` ou joignabilité HTTP)
+```
+
+Les serveurs qui déclarent un bloc `oauth: {client_id, device_endpoint, token_endpoint}` dans leur config utilisent ce flux. *Depuis v0.9.0.*
+
+### Catalogue déclaratif + synchronisation non destructive
+
+Déposez un catalogue à `.mcp-servers/catalog.json` (ou `.mcp-catalog.json`) à la racine du projet :
+
+```json
+{
+  "mcpServers": {
+    "sqlite": {"command": "uvx", "args": ["mcp-server-sqlite"]},
+    "brave":  {"command": "npx", "args": ["@brave/mcp"], "env": {"BRAVE_API_KEY": "k"}}
+  },
+  "domains": {
+    "baseline": ["sqlite"],
+    "all":      ["sqlite", "brave"]
+  }
+}
+```
+
+Synchroniser vers un `.mcp.json` projet :
+
+```bash
+superagent mcp sync                         # catalogue complet
+superagent mcp sync --domain=baseline       # seulement le domaine "baseline"
+superagent mcp sync --servers=sqlite,brave  # sous-ensemble explicite
+superagent mcp sync --dry-run               # aperçu, sans écriture disque
+```
+
+Contrat non destructif — hash disque == hash rendu → `unchanged` ; un fichier édité par l'utilisateur est gardé `user-edited` ; première écriture ou match avec notre dernier hash → `written`. Un manifest à `<project>/.superagent/mcp-manifest.json` trace le sha256 de chaque fichier écrit, pour que les entrées obsolètes soient nettoyées automatiquement.
+
+*Depuis v0.9.1*
+
+---
+
+## Wire Protocol
+
+v1 — JSON délimité par sauts de ligne (NDJSON), un événement par ligne, auto-descriptif via les champs de premier niveau `wire_version` + `type`. Fondation pour les ponts IDE, l'intégration CI, les logs structurés.
+
+```bash
+superagent --output json-stream "résume src/"
+# Émet des événements comme :
+# {"wire_version":1,"type":"turn.begin","turn_number":1}
+# {"wire_version":1,"type":"text.delta","delta":"Je vais commencer par..."}
+# {"wire_version":1,"type":"tool.call","name":"read","input":{"path":"src/"}}
+# {"wire_version":1,"type":"turn.end","turn_number":1,"usage":{...}}
+```
+
+### Transport (depuis v0.9.1)
+
+Choisissez la destination du flux via un DSN :
+
+| DSN | Signification |
+|---|---|
+| `stdout` (défaut) / `stderr` | Flux standard |
+| `file:///path/to/log.ndjson` | Écriture fichier en mode append |
+| `tcp://host:port` | Connexion à un pair TCP en écoute |
+| `unix:///path/to/sock` | Connexion à une socket unix en écoute |
+| `listen://tcp/host:port` | Écoute TCP, accepte un client |
+| `listen://unix//path/to/sock` | Écoute socket unix, accepte un client |
+
+Usage programmatique :
+
+```php
+$factory = new SuperAgent\CLI\AgentFactory();
+[$emitter, $transport] = $factory->makeWireEmitterForDsn('listen://unix//tmp/agent.sock');
+
+// L'IDE se connecte, puis :
+$agent->run($prompt, ['wire_emitter' => $emitter]);
+
+$transport->close();
+```
+
+Socket pair non bloquante — un IDE déconnecté ne bloque pas la boucle agent.
+
+*Wire Protocol v1 depuis v0.9.0. Transport socket / TCP / file depuis v0.9.1.*
+
+---
+
+## Retry, erreurs, observabilité
+
+### Retry en couches
+
+```php
+new Agent([
+    'provider'               => 'openai',
+    'request_max_retries'    => 4,       // HTTP connect / 4xx / 5xx (défaut 3)
+    'stream_max_retries'     => 5,       // réservé pour reprise mid-stream (Responses API)
+    'stream_idle_timeout_ms' => 60_000,  // coupure low-speed cURL sur SSE (défaut 300 000)
+]);
+```
+
+Backoff exponentiel avec jitter (facteur 0,9–1,1×) empêche le thundering herd des retries parallèles. Le header `Retry-After` est honoré exactement (sans jitter — le serveur sait mieux).
+
+*Depuis v0.9.1*
+
+### Erreurs classifiées
+
+Six sous-classes de `ProviderException` émises par `OpenAIErrorClassifier` à partir de `error.code` / `error.type` / statut HTTP :
+
+```php
+try {
+    $agent->run($prompt);
+} catch (\SuperAgent\Exceptions\Provider\ContextWindowExceededException $e) {
+    // prompt trop long ; compacter l'historique ou changer de modèle
+} catch (\SuperAgent\Exceptions\Provider\QuotaExceededException $e) {
+    // quota mensuel atteint ; notifier l'opérateur
+} catch (\SuperAgent\Exceptions\Provider\UsageNotIncludedException $e) {
+    // le plan ChatGPT ne couvre pas ce modèle ; upgrade ou bascule sur clé API
+} catch (\SuperAgent\Exceptions\Provider\CyberPolicyException $e) {
+    // rejet par la policy — ne pas retry
+} catch (\SuperAgent\Exceptions\Provider\ServerOverloadedException $e) {
+    // retryable avec backoff ; voir $e->retryAfterSeconds
+} catch (\SuperAgent\Exceptions\Provider\InvalidPromptException $e) {
+    // body malformé — inspecter et corriger
+} catch (\SuperAgent\Exceptions\ProviderException $e) {
+    // capture-tout ; chaque sous-classe ci-dessus étend celle-ci
+}
+```
+
+Toutes les sous-classes étendent `ProviderException`, donc les `catch (ProviderException)` existants continuent à tout capturer.
+
+*Depuis v0.9.1*
+
+### Tableau de bord santé
+
+```bash
+superagent health                # probe cURL 5s de chaque provider configuré
+superagent health --all          # inclut les providers sans clé env (utile pour "qu'est-ce que j'ai oublié ?")
+superagent health --json         # table lisible machine ; sortie non nulle si échec
+```
+
+Enveloppe `ProviderRegistry::healthCheck()` — distingue rejet d'auth (401/403) vs timeout réseau vs "pas de clé API" pour que l'opérateur corrige la bonne chose sans deviner.
+
+*Depuis v0.9.1*
+
+### Durcissement du parser SSE (depuis v0.9.0)
+
+- **Assemblage des tool calls par index** — un appel streamé fragmenté sur N chunks produit maintenant un seul bloc tool-use, pas N fragments.
+- **Détection de `finish_reason: error_finish`** — les signaux de throttle DashScope-compat lèvent `StreamContentError` (retryable, HTTP 429) au lieu de contaminer silencieusement le corps du message.
+- **Réparation de JSON tronqué** — tentative unique de fermer des accolades déséquilibrées avant repli sur un dict d'args vide.
+- **Lecture à double shape des tokens en cache** — `usage.prompt_tokens_details.cached_tokens` (shape OpenAI actuel) ET `usage.cached_tokens` (legacy) alimentent tous deux `Usage::cacheReadInputTokens`.
+
+---
+
+## Garde-fous et checkpoints
+
+### Détection de boucle (depuis v0.9.0)
+
+Cinq détecteurs observent le bus d'événements de streaming ; le premier déclenchement est persistant :
+
+| Détecteur | Signal |
+|---|---|
+| `TOOL_LOOP` | Même outil + mêmes args normalisés 5× de suite |
+| `STAGNATION` | Même nom d'outil 8× indépendamment des args |
+| `FILE_READ_LOOP` | ≥ 8 des 15 derniers appels sont en lecture, avec exemption au démarrage |
+| `CONTENT_LOOP` | Même fenêtre glissante de 50 caractères apparaît 10× dans le texte streamé |
+| `THOUGHT_LOOP` | Même texte de canal thinking apparaît 3× |
+
+```php
+new Agent([
+    'provider'        => 'openai',
+    'loop_detection'  => true,           // valeurs par défaut
+    // OU surcharges par détecteur :
+    // 'loop_detection' => ['TOOL_LOOP' => 10, 'STAGNATION' => 15],
+]);
+```
+
+Les violations sont diffusées comme des événements wire `loop_detected` — l'agent continue, le host décide d'intervenir.
+
+### Checkpoints + shadow-git (depuis v0.9.0)
+
+Chaque tour snapshot l'état de l'agent (messages, coût, usage). Attachez un `GitShadowStore` et les snapshots au niveau fichier atterrissent à côté dans un repo git **séparé et bare** à `~/.superagent/history/<project-hash>/shadow.git` — ne touche jamais votre propre `.git`.
+
+```php
+use SuperAgent\Checkpoint\CheckpointManager;
+use SuperAgent\Checkpoint\GitShadowStore;
+
+$mgr = new CheckpointManager(shadowStore: new GitShadowStore('/path/to/project'));
+$mgr->createCheckpoint($agentState, label: 'after-refactor');
+
+// Plus tard :
+$checkpoints = $mgr->list();
+$mgr->restore($checkpoints[0]->id);
+$mgr->restoreFiles($checkpoints[0]);   // rejoue le shadow commit
+```
+
+Le restore réverse les fichiers suivis et laisse les fichiers non suivis en place (sécurité). Le `.gitignore` du projet est respecté (le worktree du shadow EST le répertoire projet).
+
+### Modes de permission
+
+```php
+new Agent([
+    'provider'        => 'anthropic',
+    'permission_mode' => 'ask',     // ou 'default' / 'plan' / 'bypassPermissions'
+]);
+```
+
+`ask` interroge le `PermissionCallbackInterface` de l'appelant avant tout outil de type write. Enveloppez-le dans `WireProjectingPermissionCallback` pour relayer la requête comme événement wire vers les IDEs.
+
+---
+
+## CLI autonome
+
+```bash
+superagent                                  # REPL interactif
+superagent "corrige le bug de connexion"    # appel unique
+superagent init                             # initialise ~/.superagent/
+superagent auth login <provider>            # importe une connexion OAuth
+superagent auth status                      # affiche les credentials stockés
+superagent models list / update / refresh / status / reset
+superagent mcp list / add / remove / sync / auth / reset-auth / test / status / path
+superagent skills install / list / show / remove / path
+superagent swarm <prompt>                   # plan + exécution swarm
+superagent health [--all] [--json] [--providers=a,b,c]   # joignabilité providers
+```
+
+**Options :**
+
+```
+  -m, --model <model>                  Nom du modèle
+  -p, --provider <provider>            Clé de provider (openai, anthropic, openai-responses, ...)
+      --max-turns <n>                  Tours max de l'agent (défaut 50)
+  -s, --system-prompt <prompt>         System prompt personnalisé
+      --project <path>                 Répertoire de travail projet
+      --json                           Résultats en JSON
+      --output json-stream             Émet des événements wire NDJSON
+      --verbose-thinking               Affiche le flux thinking complet
+      --no-thinking                    Masque thinking
+      --plain                          Désactive ANSI
+      --no-rich                        Renderer minimal legacy
+  -V, --version                        Affiche la version
+  -h, --help                           Affiche l'aide
+```
+
+**Commandes interactives** (dans le REPL) :
+
+```
+  /help                    commandes disponibles
+  /model <name>            changer de modèle
+  /cost                    coût du run
+  /compact                 compaction manuelle du contexte
+  /session save|load|list|delete
+  /clear                   vider la conversation
+  /quit                    quitter
+```
+
+*CLI autonome depuis v0.8.6.*
+
+---
+
+## Intégration Laravel
+
+Le service provider s'enregistre automatiquement quand vous `composer require forgeomni/superagent` :
+
+```php
+// config/superagent.php
+return [
+    'default_provider' => env('SUPERAGENT_PROVIDER', 'anthropic'),
+    'providers' => [
+        'anthropic'         => ['api_key' => env('ANTHROPIC_API_KEY')],
+        'openai'            => ['api_key' => env('OPENAI_API_KEY')],
+        'openai-responses'  => ['api_key' => env('OPENAI_API_KEY'), 'model' => 'gpt-5'],
+        // ...
+    ],
+    'agent' => [
+        'max_turns'      => 50,
+        'max_budget_usd' => 5.00,
+    ],
+];
+```
+
+```php
+use SuperAgent\Facades\SuperAgent;
+
+$result = SuperAgent::agent(['provider' => 'openai'])
+    ->run('résume les commits de cette semaine');
+```
+
+Les commandes Artisan reflètent la CLI :
+
+```bash
+php artisan superagent:chat "corrige le bug"
+php artisan superagent:mcp sync
+php artisan superagent:models refresh
+php artisan superagent:health --json
+```
+
+Voir `docs/LARAVEL.md` pour l'intégration queue, le dispatch de jobs et le schéma `ai_usage_logs`.
+
+---
+
+## Référence de configuration
+
+Toutes les options acceptées par le constructeur `Agent`, groupées. Valeurs par défaut entre parenthèses.
+
+**Sélection de provider**
+
+| Clé | Accepte |
+|---|---|
+| `provider` | Clé de registre ou instance `LLMProvider` |
+| `model` | ID de modèle — surcharge le défaut du provider |
+| `base_url` | URL — surcharge le défaut ; déclenche aussi l'auto-détection (Azure) |
+| `region` | `intl` / `cn` / `us` / `hk` / `code` (spécifique provider) |
+| `api_key` | Clé API du provider |
+| `access_token` + `account_id` | OAuth (OpenAI ChatGPT / Anthropic Claude Code) |
+| `auth_mode` | `'api_key'` (défaut) ou `'oauth'` |
+| `organization` | ID d'org OpenAI (ajoute l'en-tête `OpenAI-Organization`) |
+
+**Boucle d'agent**
+
+| Clé | Défaut |
+|---|---|
+| `max_turns` | `50` |
+| `max_budget_usd` | `0.0` (pas de cap) |
+| `system_prompt` | `null` |
+| `auto_mode` | `false` |
+| `allowed_tools` / `denied_tools` | `null` / `[]` |
+| `permission_mode` | `'default'` |
+| `options` | `[]` (défauts forward au provider) |
+
+**Options par appel** (`$agent->run($prompt, $options)`)
+
+| Clé | Depuis | Notes |
+|---|---|---|
+| `model` / `max_tokens` / `temperature` / `tool_choice` / `response_format` | v0.1.0 | Boutons Chat Completions standards |
+| `features` | v0.8.8 | `thinking` / `prompt_cache_key` / `dashscope_cache_control` / ... routés via `FeatureDispatcher` |
+| `extra_body` | v0.9.0 | Escape hatch power-user — deep-merge dans le body |
+| `loop_detection` | v0.9.0 | `true` (défauts), `false`, ou surcharges de seuils |
+| `idempotency_key` | v0.9.1 | Passthrough vers `AgentResult::$idempotencyKey` |
+| `reasoning` | v0.9.1 | Responses API — `{effort, summary}` |
+| `verbosity` | v0.9.1 | Responses API — `low` / `medium` / `high` |
+| `prompt_cache_key` | v0.9.0 | Clé de cache pour Kimi + OpenAI Responses |
+| `previous_response_id` | v0.9.1 | Continuation Responses API |
+| `store` / `include` / `service_tier` / `parallel_tool_calls` | v0.9.1 | Responses API |
+| `client_metadata` | v0.9.1 | Map opaque key-value Responses API |
+| `trace_context` / `traceparent` / `tracestate` | v0.9.1 | Injection W3C Trace Context |
+| `output_subdir` | v0.9.1 | Bloc de garde `AgentTool` + audit post-sortie |
+
+**Retry + transport** (niveau provider)
+
+| Clé | Défaut | Depuis |
+|---|---|---|
+| `max_retries` | `3` | v0.1.0 (bouton unique legacy) |
+| `request_max_retries` | `3` (hérite de `max_retries`) | v0.9.1 |
+| `stream_max_retries` | `5` | v0.9.1 |
+| `stream_idle_timeout_ms` | `300_000` | v0.9.1 |
+| `env_http_headers` | `[]` | v0.9.1 |
+| `http_headers` | `[]` | v0.9.1 |
+| `experimental_ws_transport` | `false` | v0.9.1 (scaffold) |
+| `azure_api_version` | `'2025-04-01-preview'` | v0.9.1 (Azure seulement) |
+
+---
+
+## Liens
+
+- [CHANGELOG](CHANGELOG.md) — notes de version complètes
+- [INSTALL_FR](INSTALL_FR.md) — installation + première exécution
+- [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) — patterns, exemples, debug
+- [Providers natifs](docs/NATIVE_PROVIDERS.md) — maps de région + matrice de capacités
+- [Wire protocol](docs/WIRE_PROTOCOL.md) — spec v1
+- [Matrice de fonctionnalités](docs/FEATURES_MATRIX.md) — quel provider supporte quoi
+
+## Licence
+
+MIT — voir [LICENSE](LICENSE).

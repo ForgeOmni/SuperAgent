@@ -97,6 +97,37 @@ class KimiServerBuiltinToolTest extends TestCase
         $this->assertContains('network', $tool->attributes());
     }
 
+    public function test_web_fetch_serializes_as_builtin_function(): void
+    {
+        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $tool = new \SuperAgent\Tools\Providers\Kimi\KimiMoonshotWebFetchTool();
+        $wire = $this->invokeConvertTools($p, [$tool]);
+
+        $this->assertSame('builtin_function', $wire[0]['type']);
+        $this->assertSame('$web_fetch', $wire[0]['function']['name']);
+        $this->assertArrayNotHasKey('description', $wire[0]['function']);
+        $this->assertArrayNotHasKey('parameters', $wire[0]['function']);
+    }
+
+    public function test_code_interpreter_serializes_as_builtin_function(): void
+    {
+        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $tool = new \SuperAgent\Tools\Providers\Kimi\KimiMoonshotCodeInterpreterTool();
+        $wire = $this->invokeConvertTools($p, [$tool]);
+
+        $this->assertSame('builtin_function', $wire[0]['type']);
+        $this->assertSame('$code_interpreter', $wire[0]['function']['name']);
+    }
+
+    public function test_code_interpreter_declares_cost_and_sensitive(): void
+    {
+        $tool = new \SuperAgent\Tools\Providers\Kimi\KimiMoonshotCodeInterpreterTool();
+        $attrs = $tool->attributes();
+        $this->assertContains('network',   $attrs);
+        $this->assertContains('cost',      $attrs, 'code interpreter consumes quota per run');
+        $this->assertContains('sensitive', $attrs, 'code interpreter runs arbitrary code in a sandbox we do not operate');
+    }
+
     // ── helpers ───────────────────────────────────────────────────
 
     private function invokeConvertTools(object $provider, array $tools): array

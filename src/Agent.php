@@ -270,6 +270,14 @@ class Agent
      */
     public function run(string $prompt, array $options = []): AgentResult
     {
+        // Merge caller-supplied options over the per-instance defaults so
+        // callers of the non-auto path actually see their options applied
+        // (pre-0.9.1 this silently dropped them). `idempotency_key` in
+        // particular rides on this to surface on the returned AgentResult.
+        if (! empty($options)) {
+            $this->options = array_merge($this->options, $options);
+        }
+
         // If auto-mode is enabled, use AutoModeAgent
         if ($this->autoMode) {
             $autoAgent = new AutoModeAgent(
@@ -283,10 +291,10 @@ class Agent
                     'max_budget_usd' => $this->maxBudgetUsd,
                 ], $options)
             );
-            
+
             return $autoAgent->run($prompt, $options);
         }
-        
+
         // Otherwise use standard single-agent execution
         return $this->prompt($prompt);
     }
@@ -315,6 +323,9 @@ class Agent
             allResponses: $allResponses,
             messages: $this->messages,
             totalCostUsd: $engine->getTotalCostUsd(),
+            idempotencyKey: isset($this->options['idempotency_key']) && is_string($this->options['idempotency_key'])
+                ? substr($this->options['idempotency_key'], 0, 80)
+                : null,
         );
     }
 

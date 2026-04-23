@@ -53,4 +53,18 @@ class AgentResultTest extends TestCase
         $this->assertSame('', $result->text());
         $this->assertSame(0, $result->turns());
     }
+
+    public function test_idempotency_key_defaults_null(): void
+    {
+        $result = new AgentResult(message: null);
+
+        $this->assertNull($result->idempotencyKey);
+    }
+
+    public function test_idempotency_key_passthrough(): void
+    {
+        $result = new AgentResult(message: null, idempotencyKey: 'job-123:turn-7');
+
+        $this->assertSame('job-123:turn-7', $result->idempotencyKey);
+    }
 }

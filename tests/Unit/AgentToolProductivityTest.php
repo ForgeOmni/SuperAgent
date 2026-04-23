@@ -24,8 +24,12 @@ use SuperAgent\Tools\Builtin\AgentTool;
  */
 class AgentToolProductivityTest extends TestCase
 {
-    private function makeAgentToolWithActiveTask(string $agentId): AgentTool
-    {
+    private function makeAgentToolWithActiveTask(
+        string $agentId,
+        string $prompt = '',
+        ?string $outputSubdir = null,
+        string $taskName = 'test',
+    ): AgentTool {
         $tool = new AgentTool();
         $rc = new ReflectionClass($tool);
         $activeTasks = $rc->getProperty('activeTasks');
@@ -33,9 +37,11 @@ class AgentToolProductivityTest extends TestCase
         $activeTasks->setValue($tool, [
             $agentId => [
                 'task_id' => 'task_' . $agentId,
-                'name' => 'test',
+                'name' => $taskName,
                 'backend_instance' => null,
                 'started_at' => new \DateTimeImmutable(),
+                'prompt' => $prompt,
+                'output_subdir' => $outputSubdir,
                 'tool_counts' => [],
                 'files_written' => [],
             ],
@@ -155,5 +161,89 @@ class AgentToolProductivityTest extends TestCase
         $this->assertNotNull($info['productivityWarning']);
         $this->assertSame([], $info['filesWritten']);
         $this->assertSame(['Write' => 1], $info['toolCallsByName']);
+    }
+
+    public function testWarningLocalisedToChineseForCjkPrompt(): void
+    {
+        $agentId = 'agent_zh_empty';
+        $tool = $this->makeAgentToolWithActiveTask($agentId, '分析这份代码库并写出技术债报告');
+
+        $info = $this->buildInfo($tool, $agentId, 3);
+
+        $this->assertSame('completed_empty', $info['status']);
+        $this->assertNotNull($info['productivityWarning']);
+        // Zh variant — key phrase from the buildProductivityInfo zh template.
+        $this->assertStringContainsString('零工具调用', $info['productivityWarning']);
+        $this->assertStringNotContainsString('zero tool calls', $info['productivityWarning']);
+    }
+
+    public function testWarningStaysEnglishForLatinPrompt(): void
+    {
+        $agentId = 'agent_en_empty';
+        $tool = $this->makeAgentToolWithActiveTask($agentId, 'analyze the codebase and write a tech-debt report');
+
+        $info = $this->buildInfo($tool, $agentId, 3);
+
+        $this->assertSame('completed_empty', $info['status']);
+        $this->assertStringContainsString('zero tool calls', $info['productivityWarning']);
+    }
+
+    public function testAdvisoryWarningAlsoLocalised(): void
+    {
+        // RUN 72 shape — tools ran but no files written. Zh prompt should
+        // get the zh advisory (key phrase: "没有写入任何文件").
+        $agentId = 'agent_zh_no_writes';
+        $tool = $this->makeAgentToolWithActiveTask($agentId, '请帮我调研一下市场数据');
+        $this->recordTool($tool, $agentId, 'Bash', ['command' => 'curl …']);
+        $this->recordTool($tool, $agentId, 'Read', ['file_path' => '/tmp/a.md']);
+
+        $info = $this->buildInfo($tool, $agentId, 3);
+
+        $this->assertSame('completed', $info['status']);
+        $this->assertStringContainsString('没有写入任何文件', $info['productivityWarning']);
+    }
+
+    public function testOutputWarningsEmptyByDefault(): void
+    {
+        // Legacy shape — no output_subdir means the audit is skipped.
+        $agentId = 'agent_no_audit';
+        $tool = $this->makeAgentToolWithActiveTask($agentId);
+        $this->recordTool($tool, $agentId, 'Write', ['file_path' => '/tmp/x.md']);
+
+        $info = $this->buildInfo($tool, $agentId, 2);
+
+        $this->assertArrayHasKey('outputWarnings', $info);
+        $this->assertSame([], $info['outputWarnings']);
+    }
+
+    public function testOutputWarningsPopulatedWhenSubdirPolluted(): void
+    {
+        $subdir = sys_get_temp_dir() . '/superagent-audit-test-' . bin2hex(random_bytes(4));
+        mkdir($subdir, 0700, true);
+        try {
+            // Write a reserved filename under the agent's subdir — the
+            // audit will flag it as a consolidator-reserved violation.
+            file_put_contents($subdir . '/summary.md', 'premature consolidation');
+            file_put_contents($subdir . '/report.md',  'agent work');
+
+            $agentId = 'agent_audit';
+            $tool = $this->makeAgentToolWithActiveTask(
+                $agentId,
+                'analyze',
+                outputSubdir: $subdir,
+                taskName: 'analyst',
+            );
+            $this->recordTool($tool, $agentId, 'Write', ['file_path' => $subdir . '/report.md']);
+
+            $info = $this->buildInfo($tool, $agentId, 2);
+
+            $this->assertSame('completed', $info['status']);
+            $this->assertNotSame([], $info['outputWarnings']);
+            $this->assertStringContainsString('summary.md', implode(' ', $info['outputWarnings']));
+        } finally {
+            @unlink($subdir . '/summary.md');
+            @unlink($subdir . '/report.md');
+            @rmdir($subdir);
+        }
     }
 }

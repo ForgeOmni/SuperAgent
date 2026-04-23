@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace SuperAgent\CLI\Commands;
 
 use SuperAgent\CLI\Terminal\Renderer;
+use SuperAgent\MCP\Catalog;
+use SuperAgent\MCP\Manifest;
+use SuperAgent\MCP\McpJsonWriter;
 use SuperAgent\MCP\MCPManager;
 
 /**
@@ -43,8 +46,112 @@ class McpCommand
             'auth'       => $this->auth($renderer, $rest),
             'reset-auth' => $this->resetAuth($renderer, $rest),
             'test'       => $this->test($renderer, $rest),
+            'sync'       => $this->sync($renderer, $rest),
             default      => $this->usage($renderer, $sub),
         };
+    }
+
+    /**
+     * `superagent mcp sync [--catalog <path>] [--project <root>] [--domain <name>] [--servers a,b,c] [--dry-run]`
+     *
+     * Renders a project `.mcp.json` from a host-supplied catalog. Uses
+     * the non-destructive {@see McpJsonWriter}: byte-equal on disk is
+     * `unchanged`, a user edit lands as `user-edited` and is left in
+     * place, first-time write or our-last-write becomes `written`.
+     *
+     * Defaults:
+     *   --catalog: `<project>/.mcp-servers/catalog.json` or `.mcp-catalog.json`
+     *   --project: current working directory
+     *   Desired set: every server in the catalog (use --domain or
+     *     --servers to narrow)
+     */
+    private function sync(Renderer $renderer, array $rest): int
+    {
+        // The top-level arg parser silently drops unrecognised long
+        // flags (--dry-run, --catalog, …) — fall through to raw argv
+        // to pick them up. --project is a global option consumed by the
+        // shared parser, so leave that to SuperAgentApplication and
+        // receive it here as a regular positional string if present.
+        $rawArgv = array_slice($_SERVER['argv'] ?? [], 1);
+        $tokens  = array_merge($rest, $rawArgv);
+
+        $projectRoot = getcwd() ?: '.';
+        $catalogPath = null;
+        $domain      = null;
+        $subsetCsv   = null;
+        $dryRun      = false;
+
+        for ($i = 0; $i < count($tokens); $i++) {
+            $a = $tokens[$i];
+            if ($a === '--dry-run')            { $dryRun = true; continue; }
+            if ($a === '--catalog')            { $catalogPath = $tokens[$i + 1] ?? null; continue; }
+            if (str_starts_with((string) $a, '--catalog=')) { $catalogPath = substr($a, 10); continue; }
+            if ($a === '--domain')             { $domain = $tokens[$i + 1] ?? null; continue; }
+            if (str_starts_with((string) $a, '--domain='))  { $domain = substr($a, 9); continue; }
+            if ($a === '--servers')            { $subsetCsv = $tokens[$i + 1] ?? null; continue; }
+            if (str_starts_with((string) $a, '--servers=')) { $subsetCsv = substr($a, 10); continue; }
+        }
+
+        $projectRoot = rtrim((string) $projectRoot, DIRECTORY_SEPARATOR);
+        if ($catalogPath === null) {
+            foreach ([
+                $projectRoot . '/.mcp-servers/catalog.json',
+                $projectRoot . '/.mcp-catalog.json',
+            ] as $candidate) {
+                if (is_file($candidate)) { $catalogPath = $candidate; break; }
+            }
+        }
+
+        if ($catalogPath === null || ! is_file($catalogPath)) {
+            $renderer->error('No MCP catalog found.');
+            $renderer->hint('Pass --catalog <path>, or drop a catalog at .mcp-servers/catalog.json in your project root.');
+            return 1;
+        }
+
+        try {
+            $catalog = new Catalog($catalogPath);
+        } catch (\Throwable $e) {
+            $renderer->error('Catalog load failed: ' . $e->getMessage());
+            return 1;
+        }
+
+        // Resolve the desired subset.
+        try {
+            if ($subsetCsv !== null) {
+                $names = array_values(array_filter(array_map('trim', explode(',', $subsetCsv))));
+                $servers = $catalog->subset($names);
+            } elseif ($domain !== null) {
+                $servers = $catalog->domainServers($domain);
+                if ($servers === []) {
+                    $renderer->warning("Domain '{$domain}' is empty or unknown in the catalog — rendering an empty .mcp.json.");
+                }
+            } else {
+                $servers = $catalog->subset($catalog->names());
+            }
+        } catch (\Throwable $e) {
+            $renderer->error($e->getMessage());
+            return 1;
+        }
+
+        $mcpJsonPath  = $projectRoot . '/.mcp.json';
+        $manifestPath = $projectRoot . '/.superagent/mcp-manifest.json';
+
+        $writer = new McpJsonWriter($mcpJsonPath, new Manifest($manifestPath));
+        $result = $writer->sync($servers, $dryRun);
+
+        $status = $result['status'];
+        $path   = $result['path'];
+        $suffix = $dryRun ? ' (dry-run)' : '';
+
+        $line = sprintf('%s: %s', $status, $path);
+        match ($status) {
+            McpJsonWriter::STATUS_WRITTEN   => $renderer->success($line . $suffix . ' (' . count($servers) . ' server' . (count($servers) === 1 ? '' : 's') . ')'),
+            McpJsonWriter::STATUS_UNCHANGED => $renderer->info($line . $suffix),
+            McpJsonWriter::STATUS_USER_EDITED => $renderer->warning($line . $suffix . ' — user edits preserved'),
+            default                         => $renderer->line($line . $suffix),
+        };
+
+        return 0;
     }
 
     /**

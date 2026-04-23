@@ -135,6 +135,16 @@ class AgentTool extends Tool
                                      'To run multiple agents concurrently, leave this false and emit all agent ' .
                                      'calls in a single assistant message — the runtime parallelizes them.',
                 ],
+                'output_subdir' => [
+                    'type' => 'string',
+                    'description' => 'Absolute or project-relative directory the child is expected to write its ' .
+                                     'deliverables into. When set, the runtime (a) appends a guard block to the ' .
+                                     "child's prompt warning against sibling-role sub-directories, consolidator " .
+                                     'reserved filenames, and non-whitelisted extensions; and (b) audits the ' .
+                                     'directory after the child exits, returning any violations under ' .
+                                     "`outputWarnings` in the tool result. Omit to skip both — the legacy " .
+                                     'productivity signals (filesWritten / toolCallsByName) keep working either way.',
+                ],
             ],
             'required' => ['description', 'prompt'],
         ];
@@ -157,6 +167,21 @@ class AgentTool extends Tool
             $mode = isset($input['mode']) ? self::resolvePermissionMode($input['mode']) : null;
             $isolation = isset($input['isolation']) ? IsolationMode::from($input['isolation']) : IsolationMode::NONE;
             $runInBackground = $input['run_in_background'] ?? false;
+            $outputSubdir = isset($input['output_subdir']) && is_string($input['output_subdir']) && $input['output_subdir'] !== ''
+                ? $input['output_subdir']
+                : null;
+
+            // Prepend a host-injected guard block when the caller opted
+            // into output-auditing by setting output_subdir. The block is
+            // idempotent via its marker — re-composing the same prompt
+            // multiple times (e.g. if the parent model retries with edits)
+            // doesn't duplicate the guards.
+            if ($outputSubdir !== null) {
+                $guard = AgentOutputAuditor::guardBlock($prompt, $name);
+                if ($guard !== '') {
+                    $prompt = rtrim($prompt) . "\n\n" . $guard;
+                }
+            }
 
             $this->logger->info('Spawning agent', [
                 'name' => $name,
@@ -232,6 +257,15 @@ class AgentTool extends Tool
                 'name' => $name,
                 'backend_instance' => $backend,
                 'started_at' => new \DateTimeImmutable(),
+                // Stashed for CJK-vs-EN routing of productivityWarning text.
+                // Localising to the caller's language avoids Chinese runs
+                // getting an English warning that leaks zh/en mixing into
+                // the orchestrator's consolidation output.
+                'prompt' => $prompt,
+                // Output-dir contract, opt-in. Non-null enables the
+                // post-exit audit (extension whitelist, reserved-filename
+                // check, sibling-role detection) via AgentOutputAuditor.
+                'output_subdir' => $outputSubdir,
                 // Productivity accumulators — populated by applyProgressEvents()
                 // as the child's tool_use events stream in. Used by
                 // waitForProcessCompletion() to detect the "completed but
@@ -585,7 +619,7 @@ class AgentTool extends Tool
      */
     private function buildProductivityInfo(string $agentId, int $childReportedTurns): array
     {
-        $task = $this->activeTasks[$agentId] ?? ['tool_counts' => [], 'files_written' => []];
+        $task = $this->activeTasks[$agentId] ?? ['tool_counts' => [], 'files_written' => [], 'prompt' => '', 'output_subdir' => null];
         $counts = $task['tool_counts'];
         $files = array_values(array_unique($task['files_written']));
         $observedToolCalls = array_sum($counts);
@@ -595,16 +629,36 @@ class AgentTool extends Tool
         // the child really did invoke tools.
         $totalToolUseCount = $observedToolCalls > 0 ? $observedToolCalls : $childReportedTurns;
 
+        $isCjk = \SuperAgent\Support\LanguageDetector::isCjk($task['prompt'] ?? '');
+
         $status = 'completed';
         $warning = null;
         if ($observedToolCalls === 0) {
             $status  = 'completed_empty';
-            $warning = 'Child made zero tool calls. The final text is the entire output; no files were created, no commands were run. This usually means the model described what it would do instead of doing it — retry with a more explicit instruction to invoke tools, or pick a stronger model.';
+            $warning = $isCjk
+                ? '子代理零工具调用。最终文本就是全部输出；没有创建文件，也没有执行任何命令。通常说明模型在"描述"要做什么而不是"去做"——请用更明确的指令重新派发，或换更强的模型。'
+                : 'Child made zero tool calls. The final text is the entire output; no files were created, no commands were run. This usually means the model described what it would do instead of doing it — retry with a more explicit instruction to invoke tools, or pick a stronger model.';
         } elseif ($files === []) {
             // Keep `status: completed`. Attach an informational note so the
             // caller has context, but do NOT block: some sub-agent patterns
             // legitimately return findings as text without persisting files.
-            $warning = 'Note: child invoked ' . $observedToolCalls . ' tool(s) but wrote no files. If this task was expected to produce reports/CSVs on disk, inspect the child text (it may contain the answer inline) or re-dispatch with an explicit write instruction. Otherwise this is fine — advisory consultations often return results via text only.';
+            $warning = $isCjk
+                ? sprintf(
+                    '提示：子代理调用了 %d 次工具但没有写入任何文件。若本任务预期生成报告/CSV 到磁盘，请检查子代理的最终文本（可能把结果放在正文里），或用显式 write 指令重新派发。否则可忽略——咨询类子任务常常只通过文本返回结果。',
+                    $observedToolCalls
+                )
+                : 'Note: child invoked ' . $observedToolCalls . ' tool(s) but wrote no files. If this task was expected to produce reports/CSVs on disk, inspect the child text (it may contain the answer inline) or re-dispatch with an explicit write instruction. Otherwise this is fine — advisory consultations often return results via text only.';
+        }
+
+        // Optional post-exit filesystem audit, gated on output_subdir.
+        // Observational only — warnings land in the result for the
+        // orchestrator to decide what to do. Auditor never throws
+        // (missing dir returns []), so the happy path is untouched.
+        $outputWarnings = [];
+        $outputSubdir = $task['output_subdir'] ?? null;
+        if (is_string($outputSubdir) && $outputSubdir !== '') {
+            $auditor = new AgentOutputAuditor();
+            $outputWarnings = $auditor->audit($outputSubdir, $task['name'] ?? $agentId);
         }
 
         return [
@@ -613,6 +667,7 @@ class AgentTool extends Tool
             'toolCallsByName'     => $counts,
             'totalToolUseCount'   => $totalToolUseCount,
             'productivityWarning' => $warning,
+            'outputWarnings'      => $outputWarnings,
         ];
     }
 

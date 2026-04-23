@@ -277,6 +277,33 @@ class AgentFactory
     }
 
     /**
+     * Build a JSON-stream emitter that writes to the sink named by
+     * a {@see \SuperAgent\Harness\Wire\WireTransport} DSN — STDOUT /
+     * STDERR / file:// / tcp:// / unix:// / listen:// . This is the
+     * 0.9.0-deferred Phase 8c extension: stdio stays the default, but
+     * IDE / web-UI integrations can now attach without running the
+     * agent as a child process piping stdout.
+     *
+     * Returns `[emitter, transport]` — the caller holds the transport
+     * so it can `close()` the server handle (if any) after the run.
+     * The emitter alone is enough to wire into `options['wire_emitter']`.
+     *
+     * @return array{0: StreamEventEmitter, 1: \SuperAgent\Harness\Wire\WireTransport}
+     */
+    public function makeWireEmitterForDsn(string $dsn, array $options = []): array
+    {
+        $transport = \SuperAgent\Harness\Wire\WireTransport::open($dsn, $options);
+        $out = new \SuperAgent\Harness\Wire\WireStreamOutput($transport->stream);
+        $emitter = new StreamEventEmitter();
+        $emitter->on(static function ($event) use ($out) {
+            if ($event instanceof \SuperAgent\Harness\Wire\WireEvent) {
+                $out->emit($event);
+            }
+        });
+        return [$emitter, $transport];
+    }
+
+    /**
      * Decorate a StreamingHandler with LoopDetector observation —
      * opt-in via `$options['loop_detection']` (any truthy value,
      * including an array of per-detector threshold overrides

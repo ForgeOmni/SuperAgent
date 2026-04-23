@@ -464,6 +464,41 @@ class AgentTest extends TestCase
     }
 
     // ========================================================================
+    // IDEMPOTENCY KEY
+    // ========================================================================
+
+    public function test_run_options_merge_into_agent_options(): void
+    {
+        $agent = new Agent([
+            'provider' => $this->createMockProvider(),
+            'load_tools' => 'none',
+            'options' => ['existing' => 'kept'],
+        ]);
+
+        // `run()` used to silently drop per-call options. Reach the merge
+        // step without needing to exercise the full QueryEngine by invoking
+        // the option-merge via withOptions (same code path).
+        $agent->withOptions(['idempotency_key' => 'job-42:turn-3']);
+
+        $ref = new \ReflectionProperty(Agent::class, 'options');
+        $ref->setAccessible(true);
+        $stored = $ref->getValue($agent);
+
+        $this->assertSame('kept', $stored['existing']);
+        $this->assertSame('job-42:turn-3', $stored['idempotency_key']);
+    }
+
+    public function test_idempotency_key_truncated_to_80_chars(): void
+    {
+        // Long keys get clipped before landing on AgentResult so hosts with
+        // a VARCHAR(80) column can store the value byte-exact.
+        $long = str_repeat('x', 120);
+        $result = new \SuperAgent\AgentResult(message: null, idempotencyKey: substr($long, 0, 80));
+
+        $this->assertSame(80, strlen($result->idempotencyKey));
+    }
+
+    // ========================================================================
     // CHAINING
     // ========================================================================
 

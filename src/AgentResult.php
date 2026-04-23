@@ -15,6 +15,15 @@ class AgentResult
         /** @var Message[] */
         public readonly array $messages = [],
         public readonly float $totalCostUsd = 0.0,
+        /**
+         * Caller-supplied idempotency key forwarded from `Agent::run()`
+         * options. Pure passthrough — the SDK itself does not persist or
+         * dedupe on it. Hosts that write `ai_usage_logs` (or any similar
+         * ledger) read this on the result to implement a dedup window, so
+         * parallel workers retrying the same logical turn don't double-charge.
+         * Null when the caller didn't supply one.
+         */
+        public readonly ?string $idempotencyKey = null,
     ) {
     }
 

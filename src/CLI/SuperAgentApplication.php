@@ -6,6 +6,7 @@ namespace SuperAgent\CLI;
 
 use SuperAgent\CLI\Commands\AuthCommand;
 use SuperAgent\CLI\Commands\ChatCommand;
+use SuperAgent\CLI\Commands\HealthCommand;
 use SuperAgent\CLI\Commands\InitCommand;
 use SuperAgent\CLI\Commands\McpCommand;
 use SuperAgent\CLI\Commands\ModelsCommand;
@@ -23,7 +24,7 @@ use SuperAgent\CLI\Commands\SwarmCommand;
  */
 class SuperAgentApplication
 {
-    private const VERSION = '0.8.8';
+    private const VERSION = '0.9.1';
     private const NAME = 'SuperAgent';
 
     public function run(): int
@@ -61,6 +62,8 @@ class SuperAgentApplication
             'mcp'     => (new McpCommand())->execute($options),
             'skills'  => (new SkillsCommand())->execute($options),
             'swarm'   => (new SwarmCommand())->execute($options),
+            'health',
+            'doctor'  => (new HealthCommand())->execute($options),
             default   => (new ChatCommand())->execute($options),
         };
     }
@@ -93,6 +96,7 @@ class SuperAgentApplication
         $options['mcp_args'] = [];
         $options['skills_args'] = [];
         $options['swarm_args'] = [];
+        $options['health_args'] = [];
 
         while ($i < count($args)) {
             $arg = $args[$i];
@@ -134,7 +138,7 @@ class SuperAgentApplication
 
         // First positional arg: subcommand or prompt
         if (! empty($positional)) {
-            if (in_array($positional[0], ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm'], true)) {
+            if (in_array($positional[0], ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor'], true)) {
                 $options['command'] = array_shift($positional);
             }
 
@@ -165,6 +169,11 @@ class SuperAgentApplication
 
             if (($options['command'] ?? '') === 'models') {
                 $options['models_args'] = $positional;
+                $positional = [];
+            }
+
+            if (in_array($options['command'] ?? '', ['health', 'doctor'], true)) {
+                $options['health_args'] = $positional;
                 $positional = [];
             }
 
@@ -200,6 +209,9 @@ class SuperAgentApplication
     superagent models update            Fetch latest model catalog from remote URL
     superagent models status            Show catalog source + age
     superagent models reset             Delete user override and fall back to bundled
+    superagent health                   5s cURL probe of every configured provider
+    superagent health --all             Probe every known provider (surface missing keys)
+    superagent health --json            Machine-readable output
 
   \033[1mOptions:\033[0m
     -m, --model <model>                 Model name (e.g. sonnet, opus, haiku)

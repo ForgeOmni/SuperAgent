@@ -16,9 +16,15 @@ class ProviderRegistry
     protected static array $providers = [
         'anthropic' => AnthropicProvider::class,
         'openai' => OpenAIProvider::class,
+        // Responses API (`/v1/responses`) — distinct registry key. Opt in
+        // to pick up previous_response_id / reasoning.effort / text.verbosity
+        // / prompt_cache_key. See OpenAIResponsesProvider docblock.
+        'openai-responses' => OpenAIResponsesProvider::class,
         'openrouter' => OpenRouterProvider::class,
         'bedrock' => BedrockProvider::class,
         'ollama' => OllamaProvider::class,
+        // Local LM Studio server — OpenAI-compat, default port 1234.
+        'lmstudio' => LMStudioProvider::class,
         'gemini' => GeminiProvider::class,
         'kimi' => KimiProvider::class,
         'qwen' => QwenProvider::class,
@@ -56,6 +62,15 @@ class ProviderRegistry
             'max_tokens' => 4096,
             'max_retries' => 3,
         ],
+        'openai-responses' => [
+            'model' => 'gpt-5',
+            'max_tokens' => 4096,
+            'max_retries' => 3,
+            // Responses-native default — let the server store state so
+            // the caller can reuse `previous_response_id`. Set `store: false`
+            // in options to opt out per-call.
+            'store' => true,
+        ],
         'openrouter' => [
             'model' => 'anthropic/claude-3-5-sonnet',
             'max_tokens' => 4096,
@@ -74,6 +89,12 @@ class ProviderRegistry
             'max_tokens' => 2048,
             'max_retries' => 3,
             'keep_alive' => true,
+        ],
+        'lmstudio' => [
+            'model' => 'qwen2.5-coder-7b-instruct',
+            'base_url' => 'http://localhost:1234',
+            'max_tokens' => 4096,
+            'max_retries' => 3,
         ],
         'gemini' => [
             'model' => 'gemini-2.0-flash',

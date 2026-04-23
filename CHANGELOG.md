@@ -7,6 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-04-23
+
+### 💻 Summary
+
+**Two post-0.9.0 work rounds landed as one release.** Round 1 reverse-ports several primitives that matured downstream back into the SDK so every consumer benefits: filesystem-auditing for sub-agents, a declarative MCP catalog with non-destructive sync, language-aware warning templates, a provider health command, `idempotency_key` passthrough on `AgentResult`, two more Moonshot server-hosted builtins, and a socket/TCP/file transport for the wire protocol. Round 2 is a dedicated OpenAI-surface upgrade: a brand-new `OpenAIResponsesProvider` hitting `/v1/responses`, classified OpenAI errors (6 subclasses), layered retry with jittered backoff + SSE idle timeout, declarative `env_http_headers`, ChatGPT-OAuth backend routing, Azure OpenAI auto-detection, W3C `traceparent` passthrough, and a built-in LM Studio provider. Nine candidates total, all green.
+
+**Zero public method signatures broke.** `Agent::run` gained option-forwarding (pre-0.9.1 silently dropped per-call options — fixed). `AgentResult` gained one optional readonly property. Every new provider + every new exception class is additive.
+
+### Added
+
+#### Agent loop
+- **`idempotency_key` passthrough** on `Agent::run()` options — captured to `AgentResult::$idempotencyKey` (truncated to 80 chars) so Laravel queue workers or any parallel caller can dedupe usage-log writes for the same logical turn. The SDK does not persist or dedupe on the key itself; hosts that write `ai_usage_logs` read it off the result.
+- **Per-call `$options` now merge into the agent instance's options** — `Agent::run($prompt, ['foo' => 'bar'])` was a silent drop for the non-auto path. Options now merge via `array_merge`, matching what `withOptions()` did all along.
+
+#### Providers
+- **`OpenAIResponsesProvider` (registry key `openai-responses`)** — hits `/v1/responses` with the full Responses-API shape: `input` + `instructions` (first system message hoisted), `parallel_tool_calls`, `tools` with no outer `function` wrapper, `reasoning: {effort, summary}`, `text: {verbosity, format}`, `prompt_cache_key`, `service_tier`, `previous_response_id`, `store`, `include`, `client_metadata`. SSE parser handles `response.created` / `.output_text.delta` / `.output_item.done` / `.completed` / `.failed` / `.incomplete`. `lastResponseId()` accessor surfaces the server-assigned id so callers can pin multi-turn without resending context.
+- **ChatGPT OAuth → `chatgpt.com/backend-api/codex` routing** on the Responses provider — when `auth_mode: 'oauth'` (or just `access_token` + no explicit mode) the base URL flips to the ChatGPT backend and the path drops the `/v1/` prefix. Plus + Pro + Business subscribers now hit their subscription quota instead of getting routed to `api.openai.com` where the stored ChatGPT token would fail.
+- **Azure OpenAI auto-detection** — six base-URL markers (`openai.azure.`, `cognitiveservices.azure.`, `aoai.azure.`, `azure-api.`, `azurefd.`, `windows.net/openai`) flip the Responses provider into Azure mode: requests become `/openai/responses?api-version=...` (default `2025-04-01-preview`, overridable via `azure_api_version`), and the `api-key` header is added alongside `Authorization` so both of Azure's auth paths work.
+- **`LMStudioProvider` (registry key `lmstudio`)** — local LM Studio server at `http://localhost:1234` by default. OpenAI-compat wire, synthesises a placeholder Authorization header so Guzzle stays happy, no code changes when LM Studio rotates models.
+- **Experimental WS transport flag recognised but not implemented** — `experimental_ws_transport: true` on `OpenAIResponsesProvider` raises `FeatureNotSupportedException` with a pointer to the upstream beta. Scaffold lets config migrate forward without a caller change when WS goes GA.
+
+#### Provider config ergonomics
+- **`env_http_headers` declarative mapping** on every `ChatCompletionsProvider` — `['OpenAI-Project' => 'OPENAI_PROJECT']` sends the header only when the env var is set + non-empty. Complements hard-coded headers per vendor; lets new headers ship without code changes.
+- **`http_headers` static injection** — plain `['x-app' => 'my-host-app']` map for values that don't depend on env.
+
+#### Retry + transport
+- **Layered retry config** — `request_max_retries` (default 3, inherits legacy `max_retries` when absent) for HTTP connect / 4xx-5xx, `stream_max_retries` (default 5) reserved for providers that can resume mid-stream (Responses API via `previous_response_id`), `stream_idle_timeout_ms` (default 300 000, floor 1 000, ceiling 3 600 000). Translates to cURL `CURLOPT_LOW_SPEED_LIMIT` + `CURLOPT_LOW_SPEED_TIME` so a silent server kills the connection instead of hanging the agent.
+- **Jittered exponential backoff** — multiplicative 0.9–1.1× factor on `jitteredBackoff()`; spreads thundering-herd retries from N parallel workers. Floor 200 ms, ceiling 60 s. `Retry-After` header still honoured exactly (no jitter — server knows best).
+
+#### Error taxonomy (backward-compat additive)
+- **Six `ProviderException` subclasses** under `src/Exceptions/Provider/` — `ContextWindowExceededException`, `QuotaExceededException`, `UsageNotIncludedException`, `CyberPolicyException`, `ServerOverloadedException`, `InvalidPromptException`. All extend `ProviderException`, so existing `catch (ProviderException)` keeps catching everything.
+- **`OpenAIErrorClassifier`** — pattern-matches `error.code` / `error.type` / `error.message` / HTTP status to the right subclass. Handles codex-flavoured error codes (`context_length_exceeded`, `insufficient_quota`, `server_overloaded`, `usage_not_included`, `cyber_policy`, `content_policy_violation`) plus HTTP status fallbacks (400 → `InvalidPromptException`, 529 → `ServerOverloadedException`). Unknown shapes stay as plain `ProviderException` with `retryable` flipped on for 429/5xx.
+
+#### MCP (declarative catalog + non-destructive sync)
+- **`SuperAgent\MCP\Catalog`** — loads a host-supplied JSON catalog of `{mcpServers: {name: {command, args?, env?, type?}}}` + optional `domains` labels. `names()` / `has()` / `get()` / `subset()` / `domain()` / `domainServers()` query surface.
+- **`SuperAgent\MCP\Manifest`** — persists sha256 of every file the SDK wrote under host-owned paths. Default location `<project>/.superagent/mcp-manifest.json`.
+- **`SuperAgent\MCP\ManifestWriter`** (abstract) + **`SuperAgent\MCP\McpJsonWriter`** — the "byte-equal hash → `unchanged`, disk differs from manifest → `user-edited` (leave alone), first write or our-last-hash matches → `written`" contract. Stale cleanup removes files we wrote that no longer appear in the source; a user-edited stale file is kept as `stale-kept`. Full dry-run path never touches disk.
+- **`superagent mcp sync`** CLI — project root autodiscovery at `.mcp-servers/catalog.json` or `.mcp-catalog.json`; `--catalog <path>`, `--domain <name>`, `--servers a,b,c`, `--dry-run` flags. Falls through to raw argv so the shared parser's unknown-flag drop doesn't eat `--dry-run`.
+
+#### Agent tools / multi-agent
+- **`AgentOutputAuditor`** (`src/Tools/Builtin/AgentOutputAuditor.php`) — filesystem audit for sub-agent output dirs. Detects non-whitelisted extensions (configurable; `null` disables), consolidator-reserved filenames (`summary.md`, `mindmap.md`, `flowchart.md` + their `摘要.md` / `思维导图.md` / `流程图.md` variants + `.html`), and sibling-role sub-directories (18 default role names + a kebab-case regex). Never modifies disk — warnings land in `outputWarnings` on every `AgentTool` result.
+- **`AgentOutputAuditor::guardBlock()`** — CJK-aware prompt preamble injected into the child's `task_prompt` when `output_subdir` is set on the `AgentTool` input. Prevents sibling-role scaffolding, consolidator-filename collisions, and ensures language uniformity. Idempotent via a marker sentinel.
+- **`output_subdir`** added to `AgentTool::inputSchema()` — opt-in gate for both the guard block and the post-exit audit.
+- **`KimiMoonshotWebFetchTool`** + **`KimiMoonshotCodeInterpreterTool`** — two more Moonshot server-hosted builtins wiring through the `$`-prefix convention. Code interpreter declares `network / cost / sensitive` attributes so `ToolSecurityValidator` catches it under `SUPERAGENT_OFFLINE=1` / read-only permission modes.
+- **`productivityWarning` localisation** — CJK prompts now emit the warning in Chinese (`零工具调用` / `没有写入任何文件` / advisory phrasing) instead of English. Detection via the new `Support\LanguageDetector`.
+
+#### CLI
+- **`superagent health [--all] [--json] [--providers=a,b,c]`** (alias `doctor`) — wraps `ProviderRegistry::healthCheck()` across every configured provider. Default run filters to providers whose env var is set OR whose OAuth credential file exists under `~/.superagent/credentials/`. Table renders with ANSI badges; `--json` emits structured output for CI dashboards. Exit non-zero when any provider failed, so `|| exit 1` works in pipelines.
+
+#### Observability
+- **`SuperAgent\Support\TraceContext`** — W3C Trace-Context parser/generator. `fresh()` mints a random sampled context; `parse()` validates the canonical `00-<trace-id>-<span-id>-<flags>` shape; `asClientMetadata()` projects `traceparent` + optional `tracestate` into the OpenAI Responses API's `client_metadata` envelope.
+- **`options['trace_context']`** (accepts a `TraceContext` instance) or **`options['traceparent']`** + **`options['tracestate']`** raw strings — either source folds into `client_metadata` on the Responses provider so OpenAI-side logs correlate with the host's distributed trace. Silent drop on invalid traceparent shape.
+
+#### Wire protocol
+- **`SuperAgent\Harness\Wire\WireTransport`** — DSN-to-resource resolver for `WireStreamOutput`. Handles `stdout`, `stderr`, `file:///path/to/log.ndjson`, `tcp://host:port`, `unix:///path/to/sock`, `listen://tcp/host:port`, and `listen://unix//path/to/sock`. Listen variants block on a single `stream_socket_accept()` so IDE plugins can attach before the agent starts streaming. Non-blocking peer socket means a dropped client doesn't hang the agent loop.
+- **`AgentFactory::makeWireEmitterForDsn($dsn)`** — constructs a `StreamEventEmitter` wired to any DSN above, returning `[emitter, transport]` so the caller can `close()` the server handle after the run. Same NDJSON on the wire; only the sink changes.
+
+#### Support
+- **`SuperAgent\Support\LanguageDetector`** — binary CJK-vs-Latin gate on the U+4E00..U+9FFF ideograph block. `isCjk($text)` returns bool; `pick($text, ['zh' => ..., 'en' => ...])` picks the right template with fallback to `en`. Used by `AgentTool::buildProductivityInfo()` and `AgentOutputAuditor::guardBlock()`.
+
+### Changed
+
+- **`ChatCompletionsProvider::chat()` retry loop** now dispatches through `OpenAIErrorClassifier` instead of constructing `ProviderException` directly. Backward-compatible: every classified subclass extends `ProviderException`.
+- **`ChatCompletionsProvider::getRetryDelay()`** now falls back to `jitteredBackoff()` instead of plain `pow(2, $attempt)` when no `Retry-After` header is present. Server-supplied `Retry-After` stays jitter-free.
+- **`Agent::run($prompt, array $options)`** merges `$options` into the agent's stored options via `array_merge` before dispatch (previously a silent drop for the non-auto path).
+- **`AgentResult`** gained an optional `idempotencyKey: ?string` readonly property. All existing `new AgentResult(...)` callers compile unchanged.
+- **`AgentTool::execute()`** reads `$input['output_subdir']` (optional) — when non-null, it (a) injects the language-aware guard block into the child's prompt and (b) triggers post-exit filesystem audit via `AgentOutputAuditor`. Omit to get legacy behaviour.
+- **`AgentTool::buildProductivityInfo()`** result gained `outputWarnings: list<string>` — empty when audit was skipped, otherwise the auditor's findings.
+- **`SuperAgentApplication` `VERSION` constant** bumped `0.9.0 → 0.9.1`. Top-level help output updated to document `superagent health` + `doctor` aliases + `superagent mcp sync` options.
+
+### Compat Red Lines (All Green)
+
+- `ProviderException` + `ProviderException::fromHttpStatus()` shape unchanged. Six new subclasses extend it — no existing `catch (ProviderException)` site changes.
+- `ChatCompletionsProvider` constructor keeps accepting every pre-0.9.1 key; `env_http_headers` / `http_headers` / `request_max_retries` / `stream_max_retries` / `stream_idle_timeout_ms` are all optional with sensible defaults (legacy `max_retries` still wins when set).
+- `AgentResult` gained one optional readonly property; all pre-0.9.1 construction paths compile.
+- `Agent::run` signature unchanged. The option-merge is observationally additive: prior calls that never passed per-call options see byte-exact behaviour.
+- `AgentTool` inputSchema gained one optional field (`output_subdir`); the guard-block + audit are gated on it, so callers that don't opt in are byte-exact.
+- `ProviderRegistry` gained two keys (`openai-responses`, `lmstudio`). Existing keys unchanged. `openai` still binds to Chat Completions (Responses is a separate key).
+- No Wire Protocol v1 fields changed. `WireTransport` is a pure factory; `WireStreamOutput` constructor unchanged.
+- `KimiServerBuiltinTool` abstract contract unchanged; two new concrete subclasses ride on the existing `$`-prefix path.
+
+### Tests
+
+New test files:
+- `tests/Unit/Providers/EnvHttpHeadersTest.php` (7 scenarios) — env mapping + static headers + precedence + malformed entries
+- `tests/Unit/Providers/RetryPolicyTest.php` (7 scenarios, 4017 assertions) — layered config + 1000-sample jitter envelope
+- `tests/Unit/Providers/OpenAIResponsesProviderTest.php` (28 scenarios) — request body / tools / reasoning / prompt cache key / verbosity / SSE parser / OAuth routing / Azure detection / trace context / experimental WS flag
+- `tests/Unit/Providers/LMStudioProviderTest.php` (5 scenarios)
+- `tests/Unit/Support/TraceContextTest.php` (8 scenarios)
+- `tests/Unit/Support/LanguageDetectorTest.php` (13 scenarios)
+- `tests/Unit/Exceptions/Provider/OpenAIErrorClassifierTest.php` (16 scenarios) — each category + backward-compat base-class inheritance
+- `tests/Unit/Tools/Builtin/AgentOutputAuditorTest.php` (15 scenarios) — real tempdir scan for every violation class + guard-block CJK / EN / idempotency
+- `tests/Unit/MCP/CatalogTest.php` (9 scenarios)
+- `tests/Unit/MCP/McpJsonWriterTest.php` (8 scenarios) — full sync lifecycle
+- `tests/Unit/Harness/WireTransportTest.php` (10 scenarios, incl. live unix-socket round-trip with pcntl_fork)
+- `tests/Unit/CLI/HealthCommandTest.php` (6 scenarios)
+
+Touched existing files:
+- `tests/Unit/AgentResultTest.php` (+2 scenarios for `idempotencyKey`)
+- `tests/Unit/AgentTest.php` (+2 scenarios for option merge + 80-char truncation)
+- `tests/Unit/AgentToolProductivityTest.php` (+5 scenarios for CJK warning + audit integration)
+- `tests/Unit/Tools/Providers/KimiServerBuiltinToolTest.php` (+3 scenarios for `$web_fetch` + `$code_interpreter`)
+
+### Migration notes
+
+No database changes. No config changes required — every new knob is optional.
+
+- **Want the Responses API?** `provider: 'openai-responses'` (or `wire_api: 'responses'` if you're declaring a custom provider). Defaults assume `model: 'gpt-5'` and `store: true` so `previous_response_id` works. Set `store: false` per-call for stateless turns.
+- **ChatGPT subscription?** Pass `access_token` (from `superagent auth login`) on the `openai-responses` provider — base URL auto-switches to `chatgpt.com/backend-api/codex`.
+- **Azure OpenAI?** Point `base_url` at your resource (`https://<name>.openai.azure.com/openai/deployments/<deployment>`). Detection + `api-version` query string are automatic. Override the version via `azure_api_version` if your deployment lags.
+- **Classified errors?** No action needed — every existing `catch (ProviderException)` keeps catching. Add `catch (ContextWindowExceededException)` / etc. at the specific sites that want to compact + retry instead of bubbling.
+- **Health dashboard?** `superagent health --json` — feed the exit code into CI, parse the JSON for drill-down.
+- **MCP catalog sync?** Drop a catalog at `.mcp-servers/catalog.json`, run `superagent mcp sync --dry-run`, then run without `--dry-run` once the diff looks right. Re-sync is idempotent; user edits stay.
+
+---
+
 ## [0.9.0] - 2026-04-22
 
 ### 💻 Summary

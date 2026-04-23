@@ -1,752 +1,818 @@
-# SuperAgent - 企业级Laravel多智能体编排SDK 🚀
+# SuperAgent
 
-[![PHP版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
-[![Laravel版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
+[![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
+[![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.9.0-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.9.1-purple)](https://github.com/forgeomni/superagent)
 
-> **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)  
-> **📖 文档**: [Installation Guide](INSTALL.md) | [安装手册](INSTALL_CN.md) | [Guide d'Installation](INSTALL_FR.md) | [高级用法](docs/ADVANCED_USAGE_CN.md) | [API文档](docs/)
+> **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
+> **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
 
-SuperAgent是一个功能强大的企业级Laravel AI智能体SDK，提供Claude级别的能力，支持多智能体编排、实时监控和分布式扩展。构建并部署可并行工作的AI智能体团队，具有自动任务检测和智能资源管理功能。
-
-## ✨ 核心特性
-
-### 🆕 v0.9.0 — kimi-cli + qwen-code 启发的重构（16 个 Phase，671 tests / 1776 assertions，0 failures）
-
-把 MoonshotAI 的 `kimi-cli` 和 Alibaba 的 `qwen-code` 两个上游 CLI 做了两轮精读，落地成 16 个聚焦的 Phase。亮点：
-
-**原生 provider 正确性** —— 修掉 Kimi thinking 的错误 shape（请求参数而不是幻想的模型名），Qwen 从 Alibaba 自己 CLI 从来不用的端点切到 OpenAI-兼容主路径。两种 legacy shape 都作为 opt-in 保留（`kimi-k2-thinking-preview` 彻底移除；Qwen legacy 通过 `qwen-native` 继续可用）。
-
-**OAuth 通用化** —— 完整 RFC 8628 设备码流程覆盖 `kimi-code` 和 `qwen-code`（PKCE S256 + per-account `resource_url` 动态 base URL），加上跨进程文件锁（`CredentialStore::withLock()`）硬化每次 OAuth refresh 对抗并发。
-
-**活动 `/models` catalog 刷新** —— `superagent models refresh [<provider>]` 打每家自己的 `/models` 并 per-provider 缓存。`resources/models.json` 降级为 fallback，drift 消失。
-
-**YAML agent spec + `extend:` 继承** —— `.yaml` / `.yml` / `.md` agent 文件自动从 `~/.superagent/agents/` 和 `<project>/.superagent/agents/` 加载。跨格式继承；工具列表累加。
-
-**MCP 子命令补齐** —— `superagent mcp auth/reset-auth/test` 补全子命令组；需要 OAuth 的 MCP server 走设备码流程。
-
-**Wire Protocol v1** —— `WireEvent` interface + `JsonStreamRenderer` + `StreamEvent` 基类迁移（10 个具体事件类自动合规）+ `--output json-stream` CLI flag + `WireStreamOutput` + `ApprovalRuntime`。ACP IDE 桥接的基础。
-
-**DashScope 增强** —— 块级 `cache_control` adapter + `X-DashScope-CacheControl` header + `X-DashScope-UserAgent` + session/prompt metadata 信封 + 视觉模型自动 flag（`vl_high_resolution_images`）。
-
-**SSE parser 加固** —— 共享 `ChatCompletionsProvider::parseSSEStream()` 里的两个真 bug 影响所有 OpenAI-兼容 provider：tool-call 按 `index` 累积（之前每个真实 call 产生 N 个碎片）+ `finish_reason: "error_finish"` 检测（之前静默吞掉限流错误）。外加四个小项。
-
-**LoopDetector** —— 5 种检测器（tool / stagnation / file-read / content / thought）+ cold-start 豁免 + sticky violation + wire 事件投射，通过 `AgentFactory::maybeWrapWithLoopDetection` 可选接入。
-
-**Shadow-git checkpoint** —— 文件级 undo 层，**独立** bare git 仓库在 `~/.superagent/history/<project-hash>/shadow.git`。**不碰**用户自己的 `.git`。接入现有 `CheckpointManager`；restore 回退 tracked 文件，保留 untracked。
-
-**`$options['extra_body']` 直通口** —— OpenAI Python SDK 约定的 PHP 移植。高级用户不用等 adapter 就能发厂商特定字段。
-
-**`SupportsPromptCacheKey`** 能力 —— Kimi 的会话 key 缓存（区别于 Anthropic 块级 `SupportsContextCaching`），通过新的 `PromptCacheKeyAdapter` 路由。
-
-全量测试：**671 tests / 1776 assertions / 0 failures**。零个公开方法签名变更；所有新字段纯加法。完整分 Phase 明细见 `CHANGELOG.md` `[0.9.0]`，上游分析见 `design/{KIMI_CLI,QWEN_CODE}_INSPIRED_ROADMAP.md`。
-
-### 🆕 v0.8.9 — `AgentTool` 子 Agent 生产力观测（为多 Agent 编排加护栏）
-
-小而精的一次收尾。每次通过 `AgentTool` 分派的子 Agent 现在会返回**它到底做了什么**的硬证据，不再是单看 `success: true`。修复 `/team` 长期存在的一类失败：编排器看到子 Agent 自报 `success: true` 就继续推进，但子 Agent 其实只写了一堆说明文字 —— 没有 tool call、没有文件落盘。
-
-- **Result 上新增四个字段** —— `filesWritten`（子 Agent 通过 `Write` / `Edit` / `MultiEdit` / `NotebookEdit` / `Create` 落盘的绝对路径列表，去重）、`toolCallsByName`（如 `['Read' => 2, 'Bash' => 5, 'Write' => 1]`）、`productivityWarning`（咨询性提示字符串或 null）、`totalToolUseCount`（改为优先使用**观察到的** tool call 数，而非子 Agent 自报的 turn 数）
-- **三种生产力状态** —— `completed`（正常）、`completed_empty`（**观察到 0 次 tool call** —— 模型在"讲计划"而不是"执行计划"；永远视为分派失败，重新分派或换更强的模型）、`async_launched`（与 0.8.8 一致，仅在 `run_in_background: true` 时触发）
-- **`completed_no_writes` 明确移除** —— 开发阶段曾把"调了 tool 但没写文件"升级为失败状态。MiniMax-backed 编排器误读为终止失败，于是中途开始自己扮演所有角色，产出一份仓促的报告并跳过整合。现降级为 **advisory** 的 `productivityWarning`，状态仍是 `completed` —— 咨询类子任务本来就该用文本返回结论，不强求文件
-- **`AgentTool::description()` 和 `run_in_background` schema 重写** —— 明确并行契约（要并行就在**同一条 assistant 消息内**抛多个 agent `tool_use` block，runtime 负责 fan-out 并阻塞到全部完成；`run_in_background: true` 是 fire-and-forget，任何需要汇总子 Agent 输出的场景都**不能用**），并把三个 status 值写清楚，编排器不用猜
-- **观察式，不是启发式** —— runtime 直接数子 Agent streaming 出来的 `tool_use` 事件（覆盖标准 `assistant` 消息路径和遗留 `__PROGRESS__` 路径），不再信子 Agent 自己的叙述
-- **完全兼容** —— 0 个公开方法签名变更；新字段纯加法；0.8.9 前解构已知 key 的调用方完全不受影响
-
-全量测试仍绿：**2476 tests / 6891 assertions / 0 failures**（从 0.8.8 的 2471 / 6879 增长 —— `AgentToolProductivityTest` 新增 5 个场景）。
-
-```php
-// 每次 AgentTool 调用现在除 0.8.8 字段外还会返回：
-$result = $agentTool->execute([
-    'description' => '分析日志',
-    'prompt'      => '读取 logs/*.jsonl 并写入 findings.md',
-]);
-// $result['status']               // 'completed' | 'completed_empty' | 'async_launched'
-// $result['filesWritten']         // ['/abs/path/findings.md']
-// $result['toolCallsByName']      // ['Read' => 3, 'Write' => 1]
-// $result['totalToolUseCount']    // 4 —— 观察值，非 turn 数
-// $result['productivityWarning']  // 正常时为 null，否则为 advisory 字符串
-```
-
-### 🆕 v0.8.8 — Kimi / Qwen / GLM / MiniMax 原生接入、能力驱动 feature 管线、安全层（+375 测试）
-
-已注册 10 家 provider，亚洲四家升级为**一等原生** —— 各自的 region map、模型目录、原生能力钩子。Agent loop、MCP 栈、Skills 系统在所有 10 家上表现一致。
-
-- **四家原生 provider** —— `KimiProvider`（Moonshot）、`QwenProvider`（DashScope 原生）、`GlmProvider`（Z.AI / BigModel）、`MiniMaxProvider`。其中三家共享协议中性的 `ChatCompletionsProvider` 基类（`OpenAIProvider` 和 `OpenRouterProvider` 也迁进来了 —— 395 / 430 行重构成各 ~130 行）。Qwen 独立实现，因为 DashScope 的 `text-generation/generation` 请求体 shape 不是 chat-completions
-- **全面 region 感知** —— Kimi (intl/cn)、Qwen (intl/us/cn/hk)、GLM (intl/cn)、MiniMax (intl/cn)。`ProviderRegistry::createWithRegion()` + 带 region 标签的 `CredentialPool` 条目防止国内 key 漏到国际 endpoint
-- **能力接口家族** —— 13 个 `Supports*` 接口（Thinking / Swarm / ContextCaching / FileExtract / WebSearch / CodeInterpreter / OCR / Skills / Batch / TTS / Music / Video / Image）。Provider 只实现自己原生支持的；`FeatureDispatcher` 把 `$options['features']` 路由到对应 fragment 或优雅降级
-- **Feature adapter** —— `ThinkingAdapter`（Anthropic / Qwen / GLM / Kimi 原生，其他 CoT prompt 降级）、`AgentTeamsAdapter`（MiniMax M2.7 原生，其他 scaffold 降级）、`CodeInterpreterAdapter`（Qwen 原生，其他 sandbox-tool 提示降级）。新 adapter 在 `FeatureDispatcher::registerDefaults()` 注册
-- **Specialty-as-Tool（11 个工具）** —— 任何主脑（Claude / GPT / Gemini…）都能调用 `glm_web_search` / `glm_web_reader` / `glm_ocr` / `glm_asr` / `kimi_file_extract` / `kimi_batch` / `kimi_swarm` / `qwen_long_file` / `minimax_tts` / `minimax_music` / `minimax_video` / `minimax_image`。共享 `ProviderToolBase` 处理属性声明、轮询助手、Guzzle client 复用
-- **`superagent mcp` / `skills` / `swarm` CLI** —— `~/.superagent/mcp.json` 原子写配置；markdown skill install/list/show/remove/path；`superagent swarm <prompt>` 规划 + 执行（`native_swarm` 走 `KimiSwarmTool`，`agent_teams` 走 MiniMax chat，`local_swarm` 委托 `src/Swarm/`）
-- **`SkillInjector` + provider 桥接器** —— 通用路径把 skill body 合并进 `$options['system_prompt']`（带幂等 `## Skill: <name>` 标题）。`KimiSkillBridge` / `MiniMaxSkillBridge` 通过 `SkillInjector::registerBridge()` 注册 —— MiniMax M2.7 用"行为契约"框架，利用其训练好的 97% skill 遵循率
-- **安全层** —— `src/Security/`：`NetworkPolicy` 遵循 `SUPERAGENT_OFFLINE=1`；`CostLimiter` 走 `~/.superagent/cost_ledger.json`（UTC 自动滚动、原子写、chmod 0600），三级配额（per-call / per-tool-daily / global-daily）；`ToolSecurityValidator` 组合两者，Bash 委托给现有 `BashSecurityValidator`（23 个 check 未动，57 个测试仍绿）
-- **`CapabilityRouter` + `SwarmRouter`** —— 自动挑 provider / region / 策略。排序：偏好列表 → 原生 feature 数 → 混合成本（`input + 4·output` per 1M tokens）做 tiebreaker
-- **`ProviderRegistry::healthCheck()`** —— 5 秒 cURL 探测，返回 `{ok, latency_ms, reason}` —— 验证认证 + 可达性，不只是 env 变量
-- **`FeatureFlags`** —— 运行时覆盖 > `SUPERAGENT_DISABLE=a,b,c` env > `~/.superagent/features.json` > 默认（开）。不改代码选择性关能力
-- **非阻塞 `pollIterator()`** —— `pollUntilDone()` 的 `Generator` 变体，Laravel queue worker 可以在 poll 间 `release($delay)`，不用为 15 分钟视频渲染卡住整个 worker
-- **CI workflow** —— `.github/workflows/test.yml` 在 PHP 8.1 / 8.2 / 8.3 上跑 Unit + Smoke + Compat；Integration job（真 vendor 端点）受 `SUPERAGENT_INTEGRATION=1` 闸门
-- **三语文档** —— `docs/NATIVE_PROVIDERS{,_CN,_FR}.md`、`docs/FEATURES_MATRIX{,_CN,_FR}.md`、`docs/MIGRATION_NATIVE{,_CN,_FR}.md`。迁移指南给出从 `OpenAIProvider+base_url` 切到原生的一行 diff
-
-兼容红线（全绿）：所有公开方法签名不变、`BashSecurityValidator` 零改动、`OpenAIProvider` byte-exact（被现有 OAuth 测试锁定）、`resources/models.json` v1 继续加载、`CredentialPool` 无 region 字符串 key 继续有效。全量测试：**2471 tests / 6879 assertions / 0 failures**（从 0.8.7 的 2060 / 5675 增长）。
-
-四家新 provider 快速上手：
+PHP 的 AI agent SDK —— 在进程内跑完整的 agentic loop（LLM 轮次 → 工具调用 → 工具结果 → 下一轮），内置 12 个 provider、实时流式、多 agent 编排、以及机器可读的 wire 协议。既可以作为独立 CLI 使用，也可以作为 Laravel 依赖。
 
 ```bash
-export KIMI_API_KEY=sk-moonshot-...   # 或 MOONSHOT_API_KEY
-export QWEN_API_KEY=sk-dashscope-...  # 或 DASHSCOPE_API_KEY
-export GLM_API_KEY=...                 # 或 ZAI_API_KEY / ZHIPU_API_KEY
-export MINIMAX_API_KEY=...
-export QWEN_REGION=intl                # intl | us | cn | hk（可选）
-
-superagent chat -p kimi "用 Python 写斐波那契"
-superagent swarm "分析这个 repo 生成报告" --max-sub-agents 50
-```
-
-### 🆕 v0.8.7 — Gemini 原生 provider + CLI 可更新的模型目录（+36 测试）
-- **Gemini 一等集成** —— 原生 `GeminiProvider`、CLI `-p gemini`、init 向导、`/model` 选择器、成本跟踪、一键从 `@google/gemini-cli` 导入凭证
-- **`ModelCatalog` 三级模型+定价注册表** —— 内置基线 + 用户覆盖（`~/.superagent/models.json`）+ 可选远端 URL。新 `superagent models list|update|status|reset` CLI
-
-### 🆕 v0.8.6 — SuperAgent CLI：`superagent` 命令（独立 + Laravel 双模式、OAuth 登录、Claude Code 风格 REPL）
-SuperAgent 不再仅限 Laravel。**`superagent`** 二进制（`bin/superagent` / `bin/superagent.bat`）提供完整的 Claude Code 风格交互 REPL、一次性任务运行、会话管理、OAuth 登录。CLI 会自动检测 Laravel 项目：在 Laravel 项目中使用宿主 `config()` / 容器，否则通过独立的 `Foundation\Application` 启动一个最小容器——不写一行 PHP，也能用上本 SDK 的全部能力（Memory Palace、子智能体、Guardrails、AutoCompact、TaskRouter、MCP 工具、Skills）。
-
-- **交互式 REPL**（`src/CLI/Commands/ChatCommand.php`、`src/Harness/HarnessLoop.php`）— 流式 Claude Code 风格渲染：实时 text delta、思考预览、工具调用卡片、成本计数。斜杠命令：`/help`、`/status`、`/tasks`、`/compact`、`/continue`、`/session list|save|load|delete`、`/clear`、`/model`、`/cost`、`/quit`
-- **一次性模式** — `superagent "修复登录 bug"` 跑完即退出。`--json` 输出机器可读的 `{content, cost, turns, usage}`，方便脚本 / CI
-- **首次运行向导** — `superagent init` 引导选 provider（Anthropic / OpenAI / Ollama / OpenRouter），从环境变量 / 密文输入抓取 API key，选默认模型，写入 `~/.superagent/config.php`（`0600`）
-- **通过导入本地 Claude Code / Codex token 登录 OAuth** — `superagent auth login claude-code` 读 `~/.claude/.credentials.json`；`superagent auth login codex` 读 `~/.codex/auth.json`。不需要二次登录、不需要复制 API key。凭证原子写入 `~/.superagent/credentials/{anthropic,openai}.json`（`0600`），过期前 60 秒自动续期
-- **OAuth 感知 Provider**（`src/Providers/AnthropicProvider.php`、`OpenAIProvider.php`）— Bearer 模式 + `anthropic-beta: oauth-2025-04-20`；自动在第一个 system block 前插入 `"You are Claude Code, Anthropic's official CLI for Claude."`；OAuth token 不授权 legacy 模型（`claude-3*`），自动改写为 `claude-opus-4-5`。OpenAI 侧加 `chatgpt-account-id` 头走 Codex ChatGPT 订阅
-- **交互式 `/model` 选择器**（`src/Harness/CommandRouter.php`）— 按当前 provider 打印编号化清单（Opus/Sonnet/Haiku 4.5、GPT-5 系列、OpenRouter、Ollama），当前模型打 `*`。`/model 2` 按编号，`/model <id>` 按 ID
-- **富渲染**（`src/Console/Output/RealTimeCliRenderer.php`）— `--verbose-thinking` / `--no-thinking` / `--plain` / `--no-rich` 开关。`--plain` 去掉 ANSI，方便管道和 CI 日志
-- **容器整合** — `Foundation\Application::bootstrap()` 在 standalone 模式下把我们的 `ConfigRepository` 绑到 Laravel `Container::getInstance()` 的 `config` 键，于是 14 个基于 `config()` 的 Optimization / Performance 类在非 Laravel 环境也能静默工作
-- **Windows 友好** — `CredentialStore` 在 `HOME` 为空时回落到 `USERPROFILE`；批处理入口 `bin/superagent.bat`
-
-**典型首次会话：**
-```bash
-composer global require forgeomni/superagent      # 或 clone + composer install
-superagent auth login claude-code                  # 复用已有 Claude Code OAuth
-superagent "解释下这个代码库"                        # 一次性，不需要 API key
-
-superagent                                         # 进入 REPL
-> /model                                           # 查看可用模型
-> /model 1                                         # 切到 Opus 4.5
-> /session save my-session                         # 保存状态
-> /quit
-```
-
-**没装 Claude Code 时：**
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-superagent init              # 交互配置 → ~/.superagent/config.php
-superagent "审查这个 PR"
-```
-
-### 🆕 v0.8.5 — 记忆宫殿：MemPalace 启发的分层记忆（默认开启，6 个新测试）
-- **Memory Palace**（`src/Memory/Palace/`）— 受 MemPalace（LongMemEval 96.6%）启发的分层记忆模块。Wing（人/项目/智能体）→ Hall（5 条记忆类型走廊）→ Room（话题）→ Drawer（原始逐字内容）。同一 Room 出现在不同 Wing 时自动建立 Tunnel 跨 Wing 桥接。通过现有 `MemoryProviderManager` 作为外部 Provider 插入，**不替换**内置 `MEMORY.md` 流程
-- **Wing + Room 过滤**（`PalaceRetriever`）— 结构化元数据驱动检索；MemPalace 基准将 +34% R@10 归功于此。混合评分：关键词重叠 + 可选余弦相似度 + 时效衰减 + 访问次数加权。基于生成器流式迭代 Drawer，不一次性加载全部内存
-- **4 层记忆栈**（`Layers/MemoryLayer`, `LayerManager`）— L0 身份（~50 tok）+ L1 关键事实（~120 tok）始终加载；L2 房间召回 + L3 深度搜索按需加载。`wakeUp()` 发送 ~600–900 tok 的会话启动载荷
-- **时序知识图** — `KnowledgeEdge` 新增 `validFrom` / `validUntil`；`KnowledgeGraph` 新增 `addTriple()`、`invalidate()`、`queryEntity($entity, asOf:)`、`timeline()`。新增 `NodeType::ENTITY` + `EdgeType::RELATES_TO`。完全向后兼容（字段默认为空）
-- **智能体日记**（`Diary/AgentDiary.php`）— 每个智能体获得一个 AGENT 类型专属 Wing，内含 `hall_events/diary` Room。每个专家智能体（reviewer、architect、ops…）在共享记忆之外维护自己的短条目历史
-- **事实检查器**（`FactChecker.php`）— 基于知识图的矛盾检测，3 种严重级别（`attribution_conflict`、`stale`、`unsupported`）。**无 LLM 调用** —— 纯图遍历
-- **近似去重**（`MemoryDeduplicator.php`）— 内容哈希精确匹配 + 5-gram Jaccard 瓦片重叠（默认阈值 0.85），默认按 Room 范围去重，因为上下文很重要
-- **Wake-Up CLI**（`php artisan superagent:wake-up [--wing=] [--search=]`）— 加载 L0+L1 并可选按 Wing 范围搜索 Drawer。用于在不做全量记忆加载的情况下启动外部 AI 会话
-- **可选向量评分** — `palace.vector.enabled` + 一个 `embed_fn` 回调。未开启时，检索器完全离线运行，仅用关键词 + 时效 + 访问次数
-- **默认开启** — `palace.enabled=true`。存储布局：`{memory}/palace/wings/{slug}/halls/{hall}/rooms/{room}/drawers/*.md`。全量用例：**1851 tests, 5234 assertions, 0 failures**
-
-### 🆕 v0.8.2 — 多智能体协作管道、智能路由与并行执行（10项改进，48个新测试）
-- **协作管道** (`src/Coordinator/`) — 分阶段多智能体编排，拓扑依赖 DAG 排序，4种失败策略（快速失败、继续、重试、降级），条件化阶段执行，8事件生命周期监听器。阶段内智能体通过 ProcessBackend（OS 进程）或 InProcessBackend（Fiber）真并行执行
-- **智能任务路由** (`src/Coordinator/TaskRouter.php`) — 自动任务→模型路由：研究/对话 → Tier 3（Haiku，低成本），代码/调试/分析 → Tier 2（Sonnet，平衡），综合/协调 → Tier 1（Opus，强推理）。复杂度覆盖：极复杂代码生成升级到 Tier 1，简单分析降级到 Tier 3。`withAutoRouting()` 在管道或阶段级启用。显式 `withAgentProvider()` 始终优先
-- **阶段上下文注入** (`src/Coordinator/PhaseContextInjector.php`) — 跨阶段上下文共享：阶段 N 的智能体自动接收阶段 1..N-1 的结果摘要，通过 `<prior-phase-results>` 注入系统提示。按阶段 token 预算（2K）和总上限（8K），智能截断。避免重复发现，节约 token
-- **Provider 模式** — 3种协作模式：`sameProvider`（共享凭证 + CredentialPool 轮转），`crossProvider`（同一管道混用 Anthropic/OpenAI/Ollama），`withFallbackChain`（有序 Provider 降级）
-- **智能体重试策略** — 逐智能体指数/线性/固定退避 + 抖动。错误分类（认证/限速/服务器/网络）。429 时凭证轮转，持续失败时 Provider 切换。预设工厂：`default()`、`aggressive()`、`none()`、`crossProvider()`
-- **ProcessBackend 重试** — 并行批量执行失败的智能体现在逐个重试，支持完整的凭证轮转和 Provider 降级。Process 和 Fiber 路径共享 `retryFailedAgents()`
-- **stream_select 轮询** — ProcessBackend 在 Linux/macOS 使用 `stream_select()` 事件驱动 I/O（原：50ms 忙等待）。Windows 自动回退到 usleep 轮询
-- **AgentMailbox 写缓冲** — 写入在内存缓冲，每 10 条消息刷盘。消除批量消息的 O(n²) 磁盘 I/O
-- **3个Bug修复** — SQLite 会话 `loadLatest()` 排序（rowid 副键），WebSearch 降级断言（接受 DuckDuckGo 成功），重试 catch 块中未定义 `$agentConfig`
-- **48个新测试** — `TaskRouterTest`(26)、`PhaseContextInjectorTest`(12)、`CollaborationPipelineTest`(+10)。完整套件：**1945 测试，5729 断言，0 失败**
-
-### 🆕 v0.8.1 — 中间件管道、类型化错误与工具缓存（6项改进，32个新测试）
-- **中间件管道** (`src/Middleware/`) — 可组合的洋葱模型中间件链。`MiddlewareInterface` 支持优先级排序。5个内置中间件：`RateLimitMiddleware`（令牌桶限流）、`RetryMiddleware`（指数退避+抖动重试）、`CostTrackingMiddleware`（预算执行）、`LoggingMiddleware`（结构化日志）、`GuardrailMiddleware`（输入/输出验证）。配置：`middleware`
-- **结构化输出** (`src/Providers/ResponseFormat.php`) — `ResponseFormat` 值对象，强制 LLM 返回 JSON。支持 `text()`、`json()`、`jsonSchema()` 模式，按提供者格式转换（`toAnthropicFormat()`、`toOpenAIFormat()`）
-- **工具级结果缓存** (`src/Tools/ToolResultCache.php`) — 带 TTL 的内存缓存，用于只读工具结果。输入排序无关哈希、按工具名或文件路径定向失效、LRU 淘汰、错误结果不缓存。配置：`optimization.tool_cache`
-- **增强异常层次** — `SuperAgentException` 新增 `context` 数组、`isRetryable()`、`toArray()`。`ProviderException` 新增 `retryable`、`retryAfterSeconds`、`fromHttpStatus()` 工厂方法。`ToolException` 新增 `toolInput`。新增：`BudgetExceededException`、`ContextOverflowException`、`ValidationException`
-- **主动上下文压缩** — `ContextCompressor::compressIfNeeded()` 自动检查 token 预算并仅在超出时压缩。新增 `estimateTokenCount()`、`getCompressionStats()` 支持逐消息集成
-- **插件中间件与提供者扩展** — `PluginInterface` 现支持 `middleware()` 和 `providers()` 方法。插件可注册中间件到管道和自定义 LLM 提供者驱动。`PluginManager::collectMiddleware()`、`registerMiddleware()`、`registerProviders()`
-
-### 🆕 v0.8.0 — Hermes-Agent 启发的架构升级（19项改进，74个新测试）
-- **SQLite 会话存储 + FTS5 搜索** (`src/Session/SqliteSessionStorage.php`) — SQLite WAL 模式后端，FTS5 全文搜索跨所有会话消息。随机抖动重试避免锁竞争，被动 WAL 检查点，可选 SQLCipher 静态加密。`SessionManager::search()` 跨会话搜索 API。双写模式兼容文件回退
-- **统一上下文压缩** (`src/Optimization/ContextCompression/ContextCompressor.php`) — 4阶段分层压缩：裁剪旧工具结果 → 保护头尾 → LLM 总结中间 → 迭代更新摘要。Token 预算尾部保护（默认 8K），结构化5节摘要模板
-- **Prompt 注入检测** (`src/Guardrails/PromptInjectionDetector.php`) — 7类威胁模式检测（指令覆盖、系统提示提取、数据外泄、角色混淆、不可见Unicode、隐藏HTML、编码逃逸）。4级严重度，文件扫描，不可见字符清理。自动集成到 `SystemPromptBuilder::withContextFiles()` — 高/严重威胁排除，中等威胁清理
-- **凭证池** (`src/Providers/CredentialPool.php`) — 同 Provider 多凭证故障转移，4种轮转策略。逐凭证状态追踪，自动冷却。自动集成到 `ProviderRegistry::create()` 实现透明密钥轮转
-- **查询复杂度路由** (`src/Optimization/QueryComplexityRouter.php`) — 基于内容的模型路由：检测代码、URL、复杂度关键词、多步骤指令。简单查询自动路由到快速模型
-- **路径级写冲突检测** — `ParallelToolExecutor::classify()` 升级：写入不同路径的工具现可并行执行；重叠路径强制串行。破坏性 bash 命令检测
-- **Memory Provider 接口** (`src/Memory/Contracts/MemoryProviderInterface.php`) — 可插拔记忆提供者，10个生命周期钩子。两个实现：`VectorMemoryProvider`（余弦相似度嵌入搜索）和 `EpisodicMemoryProvider`（时间情景记忆+近因评分）。错误隔离
-- **SecurityCheckChain** (`src/Permissions/SecurityCheckChain.php`) — 可组合安全检查链，包裹 23 项 BashSecurityValidator 检查。`SecurityCheck` 接口 + `LegacyValidatorCheck` 适配器。支持 `add()`、`insertAt()`、`disableById()` 自定义安全策略
-- **Skill 渐进式披露** (`src/Tools/Builtin/SkillCatalogTool.php`) — 两阶段技能加载：第1阶段（仅元数据）→ 第2阶段（按需加载完整指令）
-- **安全流写入器** (`src/Output/SafeStreamWriter.php`) — 管道断开保护，适用于守护进程/容器场景
-- **架构加固** — FileSnapshotManager 批量 I/O（默认批次=5），AutoDreamConsolidator 内存上限（gather 500/consolidate 1000），ReplayStore JSON schema 验证，PromptHook $ARGUMENTS 注入消毒
-- **架构图** (`docs/ARCHITECTURE.md`) — 80+ 节点 Mermaid 依赖图，数据流序列图，子系统统计
-- **18项测试修复** — 修复全部预存测试失败。完整套件：**1687 测试，4713 断言，0 失败**
-
-### 🆕 v0.7.9 — 依赖注入与架构加固（63个新单元测试）
-- **单例 → 构造函数注入** — 19个单例类（`AgentManager`、`TaskManager`、`MCPManager`、`ParallelAgentCoordinator`、`EventDispatcher`、`CostTracker` 等）现已具有公开构造函数，`getInstance()` 标记为 `@deprecated`。25个调用点更新为接受注入依赖并保持向后兼容降级。支持正确的测试隔离和进程安全的 Swarm 执行
-- **ToolStateManager** (`src/Tools/ToolStateManager.php`) — 集中式可注入状态容器，替代 14 个内建工具类中分散的 `private static` 属性（`EnterPlanModeTool`、`ToolSearchTool`、`MonitorTool`、`REPLTool`、`SkillTool`、`WorkflowTool`、`BriefTool`、`ConfigTool`、`SnipTool`、`TodoWriteTool`、`AskUserQuestionTool`、`TerminalCaptureTool`、`VerifyPlanExecutionTool`）。基于桶的状态存储，支持自增ID、集合辅助方法和按工具重置。在 Swarm 模式中注入共享实例以确保跨进程正确性
-- **SessionManager 分解** — 从 631 行的 `SessionManager` 中提取 `SessionStorage`（原子文件 I/O、目录扫描、路径解析）和 `SessionPruner`（按时间 + 按数量清理）。管理器现在委托给两者，简化为纯编排层
-- **进程并发限制** — `ParallelToolExecutor::executeProcessParallel()` 现在遵守 `$maxParallel`（默认 5），按批处理工具块而非无限制生成并发 OS 进程
-- **v0.7.6 功能单元测试** — 4 个专用测试类中新增 63 个单元测试：`ForkTest`（20 个测试：分支生命周期、会话管理、评分策略、结果排名）、`DebateTest`（12 个测试：配置流式 API、回合数据、结果聚合）、`CostPredictionTest`（18 个测试：类型/复杂度检测、token 估算、预算检查、模型对比）、`ReplayTest`（13 个测试：事件类型、记录器捕获、步骤计数、快照间隔）
-
-### 🆕 v0.7.8 — Agent Harness 模式 + 企业级子系统（20个子系统，628个测试）
-- **持久化任务管理器** (`src/Tasks/PersistentTaskManager.php`) — 基于文件的任务持久化：JSON 索引 + 每任务输出日志。`appendOutput()` / `readOutput()` 日志流式读写，`watchProcess()` + `pollProcesses()` 非阻塞进程监控，重启时自动标记残留运行任务为失败，按天数自动清理。配置：`persistence.tasks`
-- **会话管理器** (`src/Session/SessionManager.php`) — 对话快照保存/加载/列表/删除到 `~/.superagent/sessions/`。`loadLatest()` 支持 CWD 过滤实现项目级恢复，自动提取摘要，Session ID 路径消毒，按数量+天数自动清理。配置：`persistence.sessions`
-- **StreamEvent 统一事件架构** (`src/Harness/`) — 9 种统一事件类型（`TextDelta`、`ThinkingDelta`、`TurnComplete`、`ToolStarted`、`ToolCompleted`、`Compaction`、`Status`、`Error`、`AgentComplete`）。`StreamEventEmitter` 多监听器分发 + `toStreamingHandler()` 桥接器，QueryEngine 零改动接入
-- **Harness REPL 交互循环** (`src/Harness/HarnessLoop.php`) — 带 `CommandRouter` 的交互式 Agent 循环（10 个内建命令：`/help`、`/status`、`/tasks`、`/compact`、`/continue`、`/session`、`/clear`、`/model`、`/cost`、`/quit`）。忙碌锁、`continue_pending()` 中断恢复、自动保存会话、自定义命令注册
-- **自动压缩器** (`src/Harness/AutoCompactor.php`) — 两级压缩：micro（截断旧工具结果，无 LLM 调用）→ full（LLM 摘要）。失败熔断器、`CompactionEvent` 事件通知。`maybeCompact()` 在每轮循环开始调用
-- **E2E 场景测试框架** (`src/Harness/Scenario.php`, `ScenarioRunner.php`) — 结构化场景定义 + fluent builder，临时工作区管理，透明工具调用跟踪，三维验证（必需工具 + 预期文本 + 自定义闭包），标签过滤，通过/失败/错误汇总
-- **QueryEngine `continue_pending()`** — `hasPendingContinuation()` + `continuePending()` 恢复被中断的工具循环，无需新的用户消息。内部循环提取为共享的 `runLoop()` 方法
-- **Worktree 管理器** (`src/Swarm/WorktreeManager.php`) — 独立的 git worktree 生命周期管理：创建时为大目录（node_modules、vendor、.venv）建立符号链接，元数据持久化，支持恢复和清理。从 ProcessBackend 提取复用
-- **Tmux 后端** (`src/Swarm/Backends/TmuxBackend.php`) — 可视化多 Agent 调试：每个 Agent 运行在 tmux 面板中。自动检测（`$TMUX` + `which tmux`），不可用时优雅降级。新增 `BackendType::TMUX` 枚举
-- **参数优于配置** — 所有新子系统的 `fromConfig()` 接受 `array $overrides` 参数，优先级：`$overrides` > 配置文件 > 默认值。可在调用处强制启用被配置禁用的功能
-- **API 重试中间件** (`src/Providers/RetryMiddleware.php`) — 指数退避+抖动，支持 `Retry-After` 头，错误分类（auth/rate_limit/transient/unrecoverable），可配置最大重试次数，重试日志追踪。`wrap()` 静态工厂
-- **iTerm2 后端** (`src/Swarm/Backends/ITermBackend.php`) — 基于 AppleScript 的面板式 Agent 调试，自动检测（`$ITERM_SESSION_ID`），优雅关闭+强制终止。`BackendType::ITERM2`
-- **插件系统** (`src/Plugins/`) — `PluginManifest`（从 `plugin.json` 解析）、`LoadedPlugin`（解析 skills/hooks/MCP）、`PluginLoader`（从 `~/.superagent/plugins/` 和 `.superagent/plugins/` 发现，启用/禁用，安装/卸载，跨所有启用插件收集）
-- **可观察应用状态** (`src/State/`) — `AppState` 不可变值对象，`with()` 部分更新。`AppStateStore` 可观察存储，`subscribe()` 返回取消订阅回调，状态变更自动通知监听器
-- **Hook 热重载** (`src/Hooks/HookReloader.php`) — 监控配置文件 mtime，变更时重载 `HookRegistry`。支持 JSON 和 PHP 配置格式。`forceReload()`、`hasChanged()`、`fromDefaults()` 工厂
-- **Prompt & Agent Hook** (`src/Hooks/PromptHook.php`, `AgentHook.php`) — 基于 LLM 的验证：发送带 `$ARGUMENTS` 注入的提示，期望 `{"ok": true/false, "reason": "..."}`。`AgentHook` 扩展上下文+60秒超时。均支持 `blockOnFailure` 和匹配器模式
-- **多通道网关** (`src/Channels/`) — `ChannelInterface`、`BaseChannel`（ACL 控制）、`MessageBus`（基于 SplQueue 的入站/出站）、`ChannelManager`（注册/分发）、`WebhookChannel`（HTTP webhook）、`InboundMessage`/`OutboundMessage` 值对象
-- **后端协议** (`src/Harness/BackendProtocol.php`, `FrontendRequest.php`) — JSON-lines 协议（`SAJSON:` 前缀）用于前后端通信。8 种事件发射器、`readRequest()`、`createStreamBridge()`。`FrontendRequest` 类型化请求解析
-- **OAuth 设备码流程** (`src/Auth/`) — RFC 8628 实现，自动打开浏览器。`CredentialStore` 基于文件的凭证存储（原子写入+0600权限）。`TokenResponse`/`DeviceCodeResponse` 不可变 DTO
-- **权限路径规则** (`src/Permissions/`) — `PathRule` 基于 glob 的允许/拒绝规则，`CommandDenyPattern` fnmatch 模式，`PathRuleEvaluator` 链式评估（拒绝优先）。`fromConfig()` 工厂
-- **协调器任务通知** (`src/Coordinator/TaskNotification.php`) — 子 Agent 完成的结构化 XML 通知，`toXml()`/`toText()`/`fromXml()`/`fromResult()`。XML 往返保真
-- **增强自动压缩器** — 动态阈值（`contextWindow - 20K - 13K`），token 估算填充（`raw * 4/3`），`contextWindowForModel()` 映射，`setContextWindow()` 覆盖
-- **增强并行工具执行** — 新增 `executeProcessParallel()` 通过 `proc_open` 实现真正 OS 级并行，`getStrategy()` 返回 `process`/`fiber`/`sequential`，配置：`performance.process_parallel_execution.enabled`
-- **会话项目隔离** — 会话存储在项目级子目录：`sessions/{basename}-{sha1[:12]}/`。向后兼容平铺布局会话
-
-### 🆕 v0.7.7 — 可调试性与质量加固
-- **吞没异常日志修复** — 为24个文件中27个静默catch块添加 `error_log('[SuperAgent] ...')`（Performance、Optimization、ProcessBackend、MCPManager等）。此前生产环境中不可见的异常现在可通过 `[SuperAgent]` 日志前缀追踪
-- **Agent 核心单元测试** (`tests/Unit/AgentTest.php`) — 31个测试、44个断言，覆盖构造函数、Provider路由、fluent API链式调用、工具管理、bridge模式、auto模式、Provider配置注入子Agent
-- **代码审查框架** (`docs/REVIEW.md`) — 定期架构评估模板，包含规模指标、优劣势分析、测试覆盖缺口、优先级行动项和版本间评分追踪（当前评分：7.6/10）
-
-### 🆕 v0.7.6 — 创新智能体能力套件（6个新子系统）
-- **Agent Replay 时间旅行调试** (`src/Replay/`) — 记录完整执行轨迹（LLM调用、工具调用、Agent生成、消息传递），支持逐步回放。`ReplayPlayer` 支持前进/后退导航、任意步骤的Agent状态检查、搜索、从任意步骤分叉重新执行、带累计成本的格式化时间线。通过 `ReplayStore` 以 NDJSON 格式持久化，支持按时间清理。配置：`replay.enabled`、`replay.snapshot_interval`
-- **对话分叉** (`src/Fork/`) — 在对话任意节点分叉，并行探索N条路径，自动选择最优结果。`ForkManager` 创建 `ForkSession` 包含多个 `ForkBranch`，通过 `proc_open`（`ForkExecutor`）真并行执行，使用内置评分策略（`ForkScorer::costEfficiency`、`brevity`、`completeness`、`composite`）。配置：`fork.enabled`、`fork.max_branches`
-- **Agent辩论协议** (`src/Debate/`) — 三种结构化多Agent协作模式：**辩论**（提议者→批评者→裁判，含反驳环节）、**红队**（构建者→攻击者→审查者，可配置攻击向量）、**集成**（N个Agent独立求解→合并最优元素）。流式配置 `DebateConfig::create()->withRounds(3)->withMaxBudget(5.0)`，按Agent选择模型，逐轮成本追踪。配置：`debate.enabled`、`debate.default_rounds`
-- **成本预测引擎** (`src/CostPrediction/`) — 执行前估算任务成本，3种策略：历史加权平均（置信度可达95%）、类型平均混合、启发式（token估算×模型定价）。`TaskAnalyzer` 通过关键词分析检测任务类型（代码生成、重构、调试、测试、分析、聊天）和复杂度。`CostPredictor::compareModels()` 多模型即时成本对比。配置：`cost_prediction.enabled`
-- **自然语言护栏** (`src/Guardrails/NaturalLanguage/`) — 用自然语言定义护栏规则，零成本编译（无LLM调用）。基于模式的 `RuleParser` 支持6种规则：工具限制（"禁止修改database/migrations中的文件"）、成本规则（"成本超过$5时暂停"）、速率限制（"每分钟最多10次bash调用"）、文件限制（"不要触碰.env文件"）、警告规则和内容规则。流式API：`NLGuardrailFacade::create()->rule('...')->compile()`。支持置信度评分和YAML导出。配置：`nl_guardrails.enabled`、`nl_guardrails.rules`
-- **自愈流水线** (`src/Pipeline/SelfHealing/`) — Pipeline步骤的新失败策略 `self_heal`：诊断失败→制定修复计划→应用变异→重试。`DiagnosticAgent` 通过规则+LLM进行8类错误诊断（超时、限流、模型限制、资源耗尽等）。`StepMutator` 支持6种变异（修改提示词、更换模型、调整超时、添加上下文、简化任务、拆分步骤）。配置：`self_healing.enabled`、`self_healing.max_heal_attempts`
-
-### 🆕 v0.7.5 — Claude Code 工具名兼容
-- **`ToolNameResolver`** (`src/Tools/ToolNameResolver.php`) — Claude Code PascalCase 工具名（`Read`、`Write`、`Edit`、`Bash`、`Glob`、`Grep`、`Agent`、`WebSearch` 等）与 SuperAgent snake_case 工具名（`read_file`、`write_file`、`edit_file`、`bash`、`glob`、`grep`、`agent`、`web_search` 等）的双向映射。40+ 工具映射，包括 CC 旧名称（`Task` → `agent`）
-- **Agent 定义自动解析** — `MarkdownAgentDefinition::allowedTools()` 和 `disallowedTools()` 通过 `ToolNameResolver::resolveAll()` 自动解析 CC 工具名。`.claude/agents/` 中的定义可使用任一格式：`allowed_tools: [Read, Grep, Glob]` 或 `allowed_tools: [read_file, grep, glob]` 均可
-- **权限系统兼容** — `QueryEngine::isToolAllowed()` 同时检查原始名称和解析后名称，CC 或 SA 格式的权限列表都能正确工作
-- **向后兼容** — 现有 SuperAgent 工具名继续正常工作，解析器是增量添加不破坏现有功能
-
-### 🆕 v0.7.0 — 性能优化套件（13 项策略，全部可配置）
-- **工具结果压缩** — 自动将旧的工具结果（超过最近 N 轮）压缩为简洁摘要，减少 30-50% input tokens。保留错误结果和近期上下文不变。配置：`optimization.tool_result_compaction`（`enabled`、`preserve_recent_turns`、`max_result_length`）
-- **按需工具 Schema** — 根据任务阶段（探索/编辑/规划）动态选择相关工具子集，省略未使用的工具 schema 节省约 10K tokens。始终包含最近使用的工具。配置：`optimization.selective_tool_schema`（`enabled`、`max_tools`）
-- **逐轮模型路由** — 纯工具调用轮自动降级到快速模型（可配置，默认 Haiku），推理时自动升级。检测连续工具调用轮并据此路由，降低 40-60% 成本。配置：`optimization.model_routing`（`enabled`、`fast_model`、`min_turns_before_downgrade`）
-- **响应预填充** — 使用 Anthropic assistant prefill 在长时间工具调用后引导输出格式，鼓励总结而非更多工具调用。保守策略：仅在连续 3+ 轮工具调用后预填。配置：`optimization.response_prefill`（`enabled`）
-- **提示缓存固定** — 在缺少缓存边界的 system prompt 中自动插入 cache boundary 标记，将静态部分（工具说明、角色）与动态部分（记忆、上下文）分离，实现约 90% prompt cache 命中率。配置：`optimization.prompt_cache_pinning`（`enabled`、`min_static_length`）
-- **所有优化默认启用**，可通过环境变量单独禁用（`SUPERAGENT_OPT_TOOL_COMPACTION`、`SUPERAGENT_OPT_SELECTIVE_TOOLS`、`SUPERAGENT_OPT_MODEL_ROUTING`、`SUPERAGENT_OPT_RESPONSE_PREFILL`、`SUPERAGENT_OPT_CACHE_PINNING`）
-- **无硬编码模型 ID** — 路由用的快速模型完全通过 `SUPERAGENT_OPT_FAST_MODEL` 配置；低价模型检测使用启发式名称匹配而非硬编码列表
-- **并行工具执行** — PHP Fiber 并行执行只读工具，耗时 = max 而非 sum。配置：`performance.parallel_tool_execution`
-- **流式工具分发** — SSE 流中收到 tool_use 块后立即启动执行。配置：`performance.streaming_tool_dispatch`
-- **HTTP 连接池** — cURL keep-alive 复用连接。配置：`performance.connection_pool`
-- **推测性预读** — Read 后预读相关文件到内存缓存。配置：`performance.speculative_prefetch`
-- **流式 Bash 执行** — 超时截断 + 尾部摘要。配置：`performance.streaming_bash`
-- **自适应 max_tokens** — 工具调用 2048，推理 8192。配置：`performance.adaptive_max_tokens`
-- **批量 API** — Anthropic Batches API（50% 折扣）。配置：`performance.batch_api`
-- **本地工具零拷贝** — Read/Edit/Write 间文件内容缓存。配置：`performance.local_tool_zero_copy`
-
-### 🆕 v0.6.19 — In-Process NDJSON 日志支持进程监控
-- **`NdjsonStreamingHandler`** (`src/Logging/NdjsonStreamingHandler.php`) — 工厂类，一行代码创建写 CC 兼容 NDJSON 到日志文件的 `StreamingHandler`。用于 in-process agent 执行（直接调用 `$agent->prompt()` 而不经过 `agent-runner.php`/`ProcessBackend` 的场景）
-- **`create(logTarget, agentId)`** — 返回带 `onToolUse`、`onToolResult`、`onTurn` 回调的 `StreamingHandler`，自动写入 `NdjsonWriter`。接受文件路径（自动创建目录）或可写流资源
-- **`createWithWriter(logTarget, agentId)`** — 返回 `{handler, writer}` 对，调用方可在执行完成后发出 `writeResult()`/`writeError()`。writer 和 handler 共享同一 NDJSON 流
-- **进程监控兼容** — 日志文件与子进程 stderr 格式完全一致，`parseStreamJsonIfNeeded()` 可直接解析并显示工具调用活动（🔧 Read、Edit、Grep 等）、token 计数和执行状态
-
-### 🆕 v0.6.18 — Claude Code 兼容 NDJSON 结构化日志
-- **`NdjsonWriter`** (`src/Logging/NdjsonWriter.php`) — 新增 Claude Code 兼容的 NDJSON（换行符分隔 JSON）事件写入器。支持 5 种事件方法：`writeAssistant()`（含 text/tool_use 内容块 + 每轮 usage 的 LLM 回复）、`writeToolUse()`（单个工具调用）、`writeToolResult()`（工具执行结果，`type:user` + `parent_tool_use_id`）、`writeResult()`（成功结果含 usage/cost/duration）、`writeError()`（错误含 subtype）。转义 U+2028/U+2029 行分隔符，与 CC 的 `ndjsonSafeStringify` 一致
-- **NDJSON 替代 `__PROGRESS__:` 协议** — `agent-runner.php` 现在在 stderr 上使用 `NdjsonWriter` 输出标准 NDJSON，替代自定义 `__PROGRESS__:` 前缀。事件可被 CC 的 bridge/sessionRunner `extractActivities()` 直接解析。每个 assistant 事件包含每轮 `usage`（inputTokens、outputTokens、cacheReadInputTokens、cacheCreationInputTokens）用于实时 token 追踪
-- **ProcessBackend NDJSON 解析** — `ProcessBackend::poll()` 升级为检测 NDJSON 行（以 `{` 开头的 JSON 对象），同时兼容旧 `__PROGRESS__:` 格式。非 JSON stderr 行（如 `[agent-runner]` 日志）继续转发到 PSR-3 logger
-- **AgentTool CC 格式支持** — `applyProgressEvents()` 现在同时处理 CC NDJSON 格式（`assistant` → 提取 tool_use 块 + usage，`user` → tool_result，`result` → 最终 usage）和旧格式，实现无缝进程监控集成
-
-### 🆕 v0.6.17 — 子Agent 进程实时进度监控
-- **结构化进度事件** — 子 agent 进程现在通过 stderr 发送 `__PROGRESS__:` 协议的结构化 JSON 进度事件。事件包括 `tool_use`（工具名、输入参数）、`tool_result`（成功/失败、结果大小）和 `turn`（每轮 LLM 调用的 token 用量）
-- **子进程 StreamingHandler** — `agent-runner.php` 创建带有 `onToolUse`、`onToolResult` 和 `onTurn` 回调的 `StreamingHandler`，将执行事件序列化回传给父进程。从 `Agent::run()` 改为 `Agent::prompt()` 以传递 handler
-- **ProcessBackend 事件解析** — `ProcessBackend::poll()` 现在识别 stderr 中 `__PROGRESS__:` 前缀的行，解析为 JSON 并按 agent 排队。新增 `consumeProgressEvents(agentId)` 方法返回并清空排队事件。普通日志行仍照常转发给 logger
-- **AgentTool 协调器集成** — `waitForProcessCompletion()` 将子 agent 注册到 `ParallelAgentCoordinator`，每次轮询时将进度事件注入 `AgentProgressTracker`。跟踪器实时更新工具使用计数、当前活动描述（如"Editing /src/Agent.php"）、token 计数和最近活动列表
-- **进程监控可见性** — `ParallelAgentDisplay` 现在可显示子 agent 实时进度（当前工具、token 计数、工具使用次数），无需修改显示代码——现有 UI 直接读取协调器的 tracker，而 tracker 现已对进程级 agent 填充数据
-
-### 🆕 v0.6.16 — 父进程注册数据透传子进程
-- **Agent 定义透传** — 父进程通过 `AgentManager::exportDefinitions()` 序列化所有已注册 agent 定义（内置 + `.claude/agents/` 自定义），经 stdin JSON 传给子进程。子进程通过 `importDefinitions()` 导入——无需 Laravel bootstrap 或文件系统访问
-- **MCP Server 配置透传** — 父进程序列化所有已注册 MCP server 配置（`ServerConfig::toArray()`）传给子进程。子进程通过 `MCPManager::registerServer()` 注册，无需重新读取配置文件或 `.mcp.json`
-- **已验证** — 子进程收到 9 个 agent 类型（7 内置 + 2 自定义含完整 system prompt）、2 个 MCP server（stdio + http）、6 个内置 skill、58 个工具
-
-### 🆕 v0.6.15 — MCP Server TCP 桥接共享
-- **MCP TCP 桥接** (`MCPBridge`) — 父进程连接 stdio MCP server 后，自动在随机端口启动轻量 TCP 代理。子进程通过注册文件发现桥接，用 `HttpTransport` 连接而非各自启动 MCP server。N 个子 agent 共享 1 个 MCP server 进程
-- **MCPManager 自动检测** — `createTransport()` 在创建 `StdioTransport` 前检查父进程桥接，若存在则透明使用 `HttpTransport`
-- **ProcessBackend 桥接轮询** — `poll()` 同时调用 `MCPBridge::poll()` 处理子进程的 TCP 请求
-
-### 🆕 v0.6.12 — 子进程 Laravel 引导与 Provider 修复
-- **子进程 Laravel 引导** — `agent-runner.php` 现在在收到 `base_path` 时执行完整 Laravel 引导（`$app->make(Kernel)->bootstrap()`）。子进程可访问 `config()`、`AgentManager`、`SkillManager`、`MCPManager`、`.claude/agents/` 目录及所有 service provider——与父进程完全一致
-- **Provider 配置序列化修复** — 当 `Agent` 以 `LLMProvider` 对象（非字符串）构造时，对象被 JSON 序列化为 `{}`，子进程无法获取 API 凭证。`injectProviderConfigIntoAgentTools()` 现在将对象替换为 `$provider->name()` 字符串，从 Laravel config 回填 `api_key`，并始终设置 provider 名称和 model
-- **子进程完整工具集** — `ProcessBackend` 默认设置 `load_tools='all'`（58 个工具），子 agent 可访问 agent、skill、mcp、web_search 等全部工具
-
-### 🆕 v0.6.11 — 真正的进程级并行子智能体
-- **基于进程的子智能体** — `AgentTool` 现在默认使用 `ProcessBackend`（`proc_open`）而非 `InProcessBackend`（Fiber）。每个子智能体在独立 OS 进程中运行，拥有独立的 Guzzle 连接，实现真正并行。PHP Fiber 是协作式的——Fiber 内的阻塞 I/O（HTTP 调用、bash 命令）会阻塞整个进程，导致旧方案实际上是串行的
-- **重写 `bin/agent-runner.php`** — 一次性运行器：从 stdin 读取 JSON 配置，创建带完整 LLM Provider 和工具的 `SuperAgent\Agent`，执行 prompt，将 JSON 结果写入 stdout
-- **`ProcessBackend` 重构** — `spawn()` 通过 stdin 传递配置后关闭；`poll()` 非阻塞轮询 stdout/stderr；`waitAll()` 等待所有追踪中的智能体完成。实测：5 个各 sleep 500ms 的智能体总计 544ms 完成（4.6x 加速）
-- **InProcessBackend 降级** — Fiber 后端作为 `proc_open` 不可用时的降级方案保留
-
-### 🆕 v0.6.10 — 多智能体同步执行修复
-- **同步智能体死锁修复** — `InProcessBackend::spawn()` 现在无论 `runInBackground` 设置如何都会创建执行 Fiber。此前同步模式从未创建 Fiber，导致 `waitForSynchronousCompletion()` 无限轮询（5 分钟超时死锁）
-- **后端类型不匹配修复** — `AgentTool::$activeTasks` 现在在 `BackendType` 枚举旁额外存储实际后端实例。同步等待循环此前在枚举值上调用 `->getStatus()` 和 `instanceof InProcessBackend`，结果始终错误
-- **Fiber 生命周期修复** — `ParallelAgentCoordinator::processAllFibers()` 现在可处理未启动的 Fiber（`!$fiber->isStarted()` → `start()`）。修复了 `AgentProgressTracker` 缺失的 `$status` 属性，以及 stub 智能体中的 null usage 类型错误
-
-### 🆕 v0.6.9 — Guzzle Base URL 路径修复
-- **多 Provider Base URL 修复** — `OpenAIProvider`、`OpenRouterProvider` 和 `OllamaProvider` 现在正确地在 `base_uri` 末尾追加斜杠，并使用相对请求路径。此前，任何带路径前缀的自定义 `base_url`（如 `https://gateway.example.com/openai`）都会因 Guzzle 的 RFC 3986 解析器在使用绝对路径（如 `/v1/chat/completions`）时将路径前缀静默丢弃。四个 Provider（`AnthropicProvider` 已在 v0.6.8 修复）现均采用正确模式
-
-### 🆕 v0.6.8 — 增量上下文与工具按需加载
-- **增量上下文** (`IncrementalContextManager`) — 基于 Delta 的上下文同步：只传输差异（新增/修改/删除的消息）而非完整历史。自动检查点、一步还原、可配置 Token 阈值触发自动压缩，以及 `getSmartWindow(maxTokens)` API 用于 Token 预算内的上下文检索
-- **懒加载上下文** (`LazyContextManager`) — 注册上下文片段（含类型、优先级、标签、大小元数据）无需立即加载内容。片段在任务请求时按需获取，通过关键词/标签相关性评分选择。支持 TTL 缓存、LRU 淘汰、`preloadPriority()`、`loadByTags()` 和 `getSmartWindow(maxTokens, focusArea)` 精细化内存管理
-- **工具按需加载** (`ToolLoader` / `LazyToolResolver`) — 注册工具类而无需实例化；工具在模型调用时才被加载。`predictAndPreload(task)` 根据任务关键词预热工具。`loadForTask(task)` 返回最小工具集。任务间可卸载闲置工具释放内存
-- **子智能体 Provider 继承** — `AgentTool` 现在接收父智能体的 provider 配置（API Key、模型、Base URL），并通过 `AgentSpawnConfig::$providerConfig` 注入每个生成的子智能体。`InProcessBackend` 创建的子智能体是真实的 `SuperAgent\Agent` 实例，具备真正的 LLM 连接，而非空操作 stub
-- **WebSearch 无 Key 降级** — `WebSearchTool` 在未设置 `SEARCH_API_KEY` 时不再直接报错，而是通过 `WebFetchTool` 自动降级到 DuckDuckGo HTML 搜索（使用 cURL 或 `file_get_contents`，浏览器级 User-Agent）
-- **WebFetch 加固** — `WebFetchTool` 现在优先使用 cURL；检查 HTTP 状态码（4xx/5xx → 报错而非静默返回错误页内容）；在 cURL 和 `allow_url_fopen` 均不可用时给出明确错误信息
-
-### 🆕 多智能体编排 (v0.6.7)
-- **并行智能体执行** - 同时运行多个智能体，实时跟踪每个智能体进度
-- **Claude Code兼容结果** - 以精确的Claude Code格式返回结果，无缝集成
-- **自动任务检测** - 分析任务复杂度，自动决定单智能体或多智能体模式
-- **智能体团队管理** - 协调具有领导者/成员关系和基于角色执行的团队
-- **智能体间通信** - SendMessage工具用于智能体间消息传递和协调
-- **持久化邮箱系统** - 可靠的消息队列，支持过滤、归档和广播
-- **进度聚合** - 实时令牌计数、活动跟踪和跨所有智能体的成本聚合
-- **WebSocket监控** - 基于浏览器的实时仪表板，监控并行智能体执行
-- **资源池化** - 智能体池化，带并发限制和依赖管理
-- **检查点与恢复** - 长时间运行的多智能体工作流的自动状态恢复
-
-### 🎯 自动模式检测
-- **智能任务分析** - 自动判断是否需要多智能体协作
-- **复杂度评估** - 基于任务复杂度自动选择执行模式
-- **资源优化** - 简单任务单智能体，复杂任务多智能体并行
-
-### 📊 企业级功能
-- **WebSocket实时监控** - 浏览器端实时仪表板
-- **性能分析** - 全面的性能指标和瓶颈分析
-- **依赖管理** - 复杂工作流编排与拓扑排序
-- **分布式扩展** - 跨多台机器/进程运行智能体
-- **持久化存储** - 自动保存进度，支持崩溃恢复
-- **智能体池化** - 预热智能体池，即时任务分配
-- **模板系统** - 10+预置模板，快速部署常见任务
-
-### 🔧 强大工具集
-- **59+内置工具** - 文件操作、代码编辑、Web搜索、任务管理等
-- **安全验证器** - 23项注入/混淆检查，命令分类
-- **智能上下文压缩** - 语义边界保护的会话记忆压缩
-- **Token预算控制** - 动态预算管理，智能成本控制
-
-### 🌍 多供应商支持
-- **Claude (Anthropic)** - 最新 Claude 4.7 Opus / Sonnet、4.5 Haiku（以及全部 4.6 / 4.5 / 4 系列）
-- **OpenAI** - GPT-5 / GPT-5-mini / GPT-5-nano、GPT-4o、o4-mini 及旧版模型
-- **Google Gemini（原生）** - `GeminiProvider` 直连 Generative Language API，支持 SSE streaming、function calling，全量兼容 MCP / Skills / 子 Agent。`superagent -p gemini -m gemini-2.5-flash "…"`
-- **AWS Bedrock** - 通过AWS使用Claude，支持最新模型
-- **Ollama** - 本地模型，包括Llama 3、Mistral等
-- **OpenRouter** - 100+模型统一API
-
-### 🔄 动态模型目录 (v0.8.7)
-- **`ModelCatalog`** - 单一 JSON（`resources/models.json`）驱动 `CostCalculator` 计费、`ModelResolver` 别名与 `/model` 选择器。可在 `~/.superagent/models.json` 覆盖，或设 `SUPERAGENT_MODELS_URL` 远端拉取
-- **CLI**：`superagent models list | update | status | reset` 无需发版即可刷新模型列表与价格
-- **启动自动刷新**（可选）：设 `SUPERAGENT_MODELS_AUTO_UPDATE=1`，CLI 每 7 天陈旧时自动拉一次
-
-## 📦 安装
-
-### 系统要求
-- PHP >= 8.1
-- Composer
-- Laravel >= 10.0（可选，支持独立使用）
-
-### 通过Composer安装
-
-```bash
-composer require forgeomni/superagent
-```
-
-### Laravel项目安装
-
-1. **安装包：**
-```bash
-composer require forgeomni/superagent
-```
-
-2. **发布配置文件：**
-```bash
-php artisan vendor:publish --provider="SuperAgent\SuperAgentServiceProvider"
-```
-
-3. **配置`.env`文件：**
-```env
-# 主要供应商
-SUPERAGENT_PROVIDER=anthropic
-ANTHROPIC_API_KEY=你的API密钥
-
-# 可选供应商
-OPENAI_API_KEY=你的OpenAI密钥
-GEMINI_API_KEY=你的Gemini密钥   # 或 GOOGLE_API_KEY
-AWS_BEDROCK_REGION=us-east-1
-
-# 模型目录自动更新（可选）
-SUPERAGENT_MODELS_URL=https://your-cdn/models.json
-SUPERAGENT_MODELS_AUTO_UPDATE=1
-
-# 多智能体功能
-SUPERAGENT_WEBSOCKET_ENABLED=true
-SUPERAGENT_WEBSOCKET_PORT=8080
-SUPERAGENT_STORAGE_PATH=storage/superagent
-
-# 自动模式检测
-SUPERAGENT_AUTO_MODE=true
-```
-
-### 独立安装（无Laravel）
-
-```bash
-# 安装包
-composer require forgeomni/superagent
-
-# 创建配置文件
-cp vendor/forgeomni/superagent/config/superagent.php config/superagent.php
+superagent "修复 src/Auth/ 里的登录 bug"
 ```
 
 ```php
-// 在应用中初始化
-use SuperAgent\SuperAgent;
-
-$config = require 'config/superagent.php';
-SuperAgent::initialize($config);
-```
-
-## 🚀 快速开始
-
-### 基础智能体
-
-```php
-use SuperAgent\Agent;
-
-$agent = new Agent([
-    'provider' => 'anthropic',
-    'model' => 'claude-4.6-opus-latest',
+$agent = new SuperAgent\Agent([
+    'provider' => 'openai-responses',
+    'model'    => 'gpt-5',
 ]);
 
-$result = $agent->run("分析这个代码库并提出改进建议");
-echo $result->message->content;
+$result = $agent->run('用一段话总结 docs/ADVANCED_USAGE.md');
+echo $result->text();
 ```
-
-### 自动多智能体模式
-
-```php
-use SuperAgent\Agent;
-
-// 启用自动检测
-$agent = new Agent([
-    'auto_mode' => true,  // 自动判断是否使用多智能体
-]);
-
-// 简单任务 - 自动使用单智能体
-$result = $agent->run("2+2等于多少？");
-
-// 复杂任务 - 自动启动多智能体团队
-$result = $agent->run("
-    分析这个项目的代码质量，
-    找出所有安全漏洞，
-    生成详细的修复方案，
-    并为每个问题创建测试用例
-");
-
-// 系统自动分析任务并决定：
-// ✅ 检测到4个子任务
-// ✅ 需要多种工具（代码分析、安全扫描、文档生成、测试创建）
-// ✅ 预估Token数超过10000
-// → 自动启动多智能体模式
-```
-
-### 多智能体团队编排
-
-```php
-use SuperAgent\Swarm\TeamContext;
-use SuperAgent\Swarm\Backends\InProcessBackend;
-use SuperAgent\Swarm\AgentSpawnConfig;
-use SuperAgent\Console\Output\ParallelAgentDisplay;
-
-// 创建团队
-$team = new TeamContext('research_team', 'team_leader');
-
-// 设置后端
-$backend = new InProcessBackend();
-$backend->setTeamContext($team);
-
-// 生成多个智能体
-$agents = [
-    $backend->spawn(new AgentSpawnConfig(
-        name: '数据收集器',
-        prompt: '从数据库收集销售数据',
-        teamName: 'research_team'
-    )),
-    $backend->spawn(new AgentSpawnConfig(
-        name: '数据分析师',
-        prompt: '分析销售趋势和异常',
-        teamName: 'research_team'
-    )),
-    $backend->spawn(new AgentSpawnConfig(
-        name: '报告撰写员',
-        prompt: '基于分析结果撰写报告',
-        teamName: 'research_team'
-    ))
-];
-
-// 实时监控进度
-$display = new ParallelAgentDisplay($output);
-$display->displayWithRefresh(500); // 每500ms刷新
-```
-
-### 智能体间通信
-
-```php
-use SuperAgent\Tools\Builtin\SendMessageTool;
-
-$messageTool = new SendMessageTool();
-
-// 直接发送消息给特定智能体
-$messageTool->execute([
-    'to' => 'researcher-agent',
-    'message' => '请优先考虑安全最佳实践',
-    'summary' => '优先级更新',
-]);
-
-// 广播给所有智能体
-$messageTool->execute([
-    'to' => '*',
-    'message' => '团队更新：关注性能优化',
-    'summary' => '团队公告',
-]);
-```
-
-### WebSocket实时监控
-
-```bash
-# 启动WebSocket服务器
-php artisan superagent:websocket
-
-# 访问监控仪表板
-open http://localhost:8080/superagent/monitor
-```
-
-仪表板功能：
-- 🔴 实时智能体状态指示器
-- 📊 每个智能体的Token使用情况
-- 💰 成本聚合与预算追踪
-- 📈 进度可视化与ETA
-- 📬 消息队列监控
-
-### 使用智能体模板
-
-```php
-use SuperAgent\Swarm\Templates\AgentTemplateManager;
-
-$templates = AgentTemplateManager::getInstance();
-
-// 使用预置模板 - 代码审查
-$config = $templates->createSpawnConfig('code_reviewer', [
-    'repository' => '/path/to/repo',
-    'focus_areas' => '安全性、性能优化',
-    'standards' => 'PSR-12、安全最佳实践'
-]);
-
-$agent = $backend->spawn($config);
-
-// 可用模板类别：
-// - 数据处理：data_processor, etl_pipeline
-// - 代码分析：code_reviewer, security_scanner
-// - 研究任务：web_researcher, documentation_writer
-// - 测试生成：test_generator, performance_tester
-// - 自动化：ci_cd_agent, deployment_agent
-```
-
-### 依赖管理
-
-```php
-use SuperAgent\Swarm\Dependency\AgentDependencyManager;
-
-$depManager = new AgentDependencyManager();
-
-// 定义执行链
-$depManager->registerChain([
-    '数据提取',
-    '数据清洗',
-    '数据分析',
-    '报告生成'
-]);
-
-// 定义并行任务
-$depManager->registerParallel([
-    '单元测试',
-    '集成测试',
-    '性能测试'
-]);
-
-// 自动按依赖关系执行
-$depManager->processWaitingAgents($backend);
-```
-
-## 📊 实时监控仪表板
-
-### 启动WebSocket服务器
-
-```bash
-# 启动WebSocket服务器
-php artisan superagent:websocket
-
-# 另一个终端，启动仪表板
-php artisan superagent:dashboard
-
-# 访问 http://localhost:8080/dashboard
-```
-
-### 仪表板功能
-- 🔄 实时智能体状态更新
-- 📈 Token使用和成本追踪
-- 🎯 任务进度可视化
-- 📊 性能指标图表
-- 🌳 团队层级显示
-
-## 🎯 自动模式检测机制
-
-SuperAgent通过以下维度自动判断任务复杂度：
-
-### 检测维度
-1. **任务复杂度分析**
-   - 子任务数量检测
-   - 任务描述长度
-   - 关键词模式匹配
-
-2. **工具需求评估**
-   - 预测需要的工具种类
-   - 工具调用频率估算
-
-3. **Token预估**
-   - 输入/输出Token预测
-   - 上下文窗口需求
-
-4. **并行机会识别**
-   - 可并行执行的子任务
-   - 任务间依赖关系
-
-### 触发条件
-```php
-// 配置自动模式阈值
-'auto_mode' => [
-    'enabled' => true,
-    'threshold' => [
-        'complexity_score' => 0.7,  // 复杂度评分阈值
-        'min_subtasks' => 3,        // 最少子任务数
-        'min_tools' => 4,           // 最少工具种类
-        'estimated_tokens' => 10000, // 预估Token数
-    ],
-],
-```
-
-## 🛠️ 高级配置
-
-### 性能优化
-
-```php
-// config/superagent.php
-'performance' => [
-    'pool' => [
-        'enabled' => true,
-        'min_idle_agents' => 2,      // 最小空闲智能体
-        'max_idle_agents' => 10,     // 最大空闲智能体
-        'max_agent_lifetime' => 3600, // 智能体最大生命周期（秒）
-    ],
-    'cache' => [
-        'prompt_cache' => true,       // 启用提示缓存
-        'result_cache' => true,       // 启用结果缓存
-        'ttl' => 3600,               // 缓存生存时间
-    ],
-],
-```
-
-### 安全设置
-
-```php
-'security' => [
-    'bash_validator' => true,         // Bash命令验证
-    'permission_mode' => 'standard',  // 权限模式
-    'max_file_size' => 10485760,     // 最大文件大小（10MB）
-    'allowed_directories' => [        // 允许访问的目录
-        base_path(),
-        storage_path(),
-    ],
-],
-```
-
-## 📚 完整文档
-
-- [快速入门指南](docs/getting-started_CN.md)
-- [多智能体编排](docs/PARALLEL_AGENT_TRACKING_CN.md)
-- [高级特性](docs/PARALLEL_AGENT_ENHANCEMENTS_CN.md)
-- [API参考](docs/api-reference_CN.md)
-- [示例代码](examples/)
-
-## 🧪 测试
-
-```bash
-# 运行所有测试
-composer test
-
-# 运行单元测试
-composer test:unit
-
-# 运行集成测试
-composer test:integration
-
-# 运行多智能体测试
-php vendor/bin/phpunit tests/Unit/ParallelAgentTrackingTest.php
-```
-
-## 📈 性能基准
-
-| 指标 | 单智能体 | 10智能体 | 100智能体 | 1000智能体 |
-|------|---------|----------|-----------|------------|
-| 内存开销 | 2 MB | 15 MB | 120 MB | 1.1 GB |
-| 追踪延迟 | <1ms | <2ms | <10ms | <50ms |
-| WebSocket广播 | N/A | 5ms | 20ms | 100ms |
-| 存储写入 | 1ms | 5ms | 50ms | 500ms |
-
-## 🤝 贡献
-
-欢迎贡献！请查看[贡献指南](CONTRIBUTING_CN.md)了解详情。
-
-### 开发路线图
-- [ ] 支持更多LLM供应商
-- [ ] GraphQL API支持
-- [ ] Kubernetes原生部署
-- [ ] 智能体市场
-- [ ] 可视化工作流编辑器
-
-## 📄 许可证
-
-SuperAgent是基于[MIT许可证](LICENSE)的开源软件。
-
-## 🙏 致谢
-
-- 受Claude Code架构启发
-- 感谢Laravel和PHP社区
-- 特别感谢Anthropic提供Claude API
-
-## 🔗 相关链接
-
-- [GitHub仓库](https://github.com/forgeomni/superagent)
-- [Discord社区](https://discord.gg/superagent)
-- [示例项目](https://github.com/forgeomni/superagent-examples)
 
 ---
 
-由SuperAgent团队用❤️制作 | [English](README.md) | [报告问题](https://github.com/forgeomni/superagent/issues)
+## 目录
+
+- [快速开始](#快速开始)
+- [Provider 与认证](#provider-与认证)
+- [OpenAI Responses API](#openai-responses-api)
+- [Agent 循环](#agent-循环)
+- [工具与多 Agent](#工具与多-agent)
+- [Agent 定义](#agent-定义yaml--markdown)
+- [Skills](#skills)
+- [MCP 集成](#mcp-集成)
+- [Wire Protocol](#wire-protocol)
+- [重试、错误与可观测性](#重试错误与可观测性)
+- [Guardrails 与 Checkpoint](#guardrails-与-checkpoint)
+- [独立 CLI](#独立-cli)
+- [Laravel 集成](#laravel-集成)
+- [配置参考](#配置参考)
+
+每个特性小节末尾会标注起始版本。完整发布日志见 [CHANGELOG.md](CHANGELOG.md)。
+
+---
+
+## 快速开始
+
+安装：
+
+```bash
+# 作为独立 CLI：
+composer global require forgeomni/superagent
+
+# 或作为 Laravel 依赖：
+composer require forgeomni/superagent
+```
+
+完整矩阵（系统要求、认证配置、IDE 桥接、CI 集成）见 [INSTALL_CN.md](INSTALL_CN.md)。
+
+最小 agent 运行：
+
+```php
+$agent = new SuperAgent\Agent(['provider' => 'anthropic']);
+$result = $agent->run('今天几号？');
+echo $result->text();
+```
+
+带工具的最小 agent 运行：
+
+```php
+$agent = (new SuperAgent\Agent(['provider' => 'openai']))
+    ->loadTools(['read', 'write', 'bash']);
+
+$result = $agent->run('检查 composer.json，告诉我这个项目目标 PHP 版本');
+echo $result->text();
+```
+
+CLI 单次调用：
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
+```
+
+---
+
+## Provider 与认证
+
+12 个注册表驱动的 provider，每个都支持 region 感知的 base URL 和多种认证方式。全部实现同一个 `LLMProvider` 契约，所以换 provider 只需改一行。
+
+| 注册表 key | Provider | 说明 |
+|---|---|---|
+| `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth |
+| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT` |
+| `openai-responses` | OpenAI Responses API (`/v1/responses`) | [下方专门小节](#openai-responses-api) |
+| `openrouter` | OpenRouter | API key |
+| `gemini` | Google Gemini | API key |
+| `kimi` | Moonshot Kimi | API key；region `intl` / `cn` / `code`（OAuth）|
+| `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）|
+| `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
+| `glm` | BigModel GLM | API key；region `intl` / `cn` |
+| `minimax` | MiniMax | API key；region `intl` / `cn` |
+| `bedrock` | AWS Bedrock | AWS SigV4 |
+| `ollama` | 本地 Ollama daemon | 无需 auth — 默认 localhost:11434 |
+| `lmstudio` | 本地 LM Studio server | 占位 auth — 默认 localhost:1234 *（v0.9.1 起）* |
+
+认证方式，按优先级：
+
+1. **环境变量 API key** —— `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `KIMI_API_KEY` / `QWEN_API_KEY` / `GLM_API_KEY` / `MINIMAX_API_KEY` / `OPENROUTER_API_KEY` / `GEMINI_API_KEY`。
+2. **已存储的 OAuth 凭据** 位于 `~/.superagent/credentials/<name>.json`。设备码流程 —— 运行 `superagent auth login <name>`：
+   - `claude-code` —— 复用现有的 Claude Code 登录
+   - `codex` —— 复用 Codex CLI 登录
+   - `gemini` —— 复用 Gemini CLI 登录
+   - `kimi-code` —— 对 `auth.kimi.com` 的 RFC 8628 设备流程 *（v0.9.0 起）*
+   - `qwen-code` —— 设备流程 + PKCE S256 + per-account `resource_url` *（v0.9.0 起）*
+3. **显式配置** —— agent options 里的 `api_key` / `access_token` / `account_id`。
+
+OAuth 刷新跨进程串行化，经由 `CredentialStore::withLock()` —— 并行 queue worker 共享一个凭据文件时不会互相覆盖刷新 *（v0.9.0 起）*。
+
+### 声明式 header
+
+```php
+new Agent([
+    'provider'         => 'openai',
+    'env_http_headers' => [
+        'OpenAI-Project'      => 'OPENAI_PROJECT',      // 仅当 env 设置且非空时发送
+        'OpenAI-Organization' => 'OPENAI_ORGANIZATION',
+    ],
+    'http_headers' => [
+        'x-app' => 'my-host-app',                       // 静态 header
+    ],
+]);
+```
+
+*v0.9.1 起*
+
+### 模型 catalog
+
+每个 provider 内置 model id + 定价元数据，在 `resources/models.json`。随时可以刷新到 vendor 的实时 `/models` endpoint：
+
+```bash
+superagent models refresh              # 所有配置了 env creds 的 provider
+superagent models refresh openai       # 单个 provider
+superagent models list                 # 显示合并后的 catalog
+superagent models status               # catalog 来源 + age
+```
+
+*v0.9.0 起*
+
+---
+
+## OpenAI Responses API
+
+专门的 provider：`provider: 'openai-responses'`。打 `/v1/responses`，完整支持 OpenAI 现代 API shape。
+
+**相比 `openai` 的优势：**
+
+| 特性 | Responses | Chat Completions |
+|---|---|---|
+| `previous_response_id` 接续 | ✅ —— 服务端持有状态，新轮次跳过重发上下文 | ❌ —— 每轮都得重发 `messages[]` |
+| `reasoning.effort`（`minimal / low / medium / high / xhigh`）| ✅ 原生 | ❌ o 系列要靠 model id 技巧 |
+| `reasoning.summary` | ✅ 原生 | ❌ |
+| `prompt_cache_key`（服务端 cache 绑定）| ✅ 原生 | ❌ |
+| `text.verbosity`（`low / medium / high`）| ✅ 原生 | ❌ |
+| `service_tier`（`priority / default / flex / scale`）| ✅ 原生 | ❌ |
+| 分类错误 | ✅ 通过 `response.failed` 事件 code | 从 HTTP body 字符串匹配 |
+
+```php
+$agent = new Agent([
+    'provider' => 'openai-responses',
+    'model'    => 'gpt-5',
+]);
+
+$result = $agent->run('分析这个代码库并提出重构建议', [
+    'reasoning'        => ['effort' => 'high', 'summary' => 'auto'],
+    'verbosity'        => 'low',
+    'prompt_cache_key' => 'session:42',
+    'service_tier'     => 'priority',
+    'store'            => true,           // 下一轮想用 previous_response_id 必须设 true
+]);
+
+// 不重发历史继续对话：
+$provider = $agent->getProvider();
+$nextAgent = new Agent([
+    'provider' => 'openai-responses',
+    'options'  => ['previous_response_id' => $provider->lastResponseId()],
+]);
+$nextResult = $nextAgent->run('现在对 auth 层再深入一层');
+```
+
+### ChatGPT 订阅路由
+
+传 `access_token`（或设 `auth_mode: 'oauth'`）会自动路由到 `chatgpt.com/backend-api/codex` —— 让 Plus / Pro / Business 订阅者按订阅额度计费，而不是在 `api.openai.com` 被拒绝。
+
+```php
+new Agent([
+    'provider'     => 'openai-responses',
+    'access_token' => $token,
+    'account_id'   => $accountId,   // 添加 chatgpt-account-id header
+]);
+```
+
+### Azure OpenAI
+
+6 个 base URL 标记会自动把 provider 切到 Azure 模式。`api-version` query 会被加上（默认 `2025-04-01-preview`，可覆盖），`api-key` header 会与 `Authorization` 并行发送。
+
+```php
+new Agent([
+    'provider'          => 'openai-responses',
+    'base_url'          => 'https://my-resource.openai.azure.com/openai/deployments/gpt-5',
+    'api_key'           => $azureKey,
+    'azure_api_version' => '2024-12-01-preview',   // 可选覆盖
+]);
+```
+
+### Trace-context 透传
+
+把 W3C `traceparent` 注入 `client_metadata`，让 OpenAI 端日志可以和你的分布式 trace 对齐：
+
+```php
+$tc = SuperAgent\Support\TraceContext::fresh();              // 新建一个
+// 或：SuperAgent\Support\TraceContext::parse($headerValue); // 从入站 HTTP header 解析
+
+$agent->run($prompt, ['trace_context' => $tc]);
+// 或：$agent->run($prompt, ['traceparent' => '00-0af7-...', 'tracestate' => 'v=1']);
+```
+
+*v0.9.1 起*
+
+---
+
+## Agent 循环
+
+`Agent::run($prompt, $options)` 跑完整的轮次循环直到模型不再发 `tool_use` 块。每轮的成本、usage、消息都流进 `AgentResult`。
+
+```php
+$result = $agent->run('...', [
+    'model'             => 'claude-sonnet-4-5-20250929',  // 单次调用覆盖
+    'max_tokens'        => 8192,
+    'temperature'       => 0.3,
+    'response_format'   => ['type' => 'json_schema', 'json_schema' => [...]],
+    'idempotency_key'   => 'job-42:turn-7',               // v0.9.1 起
+    'system_prompt'     => '你是一个精确的分析师。',
+]);
+
+echo $result->text();
+$result->turns();          // 轮次计数
+$result->totalUsage();     // Usage{inputTokens, outputTokens, cache*}
+$result->totalCostUsd;     // float，跨所有轮次
+$result->idempotencyKey;   // 用于 usage-log 去重的透传 key（v0.9.1 起）
+```
+
+### 预算 + 轮次上限
+
+```php
+$agent = (new Agent(['provider' => 'openai']))
+    ->withMaxTurns(50)
+    ->withMaxBudget(5.00);            // USD —— 硬上限；循环中超出会终止
+```
+
+### 流式输出
+
+```php
+foreach ($agent->stream('...') as $assistantMessage) {
+    echo $assistantMessage->text();
+}
+```
+
+机器可读的事件流（给 IDE / CI 消费者用的 JSON / NDJSON）见 [Wire Protocol](#wire-protocol) 小节。
+
+### Auto-mode（任务检测）
+
+```php
+new Agent([
+    'provider'  => 'anthropic',
+    'auto_mode' => true,               // 委派给 TaskAnalyzer 挑 model + 工具
+]);
+```
+
+### 幂等性
+
+```php
+$result = $agent->run($prompt, ['idempotency_key' => $queueJobId . ':' . $turnNumber]);
+// $result->idempotencyKey 截断到 80 字符；surface 在 AgentResult 上
+// 写 ai_usage_logs 的 host 可以用它去重。
+```
+
+*v0.9.1 起*
+
+---
+
+## 工具与多 Agent
+
+工具是 `SuperAgent\Tools\Tool` 的子类。内置工具 —— read / write / edit / bash / glob / grep / search / fetch —— 默认自动加载。自定义工具通过 `$agent->registerTool(new MyTool())` 注册。
+
+```php
+$agent = (new Agent(['provider' => 'anthropic']))
+    ->loadTools(['read', 'write', 'bash'])
+    ->registerTool(new MyDomainTool());
+
+$result = $agent->run('按 ./plan.md 的重构计划执行');
+```
+
+### 多 agent 编排（`AgentTool`）
+
+在一条 assistant 消息里发多个 `agent` tool_use 块，子 agent 会并行派发：
+
+```php
+$agent->registerTool(new AgentTool());
+
+$result = $agent->run(<<<PROMPT
+并行做这三项调研：
+1. 读 CHANGELOG.md，总结最近三个 release
+2. 读 composer.json，列出所有 runtime 依赖
+3. 在 src/ 里 grep TODO 注释
+然后把三份报告汇总。
+PROMPT);
+```
+
+每个子 agent 跑在自己的 PHP 进程里（通过 `ProcessBackend`）；一个子的阻塞 I/O 不会阻塞兄弟。`proc_open` 被禁用时回退到 fiber。
+
+#### 产出证据
+
+每个 `AgentTool` 结果都带子 agent 实际做了什么的硬证据 —— 而不只是 `success: true`：
+
+```php
+[
+    'status'              => 'completed',          // 或 'completed_empty' / 'async_launched'
+    'filesWritten'        => ['/abs/path/a.md'],   // 去重的绝对路径
+    'toolCallsByName'     => ['Read' => 3, 'Write' => 1],
+    'totalToolUseCount'   => 4,                    // 观测到的，而不是自报的 turn 数
+    'productivityWarning' => null,                 // 或 advisory 字符串（CJK 本地化 —— v0.9.1 起）
+    'outputWarnings'      => [],                   // v0.9.1 起 —— 文件系统审计结果
+]
+```
+
+`completed_empty` —— 观察到零次工具调用。重新派发或换更强的模型。
+`completed` + 非空 `productivityWarning` —— 子 agent 调用了工具但没写文件（咨询类子任务经常这样；看文本是否已经有答案）。
+
+*产出埋点 v0.8.9 起。CJK 本地化 + 文件系统审计 v0.9.1 起。*
+
+#### 输出目录审计 + guard 注入
+
+传 `output_subdir` 同时开启 (a) CJK 感知的 guard block 注入到子 agent prompt，和 (b) 退出后的文件系统扫描：
+
+```php
+$agent->run('...', [
+    'output_subdir' => '/abs/path/to/reports/analyst-1',
+]);
+// 审计捕捉：
+//   - 非白名单扩展名（默认 .md / .csv / .png）
+//   - consolidator 保留文件名（summary.md / 摘要.md / mindmap.md / ...）
+//   - 同级角色子目录（ceo / cfo / cto / marketing / ... 或 kebab-case 角色 slug）
+// 通过 AgentOutputAuditor 构造函数可配置。永远不改磁盘。
+```
+
+*v0.9.1 起*
+
+### Provider 原生工具
+
+任何主脑都能把下面这些当普通工具调用 —— 不用切 provider。
+
+**Moonshot 服务端托管 builtin**（服务端执行，结果内联在 assistant 回复里）：
+
+| 工具 | 属性 | 起始 |
+|---|---|---|
+| `KimiMoonshotWebSearchTool`（`$web_search`）| network | v0.9.0 |
+| `KimiMoonshotWebFetchTool`（`$web_fetch`）| network | v0.9.1 |
+| `KimiMoonshotCodeInterpreterTool`（`$code_interpreter`）| network, cost, sensitive | v0.9.1 |
+
+**其他 provider 原生工具族：**
+- Kimi —— `KimiFileExtractTool` / `KimiBatchTool` / `KimiSwarmTool` / `KimiMediaUploadTool`
+- Qwen —— `QwenLongFileTool` + `dashscope_cache_control` feature
+- GLM —— `glm_web_search` / `glm_web_reader` / `glm_ocr` / `glm_asr`
+- MiniMax —— `minimax_tts` / `minimax_music` / `minimax_video` / `minimax_image`
+
+---
+
+## Agent 定义（YAML / Markdown）
+
+从 `~/.superagent/agents/`（用户级）和 `<project>/.superagent/agents/`（项目级）自动加载。三种格式：`.yaml` / `.yml` / `.md`。跨格式 `extend:` 继承。
+
+```yaml
+# ~/.superagent/agents/reviewer.yaml
+name: reviewer
+description: 严格代码审查
+extend: base-coder              # 可以是 .yaml / .yml / .md
+system_prompt: |
+  你审查 PR，关注正确性和隐藏状态。
+allowed_tools: [read, grep, glob]
+disallowed_tools: [write, edit, bash]
+model: claude-sonnet-4-5-20250929
+```
+
+```markdown
+<!-- ~/.superagent/agents/analyst.md -->
+---
+name: analyst
+extend: reviewer
+model: gpt-5
+---
+你的任务是浮现架构风险。发现用 Markdown 格式输出。
+```
+
+工具列表字段（`allowed_tools` / `disallowed_tools` / `exclude_tools`）在 `extend:` 链中累加。循环深度受限。
+
+*v0.9.0 起*
+
+---
+
+## Skills
+
+Markdown 驱动的能力，可以全局注册并在任何 agent 运行中引入：
+
+```bash
+superagent skills install ./my-skill.md
+superagent skills list
+superagent skills show review
+superagent skills remove review
+superagent skills path        # 显示安装目录
+```
+
+Skill markdown 支持 frontmatter（`name` / `description` / `allowed_tools` / `system_prompt`）。Skill 运行时继承调用方的 provider。
+
+---
+
+## MCP 集成
+
+### Server 注册
+
+```bash
+superagent mcp list
+superagent mcp add sqlite stdio uvx --arg mcp-server-sqlite
+superagent mcp add brave stdio npx --arg @brave/mcp --env BRAVE_API_KEY=...
+superagent mcp remove sqlite
+superagent mcp status
+superagent mcp path
+```
+
+配置原子写入到 `~/.superagent/mcp.json`。
+
+### 需要 OAuth 的 MCP server
+
+```bash
+superagent mcp auth <name>          # 跑 RFC 8628 设备码流程
+superagent mcp reset-auth <name>    # 清除已存 token
+superagent mcp test <name>          # 探测可用性（stdio `command -v` 或 HTTP 可达性）
+```
+
+config 里声明 `oauth: {client_id, device_endpoint, token_endpoint}` 的 server 走此流程。*v0.9.0 起。*
+
+### 声明式 catalog + 非破坏性同步
+
+在项目根放一个 catalog 文件：`.mcp-servers/catalog.json`（或 `.mcp-catalog.json`）：
+
+```json
+{
+  "mcpServers": {
+    "sqlite": {"command": "uvx", "args": ["mcp-server-sqlite"]},
+    "brave":  {"command": "npx", "args": ["@brave/mcp"], "env": {"BRAVE_API_KEY": "k"}}
+  },
+  "domains": {
+    "baseline": ["sqlite"],
+    "all":      ["sqlite", "brave"]
+  }
+}
+```
+
+同步到项目 `.mcp.json`：
+
+```bash
+superagent mcp sync                         # 全量
+superagent mcp sync --domain=baseline       # 仅 "baseline" 域
+superagent mcp sync --servers=sqlite,brave  # 显式子集
+superagent mcp sync --dry-run               # 预览，不写盘
+```
+
+非破坏契约 —— 磁盘 hash 与渲染后 hash 相同 → `unchanged`；用户已编辑过的文件保持不动并标记 `user-edited`；首次写入或我们上次写的 hash 匹配 → `written`。manifest 在 `<project>/.superagent/mcp-manifest.json`，记录我们写过的每个文件的 sha256，所以陈旧条目自动清理。
+
+*v0.9.1 起*
+
+---
+
+## Wire Protocol
+
+v1 —— 行分隔 JSON（NDJSON），每行一个事件，通过顶层 `wire_version` + `type` 字段自描述。IDE 桥接、CI 集成、结构化日志的基础。
+
+```bash
+superagent --output json-stream "总结 src/"
+# 产生类似这样的事件：
+# {"wire_version":1,"type":"turn.begin","turn_number":1}
+# {"wire_version":1,"type":"text.delta","delta":"我先从..."}
+# {"wire_version":1,"type":"tool.call","name":"read","input":{"path":"src/"}}
+# {"wire_version":1,"type":"turn.end","turn_number":1,"usage":{...}}
+```
+
+### Transport（v0.9.1 起）
+
+通过 DSN 选择流的去向：
+
+| DSN | 含义 |
+|---|---|
+| `stdout`（默认）/ `stderr` | 标准流 |
+| `file:///path/to/log.ndjson` | append 模式写文件 |
+| `tcp://host:port` | 连接到监听中的 TCP peer |
+| `unix:///path/to/sock` | 连接到监听中的 unix socket |
+| `listen://tcp/host:port` | 监听 TCP，接受一个 client |
+| `listen://unix//path/to/sock` | 监听 unix socket，接受一个 client |
+
+编程使用：
+
+```php
+$factory = new SuperAgent\CLI\AgentFactory();
+[$emitter, $transport] = $factory->makeWireEmitterForDsn('listen://unix//tmp/agent.sock');
+
+// IDE 插件连接上来，然后：
+$agent->run($prompt, ['wire_emitter' => $emitter]);
+
+$transport->close();
+```
+
+非阻塞 peer socket 意味着 IDE 掉线不会卡住 agent loop。
+
+*Wire Protocol v1 v0.9.0 起。Socket / TCP / file transport v0.9.1 起。*
+
+---
+
+## 重试、错误与可观测性
+
+### 分层重试
+
+```php
+new Agent([
+    'provider'               => 'openai',
+    'request_max_retries'    => 4,       // HTTP connect / 4xx / 5xx（默认 3）
+    'stream_max_retries'     => 5,       // 为 mid-stream resume 预留（Responses API）
+    'stream_idle_timeout_ms' => 60_000,  // cURL 在 SSE 上的 low-speed 断流阈值（默认 300 000）
+]);
+```
+
+带抖动的指数退避（0.9–1.1× 乘数）防止多 worker 并发重试的 thundering herd。`Retry-After` header 精确按服务端给的值（不抖动 —— 服务端最清楚）。
+
+*v0.9.1 起*
+
+### 分类错误
+
+6 个 `ProviderException` 子类，由 `OpenAIErrorClassifier` 根据 response body 的 `error.code` / `error.type` / HTTP 状态派发：
+
+```php
+try {
+    $agent->run($prompt);
+} catch (\SuperAgent\Exceptions\Provider\ContextWindowExceededException $e) {
+    // prompt 过长；压缩历史或换模型
+} catch (\SuperAgent\Exceptions\Provider\QuotaExceededException $e) {
+    // 月额度打满；通知 operator
+} catch (\SuperAgent\Exceptions\Provider\UsageNotIncludedException $e) {
+    // ChatGPT 套餐不含此模型；升级或切 API key
+} catch (\SuperAgent\Exceptions\Provider\CyberPolicyException $e) {
+    // 策略拒绝 —— 不要重试
+} catch (\SuperAgent\Exceptions\Provider\ServerOverloadedException $e) {
+    // 可退避重试；查 $e->retryAfterSeconds
+} catch (\SuperAgent\Exceptions\Provider\InvalidPromptException $e) {
+    // body 畸形 —— 检查并修复
+} catch (\SuperAgent\Exceptions\ProviderException $e) {
+    // 兜底基类；上面每个子类都 extend 它
+}
+```
+
+所有子类都 extend `ProviderException`，所以已有的 `catch (ProviderException)` 调用点保持不变。
+
+*v0.9.1 起*
+
+### 健康检查面板
+
+```bash
+superagent health                # 对每个已配置 provider 做 5s cURL 探针
+superagent health --all          # 包括未配置 env key 的（用于"我忘了设哪个？"）
+superagent health --json         # 机器可读表格；任何失败都返回非零
+```
+
+封装 `ProviderRegistry::healthCheck()` —— 区分 auth 拒绝（401/403）vs 网络超时 vs "没 API key"，operator 可以对症下药而不用猜。
+
+*v0.9.1 起*
+
+### SSE parser 硬化（v0.9.0 起）
+
+- **按 index 组装 tool call** —— 一次流式调用被切成 N 个 chunk 后产出一个 tool-use 块，不再是 N 个碎片。
+- **`finish_reason: error_finish` 识别** —— DashScope-compat 的限流信号抛 `StreamContentError`（可重试，HTTP 429），而不是把错误文本偷偷塞进 message body。
+- **tool call JSON 截断修复** —— 一次性尝试闭合不平衡的 `{` 后回退到空 arg dict。
+- **双形态 cached token 读取** —— `usage.prompt_tokens_details.cached_tokens`（当前 OpenAI 形状）和 `usage.cached_tokens`（legacy）都会填到 `Usage::cacheReadInputTokens`。
+
+---
+
+## Guardrails 与 Checkpoint
+
+### 循环检测（v0.9.0 起）
+
+5 个检测器观察流式事件总线，首次触发后粘滞：
+
+| 检测器 | 信号 |
+|---|---|
+| `TOOL_LOOP` | 同工具 + 同归一化参数连续 5 次 |
+| `STAGNATION` | 同工具名连续 8 次，无论参数 |
+| `FILE_READ_LOOP` | 最近 15 个 tool call 里有 ≥ 8 个是读类，带冷启动豁免 |
+| `CONTENT_LOOP` | 相同的 50 字符滑窗在流式文本里出现 10 次 |
+| `THOUGHT_LOOP` | 相同的 thinking channel 文本出现 3 次 |
+
+```php
+new Agent([
+    'provider'        => 'openai',
+    'loop_detection'  => true,           // 默认值
+    // 或 per-detector 覆盖：
+    // 'loop_detection' => ['TOOL_LOOP' => 10, 'STAGNATION' => 15],
+]);
+```
+
+违规通过 `loop_detected` wire 事件扇出 —— agent 继续跑，由 host 决定是否干预。
+
+### Checkpoint + shadow-git（v0.9.0 起）
+
+每轮都 snapshot agent 状态（messages、cost、usage）。挂一个 `GitShadowStore` 后，文件级 snapshot 同步落到一个**独立的 bare git repo**，位置 `~/.superagent/history/<project-hash>/shadow.git` —— 永远不碰用户自己的 `.git`。
+
+```php
+use SuperAgent\Checkpoint\CheckpointManager;
+use SuperAgent\Checkpoint\GitShadowStore;
+
+$mgr = new CheckpointManager(shadowStore: new GitShadowStore('/path/to/project'));
+$mgr->createCheckpoint($agentState, label: 'after-refactor');
+
+// 之后：
+$checkpoints = $mgr->list();
+$mgr->restore($checkpoints[0]->id);
+$mgr->restoreFiles($checkpoints[0]);   // 回放 shadow commit
+```
+
+Restore 回滚已跟踪文件，留下未跟踪文件（更安全）。项目自己的 `.gitignore` 被尊重（shadow 的 worktree 就是项目目录）。
+
+### Permission mode
+
+```php
+new Agent([
+    'provider'        => 'anthropic',
+    'permission_mode' => 'ask',     // 或 'default' / 'plan' / 'bypassPermissions'
+]);
+```
+
+`ask` 在任何写入类工具前向调用方的 `PermissionCallbackInterface` 请示。用 `WireProjectingPermissionCallback` 包一层会把请求投射为 wire 事件给 IDE 用。
+
+---
+
+## 独立 CLI
+
+```bash
+superagent                                  # 交互式 REPL
+superagent "修复登录 bug"                    # 单次
+superagent init                             # 初始化 ~/.superagent/
+superagent auth login <provider>            # 导入 OAuth 登录
+superagent auth status                      # 显示已存凭据
+superagent models list / update / refresh / status / reset
+superagent mcp list / add / remove / sync / auth / reset-auth / test / status / path
+superagent skills install / list / show / remove / path
+superagent swarm <prompt>                   # 规划 + 执行 swarm
+superagent health [--all] [--json] [--providers=a,b,c]   # provider 可达性
+```
+
+**选项：**
+
+```
+  -m, --model <model>                  模型名
+  -p, --provider <provider>            Provider key（openai、anthropic、openai-responses...）
+      --max-turns <n>                  最大 agent 轮次（默认 50）
+  -s, --system-prompt <prompt>         自定义 system prompt
+      --project <path>                 项目工作目录
+      --json                           结果以 JSON 输出
+      --output json-stream             发 NDJSON wire 事件
+      --verbose-thinking               显示完整 thinking 流
+      --no-thinking                    隐藏 thinking
+      --plain                          禁用 ANSI 颜色
+      --no-rich                        legacy 最小渲染器
+  -V, --version                        显示版本
+  -h, --help                           显示帮助
+```
+
+**交互式命令**（在 REPL 里）：
+
+```
+  /help                    可用命令
+  /model <name>            切换模型
+  /cost                    显示成本跟踪
+  /compact                 强制上下文压缩
+  /session save|load|list|delete
+  /clear                   清空对话
+  /quit                    退出
+```
+
+*独立 CLI v0.8.6 起。*
+
+---
+
+## Laravel 集成
+
+`composer require forgeomni/superagent` 后 service provider 自动注册：
+
+```php
+// config/superagent.php
+return [
+    'default_provider' => env('SUPERAGENT_PROVIDER', 'anthropic'),
+    'providers' => [
+        'anthropic'         => ['api_key' => env('ANTHROPIC_API_KEY')],
+        'openai'            => ['api_key' => env('OPENAI_API_KEY')],
+        'openai-responses'  => ['api_key' => env('OPENAI_API_KEY'), 'model' => 'gpt-5'],
+        // ...
+    ],
+    'agent' => [
+        'max_turns'      => 50,
+        'max_budget_usd' => 5.00,
+    ],
+];
+```
+
+```php
+use SuperAgent\Facades\SuperAgent;
+
+$result = SuperAgent::agent(['provider' => 'openai'])
+    ->run('总结本周提交');
+```
+
+Artisan 命令镜像 CLI：
+
+```bash
+php artisan superagent:chat "修复 bug"
+php artisan superagent:mcp sync
+php artisan superagent:models refresh
+php artisan superagent:health --json
+```
+
+queue 集成、job 派发、`ai_usage_logs` schema 见 `docs/LARAVEL.md`。
+
+---
+
+## 配置参考
+
+`Agent` 构造函数接受的所有选项，分组列出。括号内是默认值。
+
+**Provider 选择**
+
+| Key | 接受 |
+|---|---|
+| `provider` | 注册表 key 或一个 `LLMProvider` 实例 |
+| `model` | 模型 id —— 覆盖 provider 默认 |
+| `base_url` | URL —— 覆盖 provider 默认；也触发自动检测（Azure）|
+| `region` | `intl` / `cn` / `us` / `hk` / `code`（按 provider）|
+| `api_key` | Provider API key |
+| `access_token` + `account_id` | OAuth（OpenAI ChatGPT / Anthropic Claude Code）|
+| `auth_mode` | `'api_key'`（默认）或 `'oauth'` |
+| `organization` | OpenAI org id（加 `OpenAI-Organization` header）|
+
+**Agent 循环**
+
+| Key | 默认 |
+|---|---|
+| `max_turns` | `50` |
+| `max_budget_usd` | `0.0`（无上限）|
+| `system_prompt` | `null` |
+| `auto_mode` | `false` |
+| `allowed_tools` / `denied_tools` | `null` / `[]` |
+| `permission_mode` | `'default'` |
+| `options` | `[]`（forward 给 provider 的 per-call 默认）|
+
+**Per-call 选项**（`$agent->run($prompt, $options)`）
+
+| Key | 起始 | 说明 |
+|---|---|---|
+| `model` / `max_tokens` / `temperature` / `tool_choice` / `response_format` | v0.1.0 | 标准 Chat Completions 旋钮 |
+| `features` | v0.8.8 | `thinking` / `prompt_cache_key` / `dashscope_cache_control` / ... 经 `FeatureDispatcher` 分发 |
+| `extra_body` | v0.9.0 | 高级用户逃生门 —— deep-merge 进 request body |
+| `loop_detection` | v0.9.0 | `true`（默认）、`false`、或阈值覆盖 |
+| `idempotency_key` | v0.9.1 | 透传到 `AgentResult::$idempotencyKey` |
+| `reasoning` | v0.9.1 | Responses API —— `{effort, summary}` |
+| `verbosity` | v0.9.1 | Responses API —— `low` / `medium` / `high` |
+| `prompt_cache_key` | v0.9.0 | Kimi + OpenAI Responses 的 cache key |
+| `previous_response_id` | v0.9.1 | Responses API 接续 |
+| `store` / `include` / `service_tier` / `parallel_tool_calls` | v0.9.1 | Responses API |
+| `client_metadata` | v0.9.1 | Responses API 不透明 key-value map |
+| `trace_context` / `traceparent` / `tracestate` | v0.9.1 | W3C Trace Context 注入 |
+| `output_subdir` | v0.9.1 | `AgentTool` guard block + 退出后审计 |
+
+**重试 + 传输**（provider 级）
+
+| Key | 默认 | 起始 |
+|---|---|---|
+| `max_retries` | `3` | v0.1.0（legacy 单旋钮）|
+| `request_max_retries` | `3`（继承 `max_retries`）| v0.9.1 |
+| `stream_max_retries` | `5` | v0.9.1 |
+| `stream_idle_timeout_ms` | `300_000` | v0.9.1 |
+| `env_http_headers` | `[]` | v0.9.1 |
+| `http_headers` | `[]` | v0.9.1 |
+| `experimental_ws_transport` | `false` | v0.9.1（脚手架）|
+| `azure_api_version` | `'2025-04-01-preview'` | v0.9.1（仅 Azure）|
+
+---
+
+## 链接
+
+- [CHANGELOG](CHANGELOG.md) —— 完整 per-release 日志
+- [INSTALL_CN](INSTALL_CN.md) —— 安装 + 首次运行
+- [高级用法](docs/ADVANCED_USAGE_CN.md) —— 模式、示例 agent、调试
+- [原生 provider](docs/NATIVE_PROVIDERS.md) —— region 映射 + capability 矩阵
+- [Wire protocol](docs/WIRE_PROTOCOL.md) —— v1 规范
+- [特性矩阵](docs/FEATURES_MATRIX.md) —— 哪个 provider 支持哪个特性
+
+## 许可证
+
+MIT —— 见 [LICENSE](LICENSE)。

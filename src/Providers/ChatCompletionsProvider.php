@@ -11,6 +11,7 @@ use GuzzleHttp\Exception\GuzzleException;
 use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\Enums\StopReason;
 use SuperAgent\Exceptions\ProviderException;
+use SuperAgent\Exceptions\Provider\OpenAIErrorClassifier;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
@@ -56,6 +57,15 @@ abstract class ChatCompletionsProvider implements LLMProvider
     protected string $model;
     protected int $maxTokens;
     protected int $maxRetries;
+
+    /** Retries for the initial HTTP connect + response status. */
+    protected int $requestMaxRetries;
+
+    /** Stream-scoped retries (used by Responses providers that can resume). */
+    protected int $streamMaxRetries;
+
+    /** SSE idle cutoff — cURL kills the connection after this many ms without data. */
+    protected int $streamIdleTimeoutMs;
     protected string $region;
     protected string $apiKey;
 
@@ -73,7 +83,33 @@ abstract class ChatCompletionsProvider implements LLMProvider
         $this->region = $config['region'] ?? $this->defaultRegion();
         $this->model = $config['model'] ?? $this->defaultModel();
         $this->maxTokens = (int) ($config['max_tokens'] ?? 4096);
-        $this->maxRetries = (int) ($config['max_retries'] ?? 3);
+        // Layered retry policy, modelled on codex-rs (model-provider-info
+        // defaults: request_max_retries=4, stream_max_retries=5,
+        // stream_idle_timeout_ms=300_000).
+        //
+        //   max_retries           — legacy single knob, used as fallback
+        //                           for both counters when set.
+        //   request_max_retries   — retries for the initial HTTP connect /
+        //                           response code (429 / 5xx / network).
+        //   stream_max_retries    — reserved; taken up by providers that
+        //                           know how to resume mid-stream (Responses
+        //                           API via `previous_response_id`).
+        //   stream_idle_timeout_ms — low-speed cutoff on the SSE connection.
+        //                           Translated to cURL LOW_SPEED_LIMIT/TIME
+        //                           on the request so an idle server doesn't
+        //                           hang the agent.
+        $this->maxRetries        = (int) ($config['max_retries'] ?? 3);
+        $this->requestMaxRetries = isset($config['request_max_retries'])
+            ? (int) $config['request_max_retries']
+            : $this->maxRetries;
+        $this->streamMaxRetries  = isset($config['stream_max_retries'])
+            ? (int) $config['stream_max_retries']
+            : max(5, $this->maxRetries);
+        $this->streamIdleTimeoutMs = (int) ($config['stream_idle_timeout_ms'] ?? 300_000);
+        // Guard against silly configs. Codex caps at 100; we follow.
+        $this->requestMaxRetries  = max(0, min($this->requestMaxRetries, 100));
+        $this->streamMaxRetries   = max(0, min($this->streamMaxRetries, 100));
+        $this->streamIdleTimeoutMs = max(1_000, min($this->streamIdleTimeoutMs, 3_600_000));
 
         $baseUrl = rtrim(
             $config['base_url'] ?? $this->regionToBaseUrl($this->region),
@@ -86,6 +122,44 @@ abstract class ChatCompletionsProvider implements LLMProvider
         ];
         foreach ($this->extraHeaders($config) as $name => $value) {
             $headers[$name] = $value;
+        }
+
+        // Declarative env-var → HTTP header mapping. When config contains
+        //
+        //   env_http_headers => ['OpenAI-Organization' => 'OPENAI_ORGANIZATION',
+        //                        'OpenAI-Project'      => 'OPENAI_PROJECT']
+        //
+        // each header is included only when its env var is set + non-empty.
+        // Mirrors codex's `env_http_headers` config so downstream consumers
+        // can add vendor-specific headers (OpenAI project scoping, Fireworks
+        // deployment id, etc.) without a code change per header. Lifted to
+        // the base class so every OpenAI-compat provider benefits.
+        if (! empty($config['env_http_headers']) && is_array($config['env_http_headers'])) {
+            foreach ($config['env_http_headers'] as $headerName => $envVar) {
+                if (! is_string($headerName) || ! is_string($envVar) || $envVar === '') {
+                    continue;
+                }
+                $val = $_ENV[$envVar] ?? getenv($envVar);
+                if ($val === false || $val === '' || ! is_string($val)) {
+                    continue;
+                }
+                $trimmed = trim($val);
+                if ($trimmed === '') continue;
+                $headers[$headerName] = $trimmed;
+            }
+        }
+
+        // Plain static headers: `http_headers => ['version' => '0.9.0']`.
+        // Complements `env_http_headers` for values that don't depend on
+        // the environment. Later keys win over earlier ones; env_http
+        // wins over http_headers wins over extraHeaders() wins over the
+        // hard-coded Authorization/Content-Type.
+        if (! empty($config['http_headers']) && is_array($config['http_headers'])) {
+            foreach ($config['http_headers'] as $headerName => $value) {
+                if (is_string($headerName) && is_scalar($value)) {
+                    $headers[$headerName] = (string) $value;
+                }
+            }
         }
 
         $this->client = new Client([
@@ -183,30 +257,38 @@ abstract class ChatCompletionsProvider implements LLMProvider
                 $response = $this->client->post($this->chatCompletionsPath(), [
                     'json' => $body,
                     'stream' => true,
+                    // cURL idle-timeout: if throughput drops below 1 byte for
+                    // the configured window, the connection is killed and
+                    // we raise via the GuzzleException catch below. Lifted
+                    // from codex's `stream_idle_timeout_ms` (default 300s).
+                    'curl' => [
+                        CURLOPT_LOW_SPEED_LIMIT => 1,
+                        CURLOPT_LOW_SPEED_TIME  => (int) max(1, (int) ceil($this->streamIdleTimeoutMs / 1000)),
+                    ],
                 ]);
                 break;
             } catch (ClientException $e) {
                 $status = $e->getResponse()->getStatusCode();
                 $responseBody = json_decode($e->getResponse()->getBody()->getContents(), true);
 
-                if (($status === 429 || $status >= 500) && $attempt < $this->maxRetries) {
+                if (($status === 429 || $status >= 500) && $attempt < $this->requestMaxRetries) {
                     $attempt++;
                     $delay = $this->getRetryDelay($attempt, $e->getResponse());
                     usleep((int) ($delay * 1_000_000));
                     continue;
                 }
 
-                throw new ProviderException(
-                    $responseBody['error']['message'] ?? $e->getMessage(),
-                    $this->providerName(),
-                    $status,
-                    $responseBody,
+                throw OpenAIErrorClassifier::classify(
+                    statusCode: $status,
+                    body: is_array($responseBody) ? $responseBody : null,
+                    message: $responseBody['error']['message'] ?? $e->getMessage(),
+                    provider: $this->providerName(),
                     previous: $e,
                 );
             } catch (GuzzleException $e) {
-                if ($attempt < $this->maxRetries) {
+                if ($attempt < $this->requestMaxRetries) {
                     $attempt++;
-                    usleep((int) (pow(2, $attempt) * 1_000_000));
+                    usleep((int) ($this->jitteredBackoff($attempt) * 1_000_000));
                     continue;
                 }
                 throw new ProviderException($e->getMessage(), $this->providerName(), previous: $e);
@@ -595,8 +677,32 @@ abstract class ChatCompletionsProvider implements LLMProvider
     protected function getRetryDelay(int $attempt, $response): float
     {
         if ($response->hasHeader('Retry-After')) {
+            // Honour the server's hint exactly. Numeric seconds or an
+            // HTTP-date per RFC 9110 §10.2.3. We stick to numeric seconds
+            // (the only form any of our providers send). No jitter —
+            // the server is telling us exactly when to retry.
             return (float) $response->getHeader('Retry-After')[0];
         }
-        return pow(2, $attempt);
+        return $this->jitteredBackoff($attempt);
+    }
+
+    /**
+     * Exponential backoff with multiplicative jitter in [0.9, 1.1] —
+     * same shape as codex-rs's `retry::backoff()`. Jitter spreads out
+     * simultaneous retries from parallel workers (Laravel queue with
+     * N consumers retrying the same rate limit) so they don't
+     * thundering-herd the next attempt.
+     *
+     * Base delay: 1s per legacy behaviour; grows 2^attempt with a
+     * ±10% random factor. Floor 200ms so the first retry isn't
+     * instantaneous; ceiling 60s so a misconfigured max_retries can't
+     * produce an hours-long sleep.
+     */
+    protected function jitteredBackoff(int $attempt): float
+    {
+        $base = pow(2, max(1, $attempt));
+        $jitter = mt_rand(90, 110) / 100.0;
+        $delay = $base * $jitter;
+        return max(0.2, min(60.0, $delay));
     }
 }
