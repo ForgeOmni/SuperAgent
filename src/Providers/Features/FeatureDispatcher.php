@@ -67,6 +67,7 @@ class FeatureDispatcher
             AgentTeamsAdapter::class,
             CodeInterpreterAdapter::class,
             PromptCacheKeyAdapter::class,
+            DashScopeCacheControlAdapter::class,
         ] as $class) {
             self::register($class);
         }

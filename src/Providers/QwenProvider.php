@@ -125,8 +125,17 @@ class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
      */
     protected function extraHeaders(array $config): array
     {
+        // `X-DashScope-CacheControl: enable` is the server-side toggle
+        // for block-level prompt caching. Harmless when the request
+        // body carries no `cache_control` markers (server just treats
+        // the request as non-cached); required when the
+        // DashScopeCacheControlAdapter has pinned markers on the
+        // system msg / last tool / last streaming message.
+        // See qwen-code `provider/dashscope.ts:40-54` for the same
+        // "header always, markers opt-in via features" split.
         return [
-            'X-DashScope-UserAgent' => 'SuperAgent/' . self::agentVersion(),
+            'X-DashScope-UserAgent'   => 'SuperAgent/' . self::agentVersion(),
+            'X-DashScope-CacheControl' => 'enable',
         ];
     }
 
