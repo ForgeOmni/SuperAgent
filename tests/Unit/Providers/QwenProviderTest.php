@@ -150,6 +150,74 @@ class QwenProviderTest extends TestCase
         $this->assertArrayNotHasKey('thinking_budget', $body);
     }
 
+    // ── Phase 7: DashScope metadata + vision flag + UserAgent ─────
+
+    public function test_x_dashscope_useragent_header_is_sent(): void
+    {
+        $p = new QwenProvider(['api_key' => 'k']);
+        $h = $this->clientHeaders($p);
+        $this->assertArrayHasKey('x-dashscope-useragent', $h);
+        $this->assertStringStartsWith('SuperAgent/', $h['x-dashscope-useragent']);
+    }
+
+    public function test_metadata_envelope_carries_channel_and_optional_ids(): void
+    {
+        $p = new QwenProvider(['api_key' => 'k']);
+        $body = $this->buildBody($p, [new UserMessage('hi')], [], null, [
+            'session_id' => 'sess-42',
+            'prompt_id'  => 'p-77',
+        ]);
+        $this->assertArrayHasKey('metadata', $body);
+        $this->assertSame('sess-42', $body['metadata']['sessionId']);
+        $this->assertSame('p-77', $body['metadata']['promptId']);
+        $this->assertSame('superagent', $body['metadata']['channel']);
+    }
+
+    public function test_metadata_present_even_without_session_or_prompt_ids(): void
+    {
+        // `channel` is always set so DashScope-side dashboards always
+        // see traffic from us as superagent.
+        $p = new QwenProvider(['api_key' => 'k']);
+        $body = $this->buildBody($p, [new UserMessage('hi')], [], null, []);
+        $this->assertSame(['channel' => 'superagent'], $body['metadata']);
+    }
+
+    public function test_vision_models_get_high_res_image_flag(): void
+    {
+        // Match qwen-code's detection: qwen-vl* / qwen3-vl* /
+        // qwen3.5-plus* / qwen3-omni*. Default qwen3.6-max-preview is
+        // NOT vision-capable.
+        foreach (['qwen-vl-plus', 'qwen-vl-ocr', 'qwen3-vl-plus', 'qwen3.5-plus', 'qwen3-omni'] as $id) {
+            $this->assertTrue(
+                QwenProvider::isVisionModel($id),
+                "{$id} should be classed as vision-capable",
+            );
+        }
+        foreach (['qwen3.6-max-preview', 'qwen3-max', 'qwen-plus', 'qwen-turbo'] as $id) {
+            $this->assertFalse(
+                QwenProvider::isVisionModel($id),
+                "{$id} must NOT be classed as vision-capable (would force unwanted HD downsampling)",
+            );
+        }
+    }
+
+    public function test_vision_flag_lands_in_request_body_for_vision_model(): void
+    {
+        $p = new QwenProvider(['api_key' => 'k']);
+        $body = $this->buildBody(
+            $p, [new UserMessage('describe')], [], null,
+            ['model' => 'qwen3-vl-plus'],
+        );
+        $this->assertTrue($body['vl_high_resolution_images']);
+    }
+
+    public function test_vision_flag_absent_for_non_vision_model(): void
+    {
+        $p = new QwenProvider(['api_key' => 'k']);
+        $body = $this->buildBody($p, [new UserMessage('hi')], [], null, []);
+        $this->assertArrayNotHasKey('vl_high_resolution_images', $body);
+    }
+
     // ── helpers ───────────────────────────────────────────────────
 
     private function buildBody(

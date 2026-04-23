@@ -112,4 +112,91 @@ class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
     {
         return 'QWEN_API_KEY (or DASHSCOPE_API_KEY) is required';
     }
+
+    /**
+     * `X-DashScope-UserAgent` lets Alibaba's backend attribute traffic
+     * to a specific client family (qwen-code emits its own version
+     * string here — see qwen-code's `provider/dashscope.ts:40-54`).
+     * We send our package version so DashScope-side telemetry can
+     * distinguish SuperAgent traffic for support / quota analysis.
+     *
+     * @param array<string, mixed> $config
+     * @return array<string, string>
+     */
+    protected function extraHeaders(array $config): array
+    {
+        return [
+            'X-DashScope-UserAgent' => 'SuperAgent/' . self::agentVersion(),
+        ];
+    }
+
+    /**
+     * Two DashScope-specific niceties:
+     *
+     * 1. **Vision model auto-flag** (`vl_high_resolution_images: true`).
+     *    qwen-code (`dashscope.ts:116-128`) detects vision-capable
+     *    models by id prefix and turns this on automatically. Without
+     *    it, large images get downsampled server-side, hurting OCR.
+     *
+     * 2. **Request metadata envelope** (`metadata: {sessionId, promptId,
+     *    channel}`). Lets DashScope-side dashboards group requests by
+     *    session and attribute them to a known client family.
+     *    `channel` is hard-coded to `superagent` so the backend can
+     *    distinguish us from qwen-code etc.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $options
+     */
+    protected function customizeRequestBody(array &$body, array $options): void
+    {
+        $model = (string) ($body['model'] ?? $this->model);
+        if (self::isVisionModel($model)) {
+            $body['vl_high_resolution_images'] = true;
+        }
+
+        $metadata = array_filter([
+            'sessionId' => $options['session_id'] ?? null,
+            'promptId'  => $options['prompt_id'] ?? null,
+            'channel'   => 'superagent',
+        ], static fn ($v) => $v !== null && $v !== '');
+        if ($metadata !== []) {
+            $body['metadata'] = $metadata;
+        }
+    }
+
+    /**
+     * Vision-capable Qwen model ids — match qwen-code's detection in
+     * `dashscope.ts:116-128`. Kept as a static helper so unit tests
+     * can hit the heuristic without constructing a provider.
+     */
+    public static function isVisionModel(string $modelId): bool
+    {
+        $id = strtolower($modelId);
+        return str_starts_with($id, 'qwen-vl')
+            || str_starts_with($id, 'qwen3-vl')
+            || str_starts_with($id, 'qwen3.5-plus')
+            || str_starts_with($id, 'qwen3-omni');
+    }
+
+    /**
+     * Read SuperAgent version from composer.json so the
+     * `X-DashScope-UserAgent` header tracks releases without us
+     * hand-maintaining a constant. Cached per process — composer.json
+     * doesn't change inside a request.
+     */
+    private static function agentVersion(): string
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+        $composer = dirname(__DIR__, 2) . '/composer.json';
+        if (is_readable($composer)) {
+            $json = @json_decode((string) file_get_contents($composer), true);
+            if (is_array($json) && !empty($json['version']) && is_string($json['version'])) {
+                return $cached = (string) $json['version'];
+            }
+        }
+        return $cached = 'dev';
+    }
 }
