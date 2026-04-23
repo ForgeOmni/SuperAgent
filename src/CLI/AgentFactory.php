@@ -175,9 +175,22 @@ class AgentFactory
         }
 
         // Best-effort refresh for Anthropic tokens (expires_at is stored in ms).
+        // Runs under CredentialStore::withLock (Phase 3) so parallel
+        // SuperAgent sessions don't race-write. Under the lock we
+        // double-check: another process may have already refreshed,
+        // in which case we re-read the updated token and skip the
+        // HTTP call entirely.
         if ($storeKey === 'anthropic') {
-            $expiresAt = $store->get($storeKey, 'expires_at');
-            if ($expiresAt && (int) floor(((int) $expiresAt) / 1000) - 60 <= time()) {
+            $token = $store->withLock($storeKey, function () use ($store, $storeKey, $token) {
+                $expiresAt = $store->get($storeKey, 'expires_at');
+                if (!$expiresAt || (int) floor(((int) $expiresAt) / 1000) - 60 > time()) {
+                    // Fresh enough — either because nothing was
+                    // expired or another process refreshed while we
+                    // waited. Re-read the stored token in case the
+                    // latter is true.
+                    return $store->get($storeKey, 'access_token') ?? $token;
+                }
+
                 $reader = ClaudeCodeCredentials::default();
                 $creds = [
                     'access_token' => $token,
@@ -185,17 +198,18 @@ class AgentFactory
                     'expires_at' => (int) $expiresAt,
                 ];
                 $refreshed = $reader->refresh($creds);
-                if ($refreshed !== null) {
-                    $token = $refreshed['access_token'];
-                    $store->store($storeKey, 'access_token', $refreshed['access_token']);
-                    if (! empty($refreshed['refresh_token'])) {
-                        $store->store($storeKey, 'refresh_token', $refreshed['refresh_token']);
-                    }
-                    if (! empty($refreshed['expires_at'])) {
-                        $store->store($storeKey, 'expires_at', (string) $refreshed['expires_at']);
-                    }
+                if ($refreshed === null) {
+                    return $token;
                 }
-            }
+                $store->store($storeKey, 'access_token', $refreshed['access_token']);
+                if (!empty($refreshed['refresh_token'])) {
+                    $store->store($storeKey, 'refresh_token', $refreshed['refresh_token']);
+                }
+                if (!empty($refreshed['expires_at'])) {
+                    $store->store($storeKey, 'expires_at', (string) $refreshed['expires_at']);
+                }
+                return $refreshed['access_token'];
+            });
         }
 
         $out = ['auth_mode' => 'oauth', 'access_token' => $token];
@@ -260,6 +274,54 @@ class AgentFactory
             }
         });
         return $emitter;
+    }
+
+    /**
+     * Decorate a StreamingHandler with LoopDetector observation —
+     * opt-in via `$options['loop_detection']` (any truthy value,
+     * including an array of per-detector threshold overrides
+     * `['TOOL_CALL_LOOP_THRESHOLD' => 10, ...]`).
+     *
+     * When a detector trips, a `LoopDetectedEvent` is emitted on the
+     * provided StreamEventEmitter (usually the json-stream emitter)
+     * so consumers see the violation on the wire. The inner handler
+     * keeps receiving every chunk unchanged — detection is purely
+     * additive, doesn't stop the turn by itself.
+     *
+     * Default-off: callers who don't pass the option see zero
+     * behaviour change.
+     *
+     * @param array<string, mixed> $options
+     * @return array{0: ?\SuperAgent\StreamingHandler, 1: ?\SuperAgent\Guardrails\LoopDetector}
+     */
+    public function maybeWrapWithLoopDetection(
+        ?\SuperAgent\StreamingHandler $inner,
+        array $options,
+        ?StreamEventEmitter $wireEmitter = null,
+    ): array {
+        $cfg = $options['loop_detection'] ?? null;
+        if ($cfg === null || $cfg === false) {
+            return [$inner, null];
+        }
+
+        $thresholds = is_array($cfg) ? $cfg : [];
+        $detector = new \SuperAgent\Guardrails\LoopDetector($thresholds);
+
+        $wrapped = \SuperAgent\Harness\Wire\ApprovalRuntime::class;  // keep use-tree warm for downstream readers
+        unset($wrapped);
+
+        $onViolation = static function (\SuperAgent\Guardrails\LoopViolation $v) use ($wireEmitter): void {
+            if ($wireEmitter !== null) {
+                $wireEmitter->emit(\SuperAgent\Harness\LoopDetectedEvent::fromViolation($v));
+            }
+        };
+
+        $handler = \SuperAgent\Harness\LoopDetectionHarness::wrap(
+            inner: $inner,
+            detector: $detector,
+            onViolation: $onViolation,
+        );
+        return [$handler, $detector];
     }
 
     /**
