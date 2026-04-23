@@ -89,13 +89,23 @@ Liste complète des modèles : `superagent models list` ou `resources/models.jso
 
 ### 3.2 Qwen3.6-Max-Preview
 
+> **Chemin par défaut :** endpoint OpenAI-compatible `<region>/compatible-mode/v1/chat/completions` — celui qu'Alibaba utilise exclusivement dans son propre qwen-code CLI. La forme native legacy DashScope `text-generation/generation` reste disponible via `provider: qwen-native` (voir ci-dessous).
+
 | Capacité | Utilisation |
 |---|---|
-| **Thinking** (`enable_thinking` + `thinking_budget`) | `$options['features']['thinking']` ou `$options['enable_thinking'] = true` |
-| **Interpréteur de code** (bac à sable côté serveur) | `$options['features']['code_interpreter']` ou `$options['enable_code_interpreter'] = true` |
-| **Qwen-Long** (10M tokens via référence de fichier) | l'outil `qwen_long_file` renvoie `fileid://xxx` ; à coller dans un message système pour donner accès au fichier à Qwen-Long. **Seulement pris en charge sur la région `cn`.** |
+| **Thinking** (niveau requête) | `$options['features']['thinking']` — émet `enable_thinking: true` à la racine du body. **Pas de `thinking_budget`** sur l'endpoint OpenAI-compat ; l'argument budget est accepté pour la compatibilité d'interface mais ignoré (warning si `SUPERAGENT_DEBUG=1`). Pour le contrôle de budget, opter pour `provider: qwen-native` |
+| **Qwen-Long** (10M tokens via référence de fichier) | l'outil `qwen_long_file` renvoie `fileid://xxx` ; à coller dans un message système pour donner accès au fichier à Qwen-Long. **Seulement pris en charge sur la région `cn`.** Fonctionne sous `qwen` et `qwen-native` — l'outil résout l'endpoint d'upload depuis l'host du provider |
 | Multimodal (VL / Omni) | Utiliser les ids `qwen3-vl-plus` / `qwen3-omni` |
 | OCR | Utiliser le modèle `qwen-vl-ocr` |
+
+**Provider legacy `qwen-native`.** Quand vous avez besoin de la forme native DashScope (`input.messages` + `parameters.*` incluant `thinking_budget` et `enable_code_interpreter`) :
+
+```php
+$qwen = ProviderRegistry::create('qwen-native', ['api_key' => $key, 'region' => 'intl']);
+// équivalent à : new \SuperAgent\Providers\QwenNativeProvider([...])
+```
+
+Les deux providers retournent `name() === 'qwen'` — observabilité / attribution de coût restent cohérentes.
 
 ### 3.3 GLM (Z.AI / BigModel)
 

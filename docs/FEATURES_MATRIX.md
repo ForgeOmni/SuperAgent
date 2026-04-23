@@ -42,7 +42,7 @@
 | `file_extract`     | kimi (via tool)        | Tool wrapper; no automatic fallback        |
 | `long_context_file`| qwen (via tool)        | Tool wrapper; no automatic fallback        |
 | `web_search`       | glm (via tool)         | MCP web-search server                      |
-| `code_interpreter` | qwen                   | ➖ (not emulated)                           |
+| `code_interpreter` | qwen-native            | ➖ (not emulated; default `qwen` provider's OpenAI-compat endpoint doesn't surface it) |
 | `prompt_cache_key` | kimi                   | Silent skip (perf optimization, not correctness) |
 
 Required vs preferred — pass `required: true` in the feature spec to

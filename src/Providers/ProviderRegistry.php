@@ -22,6 +22,8 @@ class ProviderRegistry
         'gemini' => GeminiProvider::class,
         'kimi' => KimiProvider::class,
         'qwen' => QwenProvider::class,
+        // Legacy DashScope native endpoint — opt-in. See QwenNativeProvider.
+        'qwen-native' => QwenNativeProvider::class,
         'glm' => GlmProvider::class,
         'minimax' => MiniMaxProvider::class,
     ];
@@ -85,6 +87,12 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'qwen' => [
+            'model' => 'qwen3.6-max-preview',
+            'region' => 'intl',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
+        'qwen-native' => [
             'model' => 'qwen3.6-max-preview',
             'region' => 'intl',
             'max_tokens' => 8192,
@@ -284,7 +292,7 @@ class ProviderRegistry
             'bedrock' => ['access_key', 'secret_key'],
             'ollama' => [], // No required keys for Ollama
             'gemini' => ['api_key'],
-            'kimi', 'qwen', 'glm', 'minimax' => ['api_key'],
+            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax' => ['api_key'],
             default => [],
         };
 
@@ -361,7 +369,7 @@ class ProviderRegistry
                     ?: ($_ENV['MOONSHOT_API_KEY'] ?? getenv('MOONSHOT_API_KEY')),
                 'region' => $_ENV['KIMI_REGION'] ?? getenv('KIMI_REGION') ?: 'intl',
             ],
-            'qwen' => [
+            'qwen', 'qwen-native' => [
                 'api_key' => $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY')
                     ?: ($_ENV['DASHSCOPE_API_KEY'] ?? getenv('DASHSCOPE_API_KEY')),
                 'region' => $_ENV['QWEN_REGION'] ?? getenv('QWEN_REGION') ?: 'intl',
@@ -408,7 +416,7 @@ class ProviderRegistry
                 'anthropic' => ['api_key' => $_ENV['ANTHROPIC_API_KEY'] ?? getenv('ANTHROPIC_API_KEY') ?: null],
                 'openai'    => ['api_key' => $_ENV['OPENAI_API_KEY'] ?? getenv('OPENAI_API_KEY') ?: null],
                 'kimi'      => ['api_key' => $_ENV['KIMI_API_KEY'] ?? getenv('KIMI_API_KEY') ?: null],
-                'qwen'      => ['api_key' => $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?: null],
+                'qwen', 'qwen-native' => ['api_key' => $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?: null],
                 'glm'       => ['api_key' => $_ENV['GLM_API_KEY'] ?? getenv('GLM_API_KEY') ?: null],
                 'minimax'   => ['api_key' => $_ENV['MINIMAX_API_KEY'] ?? getenv('MINIMAX_API_KEY') ?: null],
                 'gemini'    => ['api_key' => $_ENV['GEMINI_API_KEY'] ?? getenv('GEMINI_API_KEY') ?: null],

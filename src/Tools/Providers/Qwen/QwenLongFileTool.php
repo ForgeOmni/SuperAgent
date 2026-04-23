@@ -81,7 +81,16 @@ class QwenLongFileTool extends ProviderToolBase
             $boundary = bin2hex(random_bytes(16));
             $body = new MultipartStream($parts, $boundary);
 
-            $response = $this->client()->post('api/v1/files', [
+            // The file-upload endpoint lives at `{dashscope-host}/api/v1/files`
+            // — NOT under `/compatible-mode/v1/`. Both `QwenProvider`
+            // (OpenAI-compat, base ends in `/compatible-mode/v1`) and
+            // `QwenNativeProvider` (base is the bare host) end up here.
+            // Resolve against the provider's host with a fixed absolute
+            // path so it works under either one.
+            $client = $this->client();
+            $baseUri = (string) $client->getConfig('base_uri');
+            $host = rtrim((string) (parse_url($baseUri, PHP_URL_SCHEME) . '://' . parse_url($baseUri, PHP_URL_HOST)), '/');
+            $response = $client->post($host . '/api/v1/files', [
                 'headers' => ['Content-Type' => 'multipart/form-data; boundary=' . $boundary],
                 'body' => $body,
             ]);

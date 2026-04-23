@@ -155,7 +155,7 @@
       "regions": ["intl", "us", "cn", "hk"],
       "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
       "models": [
-        {"id": "qwen3.6-max-preview", "family": "qwen-max", "date": "20260420", "input": 0.78, "output": 3.90, "aliases": ["qwen", "qwen-max", "qwen3.6"], "description": "Qwen3.6-Max-Preview — 260K ctx flagship", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "code_interpreter": true, "file_extract": true, "mcp": true, "max_context": 260000}},
+        {"id": "qwen3.6-max-preview", "family": "qwen-max", "date": "20260420", "input": 0.78, "output": 3.90, "aliases": ["qwen", "qwen-max", "qwen3.6"], "description": "Qwen3.6-Max-Preview — 260K ctx flagship; thinking via extra_body.enable_thinking on the OpenAI-compat endpoint (no thinking_budget — opt into provider=qwen-native for budget control). code_interpreter is qwen-native only.", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "file_extract": true, "mcp": true, "max_context": 260000}},
         {"id": "qwen3-max",           "family": "qwen-max", "date": "20260123", "input": 0.78, "output": 3.90, "description": "Qwen3-Max"},
         {"id": "qwen3.5-plus",        "family": "qwen-plus","date": "20260215", "input": 0.40, "output": 1.20, "description": "Qwen3.5-Plus"},
         {"id": "qwen3.5-flash",       "family": "qwen-flash","date": "20260223","input": 0.15, "output": 0.60, "description": "Qwen3.5-Flash"},

@@ -22,15 +22,30 @@ class ThinkingAdapterTest extends TestCase
         $this->assertSame(['type' => 'enabled'], $body['thinking']);
     }
 
-    public function test_qwen_writes_into_parameters_subobject(): void
+    public function test_qwen_native_writes_into_parameters_subobject(): void
     {
-        $p = new QwenProvider(['api_key' => 'k']);
+        // Legacy native endpoint — `QwenNativeProvider`. Honors budget
+        // because DashScope's text-generation/generation endpoint
+        // exposes it.
+        $p = new \SuperAgent\Providers\QwenNativeProvider(['api_key' => 'k']);
         $body = ['parameters' => ['result_format' => 'message']];
         ThinkingAdapter::apply($p, ['budget' => 3000], $body);
         $this->assertTrue($body['parameters']['enable_thinking']);
         $this->assertSame(3000, $body['parameters']['thinking_budget']);
         // Existing parameters keys must be preserved by deep merge.
         $this->assertSame('message', $body['parameters']['result_format']);
+    }
+
+    public function test_qwen_chat_completions_emits_flat_enable_thinking(): void
+    {
+        // Default Qwen (OpenAI-compatible). Emits `enable_thinking: true`
+        // at body root; budget is accepted but not carried on the wire.
+        $p = new QwenProvider(['api_key' => 'k']);
+        $body = ['model' => 'qwen3.6-max-preview', 'messages' => []];
+        ThinkingAdapter::apply($p, ['budget' => 3000], $body);
+        $this->assertTrue($body['enable_thinking']);
+        $this->assertArrayNotHasKey('thinking_budget', $body);
+        $this->assertArrayNotHasKey('parameters', $body);
     }
 
     public function test_anthropic_path_is_exercised_by_capability_check(): void
@@ -139,7 +154,10 @@ class ThinkingAdapterTest extends TestCase
 
     public function test_default_budget_is_used_when_spec_omits_it(): void
     {
-        $p = new QwenProvider(['api_key' => 'k']);
+        // Exercise via QwenNativeProvider (which still honors budget);
+        // the chat-completions path deliberately drops it, so the
+        // default-budget assertion doesn't apply there.
+        $p = new \SuperAgent\Providers\QwenNativeProvider(['api_key' => 'k']);
         $body = ['parameters' => []];
         ThinkingAdapter::apply($p, [], $body);
         $this->assertSame(

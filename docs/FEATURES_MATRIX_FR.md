@@ -38,7 +38,7 @@
 |---|:---|:---|
 | `thinking` | anthropic, qwen, glm, kimi | Injection CoT dans le prompt système |
 | `agent_teams` | minimax | Structure injectée dans le prompt système |
-| `code_interpreter` | qwen | Prompt guidant vers un outil sandbox local |
+| `code_interpreter` | qwen-native | Prompt guidant vers un outil sandbox local (le `qwen` par défaut passe par l'endpoint OpenAI-compat qui n'expose pas ce champ) |
 | `context_cache` | anthropic | Ignoré silencieusement |
 | `file_extract` | kimi (outil) | Wrapper outil ; pas de repli automatique |
 | `long_context_file` | qwen (outil) | Wrapper outil ; pas de repli automatique |

@@ -34,7 +34,7 @@
 |---|:---|:---|
 | `thinking` | anthropic, qwen, glm, kimi | CoT system prompt 注入（其他） |
 | `agent_teams` | minimax | System prompt scaffold（其他） |
-| `code_interpreter` | qwen | 提示模型优先用本地 sandbox tool |
+| `code_interpreter` | qwen-native | 提示模型优先用本地 sandbox tool（默认 `qwen` 走 OpenAI-兼容端，不支持此字段） |
 | `context_cache` | anthropic | 透明跳过 |
 | `file_extract` | kimi（工具） | 工具包装；无自动降级 |
 | `long_context_file` | qwen（工具） | 工具包装；无自动降级 |

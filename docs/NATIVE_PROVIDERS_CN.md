@@ -82,13 +82,23 @@ $provider = ProviderRegistry::createWithRegion('qwen', 'us', ['api_key' => '...'
 
 ### 3.2 Qwen3.6-Max-Preview
 
+> **默认路径：** OpenAI 兼容端点 `<region>/compatible-mode/v1/chat/completions` —— Alibaba 自家 qwen-code CLI **只用这个端点**。历史的 DashScope `text-generation/generation` body shape 仍可通过 `provider: qwen-native` 获取（见下文）。
+
 | 能力 | 用法 |
 |---|---|
-| **Thinking**（`enable_thinking` + `thinking_budget`） | `$options['features']['thinking']` 或直接 `$options['enable_thinking'] = true` |
-| **Code Interpreter**（服务器沙盒） | `$options['enable_code_interpreter'] = true` |
-| **Qwen-Long**（10M tokens via 文件引用） | 内置工具 `qwen_long_file` 上传，回传 `fileid://xxx`；放进 system message 即可让 Qwen-Long 访问。**注意：当前只支持 `cn` region** |
+| **Thinking**（请求级） | `$options['features']['thinking']` —— body root 发 `enable_thinking: true`。OpenAI 兼容端**没有 `thinking_budget`**；budget 参数收下但不落 wire（`SUPERAGENT_DEBUG=1` 时打 warning）。需要 budget 控制请用 `provider: qwen-native` |
+| **Qwen-Long**（10M tokens via 文件引用） | 内置工具 `qwen_long_file` 上传，回传 `fileid://xxx`；放进 system message 即可让 Qwen-Long 访问。**注意：当前只支持 `cn` region**。`qwen` 和 `qwen-native` 两种 provider 下都可用 —— 工具会从 provider 的 host 自己解出上传端点 |
 | 多模态（VL / Omni） | 用 `qwen3-vl-plus` / `qwen3-omni` 模型 |
 | OCR | 用 `qwen-vl-ocr` 模型 |
+
+**Legacy `qwen-native` provider。** 需要 DashScope 原生 body shape（`input.messages` + `parameters.*`，含 `thinking_budget` 和 `enable_code_interpreter`）时：
+
+```php
+$qwen = ProviderRegistry::create('qwen-native', ['api_key' => $key, 'region' => 'intl']);
+// 等价于：new \SuperAgent\Providers\QwenNativeProvider([...])
+```
+
+两个 provider 的 `name()` 都返回 `'qwen'`，所以可观测性 / 成本归因保持一致。
 
 ### 3.3 GLM（Z.AI / BigModel）
 

@@ -87,13 +87,23 @@ Full model list: `superagent models list` or `resources/models.json`.
 
 ### 3.2 Qwen3.6-Max-Preview
 
+> **Default path:** OpenAI-compatible endpoint `<region>/compatible-mode/v1/chat/completions` — the same endpoint Alibaba's own qwen-code CLI uses exclusively. The legacy DashScope `text-generation/generation` body shape is still available via `provider: qwen-native` (see below).
+
 | Capability | How to use |
 |---|---|
-| **Thinking** (`enable_thinking` + `thinking_budget`) | `$options['features']['thinking']` or pass-through `$options['enable_thinking'] = true` |
-| **Code interpreter** (server-side sandbox) | `$options['features']['code_interpreter']` or `$options['enable_code_interpreter'] = true` |
-| **Qwen-Long** (10M tokens via file reference) | `qwen_long_file` tool returns `fileid://xxx`; paste into a system message to give Qwen-Long file access. **Only supported on `cn` region.** |
+| **Thinking** (request-level) | `$options['features']['thinking']` — emits `enable_thinking: true` at the body root. **No `thinking_budget`** on the OpenAI-compat endpoint; the budget arg is accepted for interface compatibility but ignored (warning logged when `SUPERAGENT_DEBUG=1`). For budget control, opt into `provider: qwen-native`. |
+| **Qwen-Long** (10M tokens via file reference) | `qwen_long_file` tool returns `fileid://xxx`; paste into a system message to give Qwen-Long file access. **Only supported on `cn` region.** Works under both `qwen` and `qwen-native` — the tool resolves the upload endpoint from the provider's host. |
 | Multimodal (VL / Omni) | Use `qwen3-vl-plus` / `qwen3-omni` model ids |
 | OCR | Use `qwen-vl-ocr` model |
+
+**Legacy `qwen-native` provider.** When you need DashScope's native body shape (`input.messages` + `parameters.*` including `thinking_budget` and `enable_code_interpreter`), construct the legacy class:
+
+```php
+$qwen = ProviderRegistry::create('qwen-native', ['api_key' => $key, 'region' => 'intl']);
+// equivalent to: new \SuperAgent\Providers\QwenNativeProvider([...])
+```
+
+Both providers report `name() === 'qwen'` so observability / cost-attribution stays consistent.
 
 ### 3.3 GLM (Z.AI / BigModel)
 

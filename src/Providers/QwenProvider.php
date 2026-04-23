@@ -4,411 +4,112 @@ declare(strict_types=1);
 
 namespace SuperAgent\Providers;
 
-use Generator;
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\ClientException;
-use GuzzleHttp\Exception\GuzzleException;
-use SuperAgent\Contracts\LLMProvider;
-use SuperAgent\Enums\StopReason;
 use SuperAgent\Exceptions\ProviderException;
-use SuperAgent\Providers\Capabilities\SupportsCodeInterpreter;
 use SuperAgent\Providers\Capabilities\SupportsThinking;
-use SuperAgent\Providers\Features\FeatureDispatcher;
-use SuperAgent\Messages\AssistantMessage;
-use SuperAgent\Messages\ContentBlock;
-use SuperAgent\Messages\Message;
-use SuperAgent\Messages\Usage;
-use SuperAgent\StreamingHandler;
-use SuperAgent\Tools\Tool;
 
 /**
- * Alibaba Qwen — DashScope native API (the non-OpenAI-compatible endpoint).
+ * Alibaba Qwen — DashScope OpenAI-compatible API.
  *
- * Chat lives at `POST /api/v1/services/aigc/text-generation/generation`.
- * The body shape is vendor-specific and does NOT follow `/chat/completions`:
+ * Default Qwen path. Speaks the standard `chat/completions` wire shape
+ * against `<region-host>/compatible-mode/v1/chat/completions`. This is
+ * what Alibaba's own qwen-code CLI uses **exclusively** — see
+ * `packages/core/src/core/openaiContentGenerator/constants.ts:5` in the
+ * upstream repo:
  *
- *     {
- *       "model": "qwen3.6-max-preview",
- *       "input":  { "messages": [...] },
- *       "parameters": {
- *         "result_format": "message",
- *         "incremental_output": true,
- *         "enable_thinking": true|false,
- *         "thinking_budget": 4000,
- *         "enable_code_interpreter": true|false,
- *         "tools": [...],
- *         "tool_choice": "auto"|"none"|{...},
- *         "parallel_tool_calls": true
- *       }
- *     }
+ *   DEFAULT_DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
  *
- * Streaming is opt-in via the `X-DashScope-SSE: enable` request header plus
- * `parameters.incremental_output = true`; the SSE frame shape matches
- * OpenAI's (`data: {...}\n\n`, `[DONE]`) closely enough to reuse one parser.
+ * For the legacy `text-generation/generation` body shape (which exposes
+ * `parameters.thinking_budget` — a knob the OpenAI-compatible endpoint
+ * does NOT surface), opt into `QwenNativeProvider` via
+ * `ProviderRegistry::create('qwen-native', $config)`.
  *
- * Regions (key-host-bound):
+ * Regions:
  *   - `intl` (default) → dashscope-intl.aliyuncs.com — Singapore
  *   - `us`             → dashscope-us.aliyuncs.com    — Virginia
  *   - `cn`             → dashscope.aliyuncs.com       — Beijing
  *   - `hk`             → cn-hongkong.dashscope.aliyuncs.com
+ *
+ * Thinking on Qwen3 / Qwen3.6 is opt-in via `extra_body.enable_thinking`
+ * (boolean only — there is NO `thinking_budget` on this endpoint).
+ * `thinkingRequestFragment()` emits the correct shape; the budget
+ * argument is accepted for interface compatibility but ignored, with a
+ * one-shot warning when `SUPERAGENT_DEBUG=1` so callers migrating from
+ * the native endpoint notice.
  */
-class QwenProvider implements LLMProvider, SupportsThinking, SupportsCodeInterpreter
+class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
 {
+    private static bool $thinkingBudgetWarned = false;
+
     public function thinkingRequestFragment(int $budgetTokens): array
     {
-        // DashScope puts thinking knobs inside the `parameters` sub-object.
-        return ['parameters' => [
-            'enable_thinking' => true,
-            'thinking_budget' => max(1, $budgetTokens),
-        ]];
-    }
-
-    public function codeInterpreterRequestFragment(array $options = []): array
-    {
-        // DashScope's code interpreter activator lives under `parameters`
-        // alongside thinking knobs; FeatureAdapter::merge() deep-merges
-        // this into existing `parameters` without clobbering them.
-        return ['parameters' => [
-            'enable_code_interpreter' => true,
-        ]];
-    }
-
-
-    protected Client $client;
-    protected string $model;
-    protected int $maxTokens;
-    protected int $maxRetries;
-    protected string $region;
-    protected string $apiKey;
-
-    public function __construct(array $config)
-    {
-        $apiKey = $config['api_key'] ?? null;
-        if (empty($apiKey)) {
-            throw new ProviderException('API key is required', 'qwen');
+        // DashScope's OpenAI-compatible endpoint accepts `enable_thinking` as
+        // a top-level boolean (delivered through OpenAI SDK's `extra_body`,
+        // which on the wire just lands at the body root). There is NO
+        // `thinking_budget` on this path — qwen-code grep shows zero hits.
+        //
+        // We accept the budget arg for interface compatibility but only
+        // surface a debug warning the first time a positive budget shows up
+        // so callers migrating from QwenNativeProvider know it's a no-op.
+        if ($budgetTokens > 0 && getenv('SUPERAGENT_DEBUG') === '1' && ! self::$thinkingBudgetWarned) {
+            self::$thinkingBudgetWarned = true;
+            error_log(
+                '[SuperAgent][qwen] thinking_budget is ignored on the OpenAI-compatible '
+                . 'DashScope endpoint. Switch to provider=qwen-native for budget control, '
+                . 'or omit `budget` from the thinking spec.'
+            );
         }
-        $this->apiKey = $apiKey;
 
-        $this->region = $config['region'] ?? 'intl';
-        $this->model = $config['model'] ?? 'qwen3.6-max-preview';
-        $this->maxTokens = (int) ($config['max_tokens'] ?? 8192);
-        $this->maxRetries = (int) ($config['max_retries'] ?? 3);
+        // Emit at top level — `FeatureAdapter::merge()` deep-merges into the
+        // outgoing body so `enable_thinking: true` lands at body root, where
+        // DashScope's compatible endpoint accepts it.
+        return ['enable_thinking' => true];
+    }
 
-        $baseUrl = rtrim(
-            $config['base_url'] ?? $this->regionToBaseUrl($this->region),
-            '/',
-        ) . '/';
+    protected function providerName(): string
+    {
+        return 'qwen';
+    }
 
-        $this->client = new Client([
-            'base_uri' => $baseUrl,
-            'headers' => [
-                'Authorization' => 'Bearer ' . $apiKey,
-                'Content-Type' => 'application/json',
-            ],
-            'timeout' => (int) ($config['timeout'] ?? 300),
-        ]);
+    protected function defaultRegion(): string
+    {
+        return 'intl';
     }
 
     protected function regionToBaseUrl(string $region): string
     {
-        return match ($region) {
+        // Region map matches QwenNativeProvider so users switching between
+        // the two providers don't have to re-pick a region. The `/compatible-mode/v1`
+        // suffix lives in the base URL because chatCompletionsPath() returns
+        // just `chat/completions`.
+        $host = match ($region) {
             'intl' => 'https://dashscope-intl.aliyuncs.com',
-            'us' => 'https://dashscope-us.aliyuncs.com',
-            'cn' => 'https://dashscope.aliyuncs.com',
-            'hk' => 'https://cn-hongkong.dashscope.aliyuncs.com',
+            'us'   => 'https://dashscope-us.aliyuncs.com',
+            'cn'   => 'https://dashscope.aliyuncs.com',
+            'hk'   => 'https://cn-hongkong.dashscope.aliyuncs.com',
             default => throw new ProviderException(
                 "Unknown region '{$region}' for qwen (expected: intl, us, cn, hk)",
                 'qwen',
             ),
         };
+        return $host . '/compatible-mode/v1';
     }
 
-    public function chat(
-        array $messages,
-        array $tools = [],
-        ?string $systemPrompt = null,
-        array $options = [],
-    ): Generator {
-        $body = $this->buildRequestBody($messages, $tools, $systemPrompt, $options);
-
-        $attempt = 0;
-        while (true) {
-            try {
-                $response = $this->client->post(
-                    'api/v1/services/aigc/text-generation/generation',
-                    [
-                        'json' => $body,
-                        'headers' => ['X-DashScope-SSE' => 'enable'],
-                        'stream' => true,
-                    ],
-                );
-                break;
-            } catch (ClientException $e) {
-                $status = $e->getResponse()->getStatusCode();
-                $responseBody = json_decode($e->getResponse()->getBody()->getContents(), true);
-
-                if (($status === 429 || $status >= 500) && $attempt < $this->maxRetries) {
-                    $attempt++;
-                    usleep((int) (pow(2, $attempt) * 1_000_000));
-                    continue;
-                }
-
-                throw new ProviderException(
-                    $responseBody['message'] ?? $responseBody['error']['message'] ?? $e->getMessage(),
-                    'qwen',
-                    $status,
-                    $responseBody,
-                    previous: $e,
-                );
-            } catch (GuzzleException $e) {
-                if ($attempt < $this->maxRetries) {
-                    $attempt++;
-                    usleep((int) (pow(2, $attempt) * 1_000_000));
-                    continue;
-                }
-                throw new ProviderException($e->getMessage(), 'qwen', previous: $e);
-            }
-        }
-
-        yield from $this->parseSSEStream(
-            $response->getBody(),
-            $options['streaming_handler'] ?? null,
-        );
-    }
-
-    protected function buildRequestBody(
-        array $messages,
-        array $tools,
-        ?string $systemPrompt,
-        array $options,
-    ): array {
-        $dsMessages = [];
-
-        if ($systemPrompt) {
-            $dsMessages[] = ['role' => 'system', 'content' => $systemPrompt];
-        }
-
-        foreach ($messages as $message) {
-            $dsMessages[] = $this->convertMessage($message);
-        }
-
-        $parameters = [
-            'result_format' => 'message',
-            'incremental_output' => true,
-            'max_tokens' => (int) ($options['max_tokens'] ?? $this->maxTokens),
-            'temperature' => (float) ($options['temperature'] ?? 0.7),
-        ];
-
-        if (! empty($tools)) {
-            $parameters['tools'] = $this->convertTools($tools);
-            $parameters['tool_choice'] = $options['tool_choice'] ?? 'auto';
-            if (isset($options['parallel_tool_calls'])) {
-                $parameters['parallel_tool_calls'] = (bool) $options['parallel_tool_calls'];
-            }
-        }
-
-        if (! empty($options['enable_thinking'])) {
-            $parameters['enable_thinking'] = true;
-            if (isset($options['thinking_budget'])) {
-                $parameters['thinking_budget'] = (int) $options['thinking_budget'];
-            }
-        }
-
-        if (! empty($options['enable_code_interpreter'])) {
-            $parameters['enable_code_interpreter'] = true;
-        }
-
-        $body = [
-            'model' => $options['model'] ?? $this->model,
-            'input' => ['messages' => $dsMessages],
-            'parameters' => $parameters,
-        ];
-
-        // Generic feature dispatch (thinking / caching / web_search / …).
-        // No-op when `$options['features']` is absent — Compat-safe.
-        FeatureDispatcher::apply($this, $options, $body);
-
-        return $body;
-    }
-
-    protected function convertMessage(Message $message): array
+    protected function defaultModel(): string
     {
-        if ($message instanceof AssistantMessage) {
-            $toolCalls = [];
-            $textParts = [];
-            foreach ($message->content as $block) {
-                if ($block->type === 'text') {
-                    $textParts[] = $block->text;
-                } elseif ($block->type === 'tool_use') {
-                    $toolCalls[] = [
-                        'id' => $block->id,
-                        'type' => 'function',
-                        'function' => [
-                            'name' => $block->name,
-                            'arguments' => json_encode($block->input),
-                        ],
-                    ];
-                }
-            }
-            $out = ['role' => 'assistant'];
-            if ($textParts !== []) {
-                $out['content'] = implode('', $textParts);
-            }
-            if ($toolCalls !== []) {
-                $out['tool_calls'] = $toolCalls;
-                $out['content'] ??= '';
-            }
-            return $out;
-        }
-
-        return ['role' => $message->role, 'content' => $message->content];
+        return 'qwen3.6-max-preview';
     }
 
-    protected function convertTools(array $tools): array
+    /**
+     * Base path is `/compatible-mode/v1` already; only `chat/completions`
+     * needs to be appended.
+     */
+    protected function chatCompletionsPath(): string
     {
-        $out = [];
-        foreach ($tools as $tool) {
-            if ($tool instanceof Tool) {
-                $out[] = [
-                    'type' => 'function',
-                    'function' => [
-                        'name' => $tool->name(),
-                        'description' => $tool->description(),
-                        'parameters' => $tool->inputSchema(),
-                    ],
-                ];
-            }
-        }
-        return $out;
+        return 'chat/completions';
     }
 
-    protected function parseSSEStream($stream, ?StreamingHandler $handler = null): Generator
+    protected function missingBearerMessage(array $config): string
     {
-        $buffer = '';
-        $messageContent = '';
-        $toolCalls = [];
-        $usage = null;
-        $stopReason = null;
-
-        while (! $stream->eof()) {
-            $chunk = $stream->read(1024);
-            $buffer .= $chunk;
-
-            while (($pos = strpos($buffer, "\n")) !== false) {
-                $line = substr($buffer, 0, $pos);
-                $buffer = substr($buffer, $pos + 1);
-
-                if (strpos($line, 'data:') !== 0) {
-                    continue;
-                }
-                // DashScope uses `data:` without a space; OpenAI uses `data: `.
-                $data = ltrim(substr($line, 5));
-                if ($data === '' || $data === '[DONE]') {
-                    continue;
-                }
-
-                $json = json_decode($data, true);
-                if (! $json) {
-                    continue;
-                }
-
-                $output = $json['output'] ?? [];
-                $choices = $output['choices'] ?? [];
-                if (! empty($choices[0]['message'])) {
-                    $msg = $choices[0]['message'];
-                    if (isset($msg['content']) && $msg['content'] !== '') {
-                        $messageContent .= $msg['content'];
-                        $handler?->onText($msg['content']);
-                    }
-                    if (! empty($msg['tool_calls'])) {
-                        foreach ($msg['tool_calls'] as $toolCall) {
-                            if (isset($toolCall['function'])) {
-                                $toolCalls[] = $toolCall;
-                                $handler?->onToolUse(
-                                    $toolCall['id'] ?? '',
-                                    $toolCall['function']['name'] ?? '',
-                                    json_decode($toolCall['function']['arguments'] ?? '{}', true) ?? [],
-                                );
-                            }
-                        }
-                    }
-                }
-
-                if (isset($choices[0]['finish_reason']) && $choices[0]['finish_reason'] !== 'null') {
-                    $stopReason = $this->mapStopReason($choices[0]['finish_reason']);
-                }
-
-                if (isset($json['usage'])) {
-                    $usage = new Usage(
-                        $json['usage']['input_tokens'] ?? 0,
-                        $json['usage']['output_tokens'] ?? 0,
-                    );
-                }
-            }
-        }
-
-        $content = [];
-        if ($messageContent !== '') {
-            $content[] = new ContentBlock('text', $messageContent);
-        }
-        foreach ($toolCalls as $toolCall) {
-            $content[] = new ContentBlock(
-                'tool_use',
-                null,
-                $toolCall['id'] ?? '',
-                $toolCall['function']['name'] ?? '',
-                json_decode($toolCall['function']['arguments'] ?? '{}', true) ?? [],
-            );
-        }
-
-        yield new AssistantMessage(
-            content: $content,
-            usage: $usage,
-            stopReason: $stopReason ?? StopReason::EndTurn,
-        );
-    }
-
-    protected function mapStopReason(string $finishReason): StopReason
-    {
-        return match ($finishReason) {
-            'stop' => StopReason::EndTurn,
-            'length' => StopReason::MaxTokens,
-            'tool_calls' => StopReason::ToolUse,
-            default => StopReason::EndTurn,
-        };
-    }
-
-    public function formatMessages(array $messages): array
-    {
-        $out = [];
-        foreach ($messages as $message) {
-            $out[] = $this->convertMessage($message);
-        }
-        return $out;
-    }
-
-    public function formatTools(array $tools): array
-    {
-        return $this->convertTools($tools);
-    }
-
-    public function getModel(): string
-    {
-        return $this->model;
-    }
-
-    public function setModel(string $model): void
-    {
-        $this->model = $model;
-    }
-
-    public function name(): string
-    {
-        return 'qwen';
-    }
-
-    public function getRegion(): string
-    {
-        return $this->region;
+        return 'QWEN_API_KEY (or DASHSCOPE_API_KEY) is required';
     }
 }
