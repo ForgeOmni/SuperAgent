@@ -129,47 +129,63 @@ class KimiCodeCredentials
      */
     public function refresh(): ?array
     {
-        $creds = $this->load();
-        if ($creds === null || empty($creds['refresh_token'])) {
-            return null;
-        }
+        // Serialize refreshes across concurrent SuperAgent sessions so
+        // two parallel processes don't race-write the same file and
+        // lose each other's fresh token. The critical section covers
+        // the full load→network→save path because another process's
+        // save() could have landed while our `load()` was reading
+        // stale state.
+        return $this->store->withLock(self::CREDENTIAL_NAME, function () {
+            $creds = $this->load();
+            if ($creds === null || empty($creds['refresh_token'])) {
+                return null;
+            }
 
-        $url = rtrim($this->host(), '/') . self::TOKEN_PATH;
-        $payload = http_build_query([
-            'grant_type'    => 'refresh_token',
-            'refresh_token' => $creds['refresh_token'],
-            'client_id'     => self::CLIENT_ID,
-        ]);
+            // Double-check expiry under the lock — another process may
+            // have already refreshed by the time we got here, in which
+            // case we should just return that fresh token.
+            $expiresAt = $creds['expires_at'] ?? null;
+            if ($expiresAt !== null && ($expiresAt - 60) > time()) {
+                return $creds;
+            }
 
-        $ctx = stream_context_create([
-            'http' => [
-                'method'        => 'POST',
-                'header'        => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\n",
-                'content'       => $payload,
-                'timeout'       => 30,
-                'ignore_errors' => true,
-            ],
-        ]);
+            $url = rtrim($this->host(), '/') . self::TOKEN_PATH;
+            $payload = http_build_query([
+                'grant_type'    => 'refresh_token',
+                'refresh_token' => $creds['refresh_token'],
+                'client_id'     => self::CLIENT_ID,
+            ]);
 
-        $resp = @file_get_contents($url, false, $ctx);
-        if ($resp === false) {
-            return null;
-        }
-        $data = json_decode($resp, true);
-        if (! is_array($data) || empty($data['access_token'])) {
-            return null;
-        }
+            $ctx = stream_context_create([
+                'http' => [
+                    'method'        => 'POST',
+                    'header'        => "Content-Type: application/x-www-form-urlencoded\r\nAccept: application/json\r\n",
+                    'content'       => $payload,
+                    'timeout'       => 30,
+                    'ignore_errors' => true,
+                ],
+            ]);
 
-        $new = [
-            'access_token'  => (string) $data['access_token'],
-            'refresh_token' => (string) ($data['refresh_token'] ?? $creds['refresh_token']),
-            'expires_at'    => isset($data['expires_in'])
-                ? (time() + (int) $data['expires_in'])
-                : ($creds['expires_at'] ?? null),
-            'scopes'        => $creds['scopes'] ?? [],
-        ];
-        $this->save($new);
-        return $new;
+            $resp = @file_get_contents($url, false, $ctx);
+            if ($resp === false) {
+                return null;
+            }
+            $data = json_decode($resp, true);
+            if (! is_array($data) || empty($data['access_token'])) {
+                return null;
+            }
+
+            $new = [
+                'access_token'  => (string) $data['access_token'],
+                'refresh_token' => (string) ($data['refresh_token'] ?? $creds['refresh_token']),
+                'expires_at'    => isset($data['expires_in'])
+                    ? (time() + (int) $data['expires_in'])
+                    : ($creds['expires_at'] ?? null),
+                'scopes'        => $creds['scopes'] ?? [],
+            ];
+            $this->save($new);
+            return $new;
+        });
     }
 
     /**
