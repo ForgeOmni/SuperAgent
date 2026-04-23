@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace SuperAgent\CLI\Commands;
 
+use SuperAgent\Auth\AuthenticationException;
 use SuperAgent\Auth\ClaudeCodeCredentials;
 use SuperAgent\Auth\CodexCredentials;
 use SuperAgent\Auth\CredentialStore;
+use SuperAgent\Auth\DeviceCodeFlow;
 use SuperAgent\Auth\GeminiCliCredentials;
+use SuperAgent\Auth\KimiCodeCredentials;
 use SuperAgent\CLI\Terminal\Renderer;
 
 /**
@@ -48,9 +51,60 @@ class AuthCommand
             'claude', 'claude-code', 'anthropic' => $this->loginClaudeCode(),
             'codex', 'openai' => $this->loginCodex(),
             'gemini', 'gemini-cli', 'google' => $this->loginGeminiCli(),
+            'kimi-code', 'kimi' => $this->loginKimiCode(),
             '' => $this->usage(),
             default => $this->usage("Unknown provider: {$provider}"),
         };
+    }
+
+    /**
+     * Kimi Code is different from the other `login` paths — there's no
+     * sibling CLI on the user's machine to import from. We run the
+     * full RFC 8628 device-code flow ourselves: display the code +
+     * verification URL, poll the token endpoint, persist on success.
+     *
+     * `DeviceCodeFlow` already encodes the polling + retry semantics
+     * (and already honours `SUPERAGENT_NO_BROWSER` / CI env guards so
+     * tests don't launch real browsers). We just point it at Kimi's
+     * endpoints and translate the returned TokenResponse into
+     * `KimiCodeCredentials`'s storage shape.
+     */
+    protected function loginKimiCode(?KimiCodeCredentials $credsOverride = null, ?DeviceCodeFlow $flowOverride = null): int
+    {
+        $r = $this->renderer;
+        $creds = $credsOverride ?? new KimiCodeCredentials($this->store);
+        $host = rtrim($creds->host(), '/');
+
+        $flow = $flowOverride ?? new DeviceCodeFlow(
+            clientId:      KimiCodeCredentials::CLIENT_ID,
+            deviceCodeUrl: $host . KimiCodeCredentials::DEVICE_AUTH_PATH,
+            tokenUrl:      $host . KimiCodeCredentials::TOKEN_PATH,
+            scopes:        [],
+            outputCallback: static fn (string $msg) => $r->line($msg),
+        );
+
+        $r->info('Starting Kimi Code OAuth device flow...');
+
+        try {
+            $token = $flow->authenticate();
+        } catch (AuthenticationException $e) {
+            $r->error('Login failed: ' . $e->getMessage());
+            return 1;
+        } catch (\Throwable $e) {
+            $r->error('Unexpected error during login: ' . $e->getMessage());
+            return 1;
+        }
+
+        $creds->save([
+            'access_token'  => $token->accessToken,
+            'refresh_token' => $token->refreshToken,
+            'expires_at'    => $token->expiresIn !== null ? time() + $token->expiresIn : null,
+            'scopes'        => $token->scope !== '' ? explode(' ', $token->scope) : [],
+        ]);
+
+        $r->success('Logged in to Kimi Code.');
+        $r->hint('Use this account by setting KIMI_REGION=code when running SuperAgent.');
+        return 0;
     }
 
     private function loginClaudeCode(): int
@@ -200,6 +254,7 @@ class AuthCommand
             'claude', 'claude-code', 'anthropic' => 'anthropic',
             'codex', 'openai' => 'openai',
             'gemini', 'gemini-cli', 'google' => 'gemini',
+            'kimi-code', 'kimi' => KimiCodeCredentials::CREDENTIAL_NAME,  // = 'kimi-code'
             default => null,
         };
         if ($key === null) {
@@ -252,8 +307,9 @@ class AuthCommand
         $this->renderer->line('  superagent auth login claude-code');
         $this->renderer->line('  superagent auth login codex');
         $this->renderer->line('  superagent auth login gemini');
+        $this->renderer->line('  superagent auth login kimi-code');
         $this->renderer->line('  superagent auth status');
-        $this->renderer->line('  superagent auth logout <claude-code|codex|gemini>');
+        $this->renderer->line('  superagent auth logout <claude-code|codex|gemini|kimi-code>');
         return $error !== null ? 1 : 0;
     }
 }

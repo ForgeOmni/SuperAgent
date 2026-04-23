@@ -43,6 +43,7 @@
 | `file_extract` | kimi (outil) | Wrapper outil ; pas de repli automatique |
 | `long_context_file` | qwen (outil) | Wrapper outil ; pas de repli automatique |
 | `web_search` | glm (outil) | Serveur MCP web-search |
+| `prompt_cache_key` | kimi | Skip silencieux (cache de session : optimisation de perf, pas de correctness) |
 
 **required vs preferred** : `required: true` sans natif ni repli → exception `FeatureNotSupportedException`. Défaut `required: false` → dégradation gracieuse.
 

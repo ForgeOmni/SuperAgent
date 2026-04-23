@@ -74,7 +74,7 @@ $provider = ProviderRegistry::createWithRegion('qwen', 'us', ['api_key' => '...'
 
 | 能力 | 用法 |
 |---|---|
-| Thinking（模型级，未来扩展） | 暂走 CoT 降级；K2 thinking 变体发布后切换 |
+| Thinking（请求级）| `$options['features']['thinking']` —— 同模型上发 `reasoning_effort`（low/medium/high，根据 `budget` 分桶）+ `thinking: {type: "enabled"}`，**不换模型** |
 | 文件抽取（PDF/PPT/Word → 文本） | 内置工具 `kimi_file_extract` |
 | Batch 处理（JSONL） | 内置工具 `kimi_batch`，`wait=false` 即返 batch_id |
 | **Agent Swarm**（300 sub-agents / 4000 步） | 内置工具 `kimi_swarm` —— 任何主脑可调用；REST schema 为 Moonshot 未公开前的**临时实现**，官方发布后替换 |
@@ -181,6 +181,25 @@ $provider->chat($messages, $tools, $system, [
 - `enabled: false` → 硬 no-op
 
 查每家支持哪些 feature：`docs/FEATURES_MATRIX.md`。
+
+### 5.1 `extra_body` 直通口（高级用户）
+
+所有继承 `ChatCompletionsProvider` 的 provider（OpenAI / OpenRouter / Kimi / GLM / MiniMax）都支持 `$options['extra_body']` —— 一个在 `customizeRequestBody`、`FeatureDispatcher` **全部执行完之后**再深度合并到请求 body 顶层的数组。对标 OpenAI Python SDK 的 `extra_body=` 约定，专门留给"厂商上了新请求字段但我们还没来得及出能力 adapter"的场景：
+
+```php
+$provider->chat($messages, $tools, $system, [
+    // Kimi：不用等能力 adapter，直接开 session 级 prompt cache
+    'extra_body' => ['prompt_cache_key' => $sessionId],
+]);
+
+// 覆盖 adapter 的选择：FeatureDispatcher 算出 "medium"，我们要 "high"
+$provider->chat($messages, $tools, $system, [
+    'features'   => ['thinking' => ['budget' => 4000]],
+    'extra_body' => ['reasoning_effort' => 'high'],
+]);
+```
+
+合并语义：标量字段覆盖；associative 子对象深度合并（叶子胜出）；indexed 列表整体替换（不拼接）。
 
 ---
 

@@ -81,7 +81,7 @@ Liste complète des modèles : `superagent models list` ou `resources/models.jso
 
 | Capacité | Utilisation |
 |---|---|
-| Réflexion (bascule de modèle) | `$options['features']['thinking']` — bascule vers `kimi-k2-thinking-preview` |
+| Réflexion (niveau requête) | `$options['features']['thinking']` — définit `reasoning_effort` (low/medium/high, bucketé depuis le `budget` token advisory) + `thinking: {type: "enabled"}` sur le même modèle. Pas de bascule de modèle. |
 | Extraction de fichiers (PDF/PPT/Word → texte) | outil `kimi_file_extract` |
 | Traitement par lots (JSONL) | outil `kimi_batch` — passer `wait=false` pour dispatch sans attente |
 | **Agent Swarm** (300 sous-agents / 4000 étapes) | outil `kimi_swarm` — tout cerveau principal peut l'appeler ; le schéma REST est **provisoire** (Moonshot n'a pas encore publié la spécification) |
@@ -191,6 +191,35 @@ $provider->chat($messages, $tools, $system, [
 - `enabled: false` → no-op strict
 
 Voir `docs/FEATURES_MATRIX.md` pour la grille par fournisseur × par fonctionnalité.
+
+### 5.1 Échappatoire `extra_body` (utilisateurs avancés)
+
+Tous les fournisseurs qui héritent de `ChatCompletionsProvider` (OpenAI,
+OpenRouter, Kimi, GLM, MiniMax) acceptent un tableau
+`$options['extra_body']` qui est **fusionné en profondeur au niveau racine
+du body de la requête APRÈS que tous les autres transforms s'exécutent**
+(`customizeRequestBody`, `FeatureDispatcher`). C'est l'équivalent PHP de
+la convention `extra_body=` du SDK Python d'OpenAI, pour le cas où un
+fournisseur expose un nouveau champ de requête avant qu'on ait livré un
+adapter de capacité :
+
+```php
+$provider->chat($messages, $tools, $system, [
+    // Kimi : activer le prompt cache au niveau session sans adapter
+    'extra_body' => ['prompt_cache_key' => $sessionId],
+]);
+
+// Écraser le choix d'un adapter : FeatureDispatcher a choisi "medium" —
+// on veut "high"
+$provider->chat($messages, $tools, $system, [
+    'features'   => ['thinking' => ['budget' => 4000]],
+    'extra_body' => ['reasoning_effort' => 'high'],
+]);
+```
+
+Sémantique de fusion : les scalaires écrasent ; les sous-objets
+associatifs sont fusionnés en profondeur (leaf-wins) ; les listes
+indexées sont remplacées en bloc.
 
 ---
 

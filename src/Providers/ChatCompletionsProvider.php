@@ -294,7 +294,57 @@ abstract class ChatCompletionsProvider implements LLMProvider
         // No-op when `$options['features']` is absent — Compat-safe.
         FeatureDispatcher::apply($this, $options, $body);
 
+        // Power-user escape hatch: $options['extra_body'] is deep-merged
+        // at the top level of the request body, AFTER customizeRequestBody
+        // and FeatureDispatcher so it always wins. Mirrors OpenAI SDK's
+        // `extra_body` convention — lets callers pass vendor-specific
+        // fields (Kimi `prompt_cache_key`, Qwen-proxied fields, GLM extras)
+        // without waiting for us to ship a feature adapter. No-op when the
+        // key is absent, so this stays Compat-safe for every pre-existing
+        // caller.
+        if (isset($options['extra_body']) && is_array($options['extra_body'])) {
+            $this->mergeExtraBody($body, $options['extra_body']);
+        }
+
         return $body;
+    }
+
+    /**
+     * Deep-merge a user-provided $options['extra_body'] fragment into the
+     * outgoing request body. Semantics match FeatureAdapter::merge():
+     *
+     *   - Scalar + scalar       → overwrite.
+     *   - Assoc array + assoc   → recursive merge (leaf-wins).
+     *   - Indexed list + list   → replace wholesale (we treat arrays like
+     *     `messages` or `tools` as single units; adapters or callers that
+     *     want to append should handle that themselves).
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $extraBody
+     */
+    protected function mergeExtraBody(array &$body, array $extraBody): void
+    {
+        foreach ($extraBody as $k => $v) {
+            if (is_array($v) && isset($body[$k]) && is_array($body[$k])
+                && self::isAssocArray($v) && self::isAssocArray($body[$k])) {
+                $sub = $body[$k];
+                $this->mergeExtraBody($sub, $v);
+                $body[$k] = $sub;
+                continue;
+            }
+            $body[$k] = $v;
+        }
+    }
+
+    /**
+     * @param array<int|string, mixed> $a
+     */
+    private static function isAssocArray(array $a): bool
+    {
+        if ($a === []) {
+            return false;
+        }
+        return array_keys($a) !== range(0, count($a) - 1);
     }
 
     protected function convertMessage(Message $message): array
@@ -394,9 +444,22 @@ abstract class ChatCompletionsProvider implements LLMProvider
                 }
 
                 if (isset($json['usage'])) {
+                    // Cached tokens on the OpenAI wire surface in two
+                    // historical shapes — the legacy top-level
+                    // `usage.cached_tokens` and the current
+                    // `usage.prompt_tokens_details.cached_tokens`. Kimi
+                    // emits the new shape; keeping both paths costs one
+                    // fallback read and avoids silently losing the
+                    // cache-read metric when an older provider shows up.
+                    $cachedRead = (int) (
+                        $json['usage']['prompt_tokens_details']['cached_tokens']
+                        ?? $json['usage']['cached_tokens']
+                        ?? 0
+                    );
                     $usage = new Usage(
-                        $json['usage']['prompt_tokens'] ?? 0,
-                        $json['usage']['completion_tokens'] ?? 0,
+                        (int) ($json['usage']['prompt_tokens'] ?? 0),
+                        (int) ($json['usage']['completion_tokens'] ?? 0),
+                        cacheReadInputTokens: $cachedRead > 0 ? $cachedRead : null,
                     );
                 }
 

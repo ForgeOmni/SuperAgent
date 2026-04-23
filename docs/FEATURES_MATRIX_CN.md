@@ -39,6 +39,7 @@
 | `file_extract` | kimi（工具） | 工具包装；无自动降级 |
 | `long_context_file` | qwen（工具） | 工具包装；无自动降级 |
 | `web_search` | glm（工具） | MCP web-search server |
+| `prompt_cache_key` | kimi | 静默跳过（会话级缓存是性能优化，不是正确性保证） |
 
 **required vs preferred**：spec 中 `required: true` 无原生且无降级时硬失败（`FeatureNotSupportedException`）；默认 `required: false` 优雅降级。
 

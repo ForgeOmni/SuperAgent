@@ -79,7 +79,7 @@ Full model list: `superagent models list` or `resources/models.json`.
 
 | Capability | How to use |
 |---|---|
-| Thinking (model switch) | `$options['features']['thinking']` — swaps to `kimi-k2-thinking-preview` |
+| Thinking (request-level) | `$options['features']['thinking']` — sets `reasoning_effort` (low/medium/high, bucketed from the advisory `budget` token count) + `thinking: {type: "enabled"}` on the same model. No model swap. |
 | File extraction (PDF/PPT/Word → text) | `kimi_file_extract` tool |
 | Batch processing (JSONL) | `kimi_batch` tool — pass `wait=false` for fire-and-forget |
 | **Agent Swarm** (300 sub-agents / 4000 steps) | `kimi_swarm` tool — any main brain can call it; REST schema is **provisional** (Moonshot hasn't published the spec yet) |
@@ -188,6 +188,33 @@ $provider->chat($messages, $tools, $system, [
 - `enabled: false` → hard no-op
 
 See `docs/FEATURES_MATRIX.md` for the per-provider × per-feature grid.
+
+### 5.1 `extra_body` escape hatch (power users)
+
+Every provider that extends `ChatCompletionsProvider` (OpenAI, OpenRouter,
+Kimi, GLM, MiniMax) accepts an `$options['extra_body']` array that is
+**deep-merged at the top level of the outgoing request body after every
+other transform runs** (`customizeRequestBody`, `FeatureDispatcher`).
+It's the PHP equivalent of OpenAI's Python SDK `extra_body=` convention
+and exists for the case where a vendor ships a new request field before
+we've shipped a capability adapter for it:
+
+```php
+$provider->chat($messages, $tools, $system, [
+    // Kimi: enable session-level prompt cache without a feature adapter
+    'extra_body' => ['prompt_cache_key' => $sessionId],
+]);
+
+// Override an adapter's choice: FeatureDispatcher picked "medium" —
+// we want "high"
+$provider->chat($messages, $tools, $system, [
+    'features'   => ['thinking' => ['budget' => 4000]],
+    'extra_body' => ['reasoning_effort' => 'high'],
+]);
+```
+
+Merge semantics: scalar fields overwrite; associative sub-objects
+deep-merge (leaf-wins); indexed lists replace wholesale.
 
 ---
 

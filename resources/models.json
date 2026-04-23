@@ -144,8 +144,7 @@
       "regions": ["intl", "cn"],
       "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
       "models": [
-        {"id": "kimi-k2-6",                "family": "k2",         "date": "20260420", "input": 0.95, "output": 4.00, "aliases": ["kimi", "k2", "kimi-k2"], "description": "Kimi K2.6 — 1T MoE, agent swarm, skills (cache-hit input $0.16/M)", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "swarm": true, "skills": true, "file_extract": true, "context_cache": "auto", "batch": true, "mcp": true, "max_context": 262144}},
-        {"id": "kimi-k2-thinking-preview", "family": "k2",         "date": "20260420", "input": 0.95, "output": 4.00, "description": "Kimi K2 thinking variant — activated by SupportsThinking", "capabilities": {"streaming": true, "tools": true, "thinking": true, "max_context": 262144}},
+        {"id": "kimi-k2-6",                "family": "k2",         "date": "20260420", "input": 0.95, "output": 4.00, "aliases": ["kimi", "k2", "kimi-k2"], "description": "Kimi K2.6 — 1T MoE, agent swarm, skills (cache-hit input $0.16/M); thinking via reasoning_effort + thinking.type", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "swarm": true, "skills": true, "file_extract": true, "context_cache": "auto", "batch": true, "mcp": true, "max_context": 262144}},
         {"id": "kimi-k2-5",                "family": "k2",         "date": "20251001", "input": 0.95, "output": 4.00, "description": "Kimi K2.5 (previous)"},
         {"id": "kimi-latest",              "family": "kimi-latest","date": "20260301", "input": 0.95, "output": 4.00, "description": "Rolling latest"}
       ]

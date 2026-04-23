@@ -13,7 +13,7 @@ class KimiProviderTest extends TestCase
     public function test_constructor_requires_api_key(): void
     {
         $this->expectException(ProviderException::class);
-        $this->expectExceptionMessageMatches('/API key/');
+        $this->expectExceptionMessageMatches('/API key|KIMI_API_KEY/i');
         new KimiProvider([]);
     }
 
@@ -36,6 +36,52 @@ class KimiProviderTest extends TestCase
         $this->expectException(ProviderException::class);
         $this->expectExceptionMessageMatches('/region/');
         new KimiProvider(['api_key' => 'sk-x', 'region' => 'eu']);
+    }
+
+    public function test_code_region_maps_to_kimi_code_coding_v1(): void
+    {
+        // Code region is OAuth-only — pass an explicit access_token so
+        // the provider's resolveBearer path succeeds without touching
+        // the real credential store / user HOME.
+        $p = new KimiProvider([
+            'region' => 'code',
+            'access_token' => 'oauth-tok',
+        ]);
+        $this->assertSame('code', $p->getRegion());
+        $this->assertSame('api.kimi.com', $this->host($p));
+    }
+
+    public function test_code_region_with_no_oauth_and_no_api_key_throws(): void
+    {
+        // Simulate a fresh machine — no credentials, no KIMI_API_KEY.
+        // The provider should surface the region-specific hint about
+        // `superagent login kimi-code`, not the generic "API key is
+        // required" message.
+        $origHome = getenv('HOME');
+        $tmp = sys_get_temp_dir() . '/superagent-kimi-bearer-' . bin2hex(random_bytes(4));
+        mkdir($tmp, 0755, true);
+        putenv('HOME=' . $tmp);
+        try {
+            $this->expectException(ProviderException::class);
+            $this->expectExceptionMessageMatches('/OAuth login|kimi-code/');
+            new KimiProvider(['region' => 'code']);
+        } finally {
+            @rmdir($tmp);
+            putenv($origHome === false ? 'HOME' : 'HOME=' . $origHome);
+        }
+    }
+
+    public function test_device_identification_headers_are_sent(): void
+    {
+        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $headers = $this->clientHeaders($p);
+        foreach (['x-msh-platform', 'x-msh-device-id', 'x-msh-version', 'x-msh-os-version'] as $expected) {
+            $this->assertArrayHasKey(
+                $expected,
+                $headers,
+                "Kimi client must send the Moonshot identification header: {$expected}",
+            );
+        }
     }
 
     public function test_name_is_kimi(): void

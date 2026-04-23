@@ -35,13 +35,15 @@
 
 | Feature            | Native providers       | Fallback                                   |
 |--------------------|:-----------------------|:-------------------------------------------|
-| `thinking`         | anthropic, qwen, glm   | CoT system-prompt injection (every other)  |
+
+| `thinking`         | anthropic, qwen, glm, kimi | CoT system-prompt injection (every other) |
 | `agent_teams`      | minimax                | System-prompt scaffold (every other)       |
 | `context_cache`    | anthropic              | Transparent skip                           |
 | `file_extract`     | kimi (via tool)        | Tool wrapper; no automatic fallback        |
 | `long_context_file`| qwen (via tool)        | Tool wrapper; no automatic fallback        |
 | `web_search`       | glm (via tool)         | MCP web-search server                      |
 | `code_interpreter` | qwen                   | ➖ (not emulated)                           |
+| `prompt_cache_key` | kimi                   | Silent skip (perf optimization, not correctness) |
 
 Required vs preferred — pass `required: true` in the feature spec to
 hard-fail (`FeatureNotSupportedException`) when neither native support

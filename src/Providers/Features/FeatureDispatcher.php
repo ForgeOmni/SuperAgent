@@ -66,6 +66,7 @@ class FeatureDispatcher
             ThinkingAdapter::class,
             AgentTeamsAdapter::class,
             CodeInterpreterAdapter::class,
+            PromptCacheKeyAdapter::class,
         ] as $class) {
             self::register($class);
         }
