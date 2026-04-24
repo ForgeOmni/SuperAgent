@@ -8148,3 +8148,535 @@ L'endpoint compat d'Alibaba signale les erreurs de throttle / transitoires en mi
 
 Tous les providers OpenAI-compat en bénéficient — pas d'opt-in per-provider requis.
 
+
+
+## 45. Pattern d'adapter host-config (v0.9.2)
+
+> Les hôtes multi-tenant accumulaient un bras `match ($providerType) { … }`
+> par nouvelle classe de provider SDK — credentials AWS de Bedrock,
+> organization OpenAI, reasoning/verbosity d'OpenAI-Responses, port par
+> défaut LMStudio. `ProviderRegistry::createForHost()` déplace ce dispatch
+> dans le SDK ; les hôtes passent une forme normalisée une fois et ne
+> reviennent jamais sur la factory.
+
+### La forme host normalisée
+
+```php
+$agent = ProviderRegistry::createForHost($sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,      // credential primaire
+    'base_url'    => $aiProvider->base_url,               // BYO-proxy / Azure / self-hosted
+    'model'       => $resolvedModel,                      // null → défaut SDK
+    'max_tokens'  => $extra['max_tokens'] ?? null,
+    'region'      => $extra['region']     ?? null,        // kimi / glm / minimax / qwen / bedrock
+    'credentials' => $extra,                              // blob opaque ; l'adapter prend ce qu'il veut
+    'extra'       => $extra,                              // passthrough spécifique au provider
+]);
+```
+
+Chaque clé est optionnelle. L'adapter par défaut cherry-pick ce que le
+provider cible veut (`api_key`, `base_url`, `model`, `max_tokens`,
+`region`) et deep-merge `extra` par-dessus sans écraser les champs de
+premier niveau. Ce dernier point permet à un hôte de passer de nouveaux
+boutons (`organization`, `reasoning`, `verbosity`, `store`) sans toucher
+au SDK — le constructeur du provider les reçoit naturellement.
+
+### Adapters intégrés
+
+- **Par défaut** — pass-through, couvre tout provider style ChatCompletions
+  (Anthropic, OpenAI, OpenAI-Responses, OpenRouter, Ollama, LMStudio,
+  Gemini, Kimi, Qwen, Qwen-native, GLM, MiniMax).
+- **`bedrock`** — découpe `credentials.aws_access_key_id` /
+  `aws_secret_access_key` / `aws_region` dans la forme du SDK AWS.
+  Les autres champs AWS (session_token, profile) passent par l'adapter
+  par défaut.
+
+### Adapters custom
+
+```php
+ProviderRegistry::registerHostConfigAdapter('my-custom', function (array $host): array {
+    return [
+        'api_key' => $host['credentials']['my_custom_token'] ?? null,
+        'model'   => $host['model'] ?? 'default-model',
+        // transformation arbitraire ; doit retourner la forme du constructeur du provider
+    ];
+});
+
+// Ensuite :
+ProviderRegistry::createForHost('my-custom', $hostShape);
+```
+
+Les adapters custom permettent à des providers fournis par plugin de
+s'enregistrer sans changer le SDK. Ils permettent aussi à un hôte de
+surcharger un adapter intégré s'il a besoin de découper les credentials
+différemment.
+
+### Pourquoi ça compte en upgrade
+
+Avant 0.9.2, ajouter un provider au SDK (comme `openai-responses` en
+0.9.1) forçait chaque hôte aval à patcher sa factory. Après 0.9.2, le
+nouveau provider ship avec son propre adapter (ou utilise celui par
+défaut) et le call site côté hôte ne change pas — un point de
+synchronisation en moins par release.
+
+### Migration
+
+Les hôtes qui tournent un switch écrit à la main :
+
+```php
+// Avant :
+$agent = match ($aiProvider->type) {
+    'openai'  => new OpenAIProvider([...]),
+    'bedrock' => new BedrockProvider([...]),
+    'kimi'    => new KimiProvider([...]),
+    // ... un bras par provider ...
+};
+
+// Après :
+$agent = ProviderRegistry::createForHost($aiProvider->sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,
+    'base_url'    => $aiProvider->base_url,
+    'model'       => $resolvedModel,
+    'max_tokens'  => $extra['max_tokens'] ?? null,
+    'region'      => $extra['region']     ?? null,
+    'credentials' => $extra,
+    'extra'       => $extra,
+]);
+```
+
+
+## 46. API OpenAI Responses (v0.9.1)
+
+> Provider dédié à `provider: 'openai-responses'` — frappe `/v1/responses`
+> au lieu de Chat Completions. Même surface `Agent` / `AgentResult`, mêmes
+> outils, même streaming, mais avec accès de première classe à la
+> continuation `previous_response_id`, à `reasoning.effort` natif, à
+> `prompt_cache_key`, à `text.verbosity`, et à la taxonomie d'erreurs
+> classifiées décrite au §48.
+
+### Exemple minimal
+
+```php
+$agent = new Agent(['provider' => 'openai-responses', 'model' => 'gpt-5']);
+
+$result = $agent->run('analyse le repo', [
+    'reasoning'        => ['effort' => 'high', 'summary' => 'auto'],
+    'verbosity'        => 'low',
+    'prompt_cache_key' => 'session:42',
+    'service_tier'     => 'priority',
+    'store'            => true,       // requis pour previous_response_id au tour suivant
+]);
+```
+
+### Multi-tour sans renvoyer l'historique
+
+```php
+$first  = $agent->run('résume src/Providers/');
+$respId = $agent->getProvider()->lastResponseId();
+
+// Le serveur détient le contexte ; on n'envoie que le delta.
+$next = (new Agent([
+    'provider' => 'openai-responses',
+    'options'  => ['previous_response_id' => $respId],
+]))->run('maintenant descends d\'un niveau sur le parser SSE');
+```
+
+Économie majeure sur longues sessions — vous êtes facturé des input
+tokens du nouveau tour, pas du renvoi de toute la conversation.
+
+### Routage OAuth ChatGPT
+
+Avec `auth_mode: 'oauth'` (ou juste `access_token` sans mode explicite),
+la base URL bascule vers `https://chatgpt.com/backend-api/codex` et le
+chemin de requête perd le préfixe `/v1/`. Les abonnés Plus / Pro /
+Business facturent sur leur abonnement au lieu de se faire rejeter sur
+`api.openai.com`.
+
+```php
+new Agent([
+    'provider'     => 'openai-responses',
+    'access_token' => $token,           // depuis `superagent auth login`
+    'account_id'   => $accountId,       // → en-tête chatgpt-account-id
+]);
+```
+
+### Azure OpenAI
+
+Six marqueurs de base URL (`openai.azure.`, `cognitiveservices.azure.`,
+`aoai.azure.`, `azure-api.`, `azurefd.`, `windows.net/openai`) basculent
+le provider en mode Azure : paramètre `api-version` ajouté (défaut
+`2025-04-01-preview`, surchargeable via `azure_api_version`), en-tête
+`api-key` envoyé à côté d'`Authorization`.
+
+```php
+new Agent([
+    'provider'          => 'openai-responses',
+    'base_url'          => 'https://my-resource.openai.azure.com/openai/deployments/gpt-5',
+    'api_key'           => getenv('AZURE_OPENAI_API_KEY'),
+    'azure_api_version' => '2025-04-01-preview',
+]);
+```
+
+### Ce que le SDK mappe vs passthrough
+
+| Option | Mappe vers | Notes |
+|---|---|---|
+| `reasoning: ['effort' => '...', 'summary' => 'auto']` | objet `reasoning` du body | Ou `features.thinking.budget_tokens` auto-bucket en effort tiers |
+| `verbosity: 'low' / 'medium' / 'high'` | `text.verbosity` | Natif — pas de hacks d'id modèle |
+| `response_format: {type: 'json_schema', json_schema: {…}}` | `text.format` | Forme Chat-Completions acceptée, remappée |
+| `prompt_cache_key: 'session:42'` | body `prompt_cache_key` | Pin cache côté serveur |
+| `service_tier: 'priority' / 'default' / 'flex' / 'scale'` | body `service_tier` | Passthrough |
+| `previous_response_id: 'resp_…'` | body `previous_response_id` | Continuation multi-tour |
+| `store: true` | body `store` | Requis pour continuation |
+| `include: ['...']` | body `include` | Array passthrough |
+| `client_metadata: ['key' => 'value']` | body `client_metadata` | Opaque ; fusionné avec trace context — voir §51 |
+
+### Drapeau WebSocket expérimental
+
+`experimental_ws_transport: true` est reconnu par le constructeur mais
+lève actuellement `FeatureNotSupportedException` — la forme de config
+survit aux migrations futures, mais le transport WS lui-même n'est pas
+implémenté dans cette release.
+
+
+## 47. Retry en couches + backoff avec jitter + SSE idle timeout (v0.9.1)
+
+> Le bouton unique `max_retries` est mort. Le SDK sépare maintenant les
+> retries au niveau requête (HTTP connect / 4xx / 5xx) des retries au
+> niveau stream (réservés aux providers qui savent reprendre en milieu
+> de stream via `previous_response_id`), et ajoute un idle timeout au
+> niveau cURL pour qu'un serveur silencieux tue la connexion au lieu de
+> bloquer la loop.
+
+### Config
+
+```php
+new Agent([
+    'provider'               => 'openai',
+    'request_max_retries'    => 4,        // HTTP connect / 4xx / 5xx (défaut 3)
+    'stream_max_retries'     => 5,        // réservé pour reprise mid-stream (défaut 5)
+    'stream_idle_timeout_ms' => 60_000,   // coupure low-speed cURL sur SSE (défaut 300_000)
+]);
+```
+
+`max_retries` legacy fonctionne toujours — il alimente les deux
+compteurs quand les clés en couches ne sont pas définies.
+
+### Backoff avec jitter
+
+```
+delay_ms = clamp(2^attempt * 1000 * jitter, floor: 200, ceiling: 60_000)
+jitter = uniform(0.9, 1.1)
+```
+
+Empêche les retries en thundering-herd de workers parallèles de se
+heurter sur le même "réveil dans N secondes". Les en-têtes
+`Retry-After` sont honorés exactement — le serveur nous dit quand
+revenir, pas de jitter appliqué.
+
+### SSE idle timeout
+
+Traduit `stream_idle_timeout_ms` en `CURLOPT_LOW_SPEED_LIMIT=1` +
+`CURLOPT_LOW_SPEED_TIME=<secondes>` de cURL. Si le débit tombe sous
+1 octet/seconde pendant la fenêtre configurée, libcurl tue la
+connexion et le SDK fait remonter comme une erreur transport
+retryable. Défaut 5 min — ajuster à la baisse sur un réseau lent, à
+la hausse si un modèle on-premise raisonne longtemps.
+
+### Ce qui reste retryable, ce qui ne l'est pas
+
+- **Retryable** — 429, 5xx, timeouts réseau, `StreamContentError`
+  (`error_finish` DashScope), `ServerOverloadedException`
+- **Pas retryable** — `ContextWindowExceededException`,
+  `QuotaExceededException`, `UsageNotIncludedException`,
+  `CyberPolicyException`, `InvalidPromptException`
+
+Le classifier (§48) décide dans quel bucket une erreur HTTP brute
+atterrit.
+
+
+## 48. Taxonomie d'erreurs OpenAI classifiées (v0.9.1)
+
+> Six sous-classes de `ProviderException` plus un
+> `OpenAIErrorClassifier` qui dispatche sur `error.code` / `error.type`
+> / statut HTTP. Toutes les sous-classes étendent `ProviderException`,
+> donc les catch sites existants continuent à capturer — le nouveau
+> code peut se restreindre au mode d'échec spécifique pour réagir
+> correctement (re-dispatcher avec un autre modèle, escalader à un
+> opérateur, ne pas retry du tout).
+
+### La taxonomie
+
+| Classe | Retryable ? | Déclencheur |
+|---|---|---|
+| `ContextWindowExceededException` | Non | `context_length_exceeded`, `string_above_max_length`, ou message contenant "maximum context length" |
+| `QuotaExceededException` | Non | `insufficient_quota`, `billing_hard_limit_reached` |
+| `UsageNotIncludedException` | Non | `usage_not_included`, `plan_restricted`, "upgrade your plan" |
+| `CyberPolicyException` | Non | `cyber_policy`, `content_policy_violation`, `safety`, mention de policy |
+| `ServerOverloadedException` | **Oui** (retryAfter honoré) | `server_overloaded`, `overloaded`, HTTP 529 |
+| `InvalidPromptException` | Non | `invalid_request_error` ou HTTP 400 simple |
+| `ProviderException` (fallback) | Oui sur 429/5xx | Forme inconnue |
+
+### Catch sites
+
+```php
+try {
+    $result = $agent->run($prompt);
+} catch (ContextWindowExceededException $e) {
+    // Compacter l'historique ou basculer sur un modèle à plus grand contexte
+} catch (QuotaExceededException $e) {
+    // Notifier l'opérateur — cap mensuel atteint
+} catch (UsageNotIncludedException $e) {
+    // Le plan ChatGPT ne couvre pas ce modèle ; upgrade ou changer de mode auth
+} catch (CyberPolicyException $e) {
+    // Remonter le refus à l'utilisateur ; pas de retry
+} catch (ServerOverloadedException $e) {
+    // Retryable — vérifier $e->retryAfterSeconds
+} catch (InvalidPromptException $e) {
+    // Quelque chose est malformé dans la requête ; log + fix, pas de retry
+} catch (ProviderException $e) {
+    // Capture-tout — chaque variante classifiée étend celle-ci
+}
+```
+
+### Les deux chemins partagent le classifier
+
+L'API Responses envoie des événements SSE `response.failed` avec des
+bodies d'erreur structurés ; l'API Chat Completions retourne l'erreur
+dans le body HTTP. Les deux alimentent `OpenAIErrorClassifier::classify()`
+et ressortent avec la même taxonomie — un catch site gère les deux
+chemins wire.
+
+
+## 49. Catalogue MCP déclaratif + sync non destructive (v0.9.1)
+
+> Déposez un `catalog.json` dans le projet, exécutez
+> `superagent mcp sync`, obtenez un `.mcp.json` que les clients MCP aval
+> consomment. Le writer suit le sha256 de tout ce qu'il a produit, donc
+> les re-syncs ne touchent que les fichiers qu'il possède — les éditions
+> utilisateur sont préservées.
+
+### Forme du catalogue
+
+```json
+{
+  "mcpServers": {
+    "sqlite":     {"command": "uvx",  "args": ["mcp-server-sqlite", "--db", "./app.db"]},
+    "brave":      {"command": "npx",  "args": ["@brave/mcp"], "env": {"BRAVE_API_KEY": "${BRAVE_API_KEY}"}},
+    "filesystem": {"command": "npx",  "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]}
+  },
+  "domains": {
+    "baseline": ["filesystem"],
+    "research": ["filesystem", "brave"],
+    "all":      ["filesystem", "brave", "sqlite"]
+  }
+}
+```
+
+Chemins : `.mcp-servers/catalog.json` (préféré) ou `.mcp-catalog.json`
+à la racine du projet. Surcharger avec `--catalog <path>`.
+
+### Contrat non destructif
+
+| État disque | Action | Status |
+|---|---|---|
+| Fichier absent | Écrit | `written` |
+| Hash matche le render | No-op | `unchanged` |
+| Hash matche notre dernière écriture ; render différent | Écrase | `written` |
+| Hash ne matche pas notre dernière écriture | Laisse | `user-edited` |
+| Source retirée ; fichier disque est notre hash | Supprime | `removed` |
+| Source retirée ; l'utilisateur a édité | Garde | `stale-kept` |
+
+Le manifest vit à `<project>/.superagent/mcp-manifest.json`.
+
+### CLI
+
+```bash
+superagent mcp sync                         # écrit catalogue complet
+superagent mcp sync --dry-run               # aperçu, sans écriture disque
+superagent mcp sync --domain=baseline       # seulement le sous-ensemble "baseline"
+superagent mcp sync --servers=brave,sqlite  # noms explicites
+```
+
+### Programmatique
+
+```php
+use SuperAgent\MCP\{Catalog, Manifest, McpJsonWriter};
+
+$catalog  = new Catalog($projectRoot . '/.mcp-servers/catalog.json');
+$manifest = new Manifest($projectRoot . '/.superagent/mcp-manifest.json');
+$writer   = new McpJsonWriter($projectRoot . '/.mcp.json', $manifest);
+
+$result = $writer->sync($catalog->domainServers('baseline'));
+// $result === ['status' => 'written'|'unchanged'|'user-edited', 'path' => '...']
+```
+
+Les writers custom réutilisent la classe de base `ManifestWriter` —
+tout fichier possédé par l'hôte peut hériter de la même sémantique non
+destructive.
+
+
+## 50. DSN de transport wire (v0.9.1)
+
+> 0.9.0 a shipé un wire protocol NDJSON stdio. 0.9.1 ajoute une couche
+> DSN pour que le même NDJSON aille vers un fichier, une socket TCP, une
+> socket unix — ou le SDK peut écouter sur une socket et accepter un
+> plugin IDE qui s'attache après le démarrage de l'agent.
+
+### Catalogue DSN
+
+| DSN | Signification | Usage typique |
+|---|---|---|
+| `stdout` (défaut) / `stderr` | Flux standard | CLI / pipes |
+| `file:///path/to/log.ndjson` | Écriture append-mode | Logs d'audit, replay |
+| `tcp://host:port` | Connexion à un pair en écoute | Processus parent consomme |
+| `unix:///path/to/sock` | Connexion à une socket unix en écoute | Daemon consomme |
+| `listen://tcp/host:port` | Écoute TCP, accepte un client | Plugin IDE s'attache |
+| `listen://unix//path/to/sock` | Écoute socket unix, accepte un client | Plugin éditeur même hôte |
+
+### Usage programmatique
+
+```php
+use SuperAgent\CLI\AgentFactory;
+
+$factory = new AgentFactory();
+[$emitter, $transport] = $factory->makeWireEmitterForDsn('listen://unix//tmp/agent.sock');
+
+// Bloque jusqu'à ce qu'un client se connecte (défaut 30s timeout) :
+// L'agent tourne — chaque événement sort via l'emitter :
+$agent->run($prompt, ['wire_emitter' => $emitter]);
+
+$transport->close();   // ferme la socket d'écoute (le flux peer appartient à l'appelant)
+```
+
+### Sémantique de déconnexion client
+
+Les sockets peer sont en non-bloquant. Si le consommateur disparaît en
+milieu de run, le `fwrite` du renderer retourne 0 octets, ce que
+`WireStreamOutput` tolère — la boucle agent continue. Pas d'exception,
+pas de blocage.
+
+### Récupération de socket obsolète
+
+Les variantes `listen://unix` unlink une sock file obsolète avant le
+bind, donc un fichier laissé par un agent qui a crashé ne bloque pas.
+Si le bind échoue toujours (un autre processus détient la socket), la
+factory lève `RuntimeException` avec l'errno.
+
+
+## 51. Petits ajouts 0.9.1
+
+Groupés ici parce que chacun est un concept d'un paragraphe.
+
+### Passthrough `idempotency_key`
+
+```php
+$result = $agent->run($prompt, ['idempotency_key' => 'job-42:turn-7']);
+$result->idempotencyKey;   // tronqué à 80 chars, null si pas passé
+```
+
+Le SDK ne persiste ni ne déduplique sur la clé lui-même — les hôtes
+qui écrivent `ai_usage_logs` la lisent sur le résultat pour
+implémenter leur propre fenêtre de déduplication. Les workers de
+queue parallèles qui retry le même tour logique peuvent maintenant
+replier leurs écritures.
+
+### Audit de sortie agent (`output_subdir`)
+
+```php
+$agent->run('...', [
+    'output_subdir' => '/abs/path/to/reports/analyst-1',
+]);
+```
+
+Gate opt-in pour (a) un bloc de garde CJK-aware préfixé au prompt du
+sous-agent et (b) un scan filesystem post-sortie. Le scan attrape :
+
+- Extensions hors whitelist (défaut `.md / .csv / .png`)
+- Noms de fichiers réservés au consolidator (`summary.md` /
+  `mindmap.md` / `flowchart.md` + `摘要.md` / `思维导图.md` /
+  `流程图.md`)
+- Sous-répertoires de rôles frères (`ceo`, `cfo`, `cto`,
+  `marketing`, … ou slugs kebab-case)
+
+Les résultats reviennent comme `outputWarnings: list<string>` sur le
+résultat d'outil. Ne modifie jamais le disque — l'hôte décide s'il
+re-dispatch.
+
+### Kimi `$web_fetch` + `$code_interpreter`
+
+Deux builtins hébergés Moonshot de plus à côté du `$web_search` de
+0.9.0 :
+
+```php
+$tools = [
+    new KimiMoonshotWebSearchTool(),
+    new KimiMoonshotWebFetchTool(),
+    new KimiMoonshotCodeInterpreterTool(),
+];
+$agent = new Agent(['provider' => 'kimi', 'tools' => $tools]);
+```
+
+`$code_interpreter` déclare les attributs `network / cost / sensitive`
+(le code tourne dans le sandbox Moonshot côté serveur) ;
+`ToolSecurityValidator` l'attrape sous `SUPERAGENT_OFFLINE=1` ou en
+modes permission read-only.
+
+### En-têtes déclaratifs `env_http_headers` + `http_headers`
+
+```php
+new Agent([
+    'provider'         => 'openai',
+    'env_http_headers' => [
+        'OpenAI-Project'      => 'OPENAI_PROJECT',      // envoyé uniquement si env défini + non vide
+        'OpenAI-Organization' => 'OPENAI_ORGANIZATION',
+    ],
+    'http_headers' => ['x-app' => 'my-host-app'],       // statique, toujours envoyé
+]);
+```
+
+Aucun nouvel en-tête ne nécessite de changer la classe provider —
+déclarer le mapping, définir l'env, déployer.
+
+### `TraceContext` pour OpenAI Responses
+
+```php
+use SuperAgent\Support\TraceContext;
+
+$tc = TraceContext::fresh();                 // ou ::parse($incomingHeaderValue)
+$agent->run($prompt, ['trace_context' => $tc]);
+// OU strings bruts :
+$agent->run($prompt, [
+    'traceparent' => '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    'tracestate'  => 'vendor=abc',
+]);
+```
+
+Se replie dans l'enveloppe `client_metadata` de l'API Responses ; les
+logs côté OpenAI portent votre trace ID. Silent drop sur traceparent
+invalide — un header malformé ne casse jamais un run.
+
+### `LanguageDetector`
+
+```php
+LanguageDetector::isCjk('分析这份报告');   // true
+LanguageDetector::pick($prompt, ['zh' => '...', 'en' => '...']);
+```
+
+Gate binaire sur le bloc d'idéogrammes U+4E00..U+9FFF — primitif à
+dessein. Utilisé par `AgentTool::buildProductivityInfo()` pour
+localiser le texte `productivityWarning`, et par
+`AgentOutputAuditor::guardBlock()` pour choisir le template de garde
+zh vs en.
+
+### CLI `superagent health` / `doctor`
+
+```bash
+superagent health               # probe cURL 5s de chaque provider configuré
+superagent health --all         # inclut les providers non configurés
+superagent health --json        # lisible machine ; exit non nul à tout échec
+```
+
+Enveloppe `ProviderRegistry::healthCheck()` — distingue rejet d'auth
+(401/403) de timeout réseau de "pas de clé API" pour qu'un opérateur
+corrige la bonne chose sans deviner. Idéal comme étape smoke CI avant
+de lancer des tests d'intégration qui frappent de vrais providers.

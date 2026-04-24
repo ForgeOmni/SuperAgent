@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.1-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.9.2-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -739,6 +739,45 @@ php artisan superagent:health --json
 ```
 
 Voir `docs/LARAVEL.md` pour l'intégration queue, le dispatch de jobs et le schéma `ai_usage_logs`.
+
+---
+
+## Intégrations hôtes
+
+Les frameworks qui embarquent SuperAgent — typiquement des plateformes multi-tenant qui stockent des credentials provider chiffrés en base et instancient un agent par requête — utilisent `ProviderRegistry::createForHost()` au lieu de `create()`. L'hôte passe une forme normalisée, le SDK dispatche vers le bon constructeur via des adapters par provider.
+
+```php
+use SuperAgent\Providers\ProviderRegistry;
+
+// Un appel, tous les providers — pas de `match ($type)` côté hôte.
+$agent = ProviderRegistry::createForHost($sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,
+    'base_url'    => $aiProvider->base_url,
+    'model'       => $resolvedModel,
+    'max_tokens'  => $extra['max_tokens']  ?? null,
+    'region'      => $extra['region']      ?? null,
+    'credentials' => $extra,                // blob opaque ; l'adapter prend ce dont il a besoin
+    'extra'       => $extra,                // passthrough spécifique au provider (organization, reasoning, verbosity, ...)
+]);
+```
+
+Chaque provider de style ChatCompletions (Anthropic, OpenAI, OpenAI-Responses, OpenRouter, Ollama, LM Studio, Gemini, Kimi, Qwen, Qwen-native, GLM, MiniMax) utilise l'adapter pass-through par défaut. Bedrock embarque un adapter intégré qui découpe `credentials.aws_access_key_id` / `aws_secret_access_key` / `aws_region` dans la forme attendue par le SDK AWS.
+
+Les plugins ou hôtes qui doivent personnaliser un adapter en enregistrent un :
+
+```php
+ProviderRegistry::registerHostConfigAdapter('my-custom-provider', function (array $host): array {
+    return [
+        'api_key' => $host['credentials']['my_custom_token'] ?? null,
+        'model'   => $host['model'] ?? 'default-model',
+        // ... transformation arbitraire
+    ];
+});
+```
+
+Les nouvelles clés de provider des futures releases SDK enregistrent leur propre adapter (ou utilisent celui par défaut), donc le code factory côté hôte n'a plus à grossir d'un bras `match` par release.
+
+*Depuis v0.9.2*
 
 ---
 

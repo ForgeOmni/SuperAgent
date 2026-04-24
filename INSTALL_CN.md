@@ -85,7 +85,7 @@ iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps
 验证：
 
 ```bash
-superagent --version    # SuperAgent v0.9.1
+superagent --version    # SuperAgent v0.9.2
 superagent --help
 ```
 
@@ -97,6 +97,8 @@ php artisan vendor:publish --tag=superagent-config
 ```
 
 生成 `config/superagent.php` —— 填入 provider key 和 agent 默认值。service provider、facade (`SuperAgent`)、Artisan 命令（`superagent:chat` / `superagent:mcp` / `superagent:models` / `superagent:health`）自动注册。
+
+**多租户 host**（SaaS 平台、per-workspace 的 provider 配置等，凭据存在数据库里）用 `ProviderRegistry::createForHost($sdkKey, $hostConfig)` 而不是手动 instantiate 每个 provider —— SDK 自己处理构造函数 shape 的 `match ($type)`。见 README 的 [Host 集成](README_CN.md#host-集成)。*v0.9.2 起。*
 
 ---
 

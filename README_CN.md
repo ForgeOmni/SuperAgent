@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.9.1-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.9.2-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -739,6 +739,45 @@ php artisan superagent:health --json
 ```
 
 queue 集成、job 派发、`ai_usage_logs` schema 见 `docs/LARAVEL.md`。
+
+---
+
+## Host 集成
+
+嵌入 SuperAgent 的 framework —— 通常是把 provider 凭据加密存在数据库里、每个请求起一个 agent 的多租户平台 —— 用 `ProviderRegistry::createForHost()` 而不是 `create()`。Host 传规范化后的 shape，SDK 通过 per-provider adapter 分发到对应的构造函数。
+
+```php
+use SuperAgent\Providers\ProviderRegistry;
+
+// 一次调用覆盖所有 provider —— host 侧不再需要 `match ($type)`。
+$agent = ProviderRegistry::createForHost($sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,
+    'base_url'    => $aiProvider->base_url,
+    'model'       => $resolvedModel,
+    'max_tokens'  => $extra['max_tokens']  ?? null,
+    'region'      => $extra['region']      ?? null,
+    'credentials' => $extra,                // 不透明 blob；adapter 按需挑选
+    'extra'       => $extra,                // provider 特定透传（organization / reasoning / verbosity 等）
+]);
+```
+
+每个 ChatCompletions 风格的 provider（Anthropic / OpenAI / OpenAI-Responses / OpenRouter / Ollama / LM Studio / Gemini / Kimi / Qwen / Qwen-native / GLM / MiniMax）都用默认的透传 adapter。Bedrock 自带一个专门的 adapter，把 `credentials.aws_access_key_id` / `aws_secret_access_key` / `aws_region` 拆成 AWS SDK 认识的 shape。
+
+需要定制 adapter 的 plugin 或 host 可以自己注册：
+
+```php
+ProviderRegistry::registerHostConfigAdapter('my-custom-provider', function (array $host): array {
+    return [
+        'api_key' => $host['credentials']['my_custom_token'] ?? null,
+        'model'   => $host['model'] ?? 'default-model',
+        // ... 任意 transform
+    ];
+});
+```
+
+未来 SDK 加的新 provider key 自带自己的 adapter（或走默认），所以 host 侧的工厂代码永远不需要加新 `match` 分支。
+
+*v0.9.2 起*
 
 ---
 

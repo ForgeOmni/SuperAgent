@@ -7690,3 +7690,485 @@ Alibaba 兼容端在 mid-stream 限流 / 瞬时错误时，发一个 final chunk
 
 所有 OpenAI-兼容 provider 都受益，不需要 per-provider opt-in。
 
+
+
+## 45. Host-config adapter 模式（v0.9.2）
+
+> 多租户 host 之前每加一个 SDK provider 类就要多一个 `match ($providerType) { … }`
+> 分支 —— Bedrock 的 AWS 凭据、OpenAI 的 organization、OpenAI-Responses 的
+> reasoning/verbosity、LMStudio 的默认端口。`ProviderRegistry::createForHost()`
+> 把这个分发搬进了 SDK；host 只传一次规范化 shape，后续不再需要碰工厂代码。
+
+### 规范化 host shape
+
+```php
+$agent = ProviderRegistry::createForHost($sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,      // 主凭据
+    'base_url'    => $aiProvider->base_url,               // BYO-proxy / Azure / 自建
+    'model'       => $resolvedModel,                      // null → SDK 默认
+    'max_tokens'  => $extra['max_tokens'] ?? null,
+    'region'      => $extra['region']     ?? null,        // kimi / glm / minimax / qwen / bedrock
+    'credentials' => $extra,                              // 不透明 blob；adapter 按需挑
+    'extra'       => $extra,                              // provider 特定透传
+]);
+```
+
+每个 key 都可选。默认 adapter 挑目标 provider 关心的字段（`api_key` / `base_url` /
+`model` / `max_tokens` / `region`），然后把 `extra` deep-merge 上去但不覆盖顶层
+字段。后一点让 host 能传新 knob（`organization` / `reasoning` / `verbosity` /
+`store`）而不碰 SDK —— provider 构造函数自然收到。
+
+### 内置 adapter
+
+- **默认** —— 透传，覆盖所有 ChatCompletions 风格 provider（Anthropic / OpenAI /
+  OpenAI-Responses / OpenRouter / Ollama / LMStudio / Gemini / Kimi / Qwen /
+  Qwen-native / GLM / MiniMax）。
+- **`bedrock`** —— 把 `credentials.aws_access_key_id` / `aws_secret_access_key` /
+  `aws_region` 拆成 AWS SDK 的构造函数 shape。其他 AWS 字段
+  （session_token / profile）走默认透传。
+
+### 自定义 adapter
+
+```php
+ProviderRegistry::registerHostConfigAdapter('my-custom', function (array $host): array {
+    return [
+        'api_key' => $host['credentials']['my_custom_token'] ?? null,
+        'model'   => $host['model'] ?? 'default-model',
+        // 任意 transform；必须返回 provider 构造函数 shape
+    ];
+});
+
+// 之后：
+ProviderRegistry::createForHost('my-custom', $hostShape);
+```
+
+自定义 adapter 让 plugin 提供的 provider 不用改 SDK 就能注册进来。也允许 host
+覆盖内置 adapter —— 比如需要以不同方式拆分凭据。
+
+### 升级时的价值
+
+0.9.2 之前，SDK 加新 provider（比如 0.9.1 的 `openai-responses`）会强制每个下游
+host patch 它自己的工厂。0.9.2 之后，新 provider 自带 adapter（或用默认），host
+调用点一行都不用改 —— 每个 release 少一个同步点。
+
+### 迁移
+
+Host 如果现在跑手写的 switch：
+
+```php
+// 之前：
+$agent = match ($aiProvider->type) {
+    'openai'  => new OpenAIProvider([...]),
+    'bedrock' => new BedrockProvider([...]),
+    'kimi'    => new KimiProvider([...]),
+    // ... 每个 provider 一个分支 ...
+};
+
+// 之后：
+$agent = ProviderRegistry::createForHost($aiProvider->sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,
+    'base_url'    => $aiProvider->base_url,
+    'model'       => $resolvedModel,
+    'max_tokens'  => $extra['max_tokens'] ?? null,
+    'region'      => $extra['region']     ?? null,
+    'credentials' => $extra,
+    'extra'       => $extra,
+]);
+```
+
+
+## 46. OpenAI Responses API（v0.9.1）
+
+> 专门的 provider：`provider: 'openai-responses'` —— 打 `/v1/responses` 而不是
+> Chat Completions。`Agent` / `AgentResult` surface 相同、工具相同、streaming
+> 相同，但能原生访问 `previous_response_id` 接续、`reasoning.effort`、
+> `prompt_cache_key`、`text.verbosity`，以及 §48 描述的分类错误。
+
+### 最小示例
+
+```php
+$agent = new Agent(['provider' => 'openai-responses', 'model' => 'gpt-5']);
+
+$result = $agent->run('分析这个 repo', [
+    'reasoning'        => ['effort' => 'high', 'summary' => 'auto'],
+    'verbosity'        => 'low',
+    'prompt_cache_key' => 'session:42',
+    'service_tier'     => 'priority',
+    'store'            => true,       // 下轮要用 previous_response_id 必须设 true
+]);
+```
+
+### 多轮不重发历史
+
+```php
+$first  = $agent->run('总结 src/Providers/');
+$respId = $agent->getProvider()->lastResponseId();
+
+// 服务端持有上下文；只发 delta。
+$next = (new Agent([
+    'provider' => 'openai-responses',
+    'options'  => ['previous_response_id' => $respId],
+]))->run('现在对 SSE parser 深入一层');
+```
+
+长会话成本大幅降低 —— 只为新轮次的 input tokens 计费，不再重发整个对话。
+
+### ChatGPT OAuth 路由
+
+`auth_mode: 'oauth'`（或仅传 `access_token` 且不显式设 mode）时，base URL 自动
+切到 `https://chatgpt.com/backend-api/codex`，请求路径去掉 `/v1/` 前缀。
+Plus / Pro / Business 订阅者按订阅额度计费，而不是在 `api.openai.com` 被拒绝。
+
+```php
+new Agent([
+    'provider'     => 'openai-responses',
+    'access_token' => $token,           // 来自 `superagent auth login`
+    'account_id'   => $accountId,       // → chatgpt-account-id header
+]);
+```
+
+### Azure OpenAI
+
+6 个 base URL 标记（`openai.azure.` / `cognitiveservices.azure.` /
+`aoai.azure.` / `azure-api.` / `azurefd.` / `windows.net/openai`）把 provider
+切到 Azure 模式：`api-version` query 自动加上（默认 `2025-04-01-preview`，可通
+`azure_api_version` 覆盖），`api-key` header 与 `Authorization` 并行发送。
+
+```php
+new Agent([
+    'provider'          => 'openai-responses',
+    'base_url'          => 'https://my-resource.openai.azure.com/openai/deployments/gpt-5',
+    'api_key'           => getenv('AZURE_OPENAI_API_KEY'),
+    'azure_api_version' => '2025-04-01-preview',
+]);
+```
+
+### SDK 映射 vs 透传
+
+| 选项 | 映射到 | 说明 |
+|---|---|---|
+| `reasoning: ['effort' => '...', 'summary' => 'auto']` | body 的 `reasoning` object | 或用 `features.thinking.budget_tokens` 自动分桶 |
+| `verbosity: 'low' / 'medium' / 'high'` | `text.verbosity` | 原生 —— 不需要 model id 技巧 |
+| `response_format: {type: 'json_schema', json_schema: {…}}` | `text.format` | 接受 Chat-Completions shape 并重映射 |
+| `prompt_cache_key: 'session:42'` | body `prompt_cache_key` | 服务端 cache 绑定 |
+| `service_tier: 'priority' / 'default' / 'flex' / 'scale'` | body `service_tier` | 透传 |
+| `previous_response_id: 'resp_…'` | body `previous_response_id` | 多轮接续 |
+| `store: true` | body `store` | 接续必备 |
+| `include: ['...']` | body `include` | 透传数组 |
+| `client_metadata: ['key' => 'value']` | body `client_metadata` | 不透明；与 trace context 合并 —— 见 §51 |
+
+### 实验性 WebSocket flag
+
+`experimental_ws_transport: true` 构造函数能识别，但当前会抛
+`FeatureNotSupportedException` —— 配置 shape 保留以便未来迁移，但 WS 传输本身
+在本 release 里未实现。
+
+
+## 47. 分层 retry + 带抖动退避 + SSE idle timeout（v0.9.1）
+
+> 单 knob `max_retries` 退休。SDK 现在把请求级重试（HTTP connect / 4xx / 5xx）
+> 和流级重试（为 `previous_response_id` 接续的 provider 预留）分开，还加了
+> cURL 级的 idle timeout，让静默服务器被杀而不是卡死 loop。
+
+### 配置
+
+```php
+new Agent([
+    'provider'               => 'openai',
+    'request_max_retries'    => 4,        // HTTP connect / 4xx / 5xx（默认 3）
+    'stream_max_retries'     => 5,        // 为 mid-stream resume 预留（默认 5）
+    'stream_idle_timeout_ms' => 60_000,   // SSE 上 cURL low-speed 断流阈值（默认 300_000）
+]);
+```
+
+Legacy `max_retries` 仍然生效 —— 分层 key 未设置时它喂给两个计数器。
+
+### 带抖动退避
+
+```
+delay_ms = clamp(2^attempt * 1000 * jitter, floor: 200, ceiling: 60_000)
+jitter = uniform(0.9, 1.1)
+```
+
+防止多 worker 并发重试在同一"第 N 秒醒来"时刻雪崩。`Retry-After` header 精确
+按服务端给的值（不抖动 —— 服务端知道最清楚）。
+
+### SSE idle timeout
+
+`stream_idle_timeout_ms` 翻译为 cURL 的 `CURLOPT_LOW_SPEED_LIMIT=1` +
+`CURLOPT_LOW_SPEED_TIME=<秒>`。如果吞吐在配置窗口里低于 1 字节/秒，libcurl
+杀连接，SDK 以可重试 transport 错误向上抛。默认 5 分钟 —— 慢网络往下调，本地
+推理时间长的模型往上调。
+
+### 什么可重试，什么不可
+
+- **可重试** —— 429 / 5xx / 网络超时 / `StreamContentError`（DashScope
+  `error_finish`）/ `ServerOverloadedException`
+- **不可重试** —— `ContextWindowExceededException` / `QuotaExceededException` /
+  `UsageNotIncludedException` / `CyberPolicyException` / `InvalidPromptException`
+
+分类器（§48）决定原始 HTTP 错误落进哪个桶。
+
+
+## 48. 分类 OpenAI 错误体系（v0.9.1）
+
+> 6 个 `ProviderException` 子类 + `OpenAIErrorClassifier`，按
+> `error.code` / `error.type` / HTTP 状态派发。所有子类都 extend
+> `ProviderException`，已有 catch 点保持不变 —— 新代码可以 narrow 到具体失败
+> 模式正确反应（换模型重试、通知 operator、干脆不重试）。
+
+### 体系
+
+| 类 | 可重试？ | 触发 |
+|---|---|---|
+| `ContextWindowExceededException` | 否 | `context_length_exceeded`、`string_above_max_length`，或 message 包含 "maximum context length" |
+| `QuotaExceededException` | 否 | `insufficient_quota`、`billing_hard_limit_reached` |
+| `UsageNotIncludedException` | 否 | `usage_not_included`、`plan_restricted`、"upgrade your plan" |
+| `CyberPolicyException` | 否 | `cyber_policy`、`content_policy_violation`、`safety`、policy 关键词 |
+| `ServerOverloadedException` | **是**（honour retryAfter）| `server_overloaded`、`overloaded`、HTTP 529 |
+| `InvalidPromptException` | 否 | `invalid_request_error` 或纯 HTTP 400 |
+| `ProviderException`（兜底）| 429/5xx 可重试 | 未知 shape |
+
+### Catch 点
+
+```php
+try {
+    $result = $agent->run($prompt);
+} catch (ContextWindowExceededException $e) {
+    // 压缩历史或换大 context 模型
+} catch (QuotaExceededException $e) {
+    // 通知 operator —— 月级上限打满
+} catch (UsageNotIncludedException $e) {
+    // ChatGPT 套餐不含此模型；升级或切 auth mode
+} catch (CyberPolicyException $e) {
+    // 向用户 surface refusal；不重试
+} catch (ServerOverloadedException $e) {
+    // 可重试 —— 查 $e->retryAfterSeconds
+} catch (InvalidPromptException $e) {
+    // 请求 body 有问题；log + 修，不重试
+} catch (ProviderException $e) {
+    // 兜底 —— 每个分类变体都 extend 它
+}
+```
+
+### 两条路径共用分类器
+
+Responses API 通过 `response.failed` SSE 事件发结构化错误 body；Chat Completions
+在 HTTP response body 里返回错误。两者都喂给 `OpenAIErrorClassifier::classify()`，
+得到同一套体系 —— 一个 catch 点处理两条 wire path。
+
+
+## 49. MCP 声明式 catalog + 非破坏性 sync（v0.9.1）
+
+> 把 `catalog.json` 放进项目，跑 `superagent mcp sync`，得到一个 `.mcp.json`
+> 给下游 MCP 客户端用。writer 追踪它产出过每个文件的 sha256，所以 re-sync 只
+> 碰它拥有的文件 —— 用户编辑被保留。
+
+### Catalog shape
+
+```json
+{
+  "mcpServers": {
+    "sqlite":     {"command": "uvx",  "args": ["mcp-server-sqlite", "--db", "./app.db"]},
+    "brave":      {"command": "npx",  "args": ["@brave/mcp"], "env": {"BRAVE_API_KEY": "${BRAVE_API_KEY}"}},
+    "filesystem": {"command": "npx",  "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]}
+  },
+  "domains": {
+    "baseline": ["filesystem"],
+    "research": ["filesystem", "brave"],
+    "all":      ["filesystem", "brave", "sqlite"]
+  }
+}
+```
+
+路径：项目根下的 `.mcp-servers/catalog.json`（首选）或 `.mcp-catalog.json`。用
+`--catalog <path>` 覆盖。
+
+### 非破坏契约
+
+| 磁盘状态 | 动作 | 状态 |
+|---|---|---|
+| 文件不存在 | 写 | `written` |
+| hash 与 render 匹配 | no-op | `unchanged` |
+| hash 与我们上次写的匹配；render 不同 | 覆盖 | `written` |
+| hash 与我们上次写的不匹配 | 不动 | `user-edited` |
+| 源移除；磁盘文件是我们的 hash | 删除 | `removed` |
+| 源移除；用户已编辑文件 | 保留 | `stale-kept` |
+
+Manifest 位于 `<project>/.superagent/mcp-manifest.json`。
+
+### CLI
+
+```bash
+superagent mcp sync                         # 写全量
+superagent mcp sync --dry-run               # 预览，不写盘
+superagent mcp sync --domain=baseline       # 仅 "baseline" 子集
+superagent mcp sync --servers=brave,sqlite  # 显式名字
+```
+
+### 编程
+
+```php
+use SuperAgent\MCP\{Catalog, Manifest, McpJsonWriter};
+
+$catalog  = new Catalog($projectRoot . '/.mcp-servers/catalog.json');
+$manifest = new Manifest($projectRoot . '/.superagent/mcp-manifest.json');
+$writer   = new McpJsonWriter($projectRoot . '/.mcp.json', $manifest);
+
+$result = $writer->sync($catalog->domainServers('baseline'));
+// $result === ['status' => 'written'|'unchanged'|'user-edited', 'path' => '...']
+```
+
+自定义 writer 复用 `ManifestWriter` 基类 —— 任何 host 拥有的文件都能继承同一套
+非破坏语义。
+
+
+## 50. Wire 传输 DSN（v0.9.1）
+
+> 0.9.0 出了 stdio NDJSON wire 协议。0.9.1 加了一层 DSN，让同样的 NDJSON 可以
+> 发到文件、TCP socket、unix socket —— 或者 SDK 监听某个 socket，接受在 agent
+> 启动后才连上来的 IDE 插件。
+
+### DSN 目录
+
+| DSN | 含义 | 典型用法 |
+|---|---|---|
+| `stdout`（默认）/ `stderr` | 标准流 | CLI / pipe |
+| `file:///path/to/log.ndjson` | append 写文件 | 审计日志 / 回放 |
+| `tcp://host:port` | 连接监听中的 peer | 父进程消费 |
+| `unix:///path/to/sock` | 连接监听中的 unix socket | daemon 消费 |
+| `listen://tcp/host:port` | 监听 TCP，接受一个 client | IDE 插件连进来 |
+| `listen://unix//path/to/sock` | 监听 unix socket，接受一个 client | 同主机编辑器插件 |
+
+### 编程使用
+
+```php
+use SuperAgent\CLI\AgentFactory;
+
+$factory = new AgentFactory();
+[$emitter, $transport] = $factory->makeWireEmitterForDsn('listen://unix//tmp/agent.sock');
+
+// 阻塞等 client 连进来（默认 30s 超时）：
+// Agent 跑 —— 所有事件通过 emitter 流出去：
+$agent->run($prompt, ['wire_emitter' => $emitter]);
+
+$transport->close();   // 关监听 socket（peer 流的 lifecycle 归调用方）
+```
+
+### Client 掉线语义
+
+Peer socket 设为非阻塞。如果消费者跑路，renderer 的 `fwrite` 返 0 字节，
+`WireStreamOutput` 能容忍 —— agent loop 照常跑。不抛异常，不卡住。
+
+### 陈旧 socket 回收
+
+`listen://unix` 变体在 bind 前会 unlink 陈旧 sock 文件，让上次 crash 的 agent
+留下的文件不挡路。如果 bind 还失败（另一个进程持有 socket），工厂抛
+`RuntimeException` 带 errno。
+
+
+## 51. 小型 0.9.1 增项
+
+下面每条都是一段话的概念，批量列出。
+
+### `idempotency_key` 透传
+
+```php
+$result = $agent->run($prompt, ['idempotency_key' => 'job-42:turn-7']);
+$result->idempotencyKey;   // 截断到 80 字符，未传则为 null
+```
+
+SDK 自己不持久化或去重 —— 写 `ai_usage_logs` 的 host 从结果上读它实现自己的去重
+窗口。并行 queue worker 重试同一逻辑 turn 时可以塌缩成一次写入。
+
+### Agent output 审计（`output_subdir`）
+
+```php
+$agent->run('...', [
+    'output_subdir' => '/abs/path/to/reports/analyst-1',
+]);
+```
+
+opt-in 门控两件事：(a) CJK 感知的 guard block 注入子 agent prompt；(b) 退出后
+文件系统扫描。扫描捕捉：
+
+- 非白名单扩展名（默认 `.md / .csv / .png`）
+- consolidator 保留文件名（`summary.md` / `mindmap.md` / `flowchart.md` +
+  `摘要.md` / `思维导图.md` / `流程图.md`）
+- 同级角色子目录（`ceo` / `cfo` / `cto` / `marketing` / … 或 kebab-case 角色
+  slug）
+
+发现以 `outputWarnings: list<string>` 返回在工具结果上。永远不改磁盘 —— host
+决定是否重新派发。
+
+### Kimi `$web_fetch` + `$code_interpreter`
+
+和 0.9.0 的 `$web_search` 并列的 Moonshot 服务端托管 builtin：
+
+```php
+$tools = [
+    new KimiMoonshotWebSearchTool(),
+    new KimiMoonshotWebFetchTool(),
+    new KimiMoonshotCodeInterpreterTool(),
+];
+$agent = new Agent(['provider' => 'kimi', 'tools' => $tools]);
+```
+
+`$code_interpreter` 声明 `network / cost / sensitive` 属性（代码在 Moonshot 沙箱
+里服务端执行）；`ToolSecurityValidator` 会在 `SUPERAGENT_OFFLINE=1` 或只读权限
+模式下拦住它。
+
+### `env_http_headers` + `http_headers` 声明式
+
+```php
+new Agent([
+    'provider'         => 'openai',
+    'env_http_headers' => [
+        'OpenAI-Project'      => 'OPENAI_PROJECT',      // 仅当 env 设置且非空时发
+        'OpenAI-Organization' => 'OPENAI_ORGANIZATION',
+    ],
+    'http_headers' => ['x-app' => 'my-host-app'],       // 静态，总是发
+]);
+```
+
+加新 header 不再需要改 provider 类 —— 声明 mapping、设 env、上线。
+
+### OpenAI Responses 的 `TraceContext`
+
+```php
+use SuperAgent\Support\TraceContext;
+
+$tc = TraceContext::fresh();                 // 或 ::parse($incomingHeaderValue)
+$agent->run($prompt, ['trace_context' => $tc]);
+// 或传原始字符串：
+$agent->run($prompt, [
+    'traceparent' => '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    'tracestate'  => 'vendor=abc',
+]);
+```
+
+折进 Responses API 的 `client_metadata` envelope；OpenAI 端日志带上你的 trace
+ID。非法 traceparent 静默丢弃 —— 畸形 header 永远不会破坏一次运行。
+
+### `LanguageDetector`
+
+```php
+LanguageDetector::isCjk('分析这份报告');   // true
+LanguageDetector::pick($prompt, ['zh' => '...', 'en' => '...']);
+```
+
+U+4E00..U+9FFF 表意文字区段的二元判定 —— 故意做得原始。`AgentTool::buildProductivityInfo()`
+用它本地化 `productivityWarning`，`AgentOutputAuditor::guardBlock()` 用它挑 zh
+vs en guard 模板。
+
+### `superagent health` / `doctor` CLI
+
+```bash
+superagent health               # 对每个已配置 provider 做 5s cURL 探针
+superagent health --all         # 包括未配置的 provider
+superagent health --json        # 机器可读；任何失败都返回非零
+```
+
+封装 `ProviderRegistry::healthCheck()` —— 区分 auth 拒绝（401/403）vs 网络超时
+vs "没 API key"，operator 可以对症下药而不用猜。适合作为 CI 冒烟步骤，跑真
+provider 的集成测试前确认。

@@ -85,7 +85,7 @@ iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps
 Vérifier :
 
 ```bash
-superagent --version    # SuperAgent v0.9.1
+superagent --version    # SuperAgent v0.9.2
 superagent --help
 ```
 
@@ -97,6 +97,8 @@ php artisan vendor:publish --tag=superagent-config
 ```
 
 `config/superagent.php` existe maintenant — renseignez les clés provider et défauts agent. Le service provider, la façade (`SuperAgent`) et les commandes Artisan (`superagent:chat`, `superagent:mcp`, `superagent:models`, `superagent:health`) s'enregistrent automatiquement.
+
+**Hôtes multi-tenant** qui stockent les credentials en ligne de base (plateformes SaaS, config provider par workspace, etc.) utilisent `ProviderRegistry::createForHost($sdkKey, $hostConfig)` au lieu d'instancier chaque provider directement — le SDK gère le `match ($type)` sur la forme du constructeur. Voir [Intégrations hôtes](README_FR.md#intégrations-hôtes) dans le README. *Depuis v0.9.2.*
 
 ---
 

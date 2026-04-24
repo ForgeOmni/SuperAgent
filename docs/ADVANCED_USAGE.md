@@ -7045,3 +7045,522 @@ picks it up.
 These hardening items apply to every current and future OpenAI-compat
 provider — no per-provider opt-in required.
 
+
+
+## 45. Host-config adapter pattern (v0.9.2)
+
+> Multi-tenant hosts used to grow a `match ($providerType) { … }` arm for
+> every new SDK provider class — Bedrock's AWS credentials, OpenAI's
+> organization, OpenAI-Responses' reasoning/verbosity, LMStudio's default
+> port. `ProviderRegistry::createForHost()` moves that dispatch into the
+> SDK; hosts pass a normalised shape once and never revisit the factory.
+
+### The normalised host shape
+
+```php
+$agent = ProviderRegistry::createForHost($sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,      // primary credential
+    'base_url'    => $aiProvider->base_url,               // BYO-proxy / Azure / self-hosted
+    'model'       => $resolvedModel,                      // null → SDK default
+    'max_tokens'  => $extra['max_tokens'] ?? null,
+    'region'      => $extra['region']     ?? null,        // kimi / glm / minimax / qwen / bedrock
+    'credentials' => $extra,                              // opaque blob; adapter picks what it needs
+    'extra'       => $extra,                              // per-provider passthrough
+]);
+```
+
+Every key is optional. The default adapter cherry-picks what the target
+provider cares about (`api_key`, `base_url`, `model`, `max_tokens`,
+`region`) and deep-merges `extra` on top without overwriting those
+top-level fields. That last bit is what lets a host pass new knobs
+(`organization`, `reasoning`, `verbosity`, `store`) without touching
+the SDK — the provider constructor receives them naturally.
+
+### Built-in adapters
+
+- **Default** — pass-through, covers every ChatCompletions-style
+  provider (Anthropic, OpenAI, OpenAI-Responses, OpenRouter, Ollama,
+  LMStudio, Gemini, Kimi, Qwen, Qwen-native, GLM, MiniMax).
+- **`bedrock`** — splits `credentials.aws_access_key_id` /
+  `aws_secret_access_key` / `aws_region` into the AWS SDK's
+  constructor shape. Other AWS fields (session_token, profile) ride
+  the default passthrough.
+
+### Custom adapters
+
+```php
+ProviderRegistry::registerHostConfigAdapter('my-custom', function (array $host): array {
+    return [
+        'api_key' => $host['credentials']['my_custom_token'] ?? null,
+        'model'   => $host['model'] ?? 'default-model',
+        // any transform you need; must return the provider's constructor shape
+    ];
+});
+
+// Thereafter:
+ProviderRegistry::createForHost('my-custom', $hostShape);
+```
+
+Custom adapters let plugin-supplied providers register without any
+SDK change. They also let a host override a built-in adapter if it
+needs to split credentials differently from the default.
+
+### Why this matters on upgrades
+
+Before 0.9.2, adding a provider to the SDK (like `openai-responses` in
+0.9.1) forced every downstream host to patch its factory. After 0.9.2,
+the new provider ships with its own adapter (or uses the default) and
+the host call site doesn't change at all — one less synchronisation
+point per release.
+
+### Migration
+
+Hosts currently running a handwritten switch:
+
+```php
+// Before:
+$agent = match ($aiProvider->type) {
+    'openai'  => new OpenAIProvider([...]),
+    'bedrock' => new BedrockProvider([...]),
+    'kimi'    => new KimiProvider([...]),
+    // ... one arm per provider ...
+};
+
+// After:
+$agent = ProviderRegistry::createForHost($aiProvider->sdkKey, [
+    'api_key'     => $aiProvider->decrypted_api_key,
+    'base_url'    => $aiProvider->base_url,
+    'model'       => $resolvedModel,
+    'max_tokens'  => $extra['max_tokens'] ?? null,
+    'region'      => $extra['region']     ?? null,
+    'credentials' => $extra,
+    'extra'       => $extra,
+]);
+```
+
+
+## 46. OpenAI Responses API (v0.9.1)
+
+> Dedicated provider at `provider: 'openai-responses'` — hits
+> `/v1/responses` instead of Chat Completions. Same `Agent` / `AgentResult`
+> surface, same tools, same streaming, but with first-class access to
+> `previous_response_id` continuation, native `reasoning.effort`,
+> `prompt_cache_key`, `text.verbosity`, and the classified error
+> taxonomy described in §48.
+
+### Minimal example
+
+```php
+$agent = new Agent(['provider' => 'openai-responses', 'model' => 'gpt-5']);
+
+$result = $agent->run('analyse the repo', [
+    'reasoning'        => ['effort' => 'high', 'summary' => 'auto'],
+    'verbosity'        => 'low',
+    'prompt_cache_key' => 'session:42',
+    'service_tier'     => 'priority',
+    'store'            => true,       // required if you want previous_response_id next turn
+]);
+```
+
+### Multi-turn without resending history
+
+```php
+$first  = $agent->run('summarise src/Providers/');
+$respId = $agent->getProvider()->lastResponseId();
+
+// Server holds the context; we only send the delta.
+$next = (new Agent([
+    'provider' => 'openai-responses',
+    'options'  => ['previous_response_id' => $respId],
+]))->run('now go deeper on the SSE parser');
+```
+
+Major cost saving on long sessions — you're billed for the new turn's
+input tokens, not for re-sending the entire conversation.
+
+### ChatGPT OAuth routing
+
+When `auth_mode: 'oauth'` (or just `access_token` + no explicit mode),
+the base URL auto-flips to `https://chatgpt.com/backend-api/codex`
+and the request path drops the `/v1/` prefix. Plus / Pro / Business
+subscribers bill against their subscription instead of getting
+rejected at `api.openai.com`.
+
+```php
+new Agent([
+    'provider'     => 'openai-responses',
+    'access_token' => $token,           // from `superagent auth login`
+    'account_id'   => $accountId,       // → chatgpt-account-id header
+]);
+```
+
+### Azure OpenAI
+
+Six base-URL markers (`openai.azure.`, `cognitiveservices.azure.`,
+`aoai.azure.`, `azure-api.`, `azurefd.`, `windows.net/openai`) flip
+the provider into Azure mode: `api-version` query-string added
+(default `2025-04-01-preview`, override via `azure_api_version`),
+`api-key` header set alongside `Authorization`.
+
+```php
+new Agent([
+    'provider'          => 'openai-responses',
+    'base_url'          => 'https://my-resource.openai.azure.com/openai/deployments/gpt-5',
+    'api_key'           => getenv('AZURE_OPENAI_API_KEY'),
+    'azure_api_version' => '2025-04-01-preview',
+]);
+```
+
+### What the SDK maps vs passes through
+
+| Option | Maps to | Notes |
+|---|---|---|
+| `reasoning: ['effort' => '...', 'summary' => 'auto']` | body `reasoning` object | Or `features.thinking.budget_tokens` auto-buckets into effort tiers |
+| `verbosity: 'low' / 'medium' / 'high'` | `text.verbosity` | Native — no model-id hacks |
+| `response_format: {type: 'json_schema', json_schema: {…}}` | `text.format` | Chat-Completions shape accepted, remapped |
+| `prompt_cache_key: 'session:42'` | body `prompt_cache_key` | Server-side cache pin |
+| `service_tier: 'priority' / 'default' / 'flex' / 'scale'` | body `service_tier` | Pass-through |
+| `previous_response_id: 'resp_…'` | body `previous_response_id` | Multi-turn continuation |
+| `store: true` | body `store` | Required for continuation |
+| `include: ['...']` | body `include` | Pass-through array |
+| `client_metadata: ['key' => 'value']` | body `client_metadata` | Opaque; merged with trace context — see §51 |
+
+### Experimental WebSocket flag
+
+`experimental_ws_transport: true` is recognised by the constructor but
+currently raises `FeatureNotSupportedException` — the config shape
+survives future migrations, but the WS transport itself is not
+implemented in this release.
+
+
+## 47. Layered retry + jittered backoff + SSE idle timeout (v0.9.1)
+
+> One-knob `max_retries` is gone. The SDK now splits request-level
+> retries (for HTTP connect / 4xx / 5xx errors) from stream-level
+> retries (reserved for providers that can resume mid-stream via
+> `previous_response_id`), and adds a cURL-level idle timeout so a
+> silent server kills the connection instead of hanging the loop.
+
+### Config
+
+```php
+new Agent([
+    'provider'               => 'openai',
+    'request_max_retries'    => 4,        // HTTP connect / 4xx / 5xx (default 3)
+    'stream_max_retries'     => 5,        // reserved for mid-stream resume (default 5)
+    'stream_idle_timeout_ms' => 60_000,   // cURL low-speed cutoff on SSE (default 300_000)
+]);
+```
+
+Legacy `max_retries` still works — it seeds both counters when the
+layered keys aren't set.
+
+### Jittered backoff
+
+```
+delay_ms = clamp(2^attempt * 1000 * jitter, floor: 200, ceiling: 60_000)
+jitter = uniform(0.9, 1.1)
+```
+
+Prevents thundering-herd retries from parallel workers colliding on
+the same "wake up at exactly N seconds" schedule. `Retry-After`
+headers are honoured exactly — the server is telling us when to come
+back, no jitter applied.
+
+### SSE idle timeout
+
+Translates `stream_idle_timeout_ms` into cURL's
+`CURLOPT_LOW_SPEED_LIMIT=1` + `CURLOPT_LOW_SPEED_TIME=<seconds>`.
+If throughput drops below 1 byte per second for the configured
+window, libcurl kills the connection and the SDK surfaces it as a
+retryable transport error. Default 5 minutes — tune down on a slow
+network or up if you're running on-premise against a model that
+reasons for a long time.
+
+### What stays retryable, what doesn't
+
+- **Retryable** — 429, 5xx, network timeouts, `StreamContentError`
+  (DashScope `error_finish`), `ServerOverloadedException`
+- **Not retryable** — `ContextWindowExceededException`,
+  `QuotaExceededException`, `UsageNotIncludedException`,
+  `CyberPolicyException`, `InvalidPromptException`
+
+The classifier (§48) decides which bucket a raw HTTP error lands in.
+
+
+## 48. Classified OpenAI error taxonomy (v0.9.1)
+
+> Six `ProviderException` subclasses plus an `OpenAIErrorClassifier`
+> that dispatches on `error.code` / `error.type` / HTTP status. All
+> subclasses extend `ProviderException`, so existing catch sites
+> keep catching — new code can narrow on the specific failure mode
+> to react correctly (re-dispatch with a different model, escalate
+> to operator, don't retry at all).
+
+### The taxonomy
+
+| Class | Retryable? | Trigger |
+|---|---|---|
+| `ContextWindowExceededException` | No | `context_length_exceeded`, `string_above_max_length`, or message mentions "maximum context length" |
+| `QuotaExceededException` | No | `insufficient_quota`, `billing_hard_limit_reached` |
+| `UsageNotIncludedException` | No | `usage_not_included`, `plan_restricted`, "upgrade your plan" |
+| `CyberPolicyException` | No | `cyber_policy`, `content_policy_violation`, `safety`, policy-mention |
+| `ServerOverloadedException` | **Yes** (retryAfter honoured) | `server_overloaded`, `overloaded`, HTTP 529 |
+| `InvalidPromptException` | No | `invalid_request_error` or plain HTTP 400 |
+| `ProviderException` (fallback) | Yes on 429/5xx | Unknown shape |
+
+### Catch sites
+
+```php
+try {
+    $result = $agent->run($prompt);
+} catch (ContextWindowExceededException $e) {
+    // Compact history or swap to a larger-context model
+} catch (QuotaExceededException $e) {
+    // Notify operator — month-level cap hit
+} catch (UsageNotIncludedException $e) {
+    // ChatGPT plan doesn't include this model; upgrade or swap auth mode
+} catch (CyberPolicyException $e) {
+    // Surface the refusal to the user; don't retry
+} catch (ServerOverloadedException $e) {
+    // Retryable — check $e->retryAfterSeconds
+} catch (InvalidPromptException $e) {
+    // Something malformed in the request; log + fix, don't retry
+} catch (ProviderException $e) {
+    // Catch-all — every classified variant extends this
+}
+```
+
+### Both paths share the classifier
+
+The Responses API sends `response.failed` SSE events with structured
+error bodies; the Chat Completions API returns the error in the HTTP
+response body. Both feed `OpenAIErrorClassifier::classify()` and come
+out as the same taxonomy — one catch site handles either wire path.
+
+
+## 49. MCP declarative catalog + non-destructive sync (v0.9.1)
+
+> Drop a `catalog.json` in the project, run `superagent mcp sync`,
+> get a `.mcp.json` that downstream MCP clients consume. The writer
+> tracks sha256 of everything it's produced so re-syncs only touch
+> files it owns — user edits are preserved.
+
+### Catalog shape
+
+```json
+{
+  "mcpServers": {
+    "sqlite":     {"command": "uvx",  "args": ["mcp-server-sqlite", "--db", "./app.db"]},
+    "brave":      {"command": "npx",  "args": ["@brave/mcp"], "env": {"BRAVE_API_KEY": "${BRAVE_API_KEY}"}},
+    "filesystem": {"command": "npx",  "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]}
+  },
+  "domains": {
+    "baseline": ["filesystem"],
+    "research": ["filesystem", "brave"],
+    "all":      ["filesystem", "brave", "sqlite"]
+  }
+}
+```
+
+Paths: `.mcp-servers/catalog.json` (preferred) or `.mcp-catalog.json`
+at the project root. Override with `--catalog <path>`.
+
+### Non-destructive contract
+
+| On-disk state | Action | Status |
+|---|---|---|
+| File absent | Write | `written` |
+| Hash matches render | No-op | `unchanged` |
+| Hash matches our last write; render differs | Overwrite | `written` |
+| Hash doesn't match our last write | Leave alone | `user-edited` |
+| Source removed; file on disk is our hash | Delete | `removed` |
+| Source removed; user has edited the file | Keep | `stale-kept` |
+
+Manifest lives at `<project>/.superagent/mcp-manifest.json`.
+
+### CLI
+
+```bash
+superagent mcp sync                         # write full catalog
+superagent mcp sync --dry-run               # preview, no disk writes
+superagent mcp sync --domain=baseline       # only the "baseline" subset
+superagent mcp sync --servers=brave,sqlite  # explicit names
+```
+
+### Programmatic
+
+```php
+use SuperAgent\MCP\{Catalog, Manifest, McpJsonWriter};
+
+$catalog  = new Catalog($projectRoot . '/.mcp-servers/catalog.json');
+$manifest = new Manifest($projectRoot . '/.superagent/mcp-manifest.json');
+$writer   = new McpJsonWriter($projectRoot . '/.mcp.json', $manifest);
+
+$result = $writer->sync($catalog->domainServers('baseline'));
+// $result === ['status' => 'written'|'unchanged'|'user-edited', 'path' => '...']
+```
+
+Custom writers reuse the `ManifestWriter` base class — any host-owned
+file can inherit the same non-destructive semantics.
+
+
+## 50. Wire transport DSN (v0.9.1)
+
+> 0.9.0 shipped a stdio NDJSON wire protocol. 0.9.1 adds a DSN layer
+> so the same NDJSON can go to a file, a TCP socket, a unix socket —
+> or the SDK can listen on a socket and accept an IDE plugin that
+> attaches after the agent starts.
+
+### DSN catalogue
+
+| DSN | Meaning | Typical use |
+|---|---|---|
+| `stdout` (default) / `stderr` | Standard streams | CLI / pipes |
+| `file:///path/to/log.ndjson` | Append-mode write | Audit logs, replay |
+| `tcp://host:port` | Connect to a listening peer | Parent process consumes |
+| `unix:///path/to/sock` | Connect to a listening unix socket | Daemon consumes |
+| `listen://tcp/host:port` | Listen on TCP, accept one client | IDE plugin attaches |
+| `listen://unix//path/to/sock` | Listen on unix socket, accept one client | Editor plugin on same host |
+
+### Programmatic use
+
+```php
+use SuperAgent\CLI\AgentFactory;
+
+$factory = new AgentFactory();
+[$emitter, $transport] = $factory->makeWireEmitterForDsn('listen://unix//tmp/agent.sock');
+
+// Block until a client attaches (default 30s timeout):
+// Agent runs — every event flows out through the emitter:
+$agent->run($prompt, ['wire_emitter' => $emitter]);
+
+$transport->close();   // close the listening socket (peer stream belongs to the caller)
+```
+
+### Client-disconnect semantics
+
+Peer sockets are set non-blocking. If the consumer goes away mid-run
+the renderer's `fwrite` returns 0 bytes, which `WireStreamOutput`
+tolerates — the agent loop keeps running. No exception, no hang.
+
+### Stale-socket recovery
+
+`listen://unix` variants unlink a stale sock file before binding so a
+crashed-previous-agent doesn't block the new one. If binding still
+fails (another process holds the socket), the factory raises a
+`RuntimeException` with the errno.
+
+
+## 51. Small 0.9.1 additions
+
+Batched here because each is a one-paragraph concept.
+
+### `idempotency_key` passthrough
+
+```php
+$result = $agent->run($prompt, ['idempotency_key' => 'job-42:turn-7']);
+$result->idempotencyKey;   // truncated to 80 chars, null if not passed
+```
+
+The SDK does not persist or dedupe on the key itself — hosts that
+write `ai_usage_logs` read it off the result to implement their own
+dedup window. Parallel queue workers retrying the same logical turn
+can now collapse their writes.
+
+### Agent output audit (`output_subdir`)
+
+```php
+$agent->run('...', [
+    'output_subdir' => '/abs/path/to/reports/analyst-1',
+]);
+```
+
+Opt-in gate for (a) a CJK-aware guard block prepended to the child
+agent's prompt and (b) a post-exit filesystem scan. The scan catches:
+
+- Non-whitelisted extensions (default `.md / .csv / .png`)
+- Consolidator-reserved filenames (`summary.md` / `mindmap.md` /
+  `flowchart.md` + `摘要.md` / `思维导图.md` / `流程图.md`)
+- Sibling-role sub-directories (`ceo`, `cfo`, `cto`, `marketing`, …
+  or kebab-case role slugs)
+
+Findings return as `outputWarnings: list<string>` on the tool
+result. Never modifies disk — the host decides whether to re-dispatch.
+
+### Kimi `$web_fetch` + `$code_interpreter`
+
+Two more Moonshot server-hosted builtins alongside the 0.9.0
+`$web_search`:
+
+```php
+$tools = [
+    new KimiMoonshotWebSearchTool(),
+    new KimiMoonshotWebFetchTool(),
+    new KimiMoonshotCodeInterpreterTool(),
+];
+$agent = new Agent(['provider' => 'kimi', 'tools' => $tools]);
+```
+
+`$code_interpreter` declares `network / cost / sensitive` attributes
+(code runs server-side in Moonshot's sandbox); `ToolSecurityValidator`
+catches it under `SUPERAGENT_OFFLINE=1` or read-only permission modes.
+
+### `env_http_headers` + `http_headers` declarative mapping
+
+```php
+new Agent([
+    'provider'         => 'openai',
+    'env_http_headers' => [
+        'OpenAI-Project'      => 'OPENAI_PROJECT',      // sent only when env set + non-empty
+        'OpenAI-Organization' => 'OPENAI_ORGANIZATION',
+    ],
+    'http_headers' => ['x-app' => 'my-host-app'],       // static, always sent
+]);
+```
+
+No new header requires a provider-class change — declare the mapping,
+set the env, ship.
+
+### `TraceContext` for OpenAI Responses
+
+```php
+use SuperAgent\Support\TraceContext;
+
+$tc = TraceContext::fresh();                 // or ::parse($incomingHeaderValue)
+$agent->run($prompt, ['trace_context' => $tc]);
+// OR raw strings:
+$agent->run($prompt, [
+    'traceparent' => '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+    'tracestate'  => 'vendor=abc',
+]);
+```
+
+Folds into the Responses API's `client_metadata` envelope; OpenAI-side
+logs carry your trace ID. Silent drop on invalid traceparent — a
+malformed header never breaks a run.
+
+### `LanguageDetector`
+
+```php
+LanguageDetector::isCjk('分析这份报告');   // true
+LanguageDetector::pick($prompt, ['zh' => '...', 'en' => '...']);
+```
+
+Binary gate on the U+4E00..U+9FFF ideograph block — primitive on
+purpose. Used by `AgentTool::buildProductivityInfo()` to localise
+`productivityWarning` text, and by `AgentOutputAuditor::guardBlock()`
+to pick the zh vs en guard template.
+
+### `superagent health` / `doctor` CLI
+
+```bash
+superagent health               # 5s cURL probe of every configured provider
+superagent health --all         # include unconfigured providers
+superagent health --json        # machine-readable; non-zero exit on any failure
+```
+
+Wraps `ProviderRegistry::healthCheck()` — distinguishes auth rejection
+(401/403) from network timeout from "no API key" so an operator can
+fix the right thing without guessing. Ideal as a CI smoke step before
+running integration tests that hit real providers.
