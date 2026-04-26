@@ -131,40 +131,19 @@ class BedrockProvider implements LLMProvider
         return $body;
     }
 
+    /**
+     * Bedrock's `anthropic.*` models speak Anthropic Messages verbatim
+     * (AWS forwards the body unchanged), so encoding lives in the
+     * shared `AnthropicEncoder` via the Transcoder facade. Kept as a
+     * protected hook so legacy callers reaching it via reflection or
+     * subclasses still work.
+     *
+     * @return array<string, mixed>
+     */
     protected function convertMessageToAnthropic(Message $message): array
     {
-        if ($message instanceof AssistantMessage) {
-            $content = [];
-            
-            foreach ($message->content as $block) {
-                if ($block->type === 'text') {
-                    $content[] = [
-                        'type' => 'text',
-                        'text' => $block->text,
-                    ];
-                } elseif ($block->type === 'tool_use') {
-                    $content[] = [
-                        'type' => 'tool_use',
-                        'id' => $block->id,
-                        'name' => $block->name,
-                        'input' => $block->input,
-                    ];
-                }
-            }
-
-            return [
-                'role' => 'assistant',
-                'content' => $content,
-            ];
-        }
-
-        // For user messages
-        return [
-            'role' => $message->role,
-            'content' => is_array($message->content) ? $message->content : [
-                ['type' => 'text', 'text' => $message->content]
-            ],
-        ];
+        return (new \SuperAgent\Conversation\Transcoder())
+            ->encode([$message], \SuperAgent\Conversation\WireFamily::Anthropic)[0];
     }
 
     protected function convertToolsToAnthropic(array $tools): array

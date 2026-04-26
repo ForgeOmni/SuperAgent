@@ -387,86 +387,19 @@ class OpenAIResponsesProvider extends OpenAIProvider
     }
 
     /**
-     * Convert SuperAgent's Message[] into the Responses `input`
-     * array. Each message becomes one `message` item; tool_use and
-     * tool_result content blocks become their own items on the
-     * flat list.
+     * Convert SuperAgent's Message[] into the Responses `input` array.
+     * Encoding lives in the shared `OpenAIResponsesEncoder` via the
+     * Transcoder facade. Kept here as a protected hook so any
+     * subclass that needs a Responses-specific override still has a
+     * stable extension point.
      *
      * @param  Message[] $messages
      * @return list<array<string,mixed>>
      */
     protected function convertMessagesToInput(array $messages): array
     {
-        $out = [];
-        foreach ($messages as $m) {
-            $roleValue = $m->role->value;
-
-            if ($m instanceof AssistantMessage) {
-                foreach ($m->content as $block) {
-                    if ($block->type === 'text' && $block->text !== null && $block->text !== '') {
-                        $out[] = [
-                            'type'    => 'message',
-                            'role'    => 'assistant',
-                            'content' => [['type' => 'output_text', 'text' => $block->text]],
-                        ];
-                    } elseif ($block->type === 'tool_use') {
-                        $out[] = [
-                            'type'      => 'function_call',
-                            'call_id'   => (string) ($block->toolUseId ?? ''),
-                            'name'      => (string) ($block->toolName ?? ''),
-                            'arguments' => (string) json_encode($block->toolInput ?? new \stdClass()),
-                        ];
-                    }
-                }
-                continue;
-            }
-
-            // ToolResultMessage: ContentBlock[] with type='tool_result'.
-            // Each block becomes its own function_call_output item so the
-            // Responses API can correlate by call_id.
-            if ($m instanceof \SuperAgent\Messages\ToolResultMessage) {
-                foreach ($m->content as $block) {
-                    if ($block->type !== 'tool_result') continue;
-                    $callId = (string) ($block->toolUseId ?? '');
-                    $contentVal = $block->content ?? '';
-                    $output = is_array($contentVal)
-                        ? (string) json_encode($contentVal)
-                        : (string) $contentVal;
-                    $out[] = [
-                        'type'    => 'function_call_output',
-                        'call_id' => $callId,
-                        'output'  => $output,
-                    ];
-                }
-                continue;
-            }
-
-            // Plain user / system turns.
-            $content = property_exists($m, 'content') ? $m->content : null;
-
-            $parts = [];
-            if (is_string($content)) {
-                $parts[] = ['type' => 'input_text', 'text' => $content];
-            } elseif (is_array($content)) {
-                foreach ($content as $c) {
-                    if (is_string($c)) {
-                        $parts[] = ['type' => 'input_text', 'text' => $c];
-                    } elseif (is_array($c) && ($c['type'] ?? null) === 'text') {
-                        $parts[] = ['type' => 'input_text', 'text' => (string) ($c['text'] ?? '')];
-                    } elseif ($c instanceof ContentBlock && $c->type === 'text' && $c->text !== null) {
-                        $parts[] = ['type' => 'input_text', 'text' => $c->text];
-                    }
-                }
-            }
-            if ($parts === []) continue;
-
-            $out[] = [
-                'type'    => 'message',
-                'role'    => $roleValue === 'system' ? 'system' : 'user',
-                'content' => $parts,
-            ];
-        }
-        return $out;
+        return (new \SuperAgent\Conversation\Transcoder())
+            ->encode($messages, \SuperAgent\Conversation\WireFamily::OpenAIResponses);
     }
 
     /**

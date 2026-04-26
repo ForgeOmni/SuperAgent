@@ -4,8 +4,13 @@ namespace SuperAgent;
 
 use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\Contracts\ToolInterface;
+use SuperAgent\Context\TokenEstimator;
+use SuperAgent\Conversation\HandoffPolicy;
+use SuperAgent\Conversation\ProviderArtifacts;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\Message;
+use SuperAgent\Messages\SystemMessage;
+use SuperAgent\Messages\UserMessage;
 use SuperAgent\Bridge\BridgeFactory;
 use SuperAgent\Config\ExperimentalFeatures;
 use SuperAgent\Providers\ModelResolver;
@@ -182,6 +187,221 @@ class Agent
         $this->provider->setModel(ModelResolver::resolve($model));
 
         return $this;
+    }
+
+    /**
+     * Hand the conversation off to a different provider mid-flight.
+     *
+     * The internal Message[] is preserved (so the new provider sees
+     * the full history, transcoded into its own wire format on the
+     * next request) but a HandoffPolicy gets a chance to clean up
+     * provider-scoped artifacts that don't survive a vendor switch:
+     *
+     *   - signed `thinking` blocks (Anthropic, DashScope) — useless to
+     *     anyone but the originator
+     *   - prior tool history — kept by default, droppable for a
+     *     "fresh start" handoff via HandoffPolicy::freshStart()
+     *   - continuation tokens (Responses API previous_response_id,
+     *     Kimi prompt_cache_key) — those live on the provider object
+     *     itself; the swap implicitly resets them
+     *
+     * The new provider is constructed via `ProviderRegistry::create()`
+     * with `$config` merged onto the SDK's host config for the named
+     * driver. Pass `model`, `api_key`, `base_url`, `region` etc. the
+     * same way `__construct()` accepts them.
+     *
+     * @param string $providerName  Driver key understood by ProviderRegistry
+     *                              (`anthropic`, `kimi`, `gemini`, …).
+     * @param array<string, mixed> $config  Provider-construction overrides.
+     */
+    public function switchProvider(
+        string $providerName,
+        array $config = [],
+        ?HandoffPolicy $policy = null,
+    ): static {
+        $policy ??= HandoffPolicy::default();
+
+        $sourceName = $this->provider->name();
+        $sourceModel = $this->safeProviderModel($this->provider);
+
+        // Build the new provider before mutating any state — if the
+        // new driver fails to construct (missing api_key, unknown
+        // region, etc.) the agent stays on the old provider.
+        $providerConfig = static::config("superagent.providers.{$providerName}", []);
+        foreach (['api_key', 'model', 'base_url', 'max_tokens', 'auth_mode',
+                  'access_token', 'account_id', 'region'] as $k) {
+            if (array_key_exists($k, $config)) {
+                $providerConfig[$k] = $config[$k];
+            }
+        }
+        if (isset($providerConfig['model'])) {
+            $providerConfig['model'] = ModelResolver::resolve($providerConfig['model']);
+        }
+        $driver = $providerConfig['driver'] ?? $providerName;
+        $newProvider = ProviderRegistry::create($driver, $providerConfig);
+        $newProvider = $this->maybeWrapWithBridge($newProvider, $config + ['provider' => $providerName]);
+
+        // Apply the policy to the in-memory message list. The wire
+        // encoders will do an extra outbound pass (dropping anything
+        // their target family can't carry) — what we do here is
+        // permanent: artifacts removed from $this->messages don't come
+        // back, even if the agent is later switched again.
+        $this->messages = $this->applyHandoffPolicy(
+            $this->messages,
+            $policy,
+            sourceName: $sourceName,
+            sourceModel: $sourceModel,
+            targetName: $providerName,
+            targetModel: $newProvider->getModel(),
+        );
+
+        $this->provider = $newProvider;
+
+        // Different tokenizers count the same history differently
+        // (Anthropic vs GPT-4 can drift 20-30%) and the new model's
+        // context window may be smaller than the source's. Run the
+        // estimator now so callers can react before the next request
+        // gets rejected for being over-budget. We expose the result
+        // via $this->lastHandoffTokenStatus so the caller can read it
+        // without us forcing a particular reaction (warn / compress /
+        // throw) onto every consumer.
+        $this->lastHandoffTokenStatus = $this->estimateContextStatusForCurrentProvider();
+
+        return $this;
+    }
+
+    /**
+     * @var array{tokens:int, window:int, fits:bool, model:string}|null
+     *      Filled in by switchProvider(); null until the first switch.
+     */
+    protected ?array $lastHandoffTokenStatus = null;
+
+    /**
+     * Token-budget snapshot taken right after the last switchProvider().
+     * Returns null if no handoff has happened yet.
+     *
+     * The shape:
+     *   - tokens: estimated tokens of the current message list under
+     *             the new tokenizer
+     *   - window: the target model's context window
+     *   - fits  : false if the estimate exceeds the auto-compact
+     *             threshold for this model — the caller should
+     *             compress before the next chat() / run() call
+     *   - model : the resolved model id we measured against
+     *
+     * @return array{tokens:int, window:int, fits:bool, model:string}|null
+     */
+    public function lastHandoffTokenStatus(): ?array
+    {
+        return $this->lastHandoffTokenStatus;
+    }
+
+    /**
+     * @return array{tokens:int, window:int, fits:bool, model:string}
+     */
+    protected function estimateContextStatusForCurrentProvider(): array
+    {
+        $estimator = new TokenEstimator();
+        $model = (string) ($this->safeProviderModel($this->provider) ?? 'default');
+        // TokenEstimator's `array|Message` type hint resolves Message
+        // against its own namespace (SuperAgent\Context\Message) which
+        // doesn't exist, so passing real Message objects trips a
+        // TypeError. Convert to array form first — that path is
+        // exercised by IncrementalContextManager and is the
+        // estimator's intended public surface.
+        $arr = array_map(static fn (Message $m) => $m->toArray(), $this->messages);
+        $tokens = $estimator->estimateMessagesTokens($arr);
+        $window = $estimator->getContextWindow($model);
+        $fits = ! $estimator->shouldAutoCompact($arr, $model);
+        return [
+            'tokens' => $tokens,
+            'window' => $window,
+            'fits'   => $fits,
+            'model'  => $model,
+        ];
+    }
+
+    /**
+     * @param Message[] $messages
+     * @return Message[]
+     */
+    protected function applyHandoffPolicy(
+        array $messages,
+        HandoffPolicy $policy,
+        string $sourceName,
+        ?string $sourceModel,
+        string $targetName,
+        ?string $targetModel,
+    ): array {
+        if (! $policy->keepToolHistory) {
+            // "Fresh start" — collapse history to (latest user
+            // turn). System prompt lives on $this->systemPrompt
+            // separately; we don't need to preserve a SystemMessage
+            // here.
+            $latestUser = null;
+            foreach (array_reverse($messages) as $m) {
+                if ($m instanceof UserMessage) {
+                    $latestUser = $m;
+                    break;
+                }
+            }
+            $messages = $latestUser !== null ? [$latestUser] : [];
+        } else {
+            // Strip provider-only blocks from each AssistantMessage.
+            $messages = array_map(
+                fn (Message $m) => $this->stripProviderArtifacts($m, $policy),
+                $messages,
+            );
+        }
+
+        if ($policy->insertHandoffMarker) {
+            $marker = sprintf(
+                '[handoff: context migrated from %s%s to %s%s]',
+                $sourceName,
+                $sourceModel !== null && $sourceModel !== '' ? "/{$sourceModel}" : '',
+                $targetName,
+                $targetModel !== null && $targetModel !== '' ? "/{$targetModel}" : '',
+            );
+            $messages[] = new SystemMessage($marker);
+        }
+
+        return $messages;
+    }
+
+    /**
+     * Drop thinking / vendor-only blocks from one Message according
+     * to the policy. The dropped artifacts get *captured* into the
+     * `provider_artifacts` namespace on metadata rather than discarded
+     * — if the agent is later switched BACK to the originating
+     * provider, that provider can re-stitch them into its request
+     * body. Non-AssistantMessage subclasses are returned verbatim.
+     */
+    protected function stripProviderArtifacts(Message $message, HandoffPolicy $policy): Message
+    {
+        if (! $message instanceof AssistantMessage) {
+            return $message;
+        }
+        if (! $policy->dropThinking) {
+            return $message;
+        }
+        return ProviderArtifacts::captureAnthropicThinking($message);
+    }
+
+    /**
+     * Some provider implementations (notably the EnhancedProvider
+     * bridge wrapper) don't expose getModel() directly. Read it
+     * defensively so a handoff marker can still be informative.
+     */
+    private function safeProviderModel(LLMProvider $provider): ?string
+    {
+        if (method_exists($provider, 'getModel')) {
+            try {
+                return (string) $provider->getModel();
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+        return null;
     }
 
     public function withMaxTurns(int $maxTurns): static

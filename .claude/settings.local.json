@@ -148,7 +148,17 @@
       "Bash(./vendor/bin/phpunit tests/Unit/Providers/OpenAIResponsesProviderTest.php)",
       "Bash(./vendor/bin/phpunit tests/Unit/Providers/LMStudioProviderTest.php)",
       "Bash(./vendor/bin/phpunit tests/Unit/Support/TraceContextTest.php tests/Unit/Providers/OpenAIResponsesProviderTest.php)",
-      "Bash(./vendor/bin/phpunit tests/Unit/Providers/EnvHttpHeadersTest.php tests/Unit/Providers/RetryPolicyTest.php tests/Unit/Providers/OpenAIResponsesProviderTest.php tests/Unit/Providers/LMStudioProviderTest.php tests/Unit/Support/TraceContextTest.php tests/Unit/Exceptions/Provider/OpenAIErrorClassifierTest.php tests/Unit/OpenAIProviderOAuthTest.php tests/Unit/AnthropicProviderOAuthTest.php)"
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/EnvHttpHeadersTest.php tests/Unit/Providers/RetryPolicyTest.php tests/Unit/Providers/OpenAIResponsesProviderTest.php tests/Unit/Providers/LMStudioProviderTest.php tests/Unit/Support/TraceContextTest.php tests/Unit/Exceptions/Provider/OpenAIErrorClassifierTest.php tests/Unit/OpenAIProviderOAuthTest.php tests/Unit/AnthropicProviderOAuthTest.php)",
+      "Bash(./vendor/bin/phpunit --testsuite Unit --filter \"Provider\")",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/ChatCompletionsConvertMessageTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php tests/Unit/Phase2ProvidersTest.php tests/Unit/Phase3Test.php tests/Unit/AgentProviderResolutionTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Phase3Test.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php tests/Unit/Phase2ProvidersTest.php tests/Unit/AgentProviderResolutionTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/WireFormatMatrixTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers/WireFormatMatrixTest.php tests/Unit/Providers/ChatCompletionsConvertMessageTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/AgentSwitchProviderTest.php tests/Unit/Conversation tests/Unit/Providers)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php tests/Unit/Phase2ProvidersTest.php tests/Unit/AgentProviderResolutionTest.php tests/Unit/AgentSwitchProviderTest.php)"
     ]
   }
 }

@@ -303,11 +303,12 @@ abstract class ChatCompletionsProvider implements LLMProvider
 
     public function formatMessages(array $messages): array
     {
-        $formatted = [];
-        foreach ($messages as $message) {
-            $formatted[] = $this->convertMessage($message);
-        }
-        return $formatted;
+        // Fast path: the encoder is stateless and processes the whole
+        // list in one call, so we skip the per-message convertMessage()
+        // hop. Subclasses that override convertMessage() will still see
+        // their override honored via buildRequestBody() below.
+        return (new \SuperAgent\Conversation\Transcoder())
+            ->encode($messages, \SuperAgent\Conversation\WireFamily::OpenAIChat);
     }
 
     public function formatTools(array $tools): array
@@ -349,8 +350,13 @@ abstract class ChatCompletionsProvider implements LLMProvider
             $out[] = ['role' => 'system', 'content' => $systemPrompt];
         }
 
-        foreach ($messages as $message) {
-            $out[] = $this->convertMessage($message);
+        // Body assembly funnels through the same Transcoder as
+        // formatMessages() so the wire shape stays consistent regardless
+        // of which entry point a caller uses. Subclasses that need a
+        // vendor-specific wire override formatMessages() at the public
+        // API level rather than poking at convertMessage().
+        foreach ($this->formatMessages($messages) as $wire) {
+            $out[] = $wire;
         }
 
         $body = [
@@ -429,32 +435,27 @@ abstract class ChatCompletionsProvider implements LLMProvider
         return array_keys($a) !== range(0, count($a) - 1);
     }
 
+    /**
+     * Convert one internal Message into ZERO OR MORE OpenAI chat-completions
+     * wire messages. Returns a list:
+     *
+     *   - AssistantMessage   → exactly 1 entry (text + tool_calls combined).
+     *   - ToolResultMessage  → N entries, one per tool_result block.
+     *   - SystemMessage      → 1 entry.
+     *   - UserMessage        → 1 entry.
+     *
+     * The actual encoding lives in `OpenAIChatEncoder` so that the same
+     * canonical translation is shared with the Transcoder facade and
+     * with any future cross-family handoff path. Subclasses that need
+     * vendor-specific message encoding still get this protected hook
+     * to override; the base implementation is a thin delegation.
+     *
+     * @return array<int, array<string, mixed>>
+     */
     protected function convertMessage(Message $message): array
     {
-        if ($message instanceof AssistantMessage) {
-            $content = [];
-            foreach ($message->content as $block) {
-                if ($block->type === 'text') {
-                    $content[] = ['type' => 'text', 'text' => $block->text];
-                } elseif ($block->type === 'tool_use') {
-                    return [
-                        'role' => 'assistant',
-                        'content' => null,
-                        'tool_calls' => [[
-                            'id' => $block->id,
-                            'type' => 'function',
-                            'function' => [
-                                'name' => $block->name,
-                                'arguments' => json_encode($block->input),
-                            ],
-                        ]],
-                    ];
-                }
-            }
-            return ['role' => 'assistant', 'content' => $content];
-        }
-
-        return ['role' => $message->role, 'content' => $message->content];
+        return (new \SuperAgent\Conversation\Encoder\OpenAIChatEncoder())
+            ->encode([$message]);
     }
 
     protected function convertTools(array $tools): array

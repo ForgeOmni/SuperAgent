@@ -157,7 +157,8 @@ class AnthropicProvider implements LLMProvider, SupportsThinking
 
     public function formatMessages(array $messages): array
     {
-        return array_map(fn (Message $m) => $m->toArray(), $messages);
+        return (new \SuperAgent\Conversation\Transcoder())
+            ->encode($messages, \SuperAgent\Conversation\WireFamily::Anthropic);
     }
 
     public function formatTools(array $tools): array

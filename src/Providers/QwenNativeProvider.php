@@ -17,7 +17,10 @@ use SuperAgent\Providers\Features\FeatureDispatcher;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
+use SuperAgent\Messages\SystemMessage;
+use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\Usage;
+use SuperAgent\Messages\UserMessage;
 use SuperAgent\StreamingHandler;
 use SuperAgent\Tools\Tool;
 
@@ -200,8 +203,10 @@ class QwenNativeProvider implements LLMProvider, SupportsThinking, SupportsCodeI
             $dsMessages[] = ['role' => 'system', 'content' => $systemPrompt];
         }
 
-        foreach ($messages as $message) {
-            $dsMessages[] = $this->convertMessage($message);
+        // Body assembly funnels through the Transcoder so the wire
+        // shape stays in lockstep with formatMessages().
+        foreach ($this->formatMessages($messages) as $wire) {
+            $dsMessages[] = $wire;
         }
 
         $parameters = [
@@ -243,37 +248,82 @@ class QwenNativeProvider implements LLMProvider, SupportsThinking, SupportsCodeI
         return $body;
     }
 
+    /**
+     * Convert one internal Message into ZERO OR MORE DashScope wire
+     * messages. DashScope's "result_format=message" branch follows the
+     * OpenAI Chat Completions shape almost verbatim — assistant emits
+     * tool_calls[]; tool results come back as separate role:tool entries
+     * with tool_call_id correlation.
+     *
+     * Returns a list to allow ToolResultMessage (which carries N parallel
+     * results) to expand into N wire messages.
+     *
+     * @return array<int, array<string, mixed>>
+     */
     protected function convertMessage(Message $message): array
     {
         if ($message instanceof AssistantMessage) {
-            $toolCalls = [];
             $textParts = [];
+            $toolCalls = [];
             foreach ($message->content as $block) {
                 if ($block->type === 'text') {
-                    $textParts[] = $block->text;
+                    $textParts[] = (string) ($block->text ?? '');
                 } elseif ($block->type === 'tool_use') {
                     $toolCalls[] = [
-                        'id' => $block->id,
+                        'id'   => (string) ($block->toolUseId ?? ''),
                         'type' => 'function',
                         'function' => [
-                            'name' => $block->name,
-                            'arguments' => json_encode($block->input),
+                            'name'      => (string) ($block->toolName ?? ''),
+                            'arguments' => json_encode(
+                                empty($block->toolInput) ? new \stdClass() : $block->toolInput,
+                                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+                            ),
                         ],
                     ];
                 }
+                // thinking blocks: dropped — DashScope's reasoning output
+                // is one-way (server → client); there's no wire field for
+                // feeding signed reasoning back in.
             }
             $out = ['role' => 'assistant'];
-            if ($textParts !== []) {
-                $out['content'] = implode('', $textParts);
+            $text = implode('', $textParts);
+            if ($text !== '') {
+                $out['content'] = $text;
+            } elseif ($toolCalls !== []) {
+                $out['content'] = '';
+            } else {
+                $out['content'] = '';
             }
             if ($toolCalls !== []) {
                 $out['tool_calls'] = $toolCalls;
-                $out['content'] ??= '';
+            }
+            return [$out];
+        }
+
+        if ($message instanceof ToolResultMessage) {
+            $out = [];
+            foreach ($message->content as $block) {
+                if ($block->type !== 'tool_result') {
+                    continue;
+                }
+                $out[] = [
+                    'role'         => 'tool',
+                    'tool_call_id' => (string) ($block->toolUseId ?? ''),
+                    'content'      => (string) ($block->content ?? ''),
+                ];
             }
             return $out;
         }
 
-        return ['role' => $message->role, 'content' => $message->content];
+        if ($message instanceof SystemMessage) {
+            return [['role' => 'system', 'content' => $message->content]];
+        }
+
+        if ($message instanceof UserMessage) {
+            return [['role' => 'user', 'content' => $message->content]];
+        }
+
+        return [['role' => $message->role->value, 'content' => '']];
     }
 
     protected function convertTools(array $tools): array
@@ -392,11 +442,8 @@ class QwenNativeProvider implements LLMProvider, SupportsThinking, SupportsCodeI
 
     public function formatMessages(array $messages): array
     {
-        $out = [];
-        foreach ($messages as $message) {
-            $out[] = $this->convertMessage($message);
-        }
-        return $out;
+        return (new \SuperAgent\Conversation\Transcoder())
+            ->encode($messages, \SuperAgent\Conversation\WireFamily::DashScope);
     }
 
     public function formatTools(array $tools): array

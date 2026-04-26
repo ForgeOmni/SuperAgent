@@ -12,7 +12,6 @@ use SuperAgent\Exceptions\ProviderException;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
-use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\Usage;
 use SuperAgent\StreamingHandler;
 use SuperAgent\Tools\Tool;
@@ -114,28 +113,8 @@ class GeminiProvider implements LLMProvider
 
     public function formatMessages(array $messages): array
     {
-        // Build toolUseId → toolName map from prior assistant messages so
-        // functionResponse entries can carry the name Gemini requires.
-        $toolNames = [];
-        foreach ($messages as $m) {
-            if ($m instanceof AssistantMessage) {
-                foreach ($m->content as $block) {
-                    if ($block->type === 'tool_use' && $block->toolUseId && $block->toolName) {
-                        $toolNames[$block->toolUseId] = $block->toolName;
-                    }
-                }
-            }
-        }
-
-        $contents = [];
-        foreach ($messages as $message) {
-            $converted = $this->convertMessage($message, $toolNames);
-            if ($converted !== null) {
-                $contents[] = $converted;
-            }
-        }
-
-        return $contents;
+        return (new \SuperAgent\Conversation\Transcoder())
+            ->encode($messages, \SuperAgent\Conversation\WireFamily::Gemini);
     }
 
     public function formatTools(array $tools): array
@@ -209,131 +188,6 @@ class GeminiProvider implements LLMProvider
 
         if (! empty($tools)) {
             $body['tools'] = $this->formatTools($tools);
-        }
-
-        return $body;
-    }
-
-    /**
-     * Convert one Message into a Gemini `contents[]` entry, or null if it should be skipped.
-     *
-     * @param  array<string, string>  $toolNames  Map of toolUseId → toolName
-     */
-    protected function convertMessage(Message $message, array $toolNames): ?array
-    {
-        if ($message instanceof AssistantMessage) {
-            $parts = [];
-            foreach ($message->content as $block) {
-                if ($block->type === 'text' && $block->text !== null && $block->text !== '') {
-                    $parts[] = ['text' => $block->text];
-                } elseif ($block->type === 'tool_use') {
-                    $parts[] = [
-                        'functionCall' => [
-                            'name' => $block->toolName ?? '',
-                            'args' => $block->toolInput ?? (object) [],
-                        ],
-                    ];
-                }
-                // thinking blocks are dropped — Gemini has no equivalent
-            }
-            if (empty($parts)) {
-                return null;
-            }
-
-            return ['role' => 'model', 'parts' => $parts];
-        }
-
-        if ($message instanceof ToolResultMessage) {
-            $parts = [];
-            foreach ($message->content as $block) {
-                if ($block->type !== 'tool_result') {
-                    continue;
-                }
-                $name = $toolNames[$block->toolUseId] ?? '';
-                $parts[] = [
-                    'functionResponse' => [
-                        'name' => $name,
-                        'response' => $this->wrapFunctionResponse($block->content, (bool) $block->isError),
-                    ],
-                ];
-            }
-            if (empty($parts)) {
-                return null;
-            }
-
-            return ['role' => 'user', 'parts' => $parts];
-        }
-
-        // Plain user message: content is string|array
-        $rawContent = $message->toArray()['content'] ?? '';
-        $parts = $this->convertPlainUserContent($rawContent, $toolNames);
-        if (empty($parts)) {
-            return null;
-        }
-
-        return ['role' => 'user', 'parts' => $parts];
-    }
-
-    /**
-     * A user message's content may be a bare string or an array of internal blocks
-     * (including tool_result entries when callers assemble them directly). Normalize
-     * into Gemini `parts[]`.
-     *
-     * @param  array<string, string>  $toolNames
-     */
-    protected function convertPlainUserContent(string|array $content, array $toolNames): array
-    {
-        if (is_string($content)) {
-            return $content === '' ? [] : [['text' => $content]];
-        }
-
-        $parts = [];
-        foreach ($content as $item) {
-            if (is_string($item)) {
-                if ($item !== '') {
-                    $parts[] = ['text' => $item];
-                }
-                continue;
-            }
-            if (! is_array($item)) {
-                continue;
-            }
-            $type = $item['type'] ?? null;
-            if ($type === 'text') {
-                $text = $item['text'] ?? '';
-                if ($text !== '') {
-                    $parts[] = ['text' => $text];
-                }
-            } elseif ($type === 'tool_result') {
-                $id = $item['tool_use_id'] ?? '';
-                $parts[] = [
-                    'functionResponse' => [
-                        'name' => $toolNames[$id] ?? '',
-                        'response' => $this->wrapFunctionResponse(
-                            $item['content'] ?? '',
-                            (bool) ($item['is_error'] ?? false),
-                        ),
-                    ],
-                ];
-            }
-        }
-
-        return $parts;
-    }
-
-    /**
-     * Gemini requires functionResponse.response to be a JSON object. Wrap string
-     * payloads under a `content` key, mark errors under `error` so the model can
-     * distinguish failures.
-     */
-    protected function wrapFunctionResponse(?string $content, bool $isError): array
-    {
-        $payload = $content ?? '';
-        $decoded = json_decode($payload, true);
-        $body = is_array($decoded) ? $decoded : ['content' => $payload];
-
-        if ($isError) {
-            $body['error'] = true;
         }
 
         return $body;

@@ -125,9 +125,10 @@ class OllamaProvider implements LLMProvider
             ];
         }
 
-        // Convert messages
-        foreach ($messages as $message) {
-            $ollamaMessages[] = $this->convertMessage($message);
+        // Body assembly funnels through the Transcoder so the wire
+        // shape stays in lockstep with formatMessages().
+        foreach ($this->formatMessages($messages) as $wire) {
+            $ollamaMessages[] = $wire;
         }
 
         $body = [
@@ -487,11 +488,8 @@ class OllamaProvider implements LLMProvider
 
     public function formatMessages(array $messages): array
     {
-        $formatted = [];
-        foreach ($messages as $message) {
-            $formatted[] = $this->convertMessage($message);
-        }
-        return $formatted;
+        return (new \SuperAgent\Conversation\Transcoder())
+            ->encode($messages, \SuperAgent\Conversation\WireFamily::Ollama);
     }
 
     public function formatTools(array $tools): array
