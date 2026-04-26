@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-04-25
+
+### 💻 Summary
+
+**Cross-provider handoff: hand a live conversation off mid-flight without losing the thread.** Six wire-format encoders (Anthropic / OpenAI Chat Completions / OpenAI Responses / Gemini / DashScope / Ollama) now live behind a single `Conversation\Transcoder`, and `Agent::switchProvider($name, $config, $policy)` swaps the active provider while preserving the message history transcoded into the new family's wire shape. `HandoffPolicy` carries three presets (`default` / `preserveAll` / `freshStart`) so the caller decides whether to keep tool history, drop signed thinking, or reset to a fresh slate. Provider-only artifacts that the new wire can't carry (Anthropic signed `thinking`, Kimi `prompt_cache_key`, Responses-API `reasoning` items, Gemini `cachedContent` refs) get parked under `AssistantMessage::$metadata['provider_artifacts'][$providerKey]` so a later swap back to the originating family can re-stitch them. Every cross-call funnels through the same Transcoder so a tool history that ran against Claude can survive a handoff to Kimi → Gemini → back to Claude without an id rewrite or content loss.
+
+**Rationale.** Three latent bugs silently corrupted multi-turn agent loops once a `tool_use` block hit the wire as conversation history. `ChatCompletionsProvider::convertMessage()` early-returned on the first `tool_use`, dropping sibling text and parallel tool calls; the same method, `BedrockProvider::convertMessageToAnthropic()`, and `QwenNativeProvider::convertMessage()` all read `$block->id` / `$block->name` / `$block->input` — properties that don't exist on `ContentBlock` (the real names are `toolUseId` / `toolName` / `toolInput`), so every replayed tool call went out as `{id:null, name:null, arguments:"null"}`. None of those three converters handled `ToolResultMessage` either, so prior tool results never round-tripped back to the model. Centralizing all six wire shapes behind one `Transcoder` means there is exactly one canonical place to fix wire-format bugs, and one canonical place to add the seventh family the next time a vendor ships a novel shape.
+
+**Zero public method signatures broke.** `Agent::switchProvider()` is additive; existing single-provider agents keep their old behavior. Provider classes still expose the same `formatMessages()` / `convertMessage()` hooks — they now delegate to the encoder rather than carrying the conversion inline. The 23 new tests pin every same-family round-trip and the cross-family handoff matrix (parallel tool calls, text+tool_use mix, tool result expansion, thinking-block stripping, atomic rollback on construction failure).
+
+### Added
+
+#### Cross-provider handoff
+- **`Agent::switchProvider(string $providerName, array $config = [], ?HandoffPolicy $policy = null): static`** — swap the active provider mid-conversation without losing the message history. The new provider is constructed via `ProviderRegistry::create()` with `$config` overlaid on the SDK's host config; failure to construct (missing `api_key`, unknown region, etc.) throws **before** any state changes — the agent stays on the old provider with its history intact. Policy-driven mutations to the message list happen exactly once on switch; the wire encoders apply per-target translations on the next `chat()`/`run()`.
+- **`Agent::lastHandoffTokenStatus(): ?array{tokens:int, window:int, fits:bool, model:string}`** — token-budget snapshot taken right after the last `switchProvider()` call. Different tokenizers count the same history differently (Anthropic and GPT-4 drift 20–30%) and the new model's context window may be smaller than the source's; reading `fits = false` lets a caller compress before the next request gets rejected.
+- **`SuperAgent\Conversation\HandoffPolicy`** — value object describing what should happen to provider-scoped artifacts on switch. Three named factories cover the common cases:
+  - `HandoffPolicy::default()` — keep tool history, drop signed thinking, append a handoff system marker, reset continuation ids
+  - `HandoffPolicy::preserveAll()` — keep everything in the internal representation; the encoder still drops what its target wire shape can't carry, but a future swap back to the source provider can recover the artifacts
+  - `HandoffPolicy::freshStart()` — collapse history to (latest user turn) so a different model can take a clean shot when the previous one went off the rails
+- **`SuperAgent\Conversation\ProviderArtifacts`** — namespaced storage convention on `AssistantMessage::$metadata['provider_artifacts'][$providerKey]`. `captureAnthropicThinking($message)` moves visible thinking blocks into the metadata slot so a later swap back to Anthropic can re-emit them; `get` / `set` / `clearProvider` round-trip arbitrary provider-specific keys (`thinking`, `cache_breakpoints`, `prompt_cache_key`, `previous_response_id`, `cachedContent`, etc.) without colliding across providers.
+
+#### Conversation transcoder
+- **`SuperAgent\Conversation\Transcoder::encode(Message[] $messages, WireFamily $target): list<array>`** — single point of translation between the internal Anthropic-shaped `Message[]` representation and the six supported wire-format families. Encoders are stateless; the per-conversation state needed for cross-family correlation (e.g. Gemini's name+order matching) is rebuilt deterministically from the message history each call.
+- **`SuperAgent\Conversation\WireFamily`** enum — `Anthropic`, `OpenAIChat`, `OpenAIResponses`, `Gemini`, `DashScope`, `Ollama`. Cases are deliberately ordered by implementation phase so a regression that wires the Transcoder up against an unsupported case fails loudly with a `LogicException` rather than producing a structurally wrong request.
+- **Six dedicated encoders** under `SuperAgent\Conversation\Encoder\`:
+  - `AnthropicEncoder` — family A (also used by `BedrockProvider` for `anthropic.*` invocations; AWS forwards the body verbatim)
+  - `OpenAIChatEncoder` — family B (`OpenAIProvider`, `KimiProvider`, `GlmProvider`, `MiniMaxProvider`, `QwenProvider`, `OpenRouterProvider`, `LMStudioProvider`)
+  - `OpenAIResponsesEncoder` — family C (typed `input[]` with `message`/`function_call`/`function_call_output`/`reasoning` items)
+  - `GeminiEncoder` — family D (the only family without tool-call ids — correlates by `name`+order; encoder builds the `toolUseId → toolName` index from the `AssistantMessage` history each call)
+  - `DashScopeEncoder` — family E (Qwen-native; `enable_thinking`/`thinking_budget` reasoning is one-way, so thinking blocks are dropped on outbound encode)
+  - `OllamaEncoder` — family F (gains tool_calls + `role:tool` round-trip support, which `OllamaProvider::convertMessage()` was missing entirely before this release)
+
+#### Provider delegation
+- **`AnthropicProvider::formatMessages()`**, **`BedrockProvider::convertMessageToAnthropic()`**, **`ChatCompletionsProvider::formatMessages()` / `convertMessage()` / `buildRequestBody()`**, **`GeminiProvider::formatMessages()`**, **`OpenAIResponsesProvider::convertMessagesToInput()`**, **`QwenNativeProvider::formatMessages()`**, **`OllamaProvider::formatMessages()`** — every provider that owns a wire-format converter now delegates to the shared encoder via `Transcoder::encode()`. The 100+ lines of duplicated conversion logic across `BedrockProvider` and `AnthropicProvider` (which the WireFormatMatrixTest now proves were drifting) collapse to a single shared `AnthropicEncoder`.
+
+### Fixed
+
+- **`ChatCompletionsProvider::convertMessage()` no longer drops sibling content on the first `tool_use` block.** The previous implementation early-returned on the first `tool_use`, so an assistant turn that emitted `text + 2× parallel tool_use` (the canonical agent-loop shape) collapsed to a single `tool_calls[]` entry with the text and second tool call lost.
+- **`ChatCompletionsProvider::convertMessage()` reads the correct ContentBlock properties.** Previous code accessed `$block->id` / `$block->name` / `$block->input` — properties that don't exist on `ContentBlock` (the real names are `toolUseId` / `toolName` / `toolInput`). Every replayed tool call in OpenAI / Kimi / GLM / MiniMax / Qwen / OpenRouter / LMStudio history went out as `{id: null, name: null, arguments: "null"}`. Tool-using conversations longer than one turn could not function.
+- **`BedrockProvider::convertMessageToAnthropic()` no longer drifts from the canonical Anthropic encoder.** The hand-rolled copy had the same wrong-property bug, missed `ToolResultMessage` entirely (falling through to a branch that emitted a `Role` enum object as the wire role), and predated several `AssistantMessage::toArray()` fixes. It now delegates to the shared `AnthropicEncoder`, which is the same path `AnthropicProvider` uses.
+- **`QwenNativeProvider::convertMessage()` handles `ToolResultMessage` and uses the correct ContentBlock properties.** Same wrong-property bug as the OpenAI Chat path; same missing `ToolResultMessage` branch. Tool results sent to Qwen via `qwen-native` (DashScope body) used to land as malformed user messages.
+- **`ChatCompletionsProvider::convertMessage()` empty tool input encodes as `{}` not `[]`.** OpenAI's parser tolerates both, but some compatible backends (older GLM, niche local servers) reject the array form as a malformed tool-call payload.
+
+### Migration path
+
+Single-provider callers keep working unchanged. To start using mid-conversation handoff:
+
+```php
+use SuperAgent\Agent;
+use SuperAgent\Conversation\HandoffPolicy;
+
+$agent = new Agent(['provider' => 'anthropic', 'api_key' => $key, 'model' => 'claude-opus-4-7']);
+$agent->run('analyse this codebase');
+
+// Hand off to a cheaper / faster model for the next phase:
+$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k2-6'])
+      ->run('write the unit tests');
+
+// Check whether the history fits under the new model's context window:
+$status = $agent->lastHandoffTokenStatus();
+if ($status !== null && ! $status['fits']) {
+    // trigger your existing IncrementalContext compression before the next call
+}
+
+// Want to keep Anthropic signed thinking around in case you swap back?
+$agent->switchProvider('kimi', [...], HandoffPolicy::preserveAll());
+
+// Conversation went off the rails — try again with a different model on a clean slate:
+$agent->switchProvider('openai', [...], HandoffPolicy::freshStart());
+```
+
+The wire-format encoders are accessible without going through `Agent` — useful for offline transcoding (e.g. converting a saved Anthropic conversation to feed into a Gemini batch job):
+
+```php
+use SuperAgent\Conversation\Transcoder;
+use SuperAgent\Conversation\WireFamily;
+
+$wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
+```
+
+### Notes
+
+- **Lossy by design.** Cross-family encoding always strips artifacts that the target wire shape can't carry: `cache_control` markers, signed Anthropic `thinking` blocks, OpenAI Responses `reasoning` items (encrypted; only decryptable by the original conversation), Kimi `prompt_cache_key`, Gemini `cachedContent` references, `$`-prefix Kimi server-hosted builtin tool names. The `HandoffPolicy::preserveAll()` preset stashes them in `AssistantMessage::$metadata['provider_artifacts']` so a later round-trip back to the originating family can recover them.
+- **Token-window math.** Different tokenizers disagree on the same history by 20–30%. `lastHandoffTokenStatus()` reuses the existing `Context\TokenEstimator` so the answer is consistent with `IncrementalContext` and the auto-compactor. The status is computed once after `switchProvider()` returns; callers that want a live count should call `TokenEstimator::estimateMessagesTokens()` directly between turns.
+- **Atomic swap.** `switchProvider()` constructs the new provider before mutating any state, so a failed construction (missing `api_key`, unknown region, network probe rejection) leaves the agent on the old provider with its message list untouched. The `AgentSwitchProviderTest::test_failed_provider_construction_leaves_agent_untouched` test pins this contract.
+- **Gemini correlation.** Gemini is the only family that does not expose tool-call ids on the wire; `functionResponse` correlates to `functionCall` by `name` and the ordering of parts within a request. The internal Message representation always carries an id (Gemini's stream parser synthesises `gemini_<hex>_<n>` ids when it sees a `functionCall`); the encoder rebuilds the `toolUseId → toolName` index from the assistant history each call, so Gemini-originated conversations round-trip through other providers and back without an external mapping table.
+- **Bedrock cleanup.** `BedrockProvider::convertMessageToAnthropic()` shrank from 35 lines of hand-rolled Anthropic conversion to 4 lines of delegation. The `WireFormatMatrixTest` proves Bedrock and Anthropic produce identical wire output for the same fixture — they always should have, but the hand-rolled copies had silently drifted.
+- **`SuperAgentApplication` `VERSION` constant** bumped `0.9.2 → 0.9.5`.
+
 ## [0.9.2] - 2026-04-23
 
 ### 💻 Summary

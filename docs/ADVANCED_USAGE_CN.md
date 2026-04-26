@@ -8172,3 +8172,208 @@ superagent health --json        # 机器可读；任何失败都返回非零
 封装 `ProviderRegistry::healthCheck()` —— 区分 auth 拒绝（401/403）vs 网络超时
 vs "没 API key"，operator 可以对症下药而不用猜。适合作为 CI 冒烟步骤，跑真
 provider 的集成测试前确认。
+
+
+## 52. 跨 Provider 切换（v0.9.5）
+
+6 个 wire-format encoder 共用一个 `Conversation\Transcoder`，再加上
+`Agent::switchProvider()` 入口，让你在会话中途换 provider 而不丢消
+息历史。
+
+### Wire-format 家族表
+
+| 家族 | Encoder | Provider |
+|---|---|---|
+| A. Anthropic Messages       | `AnthropicEncoder`       | `anthropic`、`bedrock`（`anthropic.*` 调用） |
+| B. OpenAI Chat Completions  | `OpenAIChatEncoder`      | `openai`、`kimi`、`glm`、`minimax`、`qwen`、`openrouter`、`lmstudio` |
+| C. OpenAI Responses API     | `OpenAIResponsesEncoder` | `openai-responses` |
+| D. Google Gemini            | `GeminiEncoder`          | `gemini` |
+| E. 阿里 DashScope            | `DashScopeEncoder`       | `qwen-native` |
+| F. Ollama                   | `OllamaEncoder`          | `ollama` |
+
+每个原本自带 wire-format 转换的 provider 现在都委托给共享 encoder。
+`BedrockProvider` 里那 100+ 行手写的 Anthropic 转换坍缩成 4 行委托；
+`WireFormatMatrixTest` 证明 Bedrock 和 Anthropic 对同一 fixture 输出
+的 wire 完全一致。
+
+```php
+use SuperAgent\Conversation\Transcoder;
+use SuperAgent\Conversation\WireFamily;
+
+$wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
+// list<array>，Gemini 的 contents[] 形状
+```
+
+### `Agent::switchProvider()`
+
+```php
+use SuperAgent\Conversation\HandoffPolicy;
+
+$agent = new Agent(['provider' => 'anthropic', 'api_key' => $key]);
+$agent->run('分析这个代码库');
+
+// 切到 Kimi 跑下一阶段。下次调用时历史会被重新编码成 Kimi 的
+// OpenAI 兼容 wire。
+$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k2-6'])
+      ->run('补单元测试');
+```
+
+切换是原子的。新 provider 在任何 state mutation 之前先构造好；缺
+`api_key`、未知 region 这类问题会**在** agent 的 `$provider` 字段
+被改之前抛出，所以失败的切换会让 agent 留在原 provider，消息列表
+不动。`AgentSwitchProviderTest::test_failed_provider_construction_leaves_agent_untouched`
+钉死这个契约。
+
+### `HandoffPolicy`
+
+3 个命名工厂方法覆盖常见场景。policy 在切换时对内存里的消息列表只
+做一次 mutation（之后每次请求 wire encoder 自己再做一次出站翻译）。
+
+```php
+HandoffPolicy::default();       // 保留工具历史；丢签名 thinking；
+                                // 追加 handoff system marker；重置 continuation id
+HandoffPolicy::preserveAll();   // 全部保留 —— encoder 仍会丢目标 wire 装不下的，
+                                // 但工件留在 metadata 里以便回切时复用
+HandoffPolicy::freshStart();    // 把历史压到（最后一次 user 输入）—— 适合给
+                                // 跑歪的会话换个模型重开局
+```
+
+也支持直接构造自定义组合：
+
+```php
+new HandoffPolicy(
+    keepToolHistory: true,
+    dropThinking: false,
+    imageStrategy: 'drop',          // 'fail' | 'drop' | 'recompress'（caller 钩子）
+    insertHandoffMarker: false,
+    resetContinuationIds: false,
+);
+```
+
+### `provider_artifacts` 元数据命名空间
+
+跨家族编码本质有损：`cache_control` 标记、Anthropic 签名 `thinking`
+块、Responses-API 加密 `reasoning` items、Kimi `prompt_cache_key`、
+Gemini `cachedContent` 引用、Kimi `$`-前缀服务端内置工具名 —— 这些都
+不会跨过另一个家族的 wire。
+
+`HandoffPolicy::default()` 把这些工件**捕获**到
+`AssistantMessage::$metadata['provider_artifacts'][$providerKey]`，
+而不是直接丢，这样将来切回原家族时还能重组回请求体。
+
+```php
+use SuperAgent\Conversation\ProviderArtifacts;
+
+// 出站时：去 Kimi 之前先抓 Anthropic thinking
+$cleaned = ProviderArtifacts::captureAnthropicThinking($message);
+// $cleaned->content      → 没有 thinking 块（Kimi 反正读不懂）
+// $cleaned->metadata     → ['provider_artifacts' => ['anthropic' => ['thinking' => [...]]]]
+
+// 回切时：读 Anthropic 专属 state 重组进请求体
+$thinking = ProviderArtifacts::get($message->metadata, 'anthropic', 'thinking');
+
+// 按 provider 清空（continuation token 是源 provider 私有的）：
+$meta = ProviderArtifacts::clearProvider($message->metadata, 'openai_responses');
+```
+
+按 provider key 命名空间分开，这样一个 `AssistantMessage` 可以在
+跨多次切换的会话里同时携带多家工件。Encoder 自己对内容是不可知
+的 —— 出站编码时一律保守地丢未知字段。读回工件是 caller 的责任
+（通常是 provider 自己看到自己 key 时读）。
+
+### Token 窗口重算
+
+不同 tokenizer 对同一段历史会差 20–30% —— Anthropic 跟 GPT-4 经常
+就是这个量级。新模型的 context window 也可能比源模型小。
+`lastHandoffTokenStatus()` 用的是 `Context\TokenEstimator`，所以结
+果跟 `IncrementalContext` 和 auto-compactor 的口径一致。
+
+```php
+$agent->switchProvider('gemini', ['api_key' => $key, 'model' => 'gemini-2.5-pro']);
+
+$status = $agent->lastHandoffTokenStatus();
+// [
+//     'tokens' => 41203,
+//     'window' => 1_000_000,
+//     'fits'   => true,
+//     'model'  => 'gemini-2.5-pro',
+// ]
+
+if (! $status['fits']) {
+    // 估算超过该模型的 auto-compact 阈值。
+    // 在下次 chat()/run() 之前压缩。
+}
+```
+
+### 各家族的小坑
+
+**家族 A（Anthropic / Bedrock）。** 内部表示本身就是 Anthropic 形
+状，所以编码就是逐条 `Message::toArray()`。`HandoffPolicy::default()`
+会在历史末尾追加一条 `SystemMessage` 当 handoff marker；Anthropic
+接受 messages[] 里出现 system 角色，但顶层 `system` 字段是另外提取
+的 —— marker 留在 messages[] 里（让新模型看见），不要覆盖到顶层
+system prompt。
+
+**家族 B（OpenAI Chat Completions）。** Tool-result 消息一律 1:N
+展开 —— 一条带 3 个并行结果的 `ToolResultMessage` 变成 3 条 wire
+消息，每条 `role:tool` + 自己的 `tool_call_id`。空 tool input 编
+码成 `{}`（对象），不是 `[]`（数组）—— 有些兼容后端拒收数组形
+式。Thinking 块出站时被丢（wire 没字段）。
+
+**家族 C（OpenAI Responses）。** 一个会话 turn 不再对应一条 wire
+消息，而是对应一条或多条 `input[]` item，每条有自己的 `type`
+（`message` / `function_call` / `function_call_output` /
+`reasoning`）。provider 的 `previous_response_id` 续接是
+**provider 侧 state，不是 wire 字段** —— 从别家切到 Responses 时，
+caller 必须重置 `lastResponseId`，让全量历史随请求一起发出去。
+encoder 不强制这件事；那是 HandoffPolicy 的活（默认 policy 会重
+置）。
+
+**家族 D（Gemini）。** 6 家里唯一一个不在 wire 上暴露 tool-call
+id 的。`functionResponse` 靠 `name` + 该请求里 parts 的顺序匹配
+`functionCall`。内部 Message 表示总是带 id（Gemini 的 stream
+parser 看到 `functionCall` 时合成 `gemini_<hex>_<n>` 形式的 id）；
+encoder 每次从 assistant 历史重建 `toolUseId → toolName` 映射，所
+以从 Gemini 起的会话经过别家再切回来，不需要外部映射表。Role 是
+`user` / `model`，不是 `assistant`。System prompt 走请求体顶层
+`systemInstruction`，不进 `contents[]` —— encoder 因此会静默跳过
+`SystemMessage`。
+
+**家族 E（DashScope / Qwen-native）。** wire 形状跟 OpenAI Chat 类
+似，但 DashScope 早期版本拒收 `content: null`；encoder 永远发字符
+串（只有 tool_calls 时发空串）。
+
+**家族 F（Ollama）。** 工具调用支持依赖底层模型，2024 中后期才普
+遍铺开。Encoder 发 OpenAI 兼容的 `tool_calls` + `role:tool` 形状
+（支持工具的模型能吃）；不支持的模型看到一个不熟悉的对话 turn 可
+能会瞎编。User 消息里裸的多模态数组 content 会被 JSON 编码成单字
+符串，照顾非视觉的 Ollama 部署。
+
+### 用例
+
+- **跨阶段的成本/质量路由。** 用顶配模型做分析，便宜的做样板代码
+  生成，再用顶配做 review。
+- **专长分工。** 视觉输入这一轮走 Gemini，再切回 Claude 做编排。
+- **手动恢复后的 failover。** 当某 provider 配额/故障挡住当前模
+  型时换备选，不丢会话。（瞬时错误的自动 fallback 见第 16 节
+  `FallbackProvider`。）
+- **隐私分级。** 敏感轮次走本地 Ollama，公开轮次走云端。
+- **离线转码。** 直接用 `Transcoder::encode()` 把存盘的 Anthropic
+  会话喂给 Gemini batch 任务 —— 不需要 agent 介入。
+
+### 架构注释
+
+- **Encoder 无状态。** 每会话状态（Gemini 的 `toolUseId →
+  toolName` 索引等）每次调用都从消息历史确定性地重建。这意味着
+  encoding 跨任何 persistence 层都能 round-trip，不需要外挂映射
+  表。
+- **Anthropic 形状的内部表示。** 历史巧合，不是契约 —— 但这意味着
+  `WireFamily::Anthropic` 实际上是 `Message::toArray()` 的透传，
+  其他每个家族都是真正的下行翻译，可能丢厂家专有工件。
+- **WireFamily enum 顺序。** case 故意按实现阶段顺序排，让"enum
+  case 存在"和"encoder 已接上"之间的差异保持可审计。加第七个家族
+  的步骤是：append case → 写 encoder → 在 Transcoder 的 `match`
+  里登记 → 在 `tests/Unit/Conversation/TranscoderTest.php` 加测
+  试。`test_all_six_families_encode_without_throwing` 冒烟测试会
+  在新 case 没接 encoder 时直接红。
+

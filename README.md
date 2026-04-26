@@ -31,6 +31,7 @@ echo $result->text();
 - [Quick Start](#quick-start)
 - [Providers & Authentication](#providers--authentication)
 - [OpenAI Responses API](#openai-responses-api)
+- [Cross-provider handoff](#cross-provider-handoff)
 - [Agent Loop](#agent-loop)
 - [Tools & Multi-Agent](#tools--multi-agent)
 - [Agent Definitions](#agent-definitions-yaml--markdown)
@@ -230,6 +231,57 @@ $agent->run($prompt, ['trace_context' => $tc]);
 ```
 
 *Since v0.9.1*
+
+---
+
+## Cross-provider handoff
+
+`Agent::switchProvider($name, $config, $policy)` swaps the active provider mid-conversation. The message history is preserved and re-encoded into the new provider's wire format on the next request — so a tool history that ran against Claude can continue under Kimi without losing parallel tool calls or `tool_use_id` correlation.
+
+```php
+use SuperAgent\Conversation\HandoffPolicy;
+
+$agent = new Agent(['provider' => 'anthropic', 'api_key' => $key, 'model' => 'claude-opus-4-7']);
+$agent->run('analyse this codebase');
+
+// Hand off to a cheaper / faster model for the next phase:
+$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k2-6'])
+      ->run('write the unit tests');
+
+// Token-window check after switching — different tokenizers count
+// the same history differently (Anthropic vs GPT-4 drift 20–30%):
+$status = $agent->lastHandoffTokenStatus();
+if ($status !== null && ! $status['fits']) {
+    // Trigger your existing IncrementalContext compression before the next call.
+}
+```
+
+### Handoff policy
+
+```php
+HandoffPolicy::default()      // keep tool history, drop signed thinking, append handoff marker
+HandoffPolicy::preserveAll()  // keep everything — useful when swap is temporary and you'll come back
+HandoffPolicy::freshStart()   // collapse history to (latest user turn) — fresh shot at a stuck conversation
+```
+
+Provider-only artifacts the new wire shape can't carry (Anthropic signed `thinking`, Kimi `prompt_cache_key`, Responses-API encrypted `reasoning`, Gemini `cachedContent` refs) get parked under `AssistantMessage::$metadata['provider_artifacts'][$providerKey]` — `HandoffPolicy::preserveAll()` keeps them around so a later swap back to the originating family can re-stitch them; `default()` keeps them stashed but invisible to the new provider.
+
+### Atomic swap
+
+`switchProvider()` constructs the new provider before mutating any state. If construction fails (missing `api_key`, unknown region, network probe rejection) the agent stays on the old provider with its history untouched.
+
+### Six wire-format families share one Transcoder
+
+All conversion goes through `Conversation\Transcoder`, which dispatches by `WireFamily` enum: `Anthropic` (also `bedrock`'s `anthropic.*` invocations), `OpenAIChat` (OpenAI/Kimi/GLM/MiniMax/Qwen/OpenRouter/LMStudio), `OpenAIResponses`, `Gemini` (the only family that correlates tool calls by name+order, no ids), `DashScope`, `Ollama`. Useful directly for offline transcoding:
+
+```php
+use SuperAgent\Conversation\Transcoder;
+use SuperAgent\Conversation\WireFamily;
+
+$wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
+```
+
+*Since v0.9.5*
 
 ---
 

@@ -31,6 +31,7 @@ echo $result->text();
 - [快速开始](#快速开始)
 - [Provider 与认证](#provider-与认证)
 - [OpenAI Responses API](#openai-responses-api)
+- [跨 Provider 切换](#跨-provider-切换)
 - [Agent 循环](#agent-循环)
 - [工具与多 Agent](#工具与多-agent)
 - [Agent 定义](#agent-定义yaml--markdown)
@@ -230,6 +231,57 @@ $agent->run($prompt, ['trace_context' => $tc]);
 ```
 
 *v0.9.1 起*
+
+---
+
+## 跨 Provider 切换
+
+`Agent::switchProvider($name, $config, $policy)` 在会话进行到一半时换 provider。消息历史保留下来，下次请求时按新 provider 的 wire 格式重新编码 —— 在 Claude 上跑过的工具历史可以无损交给 Kimi 继续，并行 tool call 不会被丢、`tool_use_id` 关联也不会断。
+
+```php
+use SuperAgent\Conversation\HandoffPolicy;
+
+$agent = new Agent(['provider' => 'anthropic', 'api_key' => $key, 'model' => 'claude-opus-4-7']);
+$agent->run('分析这个代码库');
+
+// 下一阶段切到更便宜/更快的模型：
+$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k2-6'])
+      ->run('补单元测试');
+
+// 切完查一下 token 预算 —— 不同 tokenizer 对同一段历史会差 20–30%
+// （Anthropic vs GPT-4 都不一样）：
+$status = $agent->lastHandoffTokenStatus();
+if ($status !== null && ! $status['fits']) {
+    // 触发已有的 IncrementalContext 压缩，再继续下一轮调用。
+}
+```
+
+### 切换策略
+
+```php
+HandoffPolicy::default()      // 保留工具历史；丢签名 thinking；插入 handoff system marker
+HandoffPolicy::preserveAll()  // 全保留 —— 适合临时切走、之后还会切回来的场景
+HandoffPolicy::freshStart()   // 把历史压缩到（最后一次 user 输入），让新模型对一段卡住的会话重新开局
+```
+
+新 wire 形状装不下的 provider 专属工件（Anthropic 签名 `thinking`、Kimi `prompt_cache_key`、Responses API 加密 `reasoning`、Gemini `cachedContent` 引用）会被存进 `AssistantMessage::$metadata['provider_artifacts'][$providerKey]` —— `HandoffPolicy::preserveAll()` 把它们留着以便回切时复用；`default()` 也只是从可见历史里搬走，不会真删。
+
+### 原子式切换
+
+`switchProvider()` 先构造新 provider，再动 state。如果构造失败（缺 `api_key`、未知 region、网络拒绝等），agent 留在原 provider，历史不动。
+
+### 6 个 wire-format 家族共用同一个 Transcoder
+
+所有转换走 `Conversation\Transcoder`，按 `WireFamily` enum 分发：`Anthropic`（`bedrock` 跑 `anthropic.*` 模型也走这条）、`OpenAIChat`（OpenAI/Kimi/GLM/MiniMax/Qwen/OpenRouter/LMStudio）、`OpenAIResponses`、`Gemini`（六家里唯一一个不用 tool_use_id、靠 name+顺序匹配）、`DashScope`、`Ollama`。也能直接独立用，比如把存盘的 Anthropic 会话喂给 Gemini batch job：
+
+```php
+use SuperAgent\Conversation\Transcoder;
+use SuperAgent\Conversation\WireFamily;
+
+$wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
+```
+
+*v0.9.5 起*
 
 ---
 

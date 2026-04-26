@@ -8680,3 +8680,249 @@ Enveloppe `ProviderRegistry::healthCheck()` — distingue rejet d'auth
 (401/403) de timeout réseau de "pas de clé API" pour qu'un opérateur
 corrige la bonne chose sans deviner. Idéal comme étape smoke CI avant
 de lancer des tests d'intégration qui frappent de vrais providers.
+
+
+## 52. Bascule inter-providers (v0.9.5)
+
+Six encodeurs de wire-format derrière un seul `Conversation\Transcoder`,
+plus un point d'entrée `Agent::switchProvider()` qui permute le
+provider actif au milieu d'une conversation sans perdre l'historique.
+
+### Familles de wire-format
+
+| Famille | Encodeur | Providers |
+|---|---|---|
+| A. Anthropic Messages       | `AnthropicEncoder`       | `anthropic`, `bedrock` (invocations `anthropic.*`) |
+| B. OpenAI Chat Completions  | `OpenAIChatEncoder`      | `openai`, `kimi`, `glm`, `minimax`, `qwen`, `openrouter`, `lmstudio` |
+| C. OpenAI Responses API     | `OpenAIResponsesEncoder` | `openai-responses` |
+| D. Google Gemini            | `GeminiEncoder`          | `gemini` |
+| E. Alibaba DashScope        | `DashScopeEncoder`       | `qwen-native` |
+| F. Ollama                   | `OllamaEncoder`          | `ollama` |
+
+Chaque provider qui possédait un convertisseur de wire-format délègue
+maintenant à l'encodeur partagé. Les 100+ lignes de conversion
+Anthropic écrites à la main dans `BedrockProvider` se sont effondrées
+en quatre lignes de délégation ; le `WireFormatMatrixTest` prouve que
+Bedrock et Anthropic produisent désormais une sortie wire identique
+pour la même fixture.
+
+```php
+use SuperAgent\Conversation\Transcoder;
+use SuperAgent\Conversation\WireFamily;
+
+$wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
+// list<array> dans la forme contents[] de Gemini
+```
+
+### `Agent::switchProvider()`
+
+```php
+use SuperAgent\Conversation\HandoffPolicy;
+
+$agent = new Agent(['provider' => 'anthropic', 'api_key' => $key]);
+$agent->run('analyse cette base de code');
+
+// Bascule vers Kimi pour la phase suivante. L'historique est préservé
+// et ré-encodé dans le wire compatible OpenAI de Kimi au prochain appel.
+$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k2-6'])
+      ->run('écris les tests unitaires');
+```
+
+La bascule est atomique. Le nouveau provider est construit avant
+toute mutation d'état ; une `api_key` manquante ou une region
+inconnue lève **avant** que le champ `$provider` de l'agent ne soit
+touché, donc une bascule échouée laisse l'agent sur l'ancien
+provider avec sa liste de messages intacte. Épinglé par
+`AgentSwitchProviderTest::test_failed_provider_construction_leaves_agent_untouched`.
+
+### `HandoffPolicy`
+
+Trois fabriques nommées couvrent les cas courants. La policy mute la
+liste de messages en mémoire exactement une fois à la bascule (les
+encodeurs wire font leur propre passe sortante à chaque requête
+suivante).
+
+```php
+HandoffPolicy::default();       // garde historique outils, supprime thinking signé,
+                                // ajoute marker système, reset continuation ids
+HandoffPolicy::preserveAll();   // garde tout — l'encodeur supprime quand même ce que
+                                // sa forme wire ne peut pas porter, mais les artefacts
+                                // survivent en métadonnée pour un retour ultérieur
+HandoffPolicy::freshStart();    // condense l'historique à (dernier tour utilisateur) —
+                                // utile pour donner un nouveau départ après un dérapage
+```
+
+Construction directe avec flags personnalisés également supportée :
+
+```php
+new HandoffPolicy(
+    keepToolHistory: true,
+    dropThinking: false,
+    imageStrategy: 'drop',          // 'fail' | 'drop' | 'recompress' (hook caller)
+    insertHandoffMarker: false,
+    resetContinuationIds: false,
+);
+```
+
+### Espace de noms `provider_artifacts` en métadonnée
+
+L'encodage inter-familles est lossy par nature : marqueurs
+`cache_control`, blocs `thinking` signés Anthropic, items
+`reasoning` chiffrés Responses-API, `prompt_cache_key` Kimi,
+références `cachedContent` Gemini, noms d'outils intégrés
+serveur Kimi à préfixe `$` — aucun ne survit à la forme wire d'une
+autre famille.
+
+Le preset `HandoffPolicy::default()` *capture* les artefacts
+supprimés dans
+`AssistantMessage::$metadata['provider_artifacts'][$providerKey]`
+plutôt que de les jeter, pour qu'une bascule retour vers la famille
+d'origine puisse les recoller.
+
+```php
+use SuperAgent\Conversation\ProviderArtifacts;
+
+// Aller : capture le thinking Anthropic avant Kimi
+$cleaned = ProviderArtifacts::captureAnthropicThinking($message);
+// $cleaned->content      → plus de blocs thinking (Kimi ne sait pas les lire)
+// $cleaned->metadata     → ['provider_artifacts' => ['anthropic' => ['thinking' => [...]]]]
+
+// Retour : lit l'état spécifique Anthropic à restaurer dans le request body
+$thinking = ProviderArtifacts::get($message->metadata, 'anthropic', 'thinking');
+
+// Effacement par provider (les tokens de continuation appartiennent à l'origine) :
+$meta = ProviderArtifacts::clearProvider($message->metadata, 'openai_responses');
+```
+
+La convention est segmentée par clé provider, donc un seul
+`AssistantMessage` peut porter des artefacts de plusieurs providers
+au fil d'une conversation à bascules multiples. Les encodeurs
+eux-mêmes sont aveugles au contenu ici — ils font toujours le
+geste conservateur de supprimer les champs inconnus à l'encodage
+sortant. Lire les artefacts en retour est la responsabilité de
+l'appelant (typiquement le provider lui-même, lorsqu'il voit sa
+propre clé sur un message).
+
+### Recalcul de la fenêtre de tokens
+
+Différents tokenizers comptent le même historique différemment —
+Anthropic et GPT-4 dérivent régulièrement de 20 à 30 %. La fenêtre
+de contexte du nouveau modèle peut aussi être plus petite que celle
+de la source. `lastHandoffTokenStatus()` réutilise
+`Context\TokenEstimator` pour rester cohérent avec
+`IncrementalContext` et l'auto-compactor.
+
+```php
+$agent->switchProvider('gemini', ['api_key' => $key, 'model' => 'gemini-2.5-pro']);
+
+$status = $agent->lastHandoffTokenStatus();
+// [
+//     'tokens' => 41203,
+//     'window' => 1_000_000,
+//     'fits'   => true,
+//     'model'  => 'gemini-2.5-pro',
+// ]
+
+if (! $status['fits']) {
+    // L'estimation dépasse le seuil d'auto-compact pour ce modèle.
+    // Déclencher la compression avant le prochain chat()/run().
+}
+```
+
+### Particularités par famille
+
+**Famille A (Anthropic / Bedrock).** La représentation interne est
+déjà à la forme Anthropic, donc l'encodage est un `Message::toArray()`
+littéral par message. Le marker de bascule
+(`HandoffPolicy::default()`) émet un `SystemMessage` en queue
+d'historique ; Anthropic accepte cela dans messages[] mais hisse
+aussi le `system` top-level séparément — gardez le marker comme
+*message* système (dans messages[]) pour que le nouveau modèle le
+voie, pas comme *prompt* système.
+
+**Famille B (OpenAI Chat Completions).** Les messages tool-result
+s'expansent toujours 1:N — un `ToolResultMessage` portant trois
+résultats parallèles devient trois messages wire avec `role:tool` +
+`tool_call_id` par résultat. Une input outil vide encode en `{}`
+(objet), pas `[]` (tableau) — certains backends compatibles
+rejettent la forme tableau. Les blocs thinking sont supprimés à
+l'encodage sortant (pas de champ wire).
+
+**Famille C (OpenAI Responses).** Chaque tour de conversation ne
+mappe pas à un message wire — il mappe à un ou plusieurs items
+`input[]`, chacun avec son propre `type` (`message` /
+`function_call` / `function_call_output` / `reasoning`). La
+continuation `previous_response_id` du provider est **un état côté
+provider, pas un champ wire** — lors d'une bascule VERS Responses
+depuis une autre famille, l'appelant doit reset `lastResponseId`
+pour que tout l'historique passe sur la requête. L'encodeur ne
+force pas ça ; c'est le travail de HandoffPolicy (et le default le
+fait).
+
+**Famille D (Gemini).** La seule famille qui n'expose pas d'ids de
+tool-call sur le wire. `functionResponse` corrèle à `functionCall`
+par `name` et l'ordre des parts dans la requête. La représentation
+interne porte toujours un id (le parser de stream Gemini synthétise
+des ids `gemini_<hex>_<n>` quand il voit un `functionCall`) ;
+l'encodeur reconstruit l'index `toolUseId → toolName` depuis
+l'historique assistant à chaque appel, donc les conversations nées
+de Gemini font l'aller-retour via d'autres providers et reviennent
+sans table de mapping externe. Les rôles sont `user` / `model`,
+pas `assistant`. Les system prompts vont sur le champ
+`systemInstruction` au top-level du request body, pas dans
+`contents[]` — l'encodeur saute donc silencieusement les
+`SystemMessage`.
+
+**Famille E (DashScope / Qwen-native).** Wire à la forme OpenAI
+Chat avec la subtilité que les versions plus anciennes de l'API
+DashScope rejettent `content: null` ; l'encodeur émet toujours une
+chaîne (vide quand il n'y a que des tool_calls).
+
+**Famille F (Ollama).** Le support des tool-calls dépend du modèle
+sous-jacent et n'est arrivé sur l'ensemble qu'à la mi-2024.
+L'encodeur émet la forme `tool_calls` + `role:tool` compatible
+OpenAI que les modèles tool-capables acceptent ; les modèles non
+tool-capables verront un tour de conversation inhabituel et
+risquent d'halluciner autour. Les arrays `content` multimodaux
+bruts des messages utilisateur sont JSON-encodés en chaîne unique
+pour les déploiements Ollama non vision.
+
+### Cas d'usage
+
+- **Routing coût / qualité par phase.** Modèle haut-de-gamme pour
+  l'analyse, modèle bon marché pour la génération de boilerplate,
+  haut-de-gamme à nouveau pour la review.
+- **Spécialisation.** Input visuel → Gemini pour ce tour, retour à
+  Claude pour l'orchestration.
+- **Failover après recovery manuel.** Quand un quota/incident
+  bloque le modèle courant, bascule vers un fallback sans perdre la
+  conversation. (Pour le fallback automatique sur erreurs
+  transitoires, voir `FallbackProvider` section 16.)
+- **Niveaux de confidentialité.** Tours sensibles sur Ollama local,
+  tours publics sur cloud.
+- **Transcodage offline.** Utiliser `Transcoder::encode()`
+  directement pour alimenter une conversation Anthropic sauvegardée
+  dans un job batch Gemini — pas besoin d'agent.
+
+### Notes architecturales
+
+- **Encodeurs sans état.** L'état par-conversation (l'index
+  `toolUseId → toolName` de Gemini, etc.) est reconstruit
+  déterministiquement depuis l'historique des messages à chaque
+  appel. L'encodage fait donc l'aller-retour à travers n'importe
+  quelle couche de persistance sans table de mapping externe.
+- **Représentation interne en forme Anthropic.** Accident
+  historique, pas un contrat — mais cela signifie que
+  `WireFamily::Anthropic` est en fait un passe-plat à
+  `Message::toArray()`, tandis que toutes les autres familles sont
+  une vraie traduction descendante qui peut supprimer des artefacts
+  vendor-only.
+- **Ordre de l'enum WireFamily.** Les cases sont ordonnés par la
+  phase d'implémentation qui les a ajoutés pour que l'écart entre
+  "le case enum existe" et "l'encodeur est branché" reste
+  auditable. Ajouter une septième famille : append le case →
+  écrire l'encodeur → enregistrer dans le `match` du Transcoder →
+  ajouter un test dans
+  `tests/Unit/Conversation/TranscoderTest.php`. Le smoke test
+  `test_all_six_families_encode_without_throwing` casse fort si un
+  nouveau case n'a pas d'encodeur.
