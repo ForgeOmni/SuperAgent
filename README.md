@@ -3,12 +3,12 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.2-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.9.6-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Docs**: [Installation](INSTALL.md) · [安装](INSTALL_CN.md) · [Installation FR](INSTALL_FR.md) · [Advanced usage](docs/ADVANCED_USAGE.md) · [API docs](docs/)
 
-An AI agent SDK for PHP — run the full agentic loop (LLM turn → tool call → tool result → next turn) in-process, with twelve providers, real-time streaming, multi-agent orchestration, and a machine-readable wire protocol. Usable as a standalone CLI or as a Laravel library.
+An AI agent SDK for PHP — run the full agentic loop (LLM turn → tool call → tool result → next turn) in-process, with thirteen providers, real-time streaming, multi-agent orchestration, and a machine-readable wire protocol. Usable as a standalone CLI or as a Laravel library.
 
 ```bash
 superagent "fix the login bug in src/Auth/"
@@ -32,6 +32,7 @@ echo $result->text();
 - [Providers & Authentication](#providers--authentication)
 - [OpenAI Responses API](#openai-responses-api)
 - [Cross-provider handoff](#cross-provider-handoff)
+- [DeepSeek V4](#deepseek-v4)
 - [Agent Loop](#agent-loop)
 - [Tools & Multi-Agent](#tools--multi-agent)
 - [Agent Definitions](#agent-definitions-yaml--markdown)
@@ -91,7 +92,7 @@ superagent "inspect composer.json and tell me what PHP version this project targ
 
 ## Providers & Authentication
 
-Twelve registry-backed providers, with region-aware base URLs and multiple auth modes per provider. All implement the same `LLMProvider` contract, so swapping one for another is one line.
+Thirteen registry-backed providers, with region-aware base URLs and multiple auth modes per provider. All implement the same `LLMProvider` contract, so swapping one for another is one line.
 
 | Registry key | Provider | Notes |
 |---|---|---|
@@ -105,13 +106,14 @@ Twelve registry-backed providers, with region-aware base URLs and multiple auth 
 | `qwen-native` | Alibaba Qwen (DashScope-native body) | Kept for `parameters.thinking_budget` callers |
 | `glm` | BigModel GLM | API key; regions `intl` / `cn` |
 | `minimax` | MiniMax | API key; regions `intl` / `cn` |
+| `deepseek` | DeepSeek V4 | API key; regions `default` / `beta` *(since v0.9.6)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Local Ollama daemon | No auth — localhost:11434 by default |
 | `lmstudio` | Local LM Studio server | Placeholder auth — localhost:1234 by default *(since v0.9.1)* |
 
 Auth options, by priority:
 
-1. **API key from environment** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
+1. **API key from environment** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
 2. **Stored OAuth credentials** at `~/.superagent/credentials/<name>.json`. Device-code flow — run `superagent auth login <name>`:
    - `claude-code` — reuses an existing Claude Code login
    - `codex` — reuses a Codex CLI login
@@ -282,6 +284,51 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 ```
 
 *Since v0.9.5*
+
+---
+
+## DeepSeek V4
+
+DeepSeek V4 (released 2026-04-24) ships two MoE models — `deepseek-v4-pro` (1.6T total / 49B active) and `deepseek-v4-flash` (284B / 13B active) — with **1M context** as the default and a single-model **thinking / non-thinking toggle**. The same backend exposes both an OpenAI-wire and an Anthropic-wire endpoint, so the SDK supports two routes:
+
+```php
+// OpenAI-wire: native DeepSeekProvider
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'model'    => 'deepseek-v4-pro',           // or 'deepseek-v4-flash'
+]);
+
+// Anthropic-wire: reuse AnthropicProvider with a custom base_url
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'base_url' => 'https://api.deepseek.com/anthropic',
+    'model'    => 'deepseek-v4-pro',
+]);
+```
+
+**Reasoning channel.** V4-thinking, R1, Kimi-thinking, Qwen-reasoning and any future OpenAI-compat reasoner stream their internal monologue on `delta.reasoning_content`. The shared `ChatCompletionsProvider` SSE parser now surfaces it as a separate `ContentBlock::thinking()` block prepended to the assistant turn — callers render or hide it deliberately rather than mixing it into the user-facing answer.
+
+```php
+$result = $agent->run('hard reasoning prompt', ['thinking' => true]);
+
+foreach ($result->message()->content as $block) {
+    if ($block->type === 'thinking') {
+        // model's reasoning chain
+    } elseif ($block->type === 'text') {
+        // user-facing answer
+    }
+}
+```
+
+**Deprecation lane.** `deepseek-chat` and `deepseek-reasoner` retire **2026-07-24**. The catalog flags both with `deprecated_until` and `replaced_by` fields; `ModelResolver` emits a one-shot warning per process recommending `deepseek-v4-flash` / `deepseek-v4-pro` respectively. Set `SUPERAGENT_SUPPRESS_DEPRECATION=1` to silence.
+
+**Cache-aware billing.** OpenAI-compat backends report `prompt_tokens` as gross (cache hits + misses). The parser now subtracts the cached portion before populating `Usage::inputTokens`, so the cache discount lands correctly — `CostCalculator` charges 10% of input price for read hits instead of effectively 110%. Affects every OpenAI-compat backend with caching (DeepSeek, Kimi, OpenAI itself).
+
+**Beta endpoint.** Set `region: 'beta'` to route to `https://api.deepseek.com/beta` for FIM / prefix completion access on the same auth.
+
+*Since v0.9.6*
 
 ---
 

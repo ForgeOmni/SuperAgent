@@ -3,12 +3,12 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.9.2-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.9.6-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
 
-PHP 的 AI agent SDK —— 在进程内跑完整的 agentic loop（LLM 轮次 → 工具调用 → 工具结果 → 下一轮），内置 12 个 provider、实时流式、多 agent 编排、以及机器可读的 wire 协议。既可以作为独立 CLI 使用，也可以作为 Laravel 依赖。
+PHP 的 AI agent SDK —— 在进程内跑完整的 agentic loop（LLM 轮次 → 工具调用 → 工具结果 → 下一轮），内置 13 个 provider、实时流式、多 agent 编排、以及机器可读的 wire 协议。既可以作为独立 CLI 使用，也可以作为 Laravel 依赖。
 
 ```bash
 superagent "修复 src/Auth/ 里的登录 bug"
@@ -32,6 +32,7 @@ echo $result->text();
 - [Provider 与认证](#provider-与认证)
 - [OpenAI Responses API](#openai-responses-api)
 - [跨 Provider 切换](#跨-provider-切换)
+- [DeepSeek V4](#deepseek-v4)
 - [Agent 循环](#agent-循环)
 - [工具与多 Agent](#工具与多-agent)
 - [Agent 定义](#agent-定义yaml--markdown)
@@ -91,7 +92,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 
 ## Provider 与认证
 
-12 个注册表驱动的 provider，每个都支持 region 感知的 base URL 和多种认证方式。全部实现同一个 `LLMProvider` 契约，所以换 provider 只需改一行。
+13 个注册表驱动的 provider，每个都支持 region 感知的 base URL 和多种认证方式。全部实现同一个 `LLMProvider` 契约，所以换 provider 只需改一行。
 
 | 注册表 key | Provider | 说明 |
 |---|---|---|
@@ -105,13 +106,14 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
 | `glm` | BigModel GLM | API key；region `intl` / `cn` |
 | `minimax` | MiniMax | API key；region `intl` / `cn` |
+| `deepseek` | DeepSeek V4 | API key；region `default` / `beta` *（v0.9.6 起）* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | 本地 Ollama daemon | 无需 auth — 默认 localhost:11434 |
 | `lmstudio` | 本地 LM Studio server | 占位 auth — 默认 localhost:1234 *（v0.9.1 起）* |
 
 认证方式，按优先级：
 
-1. **环境变量 API key** —— `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `KIMI_API_KEY` / `QWEN_API_KEY` / `GLM_API_KEY` / `MINIMAX_API_KEY` / `OPENROUTER_API_KEY` / `GEMINI_API_KEY`。
+1. **环境变量 API key** —— `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `KIMI_API_KEY` / `QWEN_API_KEY` / `GLM_API_KEY` / `MINIMAX_API_KEY` / `DEEPSEEK_API_KEY` / `OPENROUTER_API_KEY` / `GEMINI_API_KEY`。
 2. **已存储的 OAuth 凭据** 位于 `~/.superagent/credentials/<name>.json`。设备码流程 —— 运行 `superagent auth login <name>`：
    - `claude-code` —— 复用现有的 Claude Code 登录
    - `codex` —— 复用 Codex CLI 登录
@@ -282,6 +284,51 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 ```
 
 *v0.9.5 起*
+
+---
+
+## DeepSeek V4
+
+DeepSeek V4（2026-04-24 发布）推出两个 MoE 模型 —— `deepseek-v4-pro`（1.6T 总参 / 49B 激活）和 `deepseek-v4-flash`（284B / 13B 激活），默认 **1M context**，单模型 **thinking / non-thinking 切换**。同一后端同时暴露 OpenAI-wire 和 Anthropic-wire 两种接口，SDK 两条路径都支持：
+
+```php
+// OpenAI-wire：原生 DeepSeekProvider
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'model'    => 'deepseek-v4-pro',           // 或 'deepseek-v4-flash'
+]);
+
+// Anthropic-wire：复用 AnthropicProvider，自定义 base_url 即可
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'base_url' => 'https://api.deepseek.com/anthropic',
+    'model'    => 'deepseek-v4-pro',
+]);
+```
+
+**Reasoning 通道**。V4-thinking、R1、Kimi-thinking、Qwen-reasoning 以及任何 OpenAI-compat 推理模型都把内部思考流推到 `delta.reasoning_content`。共享的 `ChatCompletionsProvider` SSE 解析器现在把它呈现为单独一个 `ContentBlock::thinking()` 块，挂在 assistant 轮次的开头 —— 调用方自行决定是渲染还是隐藏，不再混进用户可见的回答里。
+
+```php
+$result = $agent->run('需要深度推理的提示', ['thinking' => true]);
+
+foreach ($result->message()->content as $block) {
+    if ($block->type === 'thinking') {
+        // 模型的思考链
+    } elseif ($block->type === 'text') {
+        // 用户可见的回答
+    }
+}
+```
+
+**退役提醒**。`deepseek-chat` 和 `deepseek-reasoner` **2026-07-24 退役**。catalog 给两者打上了 `deprecated_until` 和 `replaced_by` 字段；`ModelResolver` 会按进程发一次警告，建议切到 `deepseek-v4-flash` / `deepseek-v4-pro`。设置 `SUPERAGENT_SUPPRESS_DEPRECATION=1` 可以静音。
+
+**Cache 感知计费**。OpenAI-compat 后端报告的 `prompt_tokens` 是 gross（缓存命中 + 未命中之和）。解析器现在会先从 `prompt_tokens` 里减掉缓存命中部分再写入 `Usage::inputTokens`，让缓存折扣正确生效 —— `CostCalculator` 给读命中按 input 价的 10% 计费，而不是事实上的 110%。所有支持缓存的 OpenAI-compat 后端都受益（DeepSeek、Kimi、OpenAI 自己）。
+
+**Beta endpoint**。设置 `region: 'beta'` 路由到 `https://api.deepseek.com/beta`，同一份 auth 即可访问 FIM / 前缀补全。
+
+*v0.9.6 起*
 
 ---
 

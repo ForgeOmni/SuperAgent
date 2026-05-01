@@ -3,12 +3,12 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.2-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.9.6-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
 
-SDK d'agent IA pour PHP — exécutez la boucle agentique complète (tour LLM → appel d'outil → résultat → tour suivant) en processus, avec douze providers, streaming temps réel, orchestration multi-agents et un protocole wire lisible par machine. Utilisable en CLI autonome ou comme dépendance Laravel.
+SDK d'agent IA pour PHP — exécutez la boucle agentique complète (tour LLM → appel d'outil → résultat → tour suivant) en processus, avec treize providers, streaming temps réel, orchestration multi-agents et un protocole wire lisible par machine. Utilisable en CLI autonome ou comme dépendance Laravel.
 
 ```bash
 superagent "corrige le bug de connexion dans src/Auth/"
@@ -32,6 +32,7 @@ echo $result->text();
 - [Providers et authentification](#providers-et-authentification)
 - [API OpenAI Responses](#api-openai-responses)
 - [Bascule inter-providers](#bascule-inter-providers)
+- [DeepSeek V4](#deepseek-v4)
 - [Boucle d'agent](#boucle-dagent)
 - [Outils et multi-agents](#outils-et-multi-agents)
 - [Définitions d'agents](#définitions-dagents-yaml--markdown)
@@ -91,7 +92,7 @@ superagent "inspecte composer.json et dis-moi quelle version PHP ce projet cible
 
 ## Providers et authentification
 
-Douze providers pilotés par un registre, avec URL de base par région et plusieurs modes d'authentification. Tous implémentent le même contrat `LLMProvider` — échanger un provider pour un autre est une seule ligne.
+Treize providers pilotés par un registre, avec URL de base par région et plusieurs modes d'authentification. Tous implémentent le même contrat `LLMProvider` — échanger un provider pour un autre est une seule ligne.
 
 | Clé de registre | Provider | Notes |
 |---|---|---|
@@ -105,13 +106,14 @@ Douze providers pilotés par un registre, avec URL de base par région et plusie
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
 | `glm` | BigModel GLM | Clé API ; régions `intl` / `cn` |
 | `minimax` | MiniMax | Clé API ; régions `intl` / `cn` |
+| `deepseek` | DeepSeek V4 | Clé API ; régions `default` / `beta` *(depuis v0.9.6)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Ollama local | Aucune auth — localhost:11434 par défaut |
 | `lmstudio` | Serveur LM Studio local | Auth placeholder — localhost:1234 par défaut *(depuis v0.9.1)* |
 
 Modes d'authentification, par priorité :
 
-1. **Clé API par variable d'environnement** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
+1. **Clé API par variable d'environnement** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
 2. **Credentials OAuth stockés** à `~/.superagent/credentials/<name>.json`. Flux device-code — `superagent auth login <name>` :
    - `claude-code` — réutilise une connexion Claude Code existante
    - `codex` — réutilise une connexion Codex CLI
@@ -283,6 +285,51 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 ```
 
 *Depuis v0.9.5*
+
+---
+
+## DeepSeek V4
+
+DeepSeek V4 (sorti le 2026-04-24) propose deux modèles MoE — `deepseek-v4-pro` (1,6 T total / 49 B actifs) et `deepseek-v4-flash` (284 B / 13 B actifs) — avec **1 M de contexte** par défaut et un **bascule thinking / non-thinking** dans le même modèle. Le même backend expose deux wires en parallèle (OpenAI et Anthropic) ; le SDK supporte les deux chemins :
+
+```php
+// Wire OpenAI : DeepSeekProvider natif
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'model'    => 'deepseek-v4-pro',           // ou 'deepseek-v4-flash'
+]);
+
+// Wire Anthropic : réutilise AnthropicProvider avec un base_url personnalisé
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'base_url' => 'https://api.deepseek.com/anthropic',
+    'model'    => 'deepseek-v4-pro',
+]);
+```
+
+**Canal de raisonnement.** V4-thinking, R1, Kimi-thinking, Qwen-reasoning et tout futur reasoner OpenAI-compat poussent leur monologue interne sur `delta.reasoning_content`. Le parser SSE partagé de `ChatCompletionsProvider` le restitue désormais comme un `ContentBlock::thinking()` séparé, posé en tête de l'assistant — l'appelant choisit de l'afficher ou de le masquer plutôt que de le mélanger à la réponse utilisateur.
+
+```php
+$result = $agent->run('prompt nécessitant du raisonnement', ['thinking' => true]);
+
+foreach ($result->message()->content as $block) {
+    if ($block->type === 'thinking') {
+        // chaîne de raisonnement du modèle
+    } elseif ($block->type === 'text') {
+        // réponse visible côté utilisateur
+    }
+}
+```
+
+**Voie de dépréciation.** `deepseek-chat` et `deepseek-reasoner` se retirent le **2026-07-24**. Le catalogue marque les deux avec `deprecated_until` et `replaced_by` ; `ModelResolver` émet un warning unique par processus recommandant `deepseek-v4-flash` / `deepseek-v4-pro`. `SUPERAGENT_SUPPRESS_DEPRECATION=1` rend le warning silencieux.
+
+**Facturation cache-aware.** Les backends OpenAI-compat reportent `prompt_tokens` en brut (cache hits + miss). Le parser soustrait désormais la portion mise en cache avant de remplir `Usage::inputTokens`, ce qui fait atterrir la remise cache correctement — `CostCalculator` facture les lectures à 10 % du tarif input, au lieu d'un effectif 110 %. Concerne tout backend OpenAI-compat avec cache (DeepSeek, Kimi, OpenAI lui-même).
+
+**Endpoint beta.** `region: 'beta'` route vers `https://api.deepseek.com/beta` pour FIM / complétion par préfixe avec la même auth.
+
+*Depuis v0.9.6*
 
 ---
 

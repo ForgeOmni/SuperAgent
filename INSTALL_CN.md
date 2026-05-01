@@ -85,7 +85,7 @@ iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps
 验证：
 
 ```bash
-superagent --version    # SuperAgent v0.9.5
+superagent --version    # SuperAgent v0.9.6
 superagent --help
 ```
 
@@ -119,6 +119,7 @@ export KIMI_API_KEY=...
 export QWEN_API_KEY=...            # 'qwen' 和 'qwen-native' 共用
 export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
+export DEEPSEEK_API_KEY=...        # DeepSeek V4 — v0.9.6 起
 export OPENROUTER_API_KEY=...
 ```
 

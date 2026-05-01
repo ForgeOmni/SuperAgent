@@ -8377,3 +8377,141 @@ encoder 每次从 assistant 历史重建 `toolUseId → toolName` 映射，所
   试。`test_all_six_families_encode_without_throwing` 冒烟测试会
   在新 case 没接 encoder 时直接红。
 
+## 53. DeepSeek V4（v0.9.6）
+
+DeepSeek V4（2026-04-24 发布）是 SDK 里第一个**同后端同时支持两种 wire 家族**的 provider —— OpenAI 兼容端点 `https://api.deepseek.com/v1` 和 Anthropic 兼容端点 `https://api.deepseek.com/anthropic`。一级 `deepseek` 注册键通过 `DeepSeekProvider` 走 OpenAI 路；Anthropic 路通过给 `AnthropicProvider` 配自定义 `base_url` 即可。两条路都是平等的 —— 选哪条取决于你现有的会话历史 wire 家族。
+
+### 模型
+
+| 模型 id | 总参数 | 激活参数 | Context | 价格 input/output |
+|---|---|---|---|---|
+| `deepseek-v4-pro`   | 1.6T (MoE) | 49B  | 1 M | $0.55 / $2.20 per 1M |
+| `deepseek-v4-flash` |  284B (MoE)| 13B  | 1 M | $0.14 / $0.55 per 1M |
+| `deepseek-chat`     | (V3) | (V3) | (V3) | 已弃用 — 2026-07-24 退役 → 路由到 `deepseek-v4-flash` |
+| `deepseek-reasoner` | (R1) | (R1) | (R1) | 已弃用 — 2026-07-24 退役 → 推荐 `deepseek-v4-pro` |
+
+V4 给出了同模型 **thinking / non-thinking 切换**：同一个 model id，`thinking: {type: enabled}` 字段即可开启推理通道。V3 的 `deepseek-chat`（永远 non-thinking）和 R1 的 `deepseek-reasoner`（永远 thinking）合并成 V4 的两档。
+
+### OpenAI-wire（默认）
+
+```php
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'model'    => 'deepseek-v4-pro',
+]);
+
+// 顶层 `thinking` 开关 —— 和 FeatureDispatcher 路径同形状
+$result = $agent->run('需要深度推理的提示', ['thinking' => true]);
+
+// 或走统一的 features API：
+$result = $agent->run('需要深度推理的提示', [
+    'features' => ['thinking' => ['enabled' => true, 'budget' => 4000]],
+]);
+```
+
+`SupportsThinking::thinkingRequestFragment()` 返回 `['thinking' => ['type' => 'enabled']]`。V4 的 budget 是按模型 tier 服务端控制的（V4-Pro 比 V4-Flash 思考更多），传入的 advisory `$budgetTokens` 当前忽略。如果 DeepSeek 之后加了 budget 字段，fragment 形状是前向兼容的。
+
+### Anthropic-wire（不需要 DeepSeekProvider）
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'base_url' => 'https://api.deepseek.com/anthropic',
+    'model'    => 'deepseek-v4-pro',
+]);
+```
+
+`AnthropicProvider` 已经接受 `base_url` 覆盖；V4 的 Anthropic 端点端到端 wire 兼容（Messages API shape、`thinking: {type, budget_tokens}`、tool-use 块、签名 thinking）。当现有 Anthropic 会话历史需要直接落到 DeepSeek（不走 transcode）时用这条路。
+
+### Reasoning 通道 —— 所有 OpenAI-compat 推理模型受益
+
+共享的 `ChatCompletionsProvider::parseSSEStream()` 现在把 `delta.reasoning_content` 单独累积到一个 buffer，stream 结束时作为头部 `ContentBlock::thinking()` 块发出。**这不是 DeepSeek 专属** —— 任何在该通道流推理链的 OpenAI-compat 后端都受益：V4-thinking、R1、Kimi-thinking、Qwen-reasoning、走 Chat Completions 的 OpenAI o-series，以及任何采用同一约定的未来 reasoner。
+
+```php
+$result = $agent->run('需要深度推理的提示', ['thinking' => true]);
+
+foreach ($result->message()->content as $block) {
+    if ($block->type === 'thinking') {
+        // 内部独白 —— 用折叠 UI 面板渲染、写审计日志、或完全隐藏，调用方自己决定
+    } elseif ($block->type === 'text') {
+        // 用户可见的回答
+    }
+}
+```
+
+Streaming handler 的 `onText` 回调依然只在用户可见文本通道触发。Reasoning 是 out-of-band 设计 —— parser 把它放进 `thinking` 块就是为了让 UI 显式选择渲染或隐藏，不会混进答案里。
+
+### 退役专线
+
+`models.json` schema 给模型行加了可选的 `deprecated_until`（ISO `YYYY-MM-DD`）和 `replaced_by`（规范 id）字段。`deepseek-chat` 和 `deepseek-reasoner` 按 DeepSeek 的公告打上了 `deprecated_until: 2026-07-24`。
+
+`ModelResolver::resolve()` 在解析到弃用 id 时按 `(model, process)` 对发一次性 `error_log` 警告：
+
+```
+[SuperAgent] model 'deepseek-chat' is deprecated: retires 2026-07-24
+(N days left) — switch to 'deepseek-v4-flash'.
+Set SUPERAGENT_SUPPRESS_DEPRECATION=1 to silence.
+```
+
+这套机制覆盖任何未来 vendor 的退役 —— catalog 行加上 `deprecated_until` + `replaced_by` 即可，不需要 per-vendor 代码。
+
+```php
+use SuperAgent\Providers\ModelCatalog;
+
+$info = ModelCatalog::deprecation('deepseek-chat');
+// [
+//     'deprecated_until' => '2026-07-24',
+//     'replaced_by'      => 'deepseek-v4-flash',
+//     'days_left'        => 84,           // 退役窗口已过则为负
+// ]
+```
+
+CI / 故意 pin 弃用 id 的脚本场景设 `SUPERAGENT_SUPPRESS_DEPRECATION=1`（也接受 `true` / `yes` / `on`）即可静音。
+
+### Cache 感知计费 —— 全部 OpenAI-compat 后端的修复
+
+V4 支持自动 per-account context cache。命中部分以 `prompt_cache_hit_tokens`（DeepSeek V3 历史 shape，V4 也继续 emit）或 `prompt_tokens_details.cached_tokens`（OpenAI shape，V4 同时 emit 给 OpenAI-compat 客户端）回传。Base parser 接受任一种，第一个非 0 值生效。
+
+**所有 OpenAI-compat 后端的缓存计费都隐性 over-count**：`usage.prompt_tokens` 在 OpenAI / Kimi / DeepSeek / GLM-with-cache 上是 gross（cache 命中 + 未命中之和），但 parser 之前直接把它写进 `Usage::inputTokens`，*同时*把 cache 命中也写进 `Usage::cacheReadInputTokens`。`CostCalculator` 然后给所有 prompt token 应用全价 *再加* 给缓存部分加 10% —— 缓存部分实际按 110% 计费而不是 10%。
+
+v0.9.6 修复：parser 在写 `inputTokens` 之前先从 `prompt_tokens` 减掉缓存部分，让现有的成本算式产出正确数字。`Usage::totalTokens()` 依然加回所有字段，外部 token 计数不受影响。
+
+```php
+// 800 缓存命中 + 200 新 token，V4-Flash 单价 input=$0.14/M：
+$usage = new Usage(
+    inputTokens: 200,                 // 200 未命中
+    outputTokens: 50,
+    cacheReadInputTokens: 800,        // 800 命中
+);
+$cost = CostCalculator::calculate('deepseek-v4-flash', $usage);
+// 200 * 0.14/1M  +  800 * 0.014/1M  +  50 * 0.55/1M  ≈  $0.0000667
+//
+// 修复前 inputTokens 会被读成 1000，缓存部分被 over-charge ~10×
+```
+
+Anthropic 路径 wire 是对的（API 自己分 hits/misses），只有 OpenAI 端需要 rebalance。
+
+### Beta endpoint —— FIM / 前缀补全
+
+`region: 'beta'` 把 base URL 切到 `https://api.deepseek.com/beta`，提供 fill-in-middle 和前缀补全。chat 路径不变（`v1/chat/completions`），只是 host 不同，auth 共用。
+
+```php
+new Agent([
+    'provider' => 'deepseek',
+    'region'   => 'beta',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'model'    => 'deepseek-v4-flash',   // 代码生成用 Flash 走 FIM 最实用
+]);
+```
+
+视为 code-completion 工作负载的可选模式；chat / agentic loop 用 `default` region 即可。
+
+### 架构小记
+
+- **加 `deepseek` 注册键不需要新 encoder**。V4 的 OpenAI wire 和 OpenAI Chat Completions wire 字节相同 —— 不需要新 `WireFamily` case 也不需要新 encoder。`OpenAIChat` 家族已覆盖 `openai`、`kimi`、`glm`、`minimax`、`qwen`、`openrouter`、`lmstudio`，现在加 `deepseek`。Anthropic-wire 路用 `AnthropicProvider` 直接 + `base_url` 覆盖，落在 `Anthropic` `WireFamily` —— 也无新代码。
+- **reasoning_content plumbing 早就该做了**。Qwen `qwen-reasoning`、Kimi thinking-tuned 变体一直在 emit `delta.reasoning_content`，SDK 静默丢弃。在 `ChatCompletionsProvider::parseSSEStream()` 通用处理意味着所有现存 OpenAI-compat 子类不需要 override 就拿到这个能力 —— DeepSeek 是触发因素，Kimi-thinking 和 Qwen-reasoning 用户在 0.9.6 免费拿到通道。
+- **Budget 旋钮的前向兼容**。如果 DeepSeek（或其他 vendor）后续给 V4-thinking 暴露了 `budget_tokens` 字段，`DeepSeekProvider::thinkingRequestFragment(int $budgetTokens)` 已经接收 budget —— body fragment 加一个 `budget_tokens` key 即可，不需要调用方改动。
+- **catalog 弃用是通用机制**。`ModelCatalog::deprecation()` 和 `ModelResolver` 警告钩子对任何 provider 都生效 —— vendor 公告退役，往 catalog 行加 `deprecated_until` + `replaced_by`，警告就带着 deadline 触发。这套机制将来覆盖 Anthropic 的 Claude-3 退役、OpenAI `gpt-3.5-turbo` 寿终、以及任何其他 deadline。
+

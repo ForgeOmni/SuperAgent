@@ -7798,3 +7798,143 @@ a single string for non-vision Ollama deployments.
   `tests/Unit/Conversation/TranscoderTest.php`. The
   `test_all_six_families_encode_without_throwing` smoke test fails
   loudly if a new case is added without an encoder.
+
+## 53. DeepSeek V4 (v0.9.6)
+
+DeepSeek V4 (announced 2026-04-24) is the first provider in the SDK that ships **two wire families on the same backend** — an OpenAI-compatible endpoint at `https://api.deepseek.com/v1` and an Anthropic-compatible endpoint at `https://api.deepseek.com/anthropic`. The first-class `deepseek` registry key targets the OpenAI route via `DeepSeekProvider`; the Anthropic route is reachable by configuring `AnthropicProvider` with a custom `base_url`. Pick whichever matches the rest of your conversation history wire — neither is "preferred".
+
+### Models
+
+| Model id | Total params | Active params | Context | Pricing input/output |
+|---|---|---|---|---|
+| `deepseek-v4-pro`   | 1.6T (MoE) | 49B  | 1 M | $0.55 / $2.20 per 1M |
+| `deepseek-v4-flash` |  284B (MoE)| 13B  | 1 M | $0.14 / $0.55 per 1M |
+| `deepseek-chat`     | (V3) | (V3) | (V3) | DEPRECATED — retires 2026-07-24 → routes to `deepseek-v4-flash` |
+| `deepseek-reasoner` | (R1) | (R1) | (R1) | DEPRECATED — retires 2026-07-24 → recommend `deepseek-v4-pro` |
+
+V4 ships a single-model **thinking / non-thinking toggle**: same model id, the `thinking: {type: enabled}` field flips the reasoning channel on. V3's `deepseek-chat` (always non-thinking) and R1's `deepseek-reasoner` (always thinking) collapse into V4's two tiers.
+
+### OpenAI-wire (default)
+
+```php
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'model'    => 'deepseek-v4-pro',
+]);
+
+// Top-level `thinking` knob — same shape as the FeatureDispatcher path.
+$result = $agent->run('hard reasoning prompt', ['thinking' => true]);
+
+// Or via the unified features API:
+$result = $agent->run('hard reasoning prompt', [
+    'features' => ['thinking' => ['enabled' => true, 'budget' => 4000]],
+]);
+```
+
+`SupportsThinking::thinkingRequestFragment()` returns `['thinking' => ['type' => 'enabled']]`. V4 controls the budget server-side by tier (V4-Pro thinks more aggressively than V4-Flash); the advisory `$budgetTokens` is currently ignored. If DeepSeek adds a budget knob later, the fragment shape is forward-compatible.
+
+### Anthropic-wire (no DeepSeekProvider needed)
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'base_url' => 'https://api.deepseek.com/anthropic',
+    'model'    => 'deepseek-v4-pro',
+]);
+```
+
+`AnthropicProvider` already accepts a `base_url` override; V4's Anthropic endpoint is fully wire-compatible end-to-end (Messages API shape, `thinking: {type, budget_tokens}`, tool-use blocks, signed thinking). Use this route when an existing Anthropic conversation history needs to land on DeepSeek without a transcode.
+
+### Reasoning channel — surfaced for every OpenAI-compat reasoner
+
+The shared `ChatCompletionsProvider::parseSSEStream()` now accumulates `delta.reasoning_content` on a separate buffer and emits it as a leading `ContentBlock::thinking()` block at end-of-stream. This is **not** DeepSeek-specific — it benefits any OpenAI-compat backend that streams its reasoning chain on that channel: V4-thinking, R1, Kimi-thinking, Qwen-reasoning, OpenAI's o-series via Chat Completions, future reasoners that adopt the convention.
+
+```php
+$result = $agent->run('hard reasoning prompt', ['thinking' => true]);
+
+foreach ($result->message()->content as $block) {
+    if ($block->type === 'thinking') {
+        // Internal monologue — render in a collapsed UI panel,
+        // log for audit, or hide entirely. Caller's choice.
+    } elseif ($block->type === 'text') {
+        // The user-facing answer.
+    }
+}
+```
+
+Streaming handlers' `onText` callback continues to fire only for the user-facing text channel. Reasoning is out-of-band by design — the parser puts it in `thinking` blocks specifically so the UI can render or hide it deliberately rather than mixing it into the answer.
+
+### Deprecation lane
+
+`models.json` schema gains optional `deprecated_until` (ISO `YYYY-MM-DD`) and `replaced_by` (canonical id) fields on model rows. `deepseek-chat` and `deepseek-reasoner` are flagged with `deprecated_until: 2026-07-24` per DeepSeek's announcement.
+
+`ModelResolver::resolve()` emits a one-shot `error_log` warning per `(model, process)` pair when a deprecated id is encountered:
+
+```
+[SuperAgent] model 'deepseek-chat' is deprecated: retires 2026-07-24
+(N days left) — switch to 'deepseek-v4-flash'.
+Set SUPERAGENT_SUPPRESS_DEPRECATION=1 to silence.
+```
+
+The same mechanism covers any future provider retirement — add `deprecated_until` + `replaced_by` to the catalog row, no per-vendor code.
+
+```php
+use SuperAgent\Providers\ModelCatalog;
+
+$info = ModelCatalog::deprecation('deepseek-chat');
+// [
+//     'deprecated_until' => '2026-07-24',
+//     'replaced_by'      => 'deepseek-v4-flash',
+//     'days_left'        => 84,           // negative once the window has lapsed
+// ]
+```
+
+Set `SUPERAGENT_SUPPRESS_DEPRECATION=1` (also accepts `true` / `yes` / `on`) for CI / scripted contexts that pin to a deprecated id deliberately.
+
+### Cache-aware billing — fixed for every OpenAI-compat backend
+
+V4 supports automatic per-account context caching. Cache hits return on the wire as `prompt_cache_hit_tokens` (DeepSeek's historical V3 shape — V4 still emits it for back-compat) or `prompt_tokens_details.cached_tokens` (OpenAI shape — V4 also emits this for OpenAI-compat clients). The base parser accepts any of three shapes; first non-zero wins.
+
+A latent bug across **every OpenAI-compat backend with caching** was overcounting the cached portion: `usage.prompt_tokens` is gross (cache hits + misses) on OpenAI / Kimi / DeepSeek / GLM-with-cache, but the parser was populating `Usage::inputTokens` from that field directly while *also* setting `Usage::cacheReadInputTokens`. `CostCalculator` then applied full input price to all prompt tokens *and* added 10% to the cached slice — billing the cached portion at 110% instead of 10%.
+
+Fixed in v0.9.6: the parser now subtracts the cached count from `prompt_tokens` before storing it as `inputTokens`, so the existing cost arithmetic produces the correct number. `Usage::totalTokens()` keeps adding the fields back, so any callers tracking total token counts elsewhere are unchanged.
+
+```php
+// 800 cache hits + 200 fresh tokens, V4-Flash @ $0.14/M input:
+$usage = new Usage(
+    inputTokens: 200,                 // 200 fresh
+    outputTokens: 50,
+    cacheReadInputTokens: 800,        // 800 cached
+);
+$cost = CostCalculator::calculate('deepseek-v4-flash', $usage);
+// 200 * 0.14/1M  +  800 * 0.014/1M  +  50 * 0.55/1M  ≈  $0.0000667
+//
+// Pre-fix this would have read inputTokens=1000 and overcharged by ~10×
+// on the cached slice.
+```
+
+Anthropic's path is wire-correct (the API splits hits/misses natively); only the OpenAI-side rebalance was needed.
+
+### Beta endpoint — FIM / prefix completion
+
+`region: 'beta'` swaps the base URL to `https://api.deepseek.com/beta` for fill-in-middle and prefix completion access. The chat path is unchanged (`v1/chat/completions`) — only the host differs, same auth.
+
+```php
+new Agent([
+    'provider' => 'deepseek',
+    'region'   => 'beta',
+    'api_key'  => getenv('DEEPSEEK_API_KEY'),
+    'model'    => 'deepseek-v4-flash',   // FIM is most useful on Flash for codegen
+]);
+```
+
+Treat it as opt-in for code-completion workloads; the `default` region is the right pick for chat / agentic loops.
+
+### Architectural notes
+
+- **Adding a `deepseek` registry key without a custom encoder.** V4's OpenAI wire is byte-identical to OpenAI's Chat Completions wire — no new `WireFamily` case, no new encoder. The `OpenAIChat` family already covers `openai`, `kimi`, `glm`, `minimax`, `qwen`, `openrouter`, `lmstudio`, and now `deepseek`. The Anthropic-wire route uses `AnthropicProvider` directly with a `base_url` override and lands on the `Anthropic` `WireFamily` — also no new code.
+- **The reasoning_content plumbing was due regardless.** Qwen's `qwen-reasoning` and Kimi's thinking-tuned variants have always emitted `delta.reasoning_content`; the SDK was silently dropping it. Surfacing it generically in `ChatCompletionsProvider::parseSSEStream()` means every existing OpenAI-compat subclass gains the capability without overrides — DeepSeek is the trigger, but Kimi-thinking and Qwen-reasoning users get the channel for free in 0.9.6.
+- **Forward-compat with budget knobs.** If DeepSeek (or another vendor) later exposes a `budget_tokens` field on V4-thinking, `DeepSeekProvider::thinkingRequestFragment(int $budgetTokens)` already receives the budget — the body fragment gains a `budget_tokens` key, no caller changes.
+- **Catalog deprecation is general.** `ModelCatalog::deprecation()` and the `ModelResolver` warning hook work for any provider — add `deprecated_until` + `replaced_by` to the catalog row when a vendor announces a retirement, and the warning fires with the deadline. The same mechanism will cover Anthropic's eventual Claude-3 retirement, OpenAI's `gpt-3.5-turbo` end-of-life, and any other deadline that lands.
