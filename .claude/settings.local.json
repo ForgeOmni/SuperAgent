@@ -158,7 +158,14 @@
       "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers/WireFormatMatrixTest.php tests/Unit/Providers/ChatCompletionsConvertMessageTest.php)",
       "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php)",
       "Bash(./vendor/bin/phpunit tests/Unit/AgentSwitchProviderTest.php tests/Unit/Conversation tests/Unit/Providers)",
-      "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php tests/Unit/Phase2ProvidersTest.php tests/Unit/AgentProviderResolutionTest.php tests/Unit/AgentSwitchProviderTest.php)"
+      "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php tests/Unit/Phase2ProvidersTest.php tests/Unit/AgentProviderResolutionTest.php tests/Unit/AgentSwitchProviderTest.php)",
+      "WebFetch(domain:api-docs.deepseek.com)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/DeepSeekProviderTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/DeepSeekDeprecationTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/CostCalculatorTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers tests/Unit/ModelResolverTest.php tests/Unit/AgentProviderResolutionTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers tests/Unit/CostCalculatorTest.php tests/Unit/ModelResolverTest.php tests/Unit/AgentProviderResolutionTest.php --no-coverage)"
     ]
   }
 }
