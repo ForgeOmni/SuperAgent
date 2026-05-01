@@ -19,6 +19,22 @@ use SuperAgent\Providers\Capabilities\SupportsThinking;
 use SuperAgent\Thinking\ThinkingConfig;
 use SuperAgent\Tools\Tool;
 
+/**
+ * Anthropic Messages API client.
+ *
+ * Talks to `https://api.anthropic.com` by default, but `$config['base_url']`
+ * lets the same provider front any Anthropic-wire-compatible endpoint:
+ *
+ *   - DeepSeek V4 — `https://api.deepseek.com/anthropic` (DEEPSEEK_API_KEY).
+ *     V4 is wire-compatible end-to-end, so configuring
+ *     `provider=anthropic, base_url=https://api.deepseek.com/anthropic,
+ *      api_key=$DEEPSEEK_API_KEY, model=deepseek-v4-pro` works without a
+ *     dedicated DeepSeekProvider on the Anthropic path. Use the OpenAI-compat
+ *     `DeepSeekProvider` when you want the OpenAI wire shape instead.
+ *   - Self-hosted Anthropic gateways / proxies.
+ *   - Bedrock / Vertex Anthropic models go through their own providers
+ *     (BedrockProvider) — this base_url override is for direct-HTTP gateways.
+ */
 class AnthropicProvider implements LLMProvider, SupportsThinking
 {
     public function thinkingRequestFragment(int $budgetTokens): array

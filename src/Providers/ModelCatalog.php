@@ -105,6 +105,42 @@ class ModelCatalog
     }
 
     /**
+     * Deprecation info for a model id, or null if the model is current.
+     *
+     * Catalog entries can carry two optional fields:
+     *
+     *   - `deprecated_until` — ISO date (YYYY-MM-DD) the upstream provider
+     *     will stop serving this id. After that date the model is unusable
+     *     and the catalog entry should be removed in a release.
+     *   - `replaced_by` — canonical id callers should switch to.
+     *
+     * Returns `['deprecated_until' => ..., 'replaced_by' => ..., 'days_left' => ...]`
+     * or null when the model is current. `days_left` is negative when the
+     * deprecation window has already lapsed (the API may still respond, may
+     * not — depends on the provider's grace policy). Callers use this to
+     * emit one-time warnings at provider load.
+     *
+     * @return array{deprecated_until: string, replaced_by: ?string, days_left: int}|null
+     */
+    public static function deprecation(string $id): ?array
+    {
+        $entry = self::model($id);
+        if ($entry === null || empty($entry['deprecated_until'])) {
+            return null;
+        }
+        $until = (string) $entry['deprecated_until'];
+        $untilTs = strtotime($until . ' UTC');
+        if ($untilTs === false) {
+            return null;
+        }
+        return [
+            'deprecated_until' => $until,
+            'replaced_by'      => isset($entry['replaced_by']) ? (string) $entry['replaced_by'] : null,
+            'days_left'        => (int) floor(($untilTs - time()) / 86400),
+        ];
+    }
+
+    /**
      * Capabilities for a given model id.
      *
      * Resolution order:

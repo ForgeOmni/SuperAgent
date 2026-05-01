@@ -45,6 +45,16 @@ class ModelResolver
     protected static bool $initialized = false;
 
     /**
+     * Set of model ids we have already warned about during this process.
+     * Each entry is warned exactly once — repeated `resolve()` calls don't
+     * spam the log, but a second model with its own deprecation gets its
+     * own warning.
+     *
+     * @var array<string, true>
+     */
+    protected static array $warnedDeprecations = [];
+
+    /**
      * Resolve a model name to its canonical identifier.
      *
      * Resolution order:
@@ -56,6 +66,17 @@ class ModelResolver
     {
         static::ensureInitialized();
 
+        $resolved = static::resolveInner($model);
+        static::warnIfDeprecated($resolved);
+        return $resolved;
+    }
+
+    /**
+     * Pure resolution — no side effects. Split out so the deprecation warner
+     * can run on the resolved id without recursing.
+     */
+    protected static function resolveInner(string $model): string
+    {
         $key = strtolower(trim($model));
 
         if ($key === '') {
@@ -89,6 +110,46 @@ class ModelResolver
 
         // No match — pass through as-is
         return $model;
+    }
+
+    /**
+     * Emit a one-shot deprecation warning when the resolved model is flagged
+     * in the catalog. Goes to error_log so it shows up in CLI stderr and
+     * Laravel's php error log without needing a logger dependency. Each
+     * `(model, process)` pair warns once.
+     *
+     * Skipped entirely when SUPERAGENT_SUPPRESS_DEPRECATION=1 is set —
+     * useful in CI / scripted contexts that pin to a known-deprecated id
+     * deliberately and don't want the noise.
+     */
+    protected static function warnIfDeprecated(string $resolvedId): void
+    {
+        if (isset(static::$warnedDeprecations[$resolvedId])) {
+            return;
+        }
+        $suppress = getenv('SUPERAGENT_SUPPRESS_DEPRECATION');
+        if (is_string($suppress) && in_array(strtolower(trim($suppress)), ['1', 'true', 'yes', 'on'], true)) {
+            static::$warnedDeprecations[$resolvedId] = true;
+            return;
+        }
+
+        $info = ModelCatalog::deprecation($resolvedId);
+        if ($info === null) {
+            return;
+        }
+
+        static::$warnedDeprecations[$resolvedId] = true;
+
+        $replacement = $info['replaced_by'] ?? null;
+        $hint = $replacement !== null
+            ? " — switch to '{$replacement}'"
+            : '';
+        $when = $info['days_left'] >= 0
+            ? "retires {$info['deprecated_until']} ({$info['days_left']} days left)"
+            : "retired on {$info['deprecated_until']} ({$info['days_left']} days ago)";
+
+        error_log("[SuperAgent] model '{$resolvedId}' is deprecated: {$when}{$hint}. "
+            . 'Set SUPERAGENT_SUPPRESS_DEPRECATION=1 to silence.');
     }
 
     /**
@@ -205,6 +266,7 @@ class ModelResolver
         static::$aliasToFamily = [];
         static::$customAliases = [];
         static::$initialized = false;
+        static::$warnedDeprecations = [];
     }
 
     /**

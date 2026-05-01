@@ -32,6 +32,7 @@ class ProviderRegistry
         'qwen-native' => QwenNativeProvider::class,
         'glm' => GlmProvider::class,
         'minimax' => MiniMaxProvider::class,
+        'deepseek' => DeepSeekProvider::class,
     ];
 
     /**
@@ -146,6 +147,12 @@ class ProviderRegistry
         'minimax' => [
             'model' => 'MiniMax-M2.7',
             'region' => 'intl',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
+        'deepseek' => [
+            'model' => 'deepseek-v4-flash',
+            'region' => 'default',
             'max_tokens' => 8192,
             'max_retries' => 3,
         ],
@@ -454,7 +461,7 @@ class ProviderRegistry
             'bedrock' => ['access_key', 'secret_key'],
             'ollama' => [], // No required keys for Ollama
             'gemini' => ['api_key'],
-            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax' => ['api_key'],
+            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax', 'deepseek' => ['api_key'],
             default => [],
         };
 
@@ -547,6 +554,10 @@ class ProviderRegistry
                 'group_id' => $_ENV['MINIMAX_GROUP_ID'] ?? getenv('MINIMAX_GROUP_ID') ?: null,
                 'region' => $_ENV['MINIMAX_REGION'] ?? getenv('MINIMAX_REGION') ?: 'intl',
             ],
+            'deepseek' => [
+                'api_key' => $_ENV['DEEPSEEK_API_KEY'] ?? getenv('DEEPSEEK_API_KEY'),
+                'region' => $_ENV['DEEPSEEK_REGION'] ?? getenv('DEEPSEEK_REGION') ?: 'default',
+            ],
             default => throw new ProviderException("Unknown provider: {$name}", $name),
         };
 
@@ -581,6 +592,7 @@ class ProviderRegistry
                 'qwen', 'qwen-native' => ['api_key' => $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?: null],
                 'glm'       => ['api_key' => $_ENV['GLM_API_KEY'] ?? getenv('GLM_API_KEY') ?: null],
                 'minimax'   => ['api_key' => $_ENV['MINIMAX_API_KEY'] ?? getenv('MINIMAX_API_KEY') ?: null],
+                'deepseek'  => ['api_key' => $_ENV['DEEPSEEK_API_KEY'] ?? getenv('DEEPSEEK_API_KEY') ?: null],
                 'gemini'    => ['api_key' => $_ENV['GEMINI_API_KEY'] ?? getenv('GEMINI_API_KEY') ?: null],
                 'openrouter'=> ['api_key' => $_ENV['OPENROUTER_API_KEY'] ?? getenv('OPENROUTER_API_KEY') ?: null],
                 default     => [],
@@ -650,6 +662,7 @@ class ProviderRegistry
             'qwen'       => 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models',
             'glm'        => 'https://api.z.ai/api/paas/v4/models',
             'minimax'    => 'https://api.minimax.io/v1/text/models',
+            'deepseek'   => 'https://api.deepseek.com/v1/models',
             'ollama'     => 'http://localhost:11434/api/tags',
             default      => null,  // bedrock uses AWS SDK — no plain probe
         };
@@ -712,6 +725,10 @@ class ProviderRegistry
 
         if (getenv('MINIMAX_API_KEY')) {
             $available[] = 'minimax';
+        }
+
+        if (getenv('DEEPSEEK_API_KEY')) {
+            $available[] = 'deepseek';
         }
 
         // Check if Ollama is running
@@ -820,6 +837,15 @@ class ProviderRegistry
                 'max_context' => 204_800,
                 'structured_output' => true,
                 'regions' => ['intl', 'cn'],
+            ],
+            'deepseek' => [
+                'streaming' => true,
+                'tools' => true,
+                'vision' => false,
+                'max_context' => 1_048_576,
+                'structured_output' => true,
+                'thinking' => true,
+                'regions' => ['default', 'beta'],
             ],
             default => [],
         };

@@ -188,6 +188,18 @@
         {"id": "MiniMax-M2.5",  "family": "m2",  "date": "20260201", "input": 0.30, "output": 1.20, "description": "MiniMax M2.5"},
         {"id": "MiniMax-M2",    "family": "m2",  "date": "20260101", "input": 0.30, "output": 1.20, "description": "MiniMax M2"}
       ]
+    },
+
+    "deepseek": {
+      "env": "DEEPSEEK_API_KEY",
+      "regions": ["default"],
+      "capabilities": {"streaming": true, "tools": true, "mcp": true},
+      "models": [
+        {"id": "deepseek-v4-pro",   "family": "deepseek-v4", "date": "20260424", "input": 0.55, "output": 2.20, "aliases": ["deepseek", "deepseek-v4", "v4-pro"], "description": "DeepSeek V4 Pro — 1.6T MoE / 49B active, 1M ctx, dual thinking/non-thinking, agentic-coding SOTA", "capabilities": {"streaming": true, "tools": true, "thinking": true, "agentic": true, "context_cache": "auto", "mcp": true, "max_context": 1048576, "active_params": 49000000000, "total_params": 1600000000000}},
+        {"id": "deepseek-v4-flash", "family": "deepseek-v4", "date": "20260424", "input": 0.14, "output": 0.55, "aliases": ["v4-flash", "deepseek-flash"], "description": "DeepSeek V4 Flash — 284B MoE / 13B active, 1M ctx, dual thinking/non-thinking, drop-in for retired chat/reasoner", "capabilities": {"streaming": true, "tools": true, "thinking": true, "agentic": true, "context_cache": "auto", "mcp": true, "max_context": 1048576, "active_params": 13000000000, "total_params": 284000000000}},
+        {"id": "deepseek-chat",     "family": "deepseek-v3", "date": "20241226", "input": 0.27, "output": 1.10, "deprecated_until": "2026-07-24", "replaced_by": "deepseek-v4-flash", "description": "DeepSeek V3 chat — DEPRECATED, retires 2026-07-24, currently routes to deepseek-v4-flash"},
+        {"id": "deepseek-reasoner", "family": "deepseek-r1", "date": "20250120", "input": 0.55, "output": 2.20, "deprecated_until": "2026-07-24", "replaced_by": "deepseek-v4-pro", "description": "DeepSeek R1 reasoner — DEPRECATED, retires 2026-07-24; replaced by V4 thinking mode"}
+      ]
     }
   }
 }

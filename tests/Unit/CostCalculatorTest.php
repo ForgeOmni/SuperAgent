@@ -61,4 +61,36 @@ class CostCalculatorTest extends TestCase
 
         $this->assertEqualsWithDelta(3.0, $cost, 0.001);
     }
+
+    public function test_deepseek_v4_flash_pricing(): void
+    {
+        // V4 Flash: $0.14/M input + $0.55/M output per the catalog.
+        $usage = new Usage(1_000_000, 1_000_000);
+        $cost = CostCalculator::calculate('deepseek-v4-flash', $usage);
+        $this->assertEqualsWithDelta(0.14 + 0.55, $cost, 0.001);
+    }
+
+    public function test_deepseek_v4_pro_pricing(): void
+    {
+        $usage = new Usage(1_000_000, 1_000_000);
+        $cost = CostCalculator::calculate('deepseek-v4-pro', $usage);
+        $this->assertEqualsWithDelta(0.55 + 2.20, $cost, 0.001);
+    }
+
+    public function test_cache_read_billed_at_one_tenth_input_price(): void
+    {
+        // 800 cache hits + 200 uncached input + 50 output, V4 Flash @ $0.14/M in.
+        // Expected:
+        //   uncached input: 200 * 0.14/1M  = 0.000028
+        //   cached read   : 800 * 0.014/1M = 0.0000112
+        //   output        : 50  * 0.55/1M  = 0.0000275
+        // Total ≈ 0.0000667
+        $usage = new Usage(
+            inputTokens: 200,
+            outputTokens: 50,
+            cacheReadInputTokens: 800,
+        );
+        $cost = CostCalculator::calculate('deepseek-v4-flash', $usage);
+        $this->assertEqualsWithDelta(0.0000667, $cost, 0.000001);
+    }
 }

@@ -480,6 +480,14 @@ abstract class ChatCompletionsProvider implements LLMProvider
     {
         $buffer = '';
         $messageContent = '';
+        // Separate channel for vendor "reasoning chain" output. DeepSeek
+        // (V4 thinking-mode + legacy R1), Kimi-thinking, Qwen-reasoning
+        // and a growing set of OpenAI-compat servers stream the model's
+        // internal monologue as `delta.reasoning_content` distinct from
+        // `delta.content`. Capturing it here lets every chat-completions
+        // subclass surface a `thinking` ContentBlock without overriding
+        // the parser. Safely no-op when the field never appears.
+        $reasoningContent = '';
         /** @var array<int|string, array{id:string, name:string, arguments:string}> */
         $toolCallsByIndex = [];
         $usage = null;
@@ -531,6 +539,17 @@ abstract class ChatCompletionsProvider implements LLMProvider
                         $handler?->emitText($delta['content'], $messageContent);
                     }
 
+                    // `reasoning_content` — vendor thinking channel. Same
+                    // chunked accumulation pattern as content. Streaming
+                    // handlers don't see thinking text on the text channel:
+                    // it's an out-of-band signal that gets surfaced as a
+                    // separate ContentBlock at end-of-stream so callers can
+                    // render or hide it deliberately rather than mixing it
+                    // into the user-facing answer.
+                    if (isset($delta['reasoning_content']) && $delta['reasoning_content'] !== '') {
+                        $reasoningContent .= $delta['reasoning_content'];
+                    }
+
                     if (isset($delta['tool_calls']) && is_array($delta['tool_calls'])) {
                         foreach ($delta['tool_calls'] as $toolCallDelta) {
                             if (! is_array($toolCallDelta)) {
@@ -578,20 +597,38 @@ abstract class ChatCompletionsProvider implements LLMProvider
                 }
 
                 if (isset($json['usage'])) {
-                    // Cached tokens on the OpenAI wire surface in two
-                    // historical shapes — the legacy top-level
-                    // `usage.cached_tokens` and the current
-                    // `usage.prompt_tokens_details.cached_tokens`. Kimi
-                    // emits the new shape; keeping both paths costs one
-                    // fallback read and avoids silently losing the
-                    // cache-read metric when an older provider shows up.
+                    // Cached tokens on the OpenAI wire surface in three
+                    // shapes across vendors:
+                    //   - `usage.prompt_tokens_details.cached_tokens` —
+                    //     current OpenAI-style shape (Kimi, OpenAI itself).
+                    //   - `usage.cached_tokens`                       —
+                    //     legacy top-level shape, kept for older servers.
+                    //   - `usage.prompt_cache_hit_tokens`             —
+                    //     DeepSeek's historical shape (still emitted by
+                    //     V3/R1; V4 emits the OpenAI shape too but the
+                    //     hit/miss split is sometimes the only one
+                    //     populated, so checking last keeps the signal).
+                    // We accept any of the three; first non-zero wins.
                     $cachedRead = (int) (
                         $json['usage']['prompt_tokens_details']['cached_tokens']
                         ?? $json['usage']['cached_tokens']
+                        ?? $json['usage']['prompt_cache_hit_tokens']
                         ?? 0
                     );
+                    // OpenAI-compat semantics: `prompt_tokens` is the GROSS
+                    // count including cached portion. CostCalculator expects
+                    // `inputTokens` to be the *uncached* slice (so it can
+                    // apply full price to that and the discounted price to
+                    // `cacheReadInputTokens`); without this subtraction we'd
+                    // bill cached tokens at ~110% (full + 10%). Anthropic's
+                    // wire splits the two natively so this rebalance is
+                    // OpenAI-side only.
+                    $promptTotal = (int) ($json['usage']['prompt_tokens'] ?? 0);
+                    $inputUncached = $cachedRead > 0
+                        ? max(0, $promptTotal - $cachedRead)
+                        : $promptTotal;
                     $usage = new Usage(
-                        (int) ($json['usage']['prompt_tokens'] ?? 0),
+                        $inputUncached,
                         (int) ($json['usage']['completion_tokens'] ?? 0),
                         cacheReadInputTokens: $cachedRead > 0 ? $cachedRead : null,
                     );
@@ -604,6 +641,12 @@ abstract class ChatCompletionsProvider implements LLMProvider
         }
 
         $content = [];
+        // Thinking block lands FIRST so callers iterating in order render
+        // reasoning-then-answer, matching how Anthropic's native Messages
+        // API orders its `thinking` + `text` blocks.
+        if ($reasoningContent !== '') {
+            $content[] = ContentBlock::thinking($reasoningContent);
+        }
         if ($messageContent !== '') {
             $content[] = new ContentBlock('text', $messageContent);
         }
