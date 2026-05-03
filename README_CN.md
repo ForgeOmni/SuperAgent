@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.9.6-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.9.7-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -33,6 +33,7 @@ echo $result->text();
 - [OpenAI Responses API](#openai-responses-api)
 - [跨 Provider 切换](#跨-provider-切换)
 - [DeepSeek V4](#deepseek-v4)
+- [伴生工具（jcode 风格）](#伴生工具jcode-风格)
 - [Agent 循环](#agent-循环)
 - [工具与多 Agent](#工具与多-agent)
 - [Agent 定义](#agent-定义yaml--markdown)
@@ -329,6 +330,123 @@ foreach ($result->message()->content as $block) {
 **Beta endpoint**。设置 `region: 'beta'` 路由到 `https://api.deepseek.com/beta`，同一份 auth 即可访问 FIM / 前缀补全。
 
 *v0.9.6 起*
+
+---
+
+## 伴生工具（jcode 风格）
+
+借鉴 [jcode](https://github.com/1jehuang/jcode) 的五个增量原语。每一个都是可选启用，宿主未接线时自动降级为 no-op。
+
+### `agent_grep` —— 带封闭符号注入的 token 感知 grep
+
+`grep` 工具（与 ripgrep 字节级兼容）的兄弟。同一套参数，外加按命中注入的封闭符号元数据（PHP / JS / TS / Python / Go），并按会话做"已见块"截断，避免模型连续三轮重读同一段代码。
+
+```php
+$agent->loadTools(['grep', 'agent_grep']);   // 两个都注册，调用时按需选
+
+// 默认：基于正则的提取器（零依赖、约 95% 准确率）
+$agent->run('找出 MyClass::handle 的所有调用方，告诉我它们各自处于哪个方法里');
+```
+
+封闭符号提取通过 `Tools\Builtin\Symbols\SymbolExtractor` SPI 可插拔：
+
+```php
+use SuperAgent\Tools\Builtin\AgentGrepTool;
+use SuperAgent\Tools\Builtin\Symbols\CompositeSymbolExtractor;
+use SuperAgent\Tools\Builtin\Symbols\TreeSitterSymbolExtractor;
+use SuperAgent\Tools\Builtin\Symbols\RegexSymbolExtractor;
+
+$agent->registerTool(new AgentGrepTool(symbolExtractor: new CompositeSymbolExtractor([
+    new TreeSitterSymbolExtractor(),     // shell 调用 `tree-sitter` CLI；约 15 种语法
+    new RegexSymbolExtractor(),          // 纯 PHP 兜底，必然可用
+])));
+```
+
+`tree-sitter` 会自动从 `$PATH` 探测（也可通过 `SUPERAGENT_TREE_SITTER_BIN` 或构造参数覆盖）。二进制缺失 / 语法不支持 / 调用失败时优雅降级为"我不支持"，绝不抛异常。
+
+### `FileLedger` —— Swarm 内跨 agent 编辑通知
+
+agent A 编辑了 agent B 已经读过的文件；B 收件箱里就会收到一条 `FileShiftedEvent`。懒挂载到 `WorktreeManager::fileLedger()`，由记录读写的工具自行选择启用；默认 emitter 为 no-op，原有 swarm 字节级兼容。
+
+```php
+$ledger = $worktreeManager->fileLedger();
+$ledger->setEmitter(function (FileShiftedEvent $event, string $toAgent) {
+    // event = {path, byAgent, at, summary, shaBefore, shaAfter}
+    $mailbox->push($toAgent, $event);
+});
+
+$ledger->recordRead($agentB, '/abs/file.php');
+$ledger->recordWrite($agentA, '/abs/file.php', shaBefore: '...', shaAfter: '...', summary: '修了 null 守卫');
+// → emitter 触发，toAgent=$agentB
+```
+
+### `AmbientWorker` —— 后台记忆维护，成本独立计账
+
+长生命周期低优先级 worker，按 tick 跑记忆去重 + 失效扫描。每轮 tick 内部强制 budget，不会阻塞超过几秒。Token 成本通过回调标记 `usage_source: 'ambient'`，仪表板可以把"用户面"和"后台"开销分开看。
+
+```php
+$worker = new AmbientWorker(
+    memoryProvider: $memProvider,
+    usageReporter:  fn(Usage $u) => $costMeter->record($u, source: 'ambient'),
+    passBudgetSeconds: 3,
+);
+
+while ($host->running()) {
+    $worker->tick();          // 在 cron / swoole / react / 普通 while sleep 里调
+    sleep(60);
+}
+```
+
+### 原生浏览器桥接（Firefox / Chromium）
+
+WebExtension Native Messaging —— 4 字节小端长度前缀的 JSON 帧 —— 让 agent 不用 Selenium / Playwright 就能驱动真实浏览器。每个工具实例一个 launcher 子进程；能力面收得很紧（无 tab 管理 / cookies / extension API）。
+
+```php
+$agent->registerTool(new FirefoxBridgeTool());
+
+$agent->run('打开 https://example.com，截图，点 "Sign in" 链接，再截一张图');
+```
+
+Launcher 路径来自 `SUPERAGENT_BROWSER_BRIDGE_PATH`（或构造参数 `launcherArgv`）。`Tools\Browser\FirefoxBridge::class` 的类注释里有完整的 WebExtension + Native Messaging manifest 配置说明。
+
+### 可插拔嵌入 —— `Memory\Embeddings\*`
+
+`EmbeddingProvider` 接口（批量 shape、`dimensions()`、`fingerprint()`）。三个参考实现：
+
+| 类 | 适合谁 |
+|---|---|
+| `OllamaEmbeddingProvider` | 本机已有 Ollama 的开发者 —— 调用 `/api/embeddings`，默认 `nomic-embed-text`（768 维） |
+| `OnnxEmbeddingProvider` | 进程内推理 —— 需要 `ext-onnxruntime` 或 `ankane/onnxruntime` 加模型文件 |
+| `NullEmbeddingProvider` | 测试 / 开发 —— 返回 `[]`；下游退化为关键词打分 |
+| `CallableEmbeddingProvider` | 适配已有的 `fn(array): array` 或老 `fn(string): array<float>` 闭包 |
+
+无缝接入升级后的 `SemanticSkillRouter`：
+
+```php
+use SuperAgent\Skills\SemanticSkillRouter;
+use SuperAgent\Memory\Embeddings\OllamaEmbeddingProvider;
+
+$router = new SemanticSkillRouter(
+    embedder: new OllamaEmbeddingProvider(),    // 或任意 EmbeddingProvider
+    topK: 5,
+);
+// 没传 embedder 时退化为关键词重叠打分；向量缓存按 skill 内容哈希取键。
+```
+
+### `superagent resume` —— 跨 harness 会话续接
+
+无缝把 Claude Code 或 Codex CLI 的会话接到 SuperAgent，不丢上下文。
+
+```bash
+superagent resume list  --from claude
+superagent resume show  --from claude --session 8e2c-...
+superagent resume load  --from claude --session 8e2c-... \
+  | superagent chat --provider kimi --resume-stdin
+```
+
+`--from` 接受 `claude` / `claude-code` / `cc` / `codex`。底层是 `Conversation\HarnessImporter` 接口 + 各 harness 的 importer（`ClaudeCodeImporter` 读 `~/.claude/projects/<hash>/<uuid>.jsonl`；`CodexImporter` 读 `~/.codex/sessions/**/*.jsonl`），把内部 `Message[]` 喂给已有的 `Conversation\Transcoder`，wire family 透明切换。
+
+*v0.9.7 起*
 
 ---
 

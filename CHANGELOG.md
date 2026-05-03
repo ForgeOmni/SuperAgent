@@ -7,6 +7,197 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-05-03
+
+### 💻 Summary
+
+**jcode-inspired companion-tools wave.** Five additive primitives borrowed
+from [jcode](https://github.com/1jehuang/jcode) land alongside an
+expanded CLI surface so SuperAgent and SuperAICore can share the same
+operator-experience vocabulary. None of these change SDK call shapes or
+core dispatch — every new piece is opt-in and degrades to no-op when its
+host wiring is absent. Per project convention, every change in this
+cycle goes into 0.9.7.
+
+### Added — Tools
+
+- **`Tools\Builtin\AgentGrepTool`** — jcode-style grep with
+  enclosing-symbol injection (PHP / JS / TS / Python / Go) AND
+  per-session seen-chunk truncation. Sibling of `grep`, registered
+  separately so callers can pick byte-for-byte ripgrep parity (`grep`)
+  or token-aware augmented output (`agent_grep`). State lives in
+  `ToolStateManager` keyed by `(file, lineRange, sha)` so swarm
+  isolation works without leaking one agent's seen-chunk ledger into
+  another.
+- **`Tools\Builtin\Symbols\SymbolExtractor` SPI** — pluggable
+  enclosing-symbol resolution behind `AgentGrepTool`. Three reference
+  implementations ship:
+  - `RegexSymbolExtractor` — pure-PHP, dependency-free, ~95% accuracy
+    on PHP / JS / TS / Python / Go. Default and always-on.
+  - `TreeSitterSymbolExtractor` — opt-in. Shells out to the
+    `tree-sitter` CLI binary (auto-discovered on `$PATH`, env override
+    `SUPERAGENT_TREE_SITTER_BIN`, or constructor arg). Maps SuperAgent
+    language hints to ~15 grammars (PHP / JS / TS / Python / Go / Rust
+    / Ruby / Java / C / C++ / C# / Swift / Kotlin / Scala / Lua) and
+    parses the s-expression output with a hard timeout (1.5s default).
+    Degrades to "I don't support this" via `supports()` when the
+    binary is missing, the grammar is unregistered, or the invocation
+    fails — never throws.
+  - `CompositeSymbolExtractor` — chains extractors; first non-empty
+    map wins. Designed to layer tree-sitter precision in front of the
+    regex fallback:
+    ```php
+    new AgentGrepTool(symbolExtractor: new CompositeSymbolExtractor([
+        new TreeSitterSymbolExtractor(),
+        new RegexSymbolExtractor(),
+    ]));
+    ```
+  Roadmap item B2.
+
+### Added — Swarm
+
+- **`Swarm\Events\FileShiftedEvent`** — value object
+  `{path, byAgent, at, summary, shaBefore, shaAfter}` describing a
+  cross-agent file mutation that another agent has already read.
+- **`Swarm\FileLedger`** — agent A edits a file that agent B has
+  read; ledger emits a `FileShiftedEvent` to B's mailbox-equivalent
+  via a configurable `setEmitter()` callback. Methods:
+  `recordRead/recordWrite/peerCollisions/clearAgent`. Lazy-attached to
+  `WorktreeManager::fileLedger()` — opt-in by tools that record
+  reads/writes; default emitter is no-op so existing swarms are
+  byte-compatible.
+- **`Swarm\AmbientWorker`** — long-lived low-priority worker that runs
+  memory dedup + staleness scans on a tick. Hosts call `tick()` from a
+  loop (cron, swoole, react, plain `while sleep`); each pass enforces
+  its own `pass_budget_seconds` so a tick never blocks for more than a
+  few seconds. Token cost is tagged `usage_source: 'ambient'` via the
+  supplied callback so dashboards split user-facing vs background spend
+  (SuperAICore's CostDashboard renders an "ambient" stacked-bar slice
+  without extra plumbing).
+
+### Added — Skills
+
+- **`Skills\SemanticSkillRouter`** — picks top-K skills by embedding
+  cosine before injecting them into the system prompt. Now accepts
+  either an `EmbeddingProvider` instance OR the original
+  `callable(list<string>): list<list<float>>` shape (auto-wrapped via
+  `CallableEmbeddingProvider`). Falls back to keyword overlap when
+  none provided. Reuses cached vectors keyed by skill content hash so
+  re-embedding only happens when a skill's description changes.
+
+### Added — Embeddings (B3 scaffolding)
+
+- **`Memory\Embeddings\EmbeddingProvider`** interface — batch
+  `embed(array $texts): array` shape with `dimensions()` and
+  `fingerprint()` (the latter doubles as a cache-invalidation key when
+  the model changes).
+- **`Memory\Embeddings\NullEmbeddingProvider`** — returns empty
+  vectors. Lets tests / dev environments satisfy the type without
+  spinning up a model; downstream treats `[]` as "no signal" and falls
+  back to the baseline ranker.
+- **`Memory\Embeddings\CallableEmbeddingProvider`** — adapts existing
+  closures. Auto-detects whether the callable wants the batch shape
+  (`fn(array): array`) or the single-text legacy shape
+  (`fn(string): array<float>`, the `VectorMemoryProvider` form) by
+  inspecting the parameter type. Lets old code keep working while the
+  new SPI is the recommended target.
+- **`Memory\Embeddings\OllamaEmbeddingProvider`** — talks to a local
+  Ollama daemon (`/api/embeddings`, default model `nomic-embed-text`,
+  768 dims). Per-row failure surfaces as `[]` so a flaky daemon doesn't
+  disable the entire router for the rest of the session. Path of least
+  resistance for any developer who already runs Ollama locally.
+- **`Memory\Embeddings\OnnxEmbeddingProvider`** — opt-in scaffolding
+  for an in-process ONNX model (jcode bundles MiniLM-L6-v2 inline; the
+  PHP analogue requires either `ext-onnxruntime` or the
+  `ankane/onnxruntime` userland binding plus a model file too large to
+  bundle in this repo). Constructor probes for the runtime and the
+  model file, throwing a clear "use OllamaEmbeddingProvider until the
+  companion package lands" error if either is missing. Subclassing
+  hooks (`tokenise()`, `runModel()`) for hosts that already have an
+  ONNX wrapper. Stable type so DI / `instanceof` works today against
+  the future companion package `forgeomni/superagent-embeddings`.
+
+  Roadmap item B3.
+
+### Added — Browser bridge (B4)
+
+- **`Tools\Browser\NativeMessagingTransport`** — wraps the
+  4-byte little-endian length-prefixed JSON framing that Mozilla /
+  Chromium Native Messaging expects. Owns the launcher child-process
+  lifecycle with deadline-bounded reads (default 15s) so a stalled
+  WebExtension never deadlocks the agent. Returns null on EOF /
+  timeout / invalid frame so callers can decide whether to retry,
+  restart, or surface.
+- **`Tools\Browser\FirefoxBridge`** — high-level RPC client over the
+  transport. Methods: `navigate`, `screenshot`, `click`, `type`,
+  `evalJs`, `wait`, `pollEvents`. Auto-assigns request ids and
+  buffers unsolicited events so callers don't have to multiplex.
+  Class docblock contains the full setup walkthrough — minimal
+  `manifest.json` for the WebExtension and the Native Messaging
+  manifest layout — so the integration is reproducible without
+  external docs.
+- **`Tools\Builtin\FirefoxBridgeTool`** (`browser` tool) — Tool
+  subclass exposing the bridge to agents. Single launcher process per
+  tool instance; first action starts it, `action: 'close'` (or the
+  destructor) tears it down. Tight capability surface (no tab
+  management, cookies, or extension APIs) to keep the abuse blast
+  radius small. Launcher path comes from
+  `SUPERAGENT_BROWSER_BRIDGE_PATH` env or the constructor's
+  `launcherArgv`. Screenshot results are returned as base64 PNG so
+  hosts can re-publish them into their UI (SuperAICore's
+  `BrowserScreenshotStore` does exactly this for `/processes`).
+
+### Added — Conversation / cross-harness resume
+
+- **`Conversation\HarnessImporter`** interface — `harness()`,
+  `listSessions(int $limit)`, `load(string $sessionId)`. Returns
+  internal `Message[]` ready to feed back into an `Agent` (typically
+  via the 0.9.5 `Conversation\Transcoder` to switch wire family).
+- **`Conversation\Importers\ClaudeCodeImporter`** — parses
+  `~/.claude/projects/<hash>/<uuid>.jsonl`. Forgiving line-by-line
+  parser tolerates schema drift across Claude Code versions.
+- **`Conversation\Importers\CodexImporter`** — parses
+  `~/.codex/sessions/**/*.jsonl`.
+
+### Added — CLI
+
+- **`superagent resume <list|show|load>`** — interactive picker for
+  cross-harness session pickup. Subcommands:
+  ```bash
+  superagent resume list  --from claude
+  superagent resume show  --from claude --session 8e2c-...
+  superagent resume load  --from claude --session 8e2c-... \
+    | superagent chat --provider kimi --resume-stdin
+  ```
+  Reads its own flags directly from `$_SERVER['argv']` (after the
+  `resume` token) so the global option parser doesn't have to learn
+  about importer-specific knobs. `--from` accepts `claude` /
+  `claude-code` / `cc` / `codex`. `--json` on `list` emits one row per
+  session. Routed in `SuperAgentApplication`.
+- **`SuperAgentApplication::VERSION`** bumped `0.9.6 → 0.9.7`.
+
+### Notes
+
+- **`agent_grep` symbol extraction is regex-based** — fast,
+  dependency-free, good enough for ~95% of typical agent workloads.
+  Hosts that want tree-sitter precision subclass the tool and override
+  `extractSymbolMap()`.
+- **`FileLedger`** is sized for in-process swarms (tens of agents,
+  hundreds of files in flight). Larger deployments wire a custom
+  emitter that forwards events to Redis pub/sub or websockets.
+- **`AmbientWorker`** is purely a tick-driven primitive — hosts decide
+  the loop. The worker enforces per-pass budgets internally so a tick
+  never blocks for more than a few seconds.
+- **`SemanticSkillRouter`** falls back gracefully — without an
+  embedder it scores skills by keyword overlap and the rest of the
+  pipeline is unaffected. Vector cache is keyed by skill content hash
+  so renaming/re-describing a skill invalidates its row automatically.
+- **`superagent resume`** is independent of the
+  `--resume-stdin` ChatCommand flag; piping is one supported workflow,
+  but hosts can also call `ClaudeCodeImporter::load()` directly and
+  feed the result into a Laravel-resolved `Agent` (typically through
+  `Conversation\Transcoder` for cross-wire continuation).
+
 ## [0.9.6] - 2026-05-01
 
 ### 💻 Summary

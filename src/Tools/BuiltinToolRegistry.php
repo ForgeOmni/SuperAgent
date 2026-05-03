@@ -8,6 +8,7 @@ use SuperAgent\Tools\Builtin\BashTool;
 use SuperAgent\Tools\Builtin\BriefTool;
 use SuperAgent\Tools\Builtin\ConfigTool;
 use SuperAgent\Tools\Builtin\FileEditTool;
+use SuperAgent\Tools\Builtin\AgentGrepTool;
 use SuperAgent\Tools\Builtin\GlobTool;
 use SuperAgent\Tools\Builtin\GrepTool;
 use SuperAgent\Tools\Builtin\HttpRequestTool;
@@ -114,6 +115,9 @@ class BuiltinToolRegistry
             // Search
             'glob'                  => GlobTool::class,
             'grep'                  => GrepTool::class,
+            // jcode-style grep: enclosing-symbol injection + per-session
+            // seen-chunk truncation. Sibling of `grep`, not a replacement.
+            'agent_grep'            => AgentGrepTool::class,
             'tool_search'           => ToolSearchTool::class,
 
             // Network

@@ -8515,3 +8515,270 @@ new Agent([
 - **Budget 旋钮的前向兼容**。如果 DeepSeek（或其他 vendor）后续给 V4-thinking 暴露了 `budget_tokens` 字段，`DeepSeekProvider::thinkingRequestFragment(int $budgetTokens)` 已经接收 budget —— body fragment 加一个 `budget_tokens` key 即可，不需要调用方改动。
 - **catalog 弃用是通用机制**。`ModelCatalog::deprecation()` 和 `ModelResolver` 警告钩子对任何 provider 都生效 —— vendor 公告退役，往 catalog 行加 `deprecated_until` + `replaced_by`，警告就带着 deadline 触发。这套机制将来覆盖 Anthropic 的 Claude-3 退役、OpenAI `gpt-3.5-turbo` 寿终、以及任何其他 deadline。
 
+## 54. 伴生工具 —— jcode 风格批次（v0.9.7）
+
+借鉴 [jcode](https://github.com/1jehuang/jcode) 的五个增量原语落地，配合扩展的 CLI 表面，让 SuperAgent 与 SuperAICore 共享同一套操作员体验词汇。这些都不改变 SDK 调用 shape 也不动核心 dispatch —— 每一项都是可选启用，宿主未接线时自动降级为 no-op。
+
+### `agent_grep` —— token 感知 grep + 已见块截断
+
+老 `grep` 工具（与 ripgrep 字节级对齐）的兄弟。`AgentGrepTool` 在同一套参数表面之上再加两件事：
+
+1. **封闭符号注入**。每个 hit 都带上物理上包住该命中行的 function / class / method 名，于是模型看到 `MyClass::handle()` 而不是裸的 "MyClass.php 第 42 行"。
+2. **按会话的"已见块"截断**。当同一个 `(file, lineRange, sha)` 三元组又出现在结果集里、并且模型已经被服务过一次时，工具只发一个 marker 而不重发整段 hunk —— 防止"连续三轮重读同一片段"。状态放在 `ToolStateManager` 中，键为 `(file, lineRange, sha)`，因此 swarm 隔离时一个 agent 的"已见账本"不会泄给另一个。
+
+```php
+use SuperAgent\Tools\Builtin\AgentGrepTool;
+
+$agent->loadTools(['grep']);                  // ripgrep 字节对齐
+$agent->registerTool(new AgentGrepTool());    // 兄弟工具，输出已增强
+
+// 单次调用：按场景挑哪种 shape
+$agent->run('找出 MyClass::handle 的所有调用方，告诉我每个调用方所在的方法');
+```
+
+### 符号提取 SPI —— `Tools\Builtin\Symbols\SymbolExtractor`
+
+`AgentGrepTool` 后面挂的"封闭符号解析"是可插拔的。三个参考实现：
+
+| 类 | 模式 | 语言 | 准确率 | 成本 |
+|---|---|---|---|---|
+| `RegexSymbolExtractor` | 纯 PHP | PHP / JS / TS / Python / Go | 典型代码 ~95% | 永远在线，零 I/O |
+| `TreeSitterSymbolExtractor` | shell `tree-sitter` CLI | ~15 种语法（PHP / JS / TS / Python / Go / Rust / Ruby / Java / C / C++ / C# / Swift / Kotlin / Scala / Lua） | 解析器级 | 子进程 + 1.5 秒超时 |
+| `CompositeSymbolExtractor` | 串联多个 extractor | 第一个非空胜出 | 双方优势 | 第一个成功即短路 |
+
+```php
+use SuperAgent\Tools\Builtin\Symbols\CompositeSymbolExtractor;
+use SuperAgent\Tools\Builtin\Symbols\TreeSitterSymbolExtractor;
+use SuperAgent\Tools\Builtin\Symbols\RegexSymbolExtractor;
+
+$tool = new AgentGrepTool(symbolExtractor: new CompositeSymbolExtractor([
+    new TreeSitterSymbolExtractor(),     // 先试它；失败就穿透
+    new RegexSymbolExtractor(),          // 必然成功
+]));
+```
+
+`TreeSitterSymbolExtractor` 自动从 `$PATH` 探测 `tree-sitter` 二进制，可通过 `SUPERAGENT_TREE_SITTER_BIN` 或构造参数覆盖。它把 SuperAgent 的语言提示映射到对应语法，按硬超时（默认 1.5 秒）解析 s-expression 输出。二进制缺失 / 语法未注册 / 调用失败时通过 `supports()` 优雅地回答"我不支持"，绝不抛异常。
+
+### Swarm —— `FileLedger` + `FileShiftedEvent`
+
+跨 agent 编辑碰撞问题：agent A 写了 agent B 已经读过的文件，B 的下一步决策就建立在过期内容上了。`FileLedger` 跟踪读写；写入时给所有此前读过同一路径的 agent 各发一个 `FileShiftedEvent`。
+
+```php
+use SuperAgent\Swarm\FileLedger;
+use SuperAgent\Swarm\Events\FileShiftedEvent;
+
+$ledger = $worktreeManager->fileLedger();    // 懒加载，首次调用挂上
+$ledger->setEmitter(function (FileShiftedEvent $event, string $toAgent) use ($mailbox) {
+    // event = {path, byAgent, at, summary, shaBefore, shaAfter}
+    $mailbox->push($toAgent, $event);
+});
+
+// 处理读写的工具自行选择启用：
+$ledger->recordRead($agentB, '/abs/file.php');
+$ledger->recordWrite(
+    agent: $agentA,
+    path: '/abs/file.php',
+    shaBefore: '...',
+    shaAfter: '...',
+    summary: '修了 foo() 的 null 守卫',
+);
+// emitter 触发一次，toAgent=$agentB
+
+// 清理钩子：
+$collisions = $ledger->peerCollisions($agentB);   // 用于内省
+$ledger->clearAgent($agentB);                     // agent 关闭时
+```
+
+**容量定位**。面向进程内 swarm（数十 agent、数百文件在飞）。更大部署可以接一个把事件转发到 Redis pub/sub 或 websocket 的自定义 emitter —— 唯一要换的就是回调。
+
+**默认 emitter 是 no-op**。已有 swarm 没把工具接到 `recordRead/recordWrite` 时字节兼容。
+
+### Swarm —— `AmbientWorker`
+
+长生命周期低优先级 worker，按 tick 跑记忆去重 + 失效扫描。宿主从循环里调 `tick()`（cron / swoole / react / 普通 `while sleep` 都行）；每一轮 pass 内部强制自己的 `pass_budget_seconds`，所以一次 tick 永远不会阻塞超过几秒。Token 成本通过传入回调标记 `usage_source: 'ambient'`，仪表盘可以把"用户面"和"后台"开销分开（SuperAICore 的 CostDashboard 不需要额外接线就能渲染一条 "ambient" 堆叠柱）。
+
+```php
+use SuperAgent\Swarm\AmbientWorker;
+
+$worker = new AmbientWorker(
+    memoryProvider:    $memProvider,
+    usageReporter:     fn(Usage $u) => $costMeter->record($u, source: 'ambient'),
+    passBudgetSeconds: 3,
+);
+
+// cron pod：
+while ($host->running()) {
+    $worker->tick();
+    sleep(60);
+}
+
+// Swoole worker：
+Co\run(function () use ($worker) {
+    while (true) {
+        $worker->tick();
+        Co::sleep(60);
+    }
+});
+```
+
+worker 内部强制 per-pass budget，tick 永远不会阻塞超过几秒 —— 宿主循环只负责选*多久 tick 一次*，不必管*单次 tick 多久*。
+
+### Skills —— `SemanticSkillRouter` 升级
+
+把 skill 注入 system prompt 之前按 embedding 余弦取 top-K 的路由器。现在既接受 `EmbeddingProvider` 实例，也接受原来的 `callable(list<string>): list<list<float>>` shape（自动用 `CallableEmbeddingProvider` 包起来）。没传时退化为关键词重叠打分。向量缓存按 skill 内容哈希取键，所以只在 skill 描述变更时重新嵌入。
+
+```php
+use SuperAgent\Skills\SemanticSkillRouter;
+use SuperAgent\Memory\Embeddings\OllamaEmbeddingProvider;
+use SuperAgent\Memory\Embeddings\NullEmbeddingProvider;
+
+// 生产：真实 embedder
+$router = new SemanticSkillRouter(
+    embedder: new OllamaEmbeddingProvider(),
+    topK: 5,
+);
+
+// 测试：null embedder → router 内部退化为关键词
+$router = new SemanticSkillRouter(embedder: new NullEmbeddingProvider());
+
+// Legacy：原来返回单个 embedding 的闭包
+$router = new SemanticSkillRouter(
+    embedder: fn(string $text): array => $myLegacyEmbedFn($text),
+);
+// 自动用 CallableEmbeddingProvider 包起来 —— 不需要迁移
+```
+
+### 嵌入 SPI —— `Memory\Embeddings\*`
+
+路线图项 B3 的脚手架。给 `SemanticSkillRouter`（以及未来任何向量检索 / 去重工作）一个标准化嵌入契约。
+
+**接口 —— `EmbeddingProvider`：**
+
+```php
+interface EmbeddingProvider
+{
+    /** @return array<int, array<int, float>> —— 每条输入对应一个向量 */
+    public function embed(array $texts): array;
+    public function dimensions(): int;
+    public function fingerprint(): string;   // 模型变更时作为缓存失效键
+}
+```
+
+**参考实现：**
+
+| 类 | 何时用 | 备注 |
+|---|---|---|
+| `NullEmbeddingProvider` | 测试 / 开发环境 | 每行返回 `[]`；下游把 `[]` 当作"无信号"，回落到基线排序器 |
+| `CallableEmbeddingProvider` | 适配既有闭包 | 通过反射参数类型自动判断是批量 shape `fn(array): array`，还是老版单文本 shape `fn(string): array<float>`（`VectorMemoryProvider` 形态） |
+| `OllamaEmbeddingProvider` | 本机已经在跑 Ollama 的开发者 | 调 `/api/embeddings`，默认模型 `nomic-embed-text`（768 维）。某行失败回成 `[]`，避免一个抖动的 daemon 把整个 router 在剩余会话里搞瘫 |
+| `OnnxEmbeddingProvider` | 进程内 ONNX 推理 | 可选脚手架。构造时探测 runtime（`ext-onnxruntime` 或 `ankane/onnxruntime` 用户态绑定）和模型文件，缺一不可时抛"装不上时先用 OllamaEmbeddingProvider 顶着"清晰错误 |
+
+```php
+use SuperAgent\Memory\Embeddings\OllamaEmbeddingProvider;
+
+// 最省事：本机 Ollama daemon
+$embedder = new OllamaEmbeddingProvider(
+    host: 'http://localhost:11434',
+    model: 'nomic-embed-text',
+);
+$vectors = $embedder->embed(['skill A 描述', 'skill B 描述']);
+// → [[0.123, 0.456, ...], [0.789, 0.012, ...]]
+```
+
+`OnnxEmbeddingProvider` 给已经包装过 ONNX 的宿主开放了 `tokenise()`、`runModel()` 两个子类化钩子，并且类型稳定 —— 今天写的 DI / `instanceof` 在未来配套包 `forgeomni/superagent-embeddings` 落地后仍然有效。
+
+### Browser bridge（B4）
+
+基于 Native Messaging 的 agent 控制真实 Firefox / Chromium 浏览器，不靠 Selenium / Playwright。三层结构：
+
+**`Tools\Browser\NativeMessagingTransport`** —— 包住 Mozilla / Chromium Native Messaging 期望的 4 字节小端长度前缀 JSON 帧。掌管 launcher 子进程生命周期，读取带 deadline（默认 15 秒），WebExtension 卡住也不会把 agent 死锁。EOF / 超时 / 帧无效返回 null，调用方决定重试 / 重启 / 上抛。
+
+**`Tools\Browser\FirefoxBridge`** —— transport 之上的高层 RPC 客户端。方法：
+
+| 方法 | 用途 |
+|---|---|
+| `navigate($url)` | 驱动地址栏 |
+| `screenshot()` | 返回 base64 PNG |
+| `click($selector)` | CSS selector 点击 |
+| `type($selector, $text)` | 往 input 里输入 |
+| `evalJs($code)` | 在页面里跑 JS；返回 JSON 可序列化结果 |
+| `wait($selector, $timeoutMs)` | 等元素出现 |
+| `pollEvents()` | 排干 transport 缓冲的非请求驱动事件 |
+
+自动分配请求 id 并缓冲非请求型事件，调用方不用做多路复用。类 docblock 里有完整 setup 步骤 —— 最小 `manifest.json`（WebExtension）和 Native Messaging manifest 的布局 —— 不需查外部文档就能复现这套集成。
+
+**`Tools\Builtin\FirefoxBridgeTool`**（`browser` 工具名）—— `Tool` 子类，把 bridge 暴露给 agent。每个工具实例一个 launcher 进程；首个动作启动它，`action: 'close'`（或析构函数）把它拆掉。能力面收得很紧（无 tab 管理、cookies、extension API），把滥用爆炸半径压住。
+
+```php
+use SuperAgent\Tools\Builtin\FirefoxBridgeTool;
+
+$agent->registerTool(new FirefoxBridgeTool());
+$agent->run('打开 https://example.com，截图，点 "Sign in" 链接，再截一张图');
+```
+
+Launcher 路径来自 `SUPERAGENT_BROWSER_BRIDGE_PATH` 环境变量或构造函数 `launcherArgv` 参数。截图结果以 base64 PNG 返回，方便宿主在自家 UI 里再发布（SuperAICore 的 `BrowserScreenshotStore` 在 `/processes` 路径下就是这么干的）。
+
+### 跨 harness 会话续接
+
+`Conversation\HarnessImporter` —— "把另一个 agent harness 在磁盘上的会话存档（`.jsonl`）读出来，回给我内部 `Message[]`" 的接口。两个参考 importer：
+
+| Importer | 读取 | 说明 |
+|---|---|---|
+| `Conversation\Importers\ClaudeCodeImporter` | `~/.claude/projects/<hash>/<uuid>.jsonl` | 容错的逐行解析器，能容忍跨 Claude Code 版本的 schema 漂移 |
+| `Conversation\Importers\CodexImporter` | `~/.codex/sessions/**/*.jsonl` | 递归 glob，所以老版 Codex 安装（不同布局）也工作 |
+
+```php
+interface HarnessImporter
+{
+    public function harness(): string;             // 'claude' | 'codex' | ...
+    public function listSessions(int $limit): array;
+    public function load(string $sessionId): array;  // Message[]
+}
+```
+
+返回的消息是 SDK 内部 shape（`UserMessage` / `AssistantMessage` / `ToolResultMessage`），可以直接喂给 `Agent` —— 通常先过一次 `Conversation\Transcoder`（0.9.5）切到 agent 即将运行的 provider 对应的新 wire family。
+
+```php
+use SuperAgent\Conversation\Importers\ClaudeCodeImporter;
+use SuperAgent\Conversation\Transcoder;
+use SuperAgent\Conversation\WireFamily;
+
+$importer = new ClaudeCodeImporter();
+$messages = $importer->load('8e2c-4f9d-...');
+
+// 在 Kimi 上继续这场会话：
+$kimiBody = (new Transcoder())->encode($messages, WireFamily::OpenAIChat);
+$agent = new Agent(['provider' => 'kimi']);
+$agent->runWithMessages($messages);
+```
+
+### CLI —— `superagent resume`
+
+跨 harness 会话续接的用户面命令。三个子命令：
+
+```bash
+# 列出最近 N 个 Claude Code 会话：
+superagent resume list  --from claude
+
+# 看某个会话的完整 transcript：
+superagent resume show  --from claude --session 8e2c-...
+
+# 加载并喂给 chat —— 典型管道接 chat 命令：
+superagent resume load  --from claude --session 8e2c-... \
+  | superagent chat --provider kimi --resume-stdin
+```
+
+`--from` 接受 `claude` / `claude-code` / `cc` / `codex`。`list` 上加 `--json` 每个会话一行输出，方便脚本化。它直接从 `$_SERVER['argv']`（在 `resume` 之后）读自己的 flag，所以全局选项解析器不需要为 importer 特定旋钮学新东西。在 `SuperAgentApplication` 里路由。
+
+`superagent resume` 与 `--resume-stdin` ChatCommand flag 相互独立 —— 管道是被支持的工作流之一，但宿主也可以直接调 `ClaudeCodeImporter::load()`，把结果喂给 Laravel 解析出来的 `Agent`（通常通过 `Conversation\Transcoder` 做跨 wire 的续接）。
+
+### 架构注记
+
+- **`agent_grep` 默认用正则做符号提取** —— 快、零依赖、对约 95% 的典型 agent 工作量足够。需要 tree-sitter 精度的宿主用 `CompositeSymbolExtractor` 把 `TreeSitterSymbolExtractor` 摆在前面即可；`AgentGrepTool` 不需要子类化。
+- **`FileLedger`** 面向进程内 swarm（数十 agent、数百文件在飞）。更大部署接一个把事件转发到 Redis pub/sub 或 websocket 的自定义 emitter。
+- **`AmbientWorker`** 是纯 tick 驱动的原语 —— 循环由宿主决定。worker 内部强制 per-pass budget，tick 永远不会阻塞超过几秒。
+- **`SemanticSkillRouter`** 优雅退化 —— 没传 embedder 时它按关键词重叠打分，pipeline 其余部分不受影响。向量缓存按 skill 内容哈希取键，所以重命名/重描述 skill 自动让其行失效。
+- **`OnnxEmbeddingProvider` 是可选脚手架**。模型文件太大，没法塞进本仓库；前提缺失时该类抛清晰的"先用 OllamaEmbeddingProvider 顶着，配套包将来才上"错误。类型稳定 —— 今天写的 DI / `instanceof` 检查已经能用。
+- **Browser bridge 能力面故意做窄** —— 无 tab 管理、cookies、extension API。给 `FirefoxBridge` 加方法是一行的事，但默认能力越小，滥用爆炸半径越紧。
+- **`superagent resume` 与 `--resume-stdin` 独立**。该 CLI 子命令是被支持的工作流之一；宿主也可以直接调 `ClaudeCodeImporter::load()`，把结果喂给 Laravel 解析出来的 `Agent`。
+

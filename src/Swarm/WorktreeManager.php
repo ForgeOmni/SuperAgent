@@ -34,6 +34,15 @@ class WorktreeManager
     /** @var array<string, WorktreeInfo> In-memory registry */
     private array $worktrees = [];
 
+    /**
+     * 0.9.0+ — file-collision ledger (jcode-style "code shifting under your
+     * feet" notification). Lazy-instantiated; null until a tool / runtime
+     * calls `recordRead()` for the first time. The default emitter is a
+     * no-op so the feature is opt-in: hosts that want events delivered
+     * to peer mailboxes wire `setEmitter(fn($peerId, $event) => …)`.
+     */
+    private ?FileLedger $fileLedger = null;
+
     public function __construct(
         ?string $baseDir = null,
         ?LoggerInterface $logger = null,
@@ -49,6 +58,28 @@ class WorktreeManager
         if (!is_dir($this->baseDir)) {
             mkdir($this->baseDir, 0755, true);
         }
+    }
+
+    /**
+     * Lazy accessor for the file ledger — borrowed from jcode's coordinator
+     * server. Tools call `fileLedger()->recordRead($agentId, $absPath)`
+     * after every read, and `recordWrite($agentId, $absPath, $summary)`
+     * after every write/edit. Peer FileShiftedEvents are emitted through
+     * the ledger's emitter callback (default no-op; hosts override via
+     * `setFileLedger()` with a configured instance).
+     */
+    public function fileLedger(): FileLedger
+    {
+        if ($this->fileLedger === null) {
+            $this->fileLedger = new FileLedger();
+        }
+        return $this->fileLedger;
+    }
+
+    /** Replace the lazy ledger with a host-configured instance. */
+    public function setFileLedger(FileLedger $ledger): void
+    {
+        $this->fileLedger = $ledger;
     }
 
     /**

@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.6-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.9.7-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -33,6 +33,7 @@ echo $result->text();
 - [API OpenAI Responses](#api-openai-responses)
 - [Bascule inter-providers](#bascule-inter-providers)
 - [DeepSeek V4](#deepseek-v4)
+- [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
 - [Boucle d'agent](#boucle-dagent)
 - [Outils et multi-agents](#outils-et-multi-agents)
 - [Définitions d'agents](#définitions-dagents-yaml--markdown)
@@ -330,6 +331,123 @@ foreach ($result->message()->content as $block) {
 **Endpoint beta.** `region: 'beta'` route vers `https://api.deepseek.com/beta` pour FIM / complétion par préfixe avec la même auth.
 
 *Depuis v0.9.6*
+
+---
+
+## Outils compagnons (inspirés de jcode)
+
+Cinq primitives additives empruntées à [jcode](https://github.com/1jehuang/jcode). Chacune est opt-in et dégrade en no-op quand le câblage hôte est absent.
+
+### `agent_grep` — grep token-aware avec injection du symbole englobant
+
+Frère du `grep` byte-pour-byte compatible ripgrep. Mêmes flags, plus la métadonnée du symbole englobant par hit (PHP / JS / TS / Python / Go) et une troncature « chunk déjà vu » par session, pour que le modèle ne relise pas trois tours de suite le même morceau.
+
+```php
+$agent->loadTools(['grep', 'agent_grep']);   // les deux enregistrés, choix par appel
+
+// Par défaut : extracteur regex (zéro dépendance, ~95 % de précision)
+$agent->run('trouve tous les appelants de MyClass::handle et donne-moi la méthode englobante');
+```
+
+L'extraction de symbole est branchable via le SPI `Tools\Builtin\Symbols\SymbolExtractor` :
+
+```php
+use SuperAgent\Tools\Builtin\AgentGrepTool;
+use SuperAgent\Tools\Builtin\Symbols\CompositeSymbolExtractor;
+use SuperAgent\Tools\Builtin\Symbols\TreeSitterSymbolExtractor;
+use SuperAgent\Tools\Builtin\Symbols\RegexSymbolExtractor;
+
+$agent->registerTool(new AgentGrepTool(symbolExtractor: new CompositeSymbolExtractor([
+    new TreeSitterSymbolExtractor(),     // shell vers le CLI `tree-sitter` ; ~15 grammaires
+    new RegexSymbolExtractor(),          // fallback PHP pur, toujours dispo
+])));
+```
+
+Tree-sitter est auto-détecté sur `$PATH` (override via `SUPERAGENT_TREE_SITTER_BIN` ou paramètre constructeur). Binaire absent / grammaire inconnue / invocation foirée dégrade en « je ne supporte pas » — ne lève jamais.
+
+### `FileLedger` — notification d'édition cross-agent pour les swarms
+
+L'agent A édite un fichier que l'agent B a lu ; B reçoit un `FileShiftedEvent` dans sa boîte. Attaché paresseux à `WorktreeManager::fileLedger()`, opt-in côté outils qui enregistrent les lectures/écritures ; emitter par défaut no-op pour préserver la compat byte-à-byte des swarms existants.
+
+```php
+$ledger = $worktreeManager->fileLedger();
+$ledger->setEmitter(function (FileShiftedEvent $event, string $toAgent) {
+    // event = {path, byAgent, at, summary, shaBefore, shaAfter}
+    $mailbox->push($toAgent, $event);
+});
+
+$ledger->recordRead($agentB, '/abs/file.php');
+$ledger->recordWrite($agentA, '/abs/file.php', shaBefore: '...', shaAfter: '...', summary: 'corrige le garde null');
+// → emitter déclenche avec toAgent=$agentB
+```
+
+### `AmbientWorker` — hygiène mémoire en arrière-plan, comptage de coût isolé
+
+Worker longue durée, basse priorité, qui passe la dédup mémoire + scans de péremption à chaque tick. Budget par tick imposé en interne, jamais bloqué plus de quelques secondes. Le coût en tokens est marqué `usage_source: 'ambient'` via le callback fourni — les dashboards séparent dépense user-facing et arrière-plan.
+
+```php
+$worker = new AmbientWorker(
+    memoryProvider: $memProvider,
+    usageReporter:  fn(Usage $u) => $costMeter->record($u, source: 'ambient'),
+    passBudgetSeconds: 3,
+);
+
+while ($host->running()) {
+    $worker->tick();          // appelez depuis cron / swoole / react / un simple while sleep
+    sleep(60);
+}
+```
+
+### Bridge navigateur natif (Firefox / Chromium)
+
+WebExtension Native Messaging — framing JSON préfixé sur 4 octets little-endian — laisse l'agent piloter un vrai navigateur sans Selenium / Playwright. Un launcher par instance d'outil ; surface de capacités serrée (pas de gestion d'onglets, cookies, ni API d'extension).
+
+```php
+$agent->registerTool(new FirefoxBridgeTool());
+
+$agent->run('ouvre https://example.com, fais une capture, clique sur "Sign in", recapture');
+```
+
+Le chemin du launcher vient de `SUPERAGENT_BROWSER_BRIDGE_PATH` (ou du paramètre constructeur `launcherArgv`). Le docblock de `Tools\Browser\FirefoxBridge::class` contient le walkthrough complet (manifest WebExtension + manifest Native Messaging).
+
+### Embeddings branchables — `Memory\Embeddings\*`
+
+Interface `EmbeddingProvider` (shape batch, `dimensions()`, `fingerprint()`). Trois implémentations de référence :
+
+| Classe | Cible idéale |
+|---|---|
+| `OllamaEmbeddingProvider` | Devs qui font déjà tourner Ollama localement — appelle `/api/embeddings`, défaut `nomic-embed-text` (768 dims) |
+| `OnnxEmbeddingProvider` | Inférence in-process — nécessite `ext-onnxruntime` ou `ankane/onnxruntime` + un fichier modèle |
+| `NullEmbeddingProvider` | Tests / dev — retourne `[]` ; le downstream retombe sur le scoring par mots-clés |
+| `CallableEmbeddingProvider` | Adapte des closures existantes `fn(array): array` ou la forme legacy `fn(string): array<float>` |
+
+Branchables directement sur le `SemanticSkillRouter` rénové :
+
+```php
+use SuperAgent\Skills\SemanticSkillRouter;
+use SuperAgent\Memory\Embeddings\OllamaEmbeddingProvider;
+
+$router = new SemanticSkillRouter(
+    embedder: new OllamaEmbeddingProvider(),    // ou tout EmbeddingProvider
+    topK: 5,
+);
+// Sans embedder, fallback sur le chevauchement de mots-clés ; cache vectoriel keyé par hash de contenu skill.
+```
+
+### `superagent resume` — reprise de session cross-harness
+
+Récupérer une session Claude Code ou Codex CLI dans SuperAgent sans perdre le fil.
+
+```bash
+superagent resume list  --from claude
+superagent resume show  --from claude --session 8e2c-...
+superagent resume load  --from claude --session 8e2c-... \
+  | superagent chat --provider kimi --resume-stdin
+```
+
+`--from` accepte `claude` / `claude-code` / `cc` / `codex`. Sous le capot : interface `Conversation\HarnessImporter` + importers par harness (`ClaudeCodeImporter` lit `~/.claude/projects/<hash>/<uuid>.jsonl` ; `CodexImporter` lit `~/.codex/sessions/**/*.jsonl`), qui produisent les `Message[]` internes ré-injectés dans le `Conversation\Transcoder` existant — la wire family bascule de façon transparente.
+
+*Depuis v0.9.7*
 
 ---
 

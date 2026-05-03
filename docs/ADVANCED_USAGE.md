@@ -7938,3 +7938,272 @@ Treat it as opt-in for code-completion workloads; the `default` region is the ri
 - **The reasoning_content plumbing was due regardless.** Qwen's `qwen-reasoning` and Kimi's thinking-tuned variants have always emitted `delta.reasoning_content`; the SDK was silently dropping it. Surfacing it generically in `ChatCompletionsProvider::parseSSEStream()` means every existing OpenAI-compat subclass gains the capability without overrides — DeepSeek is the trigger, but Kimi-thinking and Qwen-reasoning users get the channel for free in 0.9.6.
 - **Forward-compat with budget knobs.** If DeepSeek (or another vendor) later exposes a `budget_tokens` field on V4-thinking, `DeepSeekProvider::thinkingRequestFragment(int $budgetTokens)` already receives the budget — the body fragment gains a `budget_tokens` key, no caller changes.
 - **Catalog deprecation is general.** `ModelCatalog::deprecation()` and the `ModelResolver` warning hook work for any provider — add `deprecated_until` + `replaced_by` to the catalog row when a vendor announces a retirement, and the warning fires with the deadline. The same mechanism will cover Anthropic's eventual Claude-3 retirement, OpenAI's `gpt-3.5-turbo` end-of-life, and any other deadline that lands.
+
+## 54. Companion tools — jcode wave (v0.9.7)
+
+Five additive primitives borrowed from [jcode](https://github.com/1jehuang/jcode) land alongside an expanded CLI surface so SuperAgent and SuperAICore share the same operator-experience vocabulary. None of these change SDK call shapes or core dispatch — every new piece is opt-in and degrades to no-op when its host wiring is absent.
+
+### `agent_grep` — token-aware grep with seen-chunk truncation
+
+Sibling of the existing `grep` tool (which is byte-for-byte ripgrep parity). `AgentGrepTool` adds two things on top of the same flag surface:
+
+1. **Enclosing-symbol injection.** Every match comes with the function / class / method name that physically encloses the matched line, so the model sees `MyClass::handle()` instead of just "line 42 of MyClass.php".
+2. **Per-session seen-chunk truncation.** When the same `(file, lineRange, sha)` tuple appears in a result set the model has already been served, the tool short-circuits with a marker rather than re-emitting the same hunk three turns in a row. State lives in `ToolStateManager` keyed by `(file, lineRange, sha)` so swarm isolation works without leaking one agent's seen-chunk ledger into another.
+
+```php
+use SuperAgent\Tools\Builtin\AgentGrepTool;
+
+$agent->loadTools(['grep']);                  // ripgrep parity, byte-for-byte
+$agent->registerTool(new AgentGrepTool());    // sibling, augmented output
+
+// Per call: pick whichever shape fits the use case.
+$agent->run('find every caller of MyClass::handle and tell me which method contains it');
+```
+
+### Symbol extraction SPI — `Tools\Builtin\Symbols\SymbolExtractor`
+
+Pluggable enclosing-symbol resolution behind `AgentGrepTool`. Three reference implementations:
+
+| Class | Mode | Languages | Accuracy | Cost |
+|---|---|---|---|---|
+| `RegexSymbolExtractor` | Pure-PHP | PHP / JS / TS / Python / Go | ~95% on typical code | Always-on, no I/O |
+| `TreeSitterSymbolExtractor` | Shells out to `tree-sitter` CLI | ~15 grammars (PHP / JS / TS / Python / Go / Rust / Ruby / Java / C / C++ / C# / Swift / Kotlin / Scala / Lua) | Parser-level | Subprocess + 1.5s timeout |
+| `CompositeSymbolExtractor` | Chains extractors | first non-empty wins | Best of both | First success short-circuits |
+
+```php
+use SuperAgent\Tools\Builtin\Symbols\CompositeSymbolExtractor;
+use SuperAgent\Tools\Builtin\Symbols\TreeSitterSymbolExtractor;
+use SuperAgent\Tools\Builtin\Symbols\RegexSymbolExtractor;
+
+$tool = new AgentGrepTool(symbolExtractor: new CompositeSymbolExtractor([
+    new TreeSitterSymbolExtractor(),     // tries first; falls through on failure
+    new RegexSymbolExtractor(),          // always succeeds
+]));
+```
+
+`TreeSitterSymbolExtractor` auto-discovers the `tree-sitter` binary on `$PATH`, with `SUPERAGENT_TREE_SITTER_BIN` and a constructor argument as overrides. Maps SuperAgent language hints to the matching grammar, parses the s-expression output with a hard timeout (1.5s default). Degrades to "I don't support this" via `supports()` when the binary is missing, the grammar is unregistered, or the invocation fails — never throws.
+
+### Swarm — `FileLedger` + `FileShiftedEvent`
+
+The cross-agent edit-collision problem: agent A writes a file that agent B has already read, and B's next decision is now made on stale content. `FileLedger` tracks reads and writes; on a write, it emits a `FileShiftedEvent` to every agent that previously read the same path.
+
+```php
+use SuperAgent\Swarm\FileLedger;
+use SuperAgent\Swarm\Events\FileShiftedEvent;
+
+$ledger = $worktreeManager->fileLedger();    // lazy, attached on first call
+$ledger->setEmitter(function (FileShiftedEvent $event, string $toAgent) use ($mailbox) {
+    // event = {path, byAgent, at, summary, shaBefore, shaAfter}
+    $mailbox->push($toAgent, $event);
+});
+
+// Tools that read/write opt in by calling these:
+$ledger->recordRead($agentB, '/abs/file.php');
+$ledger->recordWrite(
+    agent: $agentA,
+    path: '/abs/file.php',
+    shaBefore: '...',
+    shaAfter: '...',
+    summary: 'fixed null guard in foo()',
+);
+// emitter fires once with toAgent=$agentB
+
+// Cleanup hooks:
+$collisions = $ledger->peerCollisions($agentB);   // for inspection
+$ledger->clearAgent($agentB);                     // on agent shutdown
+```
+
+**Sizing.** Sized for in-process swarms (tens of agents, hundreds of files in flight). Larger deployments wire a custom emitter that forwards events to Redis pub/sub or websockets — the emitter callback is the only swap.
+
+**Default emitter is no-op.** Existing swarms that don't opt their tools into `recordRead/recordWrite` are byte-compatible.
+
+### Swarm — `AmbientWorker`
+
+Long-lived low-priority worker that runs memory dedup + staleness scans on a tick. Hosts call `tick()` from a loop (cron, swoole, react, plain `while sleep`); each pass enforces its own `pass_budget_seconds` so a tick never blocks for more than a few seconds. Token cost is tagged `usage_source: 'ambient'` via the supplied callback so dashboards split user-facing vs background spend (SuperAICore's CostDashboard renders an "ambient" stacked-bar slice without extra plumbing).
+
+```php
+use SuperAgent\Swarm\AmbientWorker;
+
+$worker = new AmbientWorker(
+    memoryProvider:    $memProvider,
+    usageReporter:     fn(Usage $u) => $costMeter->record($u, source: 'ambient'),
+    passBudgetSeconds: 3,
+);
+
+// In a cron pod:
+while ($host->running()) {
+    $worker->tick();
+    sleep(60);
+}
+
+// In a Swoole worker:
+Co\run(function () use ($worker) {
+    while (true) {
+        $worker->tick();
+        Co::sleep(60);
+    }
+});
+```
+
+The worker enforces per-pass budgets internally so a tick never blocks for more than a few seconds — the host loop only chooses *how often* to tick, not *how long* a tick runs.
+
+### Skills — `SemanticSkillRouter` upgrade
+
+The router that picks top-K skills by embedding cosine before injecting them into the system prompt. Now accepts either an `EmbeddingProvider` instance OR the original `callable(list<string>): list<list<float>>` shape (auto-wrapped via `CallableEmbeddingProvider`). Falls back to keyword overlap when none provided. Reuses cached vectors keyed by skill content hash so re-embedding only happens when a skill's description changes.
+
+```php
+use SuperAgent\Skills\SemanticSkillRouter;
+use SuperAgent\Memory\Embeddings\OllamaEmbeddingProvider;
+use SuperAgent\Memory\Embeddings\NullEmbeddingProvider;
+
+// Production: real embedder
+$router = new SemanticSkillRouter(
+    embedder: new OllamaEmbeddingProvider(),
+    topK: 5,
+);
+
+// Tests: null embedder → keyword fallback inside the router
+$router = new SemanticSkillRouter(embedder: new NullEmbeddingProvider());
+
+// Legacy: existing closure that returns a single embedding
+$router = new SemanticSkillRouter(
+    embedder: fn(string $text): array => $myLegacyEmbedFn($text),
+);
+// auto-wrapped via CallableEmbeddingProvider — no migration needed
+```
+
+### Embeddings SPI — `Memory\Embeddings\*`
+
+Roadmap item B3 scaffolding. Standardised embedding contract used by `SemanticSkillRouter` (and any future vector retrieval / dedup work).
+
+**Interface — `EmbeddingProvider`:**
+
+```php
+interface EmbeddingProvider
+{
+    /** @return array<int, array<int, float>> — one vector per input text */
+    public function embed(array $texts): array;
+    public function dimensions(): int;
+    public function fingerprint(): string;   // cache-invalidation key when model changes
+}
+```
+
+**Reference implementations:**
+
+| Class | When to use | Notes |
+|---|---|---|
+| `NullEmbeddingProvider` | Tests / dev environments | Returns `[]` per row; downstream treats `[]` as "no signal" and falls back to baseline ranker |
+| `CallableEmbeddingProvider` | Adapting existing closures | Auto-detects batch shape `fn(array): array` vs single-text legacy `fn(string): array<float>` (the `VectorMemoryProvider` form) by inspecting the parameter type |
+| `OllamaEmbeddingProvider` | Devs already running Ollama locally | Talks to `/api/embeddings`, default model `nomic-embed-text` (768 dims). Per-row failure surfaces as `[]` so a flaky daemon doesn't disable the entire router for the rest of the session |
+| `OnnxEmbeddingProvider` | In-process ONNX inference | Opt-in scaffolding. Constructor probes for the runtime (`ext-onnxruntime` or `ankane/onnxruntime` userland binding) and the model file, throws a clear "use OllamaEmbeddingProvider until the companion package lands" error if either is missing |
+
+```php
+use SuperAgent\Memory\Embeddings\OllamaEmbeddingProvider;
+use SuperAgent\Memory\Embeddings\NullEmbeddingProvider;
+use SuperAgent\Memory\Embeddings\CallableEmbeddingProvider;
+
+// Most ergonomic: local Ollama daemon
+$embedder = new OllamaEmbeddingProvider(
+    host: 'http://localhost:11434',
+    model: 'nomic-embed-text',
+);
+$vectors = $embedder->embed(['skill A description', 'skill B description']);
+// → [[0.123, 0.456, ...], [0.789, 0.012, ...]]
+```
+
+`OnnxEmbeddingProvider` exposes subclassing hooks (`tokenise()`, `runModel()`) for hosts that already have an ONNX wrapper, and is a stable type so DI / `instanceof` works today against the future companion package `forgeomni/superagent-embeddings`.
+
+### Browser bridge (B4)
+
+Native Messaging-based agent control of a real Firefox / Chromium browser, without Selenium / Playwright. Three classes layer up:
+
+**`Tools\Browser\NativeMessagingTransport`** — wraps the 4-byte little-endian length-prefixed JSON framing that Mozilla / Chromium Native Messaging expects. Owns the launcher child-process lifecycle with deadline-bounded reads (default 15s) so a stalled WebExtension never deadlocks the agent. Returns null on EOF / timeout / invalid frame so callers can decide whether to retry, restart, or surface.
+
+**`Tools\Browser\FirefoxBridge`** — high-level RPC client over the transport. Methods:
+
+| Method | Purpose |
+|---|---|
+| `navigate($url)` | Drive the location bar |
+| `screenshot()` | Returns base64 PNG |
+| `click($selector)` | CSS selector click |
+| `type($selector, $text)` | Type into an input |
+| `evalJs($code)` | Run JS in the page; returns the JSON-serialisable result |
+| `wait($selector, $timeoutMs)` | Wait for an element to appear |
+| `pollEvents()` | Drain unsolicited events buffered by the transport |
+
+Auto-assigns request ids and buffers unsolicited events so callers don't have to multiplex. Class docblock contains the full setup walkthrough — minimal `manifest.json` for the WebExtension and the Native Messaging manifest layout — so the integration is reproducible without external docs.
+
+**`Tools\Builtin\FirefoxBridgeTool`** (`browser` tool name) — `Tool` subclass exposing the bridge to agents. Single launcher process per tool instance; first action starts it, `action: 'close'` (or the destructor) tears it down. Tight capability surface (no tab management, cookies, or extension APIs) to keep the abuse blast radius small.
+
+```php
+use SuperAgent\Tools\Builtin\FirefoxBridgeTool;
+
+$agent->registerTool(new FirefoxBridgeTool());
+$agent->run('open https://example.com, screenshot, click the "Sign in" link, screenshot again');
+```
+
+Launcher path comes from `SUPERAGENT_BROWSER_BRIDGE_PATH` env or the constructor's `launcherArgv`. Screenshot results are returned as base64 PNG so hosts can re-publish them into their UI (SuperAICore's `BrowserScreenshotStore` does exactly this for `/processes`).
+
+### Cross-harness session resume
+
+`Conversation\HarnessImporter` — interface for "load this `.jsonl` from another agent harness's on-disk session store and hand me back internal `Message[]`". Two reference importers:
+
+| Importer | Reads | Notes |
+|---|---|---|
+| `Conversation\Importers\ClaudeCodeImporter` | `~/.claude/projects/<hash>/<uuid>.jsonl` | Forgiving line-by-line parser tolerates schema drift across Claude Code versions |
+| `Conversation\Importers\CodexImporter` | `~/.codex/sessions/**/*.jsonl` | Recursive glob so older Codex installs (different layout) still work |
+
+```php
+interface HarnessImporter
+{
+    public function harness(): string;             // 'claude' | 'codex' | ...
+    public function listSessions(int $limit): array;
+    public function load(string $sessionId): array;  // Message[]
+}
+```
+
+Returned messages are the SDK's internal shape (`UserMessage` / `AssistantMessage` / `ToolResultMessage`), ready to feed back into an `Agent` — typically routed through `Conversation\Transcoder` (0.9.5) to flip to the new wire family for whichever provider the agent will run on.
+
+```php
+use SuperAgent\Conversation\Importers\ClaudeCodeImporter;
+use SuperAgent\Conversation\Transcoder;
+use SuperAgent\Conversation\WireFamily;
+
+$importer = new ClaudeCodeImporter();
+$messages = $importer->load('8e2c-4f9d-...');
+
+// Continue the same conversation on Kimi:
+$kimiBody = (new Transcoder())->encode($messages, WireFamily::OpenAIChat);
+$agent = new Agent(['provider' => 'kimi']);
+$agent->runWithMessages($messages);
+```
+
+### CLI — `superagent resume`
+
+User-facing command for cross-harness session pickup. Three subcommands:
+
+```bash
+# List the most recent N Claude Code sessions:
+superagent resume list  --from claude
+
+# Show one session's full transcript:
+superagent resume show  --from claude --session 8e2c-...
+
+# Load and feed into a chat — typical pipe into the chat command:
+superagent resume load  --from claude --session 8e2c-... \
+  | superagent chat --provider kimi --resume-stdin
+```
+
+`--from` accepts `claude` / `claude-code` / `cc` / `codex`. `--json` on `list` emits one row per session for scripting. Reads its own flags directly from `$_SERVER['argv']` (after the `resume` token) so the global option parser doesn't have to learn about importer-specific knobs. Routed in `SuperAgentApplication`.
+
+`superagent resume` is independent of the `--resume-stdin` ChatCommand flag — piping is one supported workflow, but hosts can also call `ClaudeCodeImporter::load()` directly and feed the result into a Laravel-resolved `Agent` (typically through `Conversation\Transcoder` for cross-wire continuation).
+
+### Architectural notes
+
+- **`agent_grep` symbol extraction is regex-based by default** — fast, dependency-free, good enough for ~95% of typical agent workloads. Hosts that want tree-sitter precision compose `CompositeSymbolExtractor` with `TreeSitterSymbolExtractor` first; `AgentGrepTool` doesn't need subclassing.
+- **`FileLedger`** is sized for in-process swarms (tens of agents, hundreds of files in flight). Larger deployments wire a custom emitter that forwards events to Redis pub/sub or websockets.
+- **`AmbientWorker`** is purely a tick-driven primitive — hosts decide the loop. The worker enforces per-pass budgets internally so a tick never blocks for more than a few seconds.
+- **`SemanticSkillRouter`** falls back gracefully — without an embedder it scores skills by keyword overlap and the rest of the pipeline is unaffected. Vector cache is keyed by skill content hash so renaming/re-describing a skill invalidates its row automatically.
+- **`OnnxEmbeddingProvider` is opt-in scaffolding.** The model file is too large to bundle in this repo; the class throws a clear "use OllamaEmbeddingProvider until the companion package lands" error when prerequisites are missing. The stable type means DI / `instanceof` checks work today.
+- **Browser bridge capability surface is intentionally narrow** — no tab management, cookies, or extension APIs. Adding more methods is a one-line addition to `FirefoxBridge`, but the smallest-possible default keeps the abuse blast radius tight.
+- **`superagent resume` is independent of `--resume-stdin`.** The CLI subcommand is one supported workflow; hosts can also call `ClaudeCodeImporter::load()` directly and feed the result into a Laravel-resolved `Agent`.

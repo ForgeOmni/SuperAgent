@@ -10,6 +10,7 @@ use SuperAgent\CLI\Commands\HealthCommand;
 use SuperAgent\CLI\Commands\InitCommand;
 use SuperAgent\CLI\Commands\McpCommand;
 use SuperAgent\CLI\Commands\ModelsCommand;
+use SuperAgent\CLI\Commands\ResumeCommand;
 use SuperAgent\CLI\Commands\SkillsCommand;
 use SuperAgent\CLI\Commands\SwarmCommand;
 
@@ -24,7 +25,7 @@ use SuperAgent\CLI\Commands\SwarmCommand;
  */
 class SuperAgentApplication
 {
-    private const VERSION = '0.9.6';
+    private const VERSION = '0.9.7';
     private const NAME = 'SuperAgent';
 
     public function run(): int
@@ -62,6 +63,10 @@ class SuperAgentApplication
             'mcp'     => (new McpCommand())->execute($options),
             'skills'  => (new SkillsCommand())->execute($options),
             'swarm'   => (new SwarmCommand())->execute($options),
+            // 0.9.7+ — cross-harness session resume (jcode-style). Imports
+            // Claude Code / Codex CLI session logs into Message[] that any
+            // SuperAgent provider can replay (typically via `Transcoder`).
+            'resume'  => (new ResumeCommand())->execute($options),
             'health',
             'doctor'  => (new HealthCommand())->execute($options),
             default   => (new ChatCommand())->execute($options),
@@ -97,6 +102,8 @@ class SuperAgentApplication
         $options['skills_args'] = [];
         $options['swarm_args'] = [];
         $options['health_args'] = [];
+        // 0.9.7+ — `superagent resume <list|show|load> --from <harness> ...`
+        $options['resume_args'] = [];
 
         while ($i < count($args)) {
             $arg = $args[$i];
@@ -138,7 +145,7 @@ class SuperAgentApplication
 
         // First positional arg: subcommand or prompt
         if (! empty($positional)) {
-            if (in_array($positional[0], ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor'], true)) {
+            if (in_array($positional[0], ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume'], true)) {
                 $options['command'] = array_shift($positional);
             }
 
@@ -174,6 +181,11 @@ class SuperAgentApplication
 
             if (in_array($options['command'] ?? '', ['health', 'doctor'], true)) {
                 $options['health_args'] = $positional;
+                $positional = [];
+            }
+
+            if (($options['command'] ?? '') === 'resume') {
+                $options['resume_args'] = $positional;
                 $positional = [];
             }
 
