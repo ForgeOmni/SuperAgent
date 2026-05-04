@@ -69,9 +69,9 @@ class PluginLoader
      */
     public function loadPlugin(string $path): ?LoadedPlugin
     {
-        $manifestPath = rtrim($path, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'plugin.json';
+        $manifestPath = PluginManifest::discoverManifestPath($path);
 
-        if (!is_file($manifestPath)) {
+        if ($manifestPath === null) {
             return null;
         }
 
@@ -145,8 +145,8 @@ class PluginLoader
      */
     public function install(string $sourcePath, string $targetDir): bool
     {
-        $manifestPath = rtrim($sourcePath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'plugin.json';
-        if (!is_file($manifestPath)) {
+        $manifestPath = PluginManifest::discoverManifestPath($sourcePath);
+        if ($manifestPath === null) {
             return false;
         }
 

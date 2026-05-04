@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace SuperAgent\Memory;
 
 use SuperAgent\LLM\ProviderInterface;
+use SuperAgent\Memory\Embeddings\EmbeddingProvider;
 use SuperAgent\Memory\Storage\MemoryStorageInterface;
+use SuperAgent\Memory\VectorIndex\IndexedItem;
+use SuperAgent\Memory\VectorIndex\VectorIndex;
 
 class MemoryRetriever
 {
@@ -13,7 +16,100 @@ class MemoryRetriever
         private MemoryStorageInterface $storage,
         private ProviderInterface $provider,
         private MemoryConfig $config,
+        private ?EmbeddingProvider $embedder = null,
+        private ?VectorIndex $vectorIndex = null,
     ) {}
+
+    /**
+     * Find memories whose embedding is closest to the query's, using the
+     * configured `VectorIndex`. Cheaper and more deterministic than
+     * `findRelevant()`'s LLM-as-judge path — prefer this when an
+     * `EmbeddingProvider` is wired.
+     *
+     * The first call lazy-indexes every memory currently in storage so
+     * the `add` cost amortises across the session. Memory mutations
+     * during the session must call `indexMemory()` to keep the index
+     * fresh; we don't snoop the storage layer.
+     *
+     * @return Memory[] in descending similarity order
+     */
+    public function findBySimilarity(string $query, int $maxResults = 5, float $minScore = 0.0): array
+    {
+        if ($this->embedder === null || $this->vectorIndex === null) {
+            // Not wired — fall back to the LLM judge.
+            return $this->findRelevant($query, $maxResults);
+        }
+
+        if ($this->vectorIndex->count() === 0) {
+            $this->seedIndexFromStorage();
+        }
+        if ($this->vectorIndex->count() === 0) {
+            return [];
+        }
+
+        $vec = $this->embedder->embed([$query])[0] ?? [];
+        if ($vec === []) return [];
+
+        $hits = $this->vectorIndex->search($vec, $maxResults, $minScore);
+
+        $memories = [];
+        foreach ($hits as $hit) {
+            $memory = $this->storage->load($hit->id);
+            if ($memory === null) continue;
+            $memory->markAccessed();
+            $this->storage->save($memory);
+            $memories[] = $memory;
+        }
+        return $memories;
+    }
+
+    /**
+     * Add (or replace) a single memory's row in the vector index.
+     * No-op when no embedder/index is wired so callers can sprinkle
+     * this safely after every `save()`.
+     */
+    public function indexMemory(Memory $memory): void
+    {
+        if ($this->embedder === null || $this->vectorIndex === null) return;
+        $text = trim($memory->name . "\n" . $memory->description . "\n" . $memory->content);
+        if ($text === '') return;
+        $vec = $this->embedder->embed([$text])[0] ?? [];
+        if ($vec === []) return;
+        $this->vectorIndex->add($memory->id, $vec, [
+            'type'  => $memory->type->value,
+            'scope' => $memory->scope->value,
+        ]);
+    }
+
+    /**
+     * One-shot index population from current storage. Called lazily on
+     * the first similarity query when the index is empty.
+     */
+    private function seedIndexFromStorage(): void
+    {
+        if ($this->embedder === null || $this->vectorIndex === null) return;
+        $memories = $this->storage->loadAll();
+        if ($memories === []) return;
+
+        $texts = [];
+        $rows  = [];
+        foreach ($memories as $m) {
+            $texts[] = trim($m->name . "\n" . $m->description . "\n" . $m->content);
+            $rows[] = $m;
+        }
+        $vectors = $this->embedder->embed($texts);
+
+        $items = [];
+        foreach ($rows as $i => $m) {
+            $vec = $vectors[$i] ?? [];
+            if ($vec === []) continue;
+            $items[] = new IndexedItem($m->id, $vec, [
+                'type'  => $m->type->value,
+                'scope' => $m->scope->value,
+            ]);
+        }
+        $this->vectorIndex->addAll($items);
+    }
     
     /**
      * Find relevant memories for a query
