@@ -9,7 +9,10 @@ use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use SuperAgent\Exceptions\ProviderException;
 use SuperAgent\Messages\AssistantMessage;
+use SuperAgent\Messages\ContentBlock;
+use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\UserMessage;
+use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
 use SuperAgent\Providers\Capabilities\SupportsThinking;
 use SuperAgent\Providers\DeepSeekProvider;
 
@@ -186,6 +189,254 @@ class DeepSeekProviderTest extends TestCase
         $msg = $this->runParser($sse);
         $this->assertSame(400, $msg->usage->cacheReadInputTokens);
         $this->assertSame(100, $msg->usage->inputTokens);
+    }
+
+    // ── V4 Interleaved Thinking — reasoning_content replay ───────
+
+    /**
+     * Round-trip an AssistantMessage that carries BOTH a thinking
+     * block and a tool_use block. The V4 server requires the
+     * reasoning_content field on every replayed assistant message
+     * with tool_calls; without it we get a 400.
+     */
+    public function test_reasoning_content_round_trips_on_assistant_with_tool_calls(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $assistant = new AssistantMessage();
+        $assistant->content = [
+            ContentBlock::thinking('Let me search the docs first.'),
+            ContentBlock::toolUse('call-1', 'web_search', ['q' => 'deepseek v4 docs']),
+        ];
+        $body = $this->buildBody(
+            $p,
+            [new UserMessage('hi'), $assistant],
+            [],
+            null,
+            ['reasoning_effort' => 'high'],
+        );
+        // Find the assistant entry.
+        $assistantWire = null;
+        foreach ($body['messages'] as $m) {
+            if (($m['role'] ?? null) === 'assistant') { $assistantWire = $m; break; }
+        }
+        $this->assertNotNull($assistantWire, 'assistant message must be on the wire');
+        $this->assertSame('Let me search the docs first.', $assistantWire['reasoning_content']);
+        $this->assertNotEmpty($assistantWire['tool_calls']);
+    }
+
+    /**
+     * Final-pass sanitizer: an assistant message with tool_calls but
+     * NO accompanying thinking block (e.g. session restored from disk
+     * pre-fix, sub-agent built it by hand) must get a `(reasoning
+     * omitted)` placeholder when running on a V4 thinking model so
+     * the API doesn't reject the request.
+     */
+    public function test_sanitizer_forces_placeholder_on_assistant_with_tool_calls(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $assistant = new AssistantMessage();
+        // No thinking block — only the tool call.
+        $assistant->content = [
+            ContentBlock::toolUse('call-2', 'shell', ['cmd' => 'ls']),
+        ];
+        $body = $this->buildBody(
+            $p,
+            [$assistant],
+            [],
+            null,
+            ['reasoning_effort' => 'high'],
+        );
+        $assistantWire = null;
+        foreach ($body['messages'] as $m) {
+            if (($m['role'] ?? null) === 'assistant') { $assistantWire = $m; break; }
+        }
+        $this->assertNotNull($assistantWire);
+        $this->assertSame('(reasoning omitted)', $assistantWire['reasoning_content']);
+    }
+
+    public function test_sanitizer_skipped_when_effort_off(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $assistant = new AssistantMessage();
+        $assistant->content = [
+            ContentBlock::toolUse('call-3', 'shell', ['cmd' => 'ls']),
+        ];
+        $body = $this->buildBody(
+            $p,
+            [$assistant],
+            [],
+            null,
+            ['reasoning_effort' => 'off'],
+        );
+        $assistantWire = null;
+        foreach ($body['messages'] as $m) {
+            if (($m['role'] ?? null) === 'assistant') { $assistantWire = $m; break; }
+        }
+        $this->assertArrayNotHasKey('reasoning_content', $assistantWire);
+    }
+
+    public function test_sanitizer_skipped_for_assistant_without_tool_calls(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $assistant = new AssistantMessage();
+        $assistant->content = [ContentBlock::text('plain answer')];
+        $body = $this->buildBody(
+            $p,
+            [$assistant],
+            [],
+            null,
+            ['reasoning_effort' => 'high'],
+        );
+        $assistantWire = null;
+        foreach ($body['messages'] as $m) {
+            if (($m['role'] ?? null) === 'assistant') { $assistantWire = $m; break; }
+        }
+        // Plain text answers don't need replay — DeepSeek accepts them.
+        $this->assertArrayNotHasKey('reasoning_content', $assistantWire);
+    }
+
+    public function test_requires_reasoning_content_recognises_v4_and_reasoners(): void
+    {
+        $this->assertTrue(DeepSeekProvider::requiresReasoningContent('deepseek-v4-pro'));
+        $this->assertTrue(DeepSeekProvider::requiresReasoningContent('deepseek-v4-flash'));
+        $this->assertTrue(DeepSeekProvider::requiresReasoningContent('deepseek-v3.2'));
+        $this->assertTrue(DeepSeekProvider::requiresReasoningContent('deepseek-reasoner'));
+        $this->assertTrue(DeepSeekProvider::requiresReasoningContent('deepseek-r1'));
+        $this->assertTrue(DeepSeekProvider::requiresReasoningContent('deepseek-r1-distill-llama-8b'));
+        $this->assertTrue(DeepSeekProvider::requiresReasoningContent('something-thinking'));
+        $this->assertFalse(DeepSeekProvider::requiresReasoningContent('deepseek-chat'));
+        $this->assertFalse(DeepSeekProvider::requiresReasoningContent('deepseek-v3'));
+    }
+
+    // ── Reasoning effort ─────────────────────────────────────────
+
+    public function test_implements_supports_reasoning_effort(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $this->assertInstanceOf(SupportsReasoningEffort::class, $p);
+    }
+
+    public function test_reasoning_effort_off_disables_thinking(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $this->assertSame(
+            ['thinking' => ['type' => 'disabled']],
+            $p->reasoningEffortFragment('off'),
+        );
+    }
+
+    public function test_reasoning_effort_high_emits_thinking_enabled(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $frag = $p->reasoningEffortFragment('high');
+        $this->assertSame('high', $frag['reasoning_effort']);
+        $this->assertSame(['type' => 'enabled'], $frag['thinking']);
+    }
+
+    public function test_reasoning_effort_max_emits_max_band(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $frag = $p->reasoningEffortFragment('max');
+        $this->assertSame('max', $frag['reasoning_effort']);
+        $this->assertSame(['type' => 'enabled'], $frag['thinking']);
+    }
+
+    public function test_reasoning_effort_unknown_value_returns_empty(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        // Misconfigured caller passes nonsense — we MUST NOT mutate
+        // the request rather than risk a malformed payload.
+        $this->assertSame([], $p->reasoningEffortFragment('moonbeam'));
+    }
+
+    public function test_reasoning_effort_nim_uses_chat_template_kwargs(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k', 'upstream' => 'nvidia_nim']);
+        $frag = $p->reasoningEffortFragment('high');
+        $this->assertSame(
+            ['chat_template_kwargs' => ['thinking' => true, 'reasoning_effort' => 'high']],
+            $frag,
+        );
+    }
+
+    public function test_reasoning_effort_option_injects_into_body(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $body = $this->buildBody(
+            $p,
+            [new UserMessage('hi')],
+            [],
+            null,
+            ['reasoning_effort' => 'max'],
+        );
+        $this->assertSame('max', $body['reasoning_effort']);
+        $this->assertSame(['type' => 'enabled'], $body['thinking']);
+    }
+
+    // ── Multi-upstream routing ───────────────────────────────────
+
+    public function test_upstream_alias_accepts_nvidia_nim(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k', 'upstream' => 'nvidia_nim']);
+        $this->assertSame('integrate.api.nvidia.com', $this->host($p));
+    }
+
+    public function test_upstream_alias_accepts_fireworks(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k', 'upstream' => 'fireworks']);
+        $this->assertSame('api.fireworks.ai', $this->host($p));
+    }
+
+    public function test_upstream_alias_accepts_novita(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k', 'upstream' => 'novita']);
+        $this->assertSame('api.novita.ai', $this->host($p));
+    }
+
+    public function test_upstream_alias_accepts_openrouter(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k', 'upstream' => 'openrouter']);
+        $this->assertSame('openrouter.ai', $this->host($p));
+    }
+
+    public function test_upstream_sglang_requires_explicit_base_url(): void
+    {
+        // SGLang is self-hosted — no fixed URL. Caller must pass base_url
+        // OR the constructor should raise.
+        $this->expectException(ProviderException::class);
+        new DeepSeekProvider(['api_key' => 'k', 'upstream' => 'sglang']);
+    }
+
+    public function test_upstream_sglang_works_with_explicit_base_url(): void
+    {
+        $p = new DeepSeekProvider([
+            'api_key'  => 'k',
+            'upstream' => 'sglang',
+            'base_url' => 'http://my-sglang:30000/v1',
+        ]);
+        // base_url wins over the upstream resolver per parent semantics.
+        $this->assertSame('my-sglang', $this->host($p));
+    }
+
+    public function test_explicit_region_wins_over_upstream(): void
+    {
+        // When both keys are passed, region takes precedence — no
+        // surprise routing.
+        $p = new DeepSeekProvider([
+            'api_key'  => 'k',
+            'region'   => 'beta',
+            'upstream' => 'fireworks',
+        ]);
+        $this->assertSame('api.deepseek.com', $this->host($p));
+    }
+
+    // ── FIM ──────────────────────────────────────────────────────
+
+    public function test_complete_fim_requires_beta_upstream(): void
+    {
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $this->expectException(ProviderException::class);
+        $p->completeFim('def hello():\n    ');
     }
 
     // ── helpers ───────────────────────────────────────────────────

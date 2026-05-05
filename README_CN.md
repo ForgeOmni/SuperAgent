@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.9.7-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-0.9.8-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -33,6 +33,8 @@ echo $result->text();
 - [OpenAI Responses API](#openai-responses-api)
 - [跨 Provider 切换](#跨-provider-切换)
 - [DeepSeek V4](#deepseek-v4)
+- [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
+- [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
 - [Agent 循环](#agent-循环)
 - [工具与多 Agent](#工具与多-agent)
@@ -107,7 +109,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
 | `glm` | BigModel GLM | API key；region `intl` / `cn` |
 | `minimax` | MiniMax | API key；region `intl` / `cn` |
-| `deepseek` | DeepSeek V4 | API key；region `default` / `beta` *（v0.9.6 起）* |
+| `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | 本地 Ollama daemon | 无需 auth — 默认 localhost:11434 |
 | `lmstudio` | 本地 LM Studio server | 占位 auth — 默认 localhost:1234 *（v0.9.1 起）* |
@@ -327,9 +329,220 @@ foreach ($result->message()->content as $block) {
 
 **Cache 感知计费**。OpenAI-compat 后端报告的 `prompt_tokens` 是 gross（缓存命中 + 未命中之和）。解析器现在会先从 `prompt_tokens` 里减掉缓存命中部分再写入 `Usage::inputTokens`，让缓存折扣正确生效 —— `CostCalculator` 给读命中按 input 价的 10% 计费，而不是事实上的 110%。所有支持缓存的 OpenAI-compat 后端都受益（DeepSeek、Kimi、OpenAI 自己）。
 
-**Beta endpoint**。设置 `region: 'beta'` 路由到 `https://api.deepseek.com/beta`，同一份 auth 即可访问 FIM / 前缀补全。
+**Beta endpoint**。设置 `region: 'beta'` 路由到 `https://api.deepseek.com/beta`，同一份 auth 即可访问 FIM / 前缀补全 —— 见 [`completeFim()`](#fim前缀补全-v098) 专用辅助方法。
 
 *v0.9.6 起*
+
+### Reasoning-effort 三档 *(v0.9.8)*
+
+DeepSeek 原生 + 各 relay 通用三档：
+
+```php
+// 最便宜：完全关闭 thinking。
+$agent->run('翻译这段', options: ['reasoning_effort' => 'off']);
+
+// 标准 thinking 预算（V4-Pro 默认）。
+$agent->run('设计一个至少一次语义的队列', options: ['reasoning_effort' => 'high']);
+
+// 最深 CoT —— V4-Pro "再想想"。慢且贵。
+$agent->run('审计这次迁移有无竞态', options: ['reasoning_effort' => 'max']);
+```
+
+每个上游获得它期望的字段：DeepSeek 原生 / OpenRouter / Novita / Fireworks / SGLang 用顶层 `reasoning_effort` + `thinking: {type: enabled}`；NVIDIA NIM 用嵌套的 `chat_template_kwargs.{thinking, reasoning_effort}`。未知值静默忽略，不会产生畸形请求。
+
+### 多上游路由 *(v0.9.8)*
+
+同一份 V4 权重，六种入口。一个 `upstream` 配置键切换：
+
+```php
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'upstream' => 'fireworks',          // 或 nvidia_nim / novita / openrouter / sglang
+    'options'  => ['model' => 'deepseek-v4-pro'],
+]);
+
+// 自托管 SGLang 必须显式给 base_url：
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'upstream' => 'sglang',
+    'base_url' => 'http://my-sglang:30000/v1',
+]);
+```
+
+`region` 仍然是 `upstream` 的别名以保兼容 —— 旧代码 `region: 'default' | 'cn' | 'beta'` 不变。
+
+### V4 Interleaved-Thinking 回放 *(v0.9.8)*
+
+V4 thinking 模式拒绝带 `tool_calls` 但缺 `reasoning_content` 的 assistant 消息。Provider 现在：
+
+1. 自动把每条 `AssistantMessage` 的 `thinking` 块以 `reasoning_content` 形式重新发送（无需调用方介入）。
+2. 末位 sanitizer 给漏网的 assistant+tool_calls 强制写入 `(reasoning omitted)` 占位 —— 兜底从磁盘恢复的旧会话和手工拼装消息的子 agent。
+
+`reasoning_effort: 'off'` 时 sanitizer 自动跳过。
+
+### FIM（前缀补全） *(v0.9.8)*
+
+```php
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'region'   => 'beta',
+]);
+
+$completed = $agent->provider()->completeFim(
+    prefix: "function fibonacci(\$n) {\n    ",
+    suffix: "\n}\n",
+    options: ['max_tokens' => 64],
+);
+```
+
+打到 `https://api.deepseek.com/beta/v1/completions`。非 beta region 调用直接抛错，避免静默路由错地方。
+
+### `/model auto` 启发式 *(v0.9.8)*
+
+```php
+use SuperAgent\Routing\AutoModelStrategy;
+
+$strategy = new AutoModelStrategy();
+$model    = $strategy->select($messages, $systemPrompt, $options);
+// → 'deepseek-v4-pro' 或 'deepseek-v4-flash'
+
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'options'  => ['model' => $model, 'reasoning_effort' => 'high'],
+]);
+```
+
+升 Pro 触发条件：prompt ≥ 32K tokens、连续 ≥ 3 轮工具调用、显式 `reasoning_effort=max`、或系统提示含关键词（`review / audit / design / architect / plan / debug a complex / analyze the codebase / find the root cause`）。其他场景默认 Flash。
+
+### Cache 感知压缩 *(v0.9.8)*
+
+```php
+use SuperAgent\Context\Strategies\CacheAwareCompressor;
+use SuperAgent\Context\Strategies\ConversationCompressor;
+
+$compactor = new CacheAwareCompressor(
+    delegate:       new ConversationCompressor($estimator, $config, $provider),
+    tokenEstimator: $estimator,
+    config:         $config,
+    pinHead:        4,        // 前 4 条消息保持字节稳定
+    pinSystem:      true,     // 系统消息也固定
+);
+```
+
+包装任意 `CompressionStrategy`。结果形态：`[head_pinned, summary_boundary, summary, tail_preserved]`，缓存前缀停留在 byte 0。多轮压缩幂等 —— 把压缩结果再喂回去也保持同样的前缀字节，DeepSeek 自动前缀缓存每轮 `/compact` 都继续命中。
+
+---
+
+## Goal mode（codex `/goal` 对齐） *(v0.9.8)*
+
+3 个模型可调用工具、4 状态生命周期、2 个提示模板。Goal 是线程级的；每个线程同一时刻最多一个非终态 goal。模型只能 `active → complete`；pause / resume / budget 由用户/系统控制。
+
+```php
+use SuperAgent\Goals\GoalManager;
+use SuperAgent\Goals\InMemoryGoalStore;
+use SuperAgent\Tools\Builtin\CreateGoalTool;
+use SuperAgent\Tools\Builtin\GetGoalTool;
+use SuperAgent\Tools\Builtin\UpdateGoalTool;
+
+$threadId = 'session-42';
+$goals    = new GoalManager(new InMemoryGoalStore());
+
+$agent->registerTool(new CreateGoalTool($goals, $threadId));
+$agent->registerTool(new GetGoalTool($goals, $threadId));
+$agent->registerTool(new UpdateGoalTool($goals, $threadId));
+
+// 每轮结束记账并按需注入续作模板：
+$agent->onTurnEnd(function ($usage) use ($goals, $threadId) {
+    $goal = $goals->getActive($threadId);
+    if ($goal === null) return;
+    $updated = $goals->recordUsage($goal->id, $usage->inputTokens + $usage->outputTokens);
+    if ($updated->status === GoalStatus::BudgetLimited) {
+        $agent->injectSystemMessage($goals->renderBudgetLimitPrompt($updated));
+    } elseif ($updated->status === GoalStatus::Active) {
+        $agent->injectSystemMessage($goals->renderContinuationPrompt($updated));
+    }
+});
+```
+
+**持久化**。SDK 自带 `InMemoryGoalStore`；SuperAICore 提供 `EloquentGoalStore`（表 `ai_goals`），进程重启后 goal 状态保留。
+
+**不可信输入包裹**。两份模板都用 `Security\UntrustedInput::tag()` 把用户目标包在 `<untrusted_objective>` 里，防止精心构造的 goal 文本提权到 system 角色：
+
+```php
+use SuperAgent\Security\UntrustedInput;
+
+$wrapped = UntrustedInput::wrap($userInput, kind: 'note');
+// → "The text below is user-provided data..." + "<untrusted_note>...</untrusted_note>"
+```
+
+任何把用户文本注入 system-role 消息的地方都建议用一下 —— goals、skills、memory 导入。
+
+---
+
+## 运行期护栏 *(v0.9.8)*
+
+### 子 agent 深度上限
+
+防递归 `agent` 工具调用。对齐 codex `agents.max_depth`。
+
+```php
+use SuperAgent\Swarm\AgentDepthGuard;
+
+// 设置上限（默认 5；环境变量 SUPERAGENT_MAX_AGENT_DEPTH）
+AgentDepthGuard::setMax(8);
+
+// spawn 前调用：
+AgentDepthGuard::check();                       // 越界抛 AgentDepthExceededException
+$childEnv = AgentDepthGuard::forChild();        // 传给 proc_open / Symfony\Process
+```
+
+深度通过 `SUPERAGENT_AGENT_DEPTH` 环境变量在子进程间传递。
+
+### 令牌桶限速
+
+DeepSeek-TUI 同款（8 RPS、16 burst）：
+
+```php
+use SuperAgent\Providers\Transport\TokenBucket;
+
+$bucket = new TokenBucket(ratePerSecond: 8.0, burst: 16);
+
+$bucket->consume();          // 阻塞至有容量
+if (! $bucket->tryConsume()) { /* 跳过 / 入队 */ }
+```
+
+进程内精度。跨进程限速由宿主负责（Redis-backed Guzzle middleware）。
+
+### 临时分支会话（`/side` 语义）
+
+```php
+use SuperAgent\Conversation\Fork;
+
+$fork = Fork::from($parentMessages);
+$fork->extend(new UserMessage('试试另一种思路'),
+              $sideAssistantReply);
+
+// 丢弃或选择性回带：
+$parentNext = $fork->discard();          // 完全丢弃
+$parentNext = $fork->promote(2);         // 只带回第 2 条
+$parentNext = $fork->promoteAll();       // 全部带回
+```
+
+### Ad-hoc 内存注入
+
+```php
+use SuperAgent\Memory\AdHocMemoryProvider;
+
+$adhoc = new AdHocMemoryProvider();
+$adhoc->push('CI 主分支当前红色', ttlSeconds: 1800, untrusted: true);
+$adhoc->push('必须输出 JSON', ttlSeconds: 0, untrusted: false);  // 永驻 + 信任
+
+$memoryManager->setExternalProvider($adhoc);
+// 下一轮通过 onTurnStart() 看到这两条；ad-hoc 是 push-only —— search() 返回 []。
+// 与 BuiltinMemoryProvider 组合使用，不要替换。
+```
+
+
 
 ---
 

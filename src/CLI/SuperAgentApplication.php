@@ -25,7 +25,7 @@ use SuperAgent\CLI\Commands\SwarmCommand;
  */
 class SuperAgentApplication
 {
-    private const VERSION = '0.9.7';
+    private const VERSION = '0.9.8';
     private const NAME = 'SuperAgent';
 
     public function run(): int

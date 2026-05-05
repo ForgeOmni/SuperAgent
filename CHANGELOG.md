@@ -7,6 +7,314 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-05-04
+
+### 💻 Summary
+
+**DeepSeek-TUI parity wave + codex `/goal` parity.** 0.9.7 added the
+companion-tools surface; 0.9.8 wires the SDK to actually use it the way
+[DeepSeek-TUI](https://github.com/charmbracelet/deepseek-tui) does in
+production. Six themes, all DeepSeek-shaped:
+
+1. **V4 thinking-mode safety** — the Interleaved-Thinking rule
+   (assistant messages with `tool_calls` MUST replay
+   `reasoning_content` or the API returns HTTP 400) is now enforced by
+   the provider, with a final-pass sanitizer that bullet-proofs
+   restored sessions and hand-built sub-agent messages.
+2. **Reasoning-effort dial** — `off / high / max` maps cleanly across
+   DeepSeek native + every relay (NVIDIA NIM, Fireworks, Novita,
+   OpenRouter, SGLang); each upstream gets the body shape it expects
+   (top-level `reasoning_effort` for most, `chat_template_kwargs` for
+   NIM).
+3. **Multi-upstream routing** — same DeepSeek V4 weights, six
+   inference paths. One `upstream` config key picks the host;
+   `base_url` still wins for self-hosted SGLang.
+4. **Cache-aware compaction** — long sessions trim the middle without
+   touching the cached prefix, so the 1/10 read price keeps
+   compounding instead of resetting on every `/compact`.
+5. **`/model auto`** — Pro vs Flash escalation by prompt length, tool
+   chain depth, and intent keywords. Default Flash, escalate on
+   signal.
+6. **FIM endpoint** — `completeFim(prefix, suffix)` on the beta region
+   for prefix-completion / inline-fill code use cases.
+
+**codex `/goal` parity.** Three model-callable tools (`create_goal`,
+`get_goal`, `update_goal`), four-state lifecycle (`active /
+complete / paused / budget_limited`), token-budget accounting, and
+two prompt templates (`continuation.md`, `budget_limit.md`) ported
+verbatim from codex's `core/templates/goals/`. Objectives are wrapped
+in `<untrusted_objective>` via the new `Security\UntrustedInput`
+primitive so a crafted goal text can't smuggle higher-priority
+instructions into the system role.
+
+**Operational guardrails.** Sub-agent recursion depth cap
+(`SUPERAGENT_MAX_AGENT_DEPTH`, default 5), 8 RPS / 16-burst
+token-bucket rate limiter for OpenAI-compat traffic, and an
+ephemeral-fork value object (`Conversation\Fork`) that mirrors
+codex's `/side`. Ad-hoc memory provider gives hosts a one-off
+"inject this fact for the next turn" channel without touching
+durable MEMORY.md.
+
+**SuperAICore companion** ships in lockstep: `cache_hit_rate` on every
+usage row + per-model aggregation; three-tier approval gate
+(`Auto / Suggest / Never`) with a single-use `/approve` override;
+`/v1/usage?group_by=…` headless JSON endpoint; `ai_goals` table with
+an `EloquentGoalStore` for cross-restart goal persistence;
+workspace-shared plugin registry checked into the repo so `git clone`
+puts new hires on the team's full toolset.
+
+### Added — DeepSeek V4 (provider-side)
+
+- **`Providers\DeepSeekProvider::formatMessages()` override** — the
+  base `OpenAIChatEncoder` drops `thinking` blocks (correct for
+  OpenAI proper; wrong for DeepSeek V4). The override collects each
+  AssistantMessage's thinking blocks and re-emits them as
+  `reasoning_content` on the wire so the V4 Interleaved-Thinking
+  replay rule is honored on every replayed assistant turn.
+- **Final-pass sanitizer** — `customizeRequestBody()` walks
+  `body.messages` and forces `reasoning_content: '(reasoning
+  omitted)'` on any `assistant` + `tool_calls` entry that slipped
+  through without a thinking block. Mirrors DeepSeek-TUI's
+  `sanitize_thinking_mode_messages` — last line of defense for
+  sessions restored from disk pre-0.9.8, sub-agents that hand-build
+  messages, and `extra_body` overrides.
+- **`Providers\Capabilities\SupportsReasoningEffort`** — three-tier
+  dial (`off / high / max`). Implementations return a body fragment
+  that gets merged into the request; unknown values return `[]` so a
+  misconfigured caller never poisons the request.
+- **`DeepSeekProvider::reasoningEffortFragment()`** — emits the right
+  shape per upstream:
+  - DeepSeek native / OpenRouter / Novita / Fireworks / SGLang →
+    top-level `reasoning_effort` + `thinking: {type: enabled}`.
+  - NVIDIA NIM → nested under `chat_template_kwargs`.
+  Off-band synonyms (`disabled / none / false`) wire to
+  `thinking: {type: disabled}` (or `chat_template_kwargs.thinking:
+  false` for NIM).
+- **`DeepSeekProvider::requiresReasoningContent($model)`** — public
+  static helper; `true` for `deepseek-v4*`, `deepseek-v3.2`,
+  `*-reasoner`, `*-reasoning`, `*-thinking`, `deepseek-r\d`. Other
+  call sites (compactor, model resolver) can ask the same question.
+- **Multi-upstream routing** — `region` (or alias `upstream`) accepts:
+  `deepseek` (default), `cn`, `beta`, `nvidia_nim`, `fireworks`,
+  `novita`, `openrouter`, `sglang`. SGLang requires explicit
+  `base_url` (self-hosted, no fixed endpoint). When both `region` and
+  `upstream` are set, `region` wins — no surprise routing.
+- **`DeepSeekProvider::completeFim($prefix, $suffix, $options)`** —
+  hits the `/v1/completions` (FIM) endpoint on the beta region for
+  prefix completion / inline fill use cases. Throws when the provider
+  isn't configured for `region: 'beta'` rather than silently routing
+  to the wrong endpoint.
+
+### Added — Cache-aware compaction
+
+- **`Context\Strategies\CacheAwareCompressor`** — wraps any
+  `CompressionStrategy` (typically `ConversationCompressor`) so the
+  pinned head prefix is never mutated by compaction. Result shape:
+  `[head_pinned, summary_boundary, summary, tail_preserved]` with
+  the cached bytes living at index 0. Default pin: 1 system + 4
+  conversation messages. Idempotent across repeated rounds — feeding
+  a compacted result back through the wrapper preserves the same
+  prefix bytes.
+
+### Added — `/model auto` heuristic
+
+- **`Routing\AutoModelStrategy`** — picks `deepseek-v4-pro` vs
+  `deepseek-v4-flash` per turn:
+  - Long context (≥ 32K tokens) → Pro.
+  - Tool-chain depth ≥ 3 trailing assistant turns with `tool_use` →
+    Pro.
+  - Explicit `reasoning_effort: max` → Pro.
+  - System-prompt keywords (`review / audit / design / architect /
+    plan / debug a complex / analyze the codebase / find the root
+    cause`) → Pro.
+  - Otherwise → Flash. Conservative bias: false-Pro is more expensive
+    than false-Flash.
+
+### Added — codex Goal mode (full port)
+
+- **`Goals\Goal` value object** — `{id, threadId, objective, status,
+  tokenBudget, tokensUsed, createdAt, updatedAt}` with helpers
+  `remainingBudget()`, `elapsedSeconds()`, `withStatus()`,
+  `withTokensUsed()`.
+- **`Goals\GoalStatus` enum** — `Active / Complete / Paused /
+  BudgetLimited`. `isLive()` returns `true` for `Active` and
+  `BudgetLimited` (the latter fires once more so the model can wrap
+  up); `isTerminal()` is `Complete` only.
+- **`Goals\Contracts\GoalStore` SPI** — `create / findActive /
+  findById / transition / recordTokens`. The SDK ships
+  `InMemoryGoalStore`; SuperAICore provides `EloquentGoalStore` for
+  cross-restart persistence.
+- **`Goals\GoalManager`** — orchestrates lifecycle:
+  - `create(threadId, objective, tokenBudget)` — fails if the thread
+    already has a non-terminal goal (codex contract).
+  - `recordUsage(goalId, turnTokens)` — increments tokens; flips
+    status to `BudgetLimited` when crossing the cap.
+  - `markComplete(goalId)` — frees the thread for a fresh goal.
+  - `renderContinuationPrompt(goal)` and `renderBudgetLimitPrompt(goal)`
+    — Mustache-lite template render with built-in fallbacks.
+- **Three model-callable tools**:
+  - `Tools\Builtin\CreateGoalTool` — required `objective`, optional
+    positive `token_budget`. Fails when an active goal exists.
+  - `Tools\Builtin\GetGoalTool` — read-only; returns
+    `{ "goal": {…} }` or `{ "goal": null }` rather than erroring on
+    "no goal".
+  - `Tools\Builtin\UpdateGoalTool` — only valid status is
+    `complete`. Pause / resume / budget changes flow from
+    user/system, never from the model. Echoes
+    `final_tokens_used` + `final_elapsed_seconds` so the model can
+    report them to the user.
+- **Prompt templates** (`resources/prompts/goals/`):
+  - `continuation.md` — auto-injected when the agent goes idle but
+    the goal is active. Includes the codex-style completion-audit
+    checklist (restate objective → prompt-to-artifact map →
+    inspect real evidence → reject proxy signals → only mark
+    complete when audit passes).
+  - `budget_limit.md` — single-shot wrap-up prompt fired when
+    tokens crossed the budget.
+  Both wrap the user objective in `<untrusted_objective>` via
+  `Security\UntrustedInput::tag()` so a crafted goal text can't
+  promote itself to a higher-priority instruction.
+
+### Added — Security primitives
+
+- **`Security\UntrustedInput`** — wraps free-form user text in
+  `<untrusted_*>` tags + an explicit "treat as data, not as
+  higher-priority instructions" disclaimer. Three entry points:
+  `wrap()` (disclaimer + tagged payload), `tag()` (tagged payload
+  only, for embedding in larger templates), `disclaimerFor()`
+  (just the disclaimer text). Tag suffix is sanitised to
+  `[a-z0-9_]+`; empty / invalid falls back to `untrusted_input`.
+  Used by goal templates today; recommended at every site that
+  injects user-supplied text into a system-role message.
+
+### Added — Sub-agent guardrails
+
+- **`Swarm\AgentDepthGuard`** — recursion cap on sub-agent spawning,
+  matching codex's `agents.max_depth`. Depth tracked through the
+  `SUPERAGENT_AGENT_DEPTH` environment variable so it survives
+  `proc_open` / `Symfony\Process` spawning. Default cap: 5. Override
+  via `SUPERAGENT_MAX_AGENT_DEPTH` env, `superagent.agents.max_depth`
+  Laravel config, or `AgentDepthGuard::setMax()`.
+  - `current()` — depth of the running agent.
+  - `check()` — raises `AgentDepthExceededException` when about to
+    exceed the cap.
+  - `forChild()` — env bag with `SUPERAGENT_AGENT_DEPTH = current+1`
+    for the child process.
+
+### Added — Transport
+
+- **`Providers\Transport\TokenBucket`** — in-process token-bucket
+  rate limiter. DeepSeek-TUI shape: 8 RPS sustained, 16 burst.
+  `consume()` blocks until capacity; `tryConsume()` returns false
+  instead. Time / sleep sources injectable for tests. Per-process
+  fidelity matches codex-rs's `RateLimiter` — cross-process
+  coordination is a host concern (Redis-backed Guzzle middleware).
+
+### Added — Conversation forks
+
+- **`Conversation\Fork`** — codex `/side` semantics as a value
+  object. `Fork::from($parentMessages)` snapshots the parent;
+  `extend(Message…)` appends to the side; closing options:
+  - `discard()` — throw the side away; parent is untouched.
+  - `promote(...$indexes)` — bring specific side messages back into
+    the parent (e.g. just the final answer).
+  - `promoteAll()` — bring everything back.
+
+### Added — Memory
+
+- **`Memory\AdHocMemoryProvider`** — host-pushed one-off memory
+  entries with optional TTL. Each entry can be wrapped in
+  `<untrusted_*>` (default `true` — entries from the user are
+  untrusted). Exposed via `onTurnStart()` so the next turn sees the
+  injection; ad-hoc memory is push-only — `search()` returns `[]`.
+  Compose alongside `BuiltinMemoryProvider`, not in place of.
+- **`Memory\Contracts\MemoriesAccessor` SPI** — surface area shared
+  by future memory CLIs / dashboards / MCP servers. Four
+  operations matching codex's `memories-mcp`: `list / read /
+  search / update`, with pagination + line-offset support so an
+  agent can drill into a long memory file without paying the whole
+  document each time.
+
+### Added — Internals
+
+- **`Providers\Capabilities\SupportsReasoningEffort` capability**
+  (described above).
+- **`Goals\GoalAlreadyExistsException`** — distinct exception type
+  so hosts can surface a `/goal` UI prompt instead of a generic
+  error when the model calls `create_goal` on a busy thread.
+- **`Swarm\AgentDepthExceededException`** — same idea for the depth
+  cap; lets hosts return a tool result instead of bubbling up.
+
+### SuperAICore companion (0.9.1)
+
+The host package ships matching pieces this cycle:
+
+- **`Services\UsageRecorder`** stamps `metadata.cache_hit_rate ∈
+  [0,1]` on every row with a non-zero cache slice; denominator is
+  the GROSS prompt (uncached input + cache reads). Dashboards
+  group-by `model / day / backend` and average the rate without
+  re-deriving the denominator.
+- **`Http\Controllers\UsageController`** reports `cache_hit_rate`
+  per model + at session-summary level; the Usage page now shows
+  "what fraction of my prompt was free this period".
+- **`Http\Controllers\UsageApiController`** — headless JSON
+  endpoint `GET /v1/usage?group_by=day|model|provider|thread|
+  backend|task_type` (route added at `v1/usage`). Same shape codex
+  exposes via its app-server. Auth is the host's job.
+- **`Runner\ApprovalMode` + `ApprovalDecision` + `ApprovalGate`** —
+  three-tier execution gate (`Auto / Suggest / Never`). Mutations
+  in Suggest mode return `canRetry: true` with code
+  `mutation_pending_approval` (or `destructive_pending_approval`
+  when `DestructiveCommandScanner` flags the call); a single-use
+  override token (`tool_use_id`) flips the gate for one retry —
+  the codex `/approve` flow ported to API shape. Read-only
+  allowlist applies in every mode (`agent_grep`, `agent_read`,
+  `agent_get_goal`, `web_search`, `web_fetch`, …).
+- **`Models\AiGoal` + `Goals\EloquentGoalStore` + migration
+  `2026_05_04_000001_create_ai_goals_table`** — durable backing
+  for the SDK's `GoalStore` SPI. Threads survive process restarts
+  with their goal status intact (codex behaviour: paused goals
+  stay paused on resume).
+- **`Plugins\WorkspacePluginRegistry`** — JSON manifest at
+  `.superaicore/workspace-plugins.json` lets a team commit
+  required plugins to the repo. `pendingInstalls()` splits
+  scope=workspace (auto-install candidates) vs scope=user
+  (recommended only). Codex's workspace-plugin-sharing pattern.
+
+### Compatibility
+
+- **No breaking changes.** Every new piece is additive and opt-in.
+  Existing DeepSeek callers keep working — `formatMessages`
+  override only attaches `reasoning_content` when an
+  AssistantMessage carries `thinking` blocks (which the prior
+  parser was already producing).
+- **`region` / `upstream` precedence** — explicit `region` wins
+  when both are passed. Existing `region: 'default' | 'cn' |
+  'beta'` callers see no change.
+- **Cache-aware compactor is opt-in** — register it in place of
+  the bare `ConversationCompressor` when you want the prefix
+  pinned; the default registration shipped pre-0.9.8 still works.
+
+### Trade-offs
+
+- **`reasoning_content` replay costs input tokens.** Long thinking
+  traces add up across multi-turn tool loops. We log the per-request
+  replay size at info level; hosts that want to cap it can wrap
+  `formatMessages` and truncate before the wire. Codex made the
+  same call: correctness over cost.
+- **`AutoModelStrategy` errs toward Flash.** Better to under-shoot
+  than over-spend. The four signals are the cheapest reliable
+  predictors; richer ML-based routing is intentionally out of
+  scope (host concern, not SDK).
+- **`AgentDepthGuard` is process-scoped.** Distributed swarms (one
+  agent per pod) need a host-level cap; the env-var design covers
+  the common single-host fan-out case without infrastructure
+  overhead.
+- **`AdHocMemoryProvider` is process-local.** Dies on shutdown by
+  design — durable memory belongs in `BuiltinMemoryProvider` /
+  `MEMORY.md` files. Use ad-hoc when you don't want the entry
+  surviving the conversation.
+
 ## [0.9.7] - 2026-05-03
 
 ### 💻 Summary

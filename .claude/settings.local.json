@@ -165,7 +165,30 @@
       "Bash(./vendor/bin/phpunit tests/Unit/CostCalculatorTest.php --no-coverage)",
       "Bash(./vendor/bin/phpunit tests/Unit/Providers tests/Unit/ModelResolverTest.php tests/Unit/AgentProviderResolutionTest.php --no-coverage)",
       "Bash(./vendor/bin/phpunit --no-coverage)",
-      "Bash(./vendor/bin/phpunit tests/Unit/Providers tests/Unit/CostCalculatorTest.php tests/Unit/ModelResolverTest.php tests/Unit/AgentProviderResolutionTest.php --no-coverage)"
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers tests/Unit/CostCalculatorTest.php tests/Unit/ModelResolverTest.php tests/Unit/AgentProviderResolutionTest.php --no-coverage)",
+      "Read(//c/Users/mlizp/SuperAICore/**)",
+      "Read(//c/Users/mlizp/DeepSeek-TUI/**)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\mlizp\\\\DeepSeek-TUI\" -Force | Format-Table Name, @{N=\"Type\";E={if\\($_.PSIsContainer\\){\"DIR\"}else{\"FILE\"}}} -AutoSize)",
+      "Bash(dir /b \"C:\\\\Users\\\\mlizp\\\\SuperAgent\\\\src\")",
+      "PowerShell(Get-Content *)",
+      "Bash(dir \"C:\\\\Users\\\\mlizp\\\\SuperAgent\\\\src\\\\Providers\\\\Contracts\")",
+      "Bash(gh release *)",
+      "Bash(gh api *)",
+      "Bash(gh search *)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/DeepSeekProviderTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Context/Strategies/CacheAwareCompressorTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/ApprovalGateTest.php tests/Unit/UsageRecorderCacheHitRateTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Routing/AutoModelStrategyTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Security/UntrustedInputTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Goals/GoalManagerTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Swarm/AgentDepthGuardTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/Transport/TokenBucketTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Conversation/ForkTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Memory/AdHocMemoryProviderTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/WorkspacePluginRegistryTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/SuperAgentBackendTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/UsageRecorderCacheHitRateTest.php tests/Unit/ApprovalGateTest.php tests/Unit/WorkspacePluginRegistryTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/DeepSeekProviderTest.php tests/Unit/Context/Strategies/CacheAwareCompressorTest.php tests/Unit/Routing/AutoModelStrategyTest.php tests/Unit/Security/UntrustedInputTest.php tests/Unit/Goals/GoalManagerTest.php tests/Unit/Swarm/AgentDepthGuardTest.php tests/Unit/Providers/Transport/TokenBucketTest.php tests/Unit/Conversation/ForkTest.php tests/Unit/Memory/AdHocMemoryProviderTest.php)"
     ]
   }
 }

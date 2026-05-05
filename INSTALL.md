@@ -85,7 +85,7 @@ iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps
 Verify:
 
 ```bash
-superagent --version    # SuperAgent v0.9.7
+superagent --version    # SuperAgent v0.9.8
 superagent --help
 ```
 
@@ -121,6 +121,15 @@ export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
 export DEEPSEEK_API_KEY=...        # DeepSeek V4 — since v0.9.6
 export OPENROUTER_API_KEY=...
+
+# DeepSeek multi-upstream relays (v0.9.8) — same V4 weights, alternate hosts.
+# DEEPSEEK_API_KEY also works against these via upstream='openrouter' etc.
+export NVIDIA_NIM_API_KEY=...
+export FIREWORKS_API_KEY=...
+export NOVITA_API_KEY=...
+
+# Sub-agent recursion cap (v0.9.8). Default 5; raise for deep workflows.
+export SUPERAGENT_MAX_AGENT_DEPTH=5
 ```
 
 Optional scoping headers (since v0.9.1 — declare them once on the agent, they auto-omit when the env isn't set):

@@ -85,7 +85,7 @@ iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps
 验证：
 
 ```bash
-superagent --version    # SuperAgent v0.9.7
+superagent --version    # SuperAgent v0.9.8
 superagent --help
 ```
 
@@ -121,6 +121,15 @@ export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
 export DEEPSEEK_API_KEY=...        # DeepSeek V4 — v0.9.6 起
 export OPENROUTER_API_KEY=...
+
+# DeepSeek 多上游 relay (v0.9.8) —— 同一份 V4 权重的不同入口。
+# DEEPSEEK_API_KEY 也能配 upstream='openrouter' 等使用。
+export NVIDIA_NIM_API_KEY=...
+export FIREWORKS_API_KEY=...
+export NOVITA_API_KEY=...
+
+# 子 agent 递归深度上限 (v0.9.8)。默认 5；深度工作流可以调高。
+export SUPERAGENT_MAX_AGENT_DEPTH=5
 ```
 
 可选的 scope header（v0.9.1 起 —— 在 agent 上声明一次，env 未设置时自动省略）：

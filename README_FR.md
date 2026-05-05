@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.7-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-0.9.8-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -33,6 +33,8 @@ echo $result->text();
 - [API OpenAI Responses](#api-openai-responses)
 - [Bascule inter-providers](#bascule-inter-providers)
 - [DeepSeek V4](#deepseek-v4)
+- [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
+- [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
 - [Boucle d'agent](#boucle-dagent)
 - [Outils et multi-agents](#outils-et-multi-agents)
@@ -107,7 +109,7 @@ Treize providers pilotés par un registre, avec URL de base par région et plusi
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
 | `glm` | BigModel GLM | Clé API ; régions `intl` / `cn` |
 | `minimax` | MiniMax | Clé API ; régions `intl` / `cn` |
-| `deepseek` | DeepSeek V4 | Clé API ; régions `default` / `beta` *(depuis v0.9.6)* |
+| `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Ollama local | Aucune auth — localhost:11434 par défaut |
 | `lmstudio` | Serveur LM Studio local | Auth placeholder — localhost:1234 par défaut *(depuis v0.9.1)* |
@@ -328,9 +330,220 @@ foreach ($result->message()->content as $block) {
 
 **Facturation cache-aware.** Les backends OpenAI-compat reportent `prompt_tokens` en brut (cache hits + miss). Le parser soustrait désormais la portion mise en cache avant de remplir `Usage::inputTokens`, ce qui fait atterrir la remise cache correctement — `CostCalculator` facture les lectures à 10 % du tarif input, au lieu d'un effectif 110 %. Concerne tout backend OpenAI-compat avec cache (DeepSeek, Kimi, OpenAI lui-même).
 
-**Endpoint beta.** `region: 'beta'` route vers `https://api.deepseek.com/beta` pour FIM / complétion par préfixe avec la même auth.
+**Endpoint beta.** `region: 'beta'` route vers `https://api.deepseek.com/beta` pour FIM / complétion par préfixe avec la même auth — voir [`completeFim()`](#fim-complétion-par-préfixe-v098) pour l'helper dédié.
 
 *Depuis v0.9.6*
+
+### Effort de raisonnement à trois niveaux *(v0.9.8)*
+
+Trois niveaux uniformes sur DeepSeek natif + chaque relais :
+
+```php
+// Le moins cher : pas de thinking du tout.
+$agent->run('traduis ce paragraphe', options: ['reasoning_effort' => 'off']);
+
+// Budget thinking standard (V4-Pro par défaut).
+$agent->run('conçois une queue at-least-once', options: ['reasoning_effort' => 'high']);
+
+// CoT le plus profond — V4-Pro "réfléchis plus fort". Lent et coûteux.
+$agent->run('audite cette migration pour les races conditions', options: ['reasoning_effort' => 'max']);
+```
+
+Chaque upstream reçoit la forme du body qu'il attend : `reasoning_effort` + `thinking: {type: enabled}` au top-level pour DeepSeek natif / OpenRouter / Novita / Fireworks / SGLang ; imbriqué dans `chat_template_kwargs.{thinking, reasoning_effort}` pour NVIDIA NIM. Les valeurs inconnues sont silencieusement no-op au lieu d'empoisonner la requête.
+
+### Routage multi-upstream *(v0.9.8)*
+
+Mêmes poids V4, six chemins relais. Une clé `upstream` choisit l'hôte :
+
+```php
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'upstream' => 'fireworks',          // ou nvidia_nim / novita / openrouter / sglang
+    'options'  => ['model' => 'deepseek-v4-pro'],
+]);
+
+// SGLang auto-hébergé exige un base_url explicite :
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'upstream' => 'sglang',
+    'base_url' => 'http://my-sglang:30000/v1',
+]);
+```
+
+`region` reste un alias d'`upstream` pour la rétrocompatibilité — le code existant `region: 'default' | 'cn' | 'beta'` est byte-compatible.
+
+### Replay V4 Interleaved-Thinking *(v0.9.8)*
+
+Le mode V4 thinking rejette les messages assistant qui portent `tool_calls` sans `reasoning_content`. Le provider :
+
+1. Réémet automatiquement les blocs `thinking` de chaque `AssistantMessage` comme `reasoning_content` sur la wire (aucun changement d'appelant).
+2. Lance un sanitizer de dernière passe qui force un placeholder `(reasoning omitted)` sur tout assistant+tool_calls qui aurait échappé — sécurise les sessions restaurées du disque pré-0.9.8 et les sous-agents qui construisent les messages à la main.
+
+Désactiver avec `reasoning_effort: 'off'` (le sanitizer saute quand le thinking est explicitement désactivé).
+
+### FIM (complétion par préfixe) *(v0.9.8)*
+
+```php
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'region'   => 'beta',
+]);
+
+$completed = $agent->provider()->completeFim(
+    prefix: "function fibonacci(\$n) {\n    ",
+    suffix: "\n}\n",
+    options: ['max_tokens' => 64],
+);
+```
+
+Frappe `https://api.deepseek.com/beta/v1/completions`. Lève une erreur si le provider n'est pas en beta region plutôt que de router silencieusement ailleurs.
+
+### Heuristique `/model auto` *(v0.9.8)*
+
+```php
+use SuperAgent\Routing\AutoModelStrategy;
+
+$strategy = new AutoModelStrategy();
+$model    = $strategy->select($messages, $systemPrompt, $options);
+// → 'deepseek-v4-pro' ou 'deepseek-v4-flash'
+
+$agent = new Agent([
+    'provider' => 'deepseek',
+    'options'  => ['model' => $model, 'reasoning_effort' => 'high'],
+]);
+```
+
+Escalade vers Pro quand : prompt ≥ 32K tokens, ≥ 3 tours d'outils consécutifs, `reasoning_effort=max` explicite, ou mots-clés dans le system prompt (`review / audit / design / architect / plan / debug a complex / analyze the codebase / find the root cause`). Sinon Flash.
+
+### Compaction cache-aware *(v0.9.8)*
+
+```php
+use SuperAgent\Context\Strategies\CacheAwareCompressor;
+use SuperAgent\Context\Strategies\ConversationCompressor;
+
+$compactor = new CacheAwareCompressor(
+    delegate:       new ConversationCompressor($estimator, $config, $provider),
+    tokenEstimator: $estimator,
+    config:         $config,
+    pinHead:        4,        // les 4 premiers messages restent byte-stables
+    pinSystem:      true,     // le system message aussi
+);
+```
+
+Wrap n'importe quelle `CompressionStrategy`. Forme du résultat : `[head_pinned, summary_boundary, summary, tail_preserved]` avec le préfixe caché à l'octet 0. Idempotent sur plusieurs rounds — refeeder un résultat compacté préserve les mêmes octets de préfixe, donc le cache préfixe automatique de DeepSeek continue de hit à chaque `/compact`.
+
+---
+
+## Goal mode (parité codex `/goal`) *(v0.9.8)*
+
+Trois outils appelables par le modèle, lifecycle à quatre états, deux templates de prompt. Les goals sont thread-scopés ; chaque thread a au plus un goal non-terminal à la fois. Le modèle peut UNIQUEMENT transitionner `active → complete` ; pause / resume / budget viennent de l'utilisateur / système.
+
+```php
+use SuperAgent\Goals\GoalManager;
+use SuperAgent\Goals\InMemoryGoalStore;
+use SuperAgent\Tools\Builtin\CreateGoalTool;
+use SuperAgent\Tools\Builtin\GetGoalTool;
+use SuperAgent\Tools\Builtin\UpdateGoalTool;
+
+$threadId = 'session-42';
+$goals    = new GoalManager(new InMemoryGoalStore());
+
+$agent->registerTool(new CreateGoalTool($goals, $threadId));
+$agent->registerTool(new GetGoalTool($goals, $threadId));
+$agent->registerTool(new UpdateGoalTool($goals, $threadId));
+
+// À chaque tour, comptabilise les tokens et injecte la continuation si idle :
+$agent->onTurnEnd(function ($usage) use ($goals, $threadId) {
+    $goal = $goals->getActive($threadId);
+    if ($goal === null) return;
+    $updated = $goals->recordUsage($goal->id, $usage->inputTokens + $usage->outputTokens);
+    if ($updated->status === GoalStatus::BudgetLimited) {
+        $agent->injectSystemMessage($goals->renderBudgetLimitPrompt($updated));
+    } elseif ($updated->status === GoalStatus::Active) {
+        $agent->injectSystemMessage($goals->renderContinuationPrompt($updated));
+    }
+});
+```
+
+**Persistance.** `InMemoryGoalStore` ship avec le SDK ; SuperAICore fournit `EloquentGoalStore` (table `ai_goals`) pour qu'un goal survive aux redémarrages du process.
+
+**Wrapping d'input non-fiable.** Les deux templates wrap l'objectif utilisateur dans `<untrusted_objective>` via `Security\UntrustedInput::tag()` pour qu'un goal text crafted ne puisse pas se hisser au rang d'instruction prioritaire :
+
+```php
+use SuperAgent\Security\UntrustedInput;
+
+$wrapped = UntrustedInput::wrap($userInput, kind: 'note');
+// → "The text below is user-provided data..." + "<untrusted_note>...</untrusted_note>"
+```
+
+Recommandé partout où du texte fourni par l'utilisateur est injecté dans un message de rôle système — goals, skills, imports mémoire.
+
+---
+
+## Garde-fous opérationnels *(v0.9.8)*
+
+### Plafond de profondeur sub-agent
+
+Plafond sur les appels récursifs à l'outil `agent`. Reflet du `agents.max_depth` de codex.
+
+```php
+use SuperAgent\Swarm\AgentDepthGuard;
+
+// Définir le plafond (par défaut 5 ; env : SUPERAGENT_MAX_AGENT_DEPTH).
+AgentDepthGuard::setMax(8);
+
+// Au site de spawn, avant de lancer le child :
+AgentDepthGuard::check();                       // throw AgentDepthExceededException au plafond
+$childEnv = AgentDepthGuard::forChild();        // à passer à proc_open / Symfony\Process
+```
+
+Profondeur trackée via la variable d'environnement `SUPERAGENT_AGENT_DEPTH` pour qu'elle survive au spawn du process.
+
+### Rate limiter token-bucket
+
+Forme DeepSeek-TUI (8 RPS soutenu, 16 burst) :
+
+```php
+use SuperAgent\Providers\Transport\TokenBucket;
+
+$bucket = new TokenBucket(ratePerSecond: 8.0, burst: 16);
+
+$bucket->consume();          // bloque jusqu'à capacité
+if (! $bucket->tryConsume()) { /* skip / queue */ }
+```
+
+Précision intra-process. Les limites cross-process sont une responsabilité de l'hôte (middleware Guzzle Redis-backed).
+
+### Fork éphémère de conversation (sémantique `/side`)
+
+```php
+use SuperAgent\Conversation\Fork;
+
+$fork = Fork::from($parentMessages);
+$fork->extend(new UserMessage('essaie l\'approche alternative'),
+              $sideAssistantReply);
+
+// Soit jeter, soit promote des messages choisis vers le parent :
+$parentNext = $fork->discard();          // jette le side
+$parentNext = $fork->promote(2);         // ramène uniquement le message side #2
+$parentNext = $fork->promoteAll();       // ramène tout
+```
+
+### Injection mémoire ad-hoc
+
+```php
+use SuperAgent\Memory\AdHocMemoryProvider;
+
+$adhoc = new AdHocMemoryProvider();
+$adhoc->push('CI rouge sur main', ttlSeconds: 1800, untrusted: true);
+$adhoc->push('Tu DOIS sortir du JSON', ttlSeconds: 0, untrusted: false);  // sticky + trusted
+
+$memoryManager->setExternalProvider($adhoc);
+// Le tour suivant voit les deux entrées via onTurnStart() ; ad-hoc est push-only —
+// search() retourne []. À composer aux côtés de BuiltinMemoryProvider, pas en remplacement.
+```
+
+
 
 ---
 
