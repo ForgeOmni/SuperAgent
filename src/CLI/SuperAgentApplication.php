@@ -6,12 +6,14 @@ namespace SuperAgent\CLI;
 
 use SuperAgent\CLI\Commands\AuthCommand;
 use SuperAgent\CLI\Commands\ChatCommand;
+use SuperAgent\CLI\Commands\EvalCommand;
 use SuperAgent\CLI\Commands\HealthCommand;
 use SuperAgent\CLI\Commands\InitCommand;
 use SuperAgent\CLI\Commands\McpCommand;
 use SuperAgent\CLI\Commands\ModelsCommand;
 use SuperAgent\CLI\Commands\ResumeCommand;
 use SuperAgent\CLI\Commands\SkillsCommand;
+use SuperAgent\CLI\Commands\SmartCommand;
 use SuperAgent\CLI\Commands\SwarmCommand;
 
 /**
@@ -63,6 +65,14 @@ class SuperAgentApplication
             'mcp'     => (new McpCommand())->execute($options),
             'skills'  => (new SkillsCommand())->execute($options),
             'swarm'   => (new SwarmCommand())->execute($options),
+            // Manually run capability evaluations on selected models × dimensions
+            // and persist scores to ~/.superagent/model_scores.json — the input
+            // AutoModelStrategy uses for score-aware routing.
+            'eval'    => (new EvalCommand())->execute($options),
+            // Eval-score-driven task orchestration: brain model plans + splits,
+            // subtasks routed to (best | cheapest-passing) by dim, then merged.
+            // Distinct from the existing keyword-heuristic AutoMode.
+            'smart'   => (new SmartCommand())->execute($options),
             // 0.9.7+ — cross-harness session resume (jcode-style). Imports
             // Claude Code / Codex CLI session logs into Message[] that any
             // SuperAgent provider can replay (typically via `Transcoder`).
@@ -102,11 +112,25 @@ class SuperAgentApplication
         $options['skills_args'] = [];
         $options['swarm_args'] = [];
         $options['health_args'] = [];
+        $options['eval_args'] = [];
+        $options['smart_args'] = [];
         // 0.9.7+ — `superagent resume <list|show|load> --from <harness> ...`
         $options['resume_args'] = [];
 
+        // Raw args captured after a subcommand boundary — flags global parser
+        // doesn't recognize (e.g. `eval run --models X --dims Y`) end up here
+        // and are routed below to the subcommand's `<name>_args` slot.
+        $subcommandRaw = null;
+        $knownSubcommands = ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume', 'eval', 'smart'];
+
         while ($i < count($args)) {
             $arg = $args[$i];
+
+            if ($subcommandRaw !== null) {
+                $subcommandRaw[] = $arg;
+                $i++;
+                continue;
+            }
 
             if ($arg === '--model' || $arg === '-m') {
                 $options['model'] = $args[++$i] ?? null;
@@ -138,61 +162,57 @@ class SuperAgentApplication
                 $options['output'] = (string) ($args[++$i] ?? '');
             } elseif (! str_starts_with($arg, '-')) {
                 $positional[] = $arg;
+                // Once we cross a known-subcommand positional, stop consuming
+                // flags globally — they belong to the subcommand. Without this,
+                // `eval run --models X` would silently drop `--models`.
+                if (in_array($arg, $knownSubcommands, true) && $options['command'] === null) {
+                    $options['command'] = $arg;
+                    array_pop($positional);
+                    $subcommandRaw = [];
+                }
             }
 
             $i++;
         }
 
-        // First positional arg: subcommand or prompt
-        if (! empty($positional)) {
-            if (in_array($positional[0], ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume'], true)) {
-                $options['command'] = array_shift($positional);
-            }
-
-            if (in_array($options['command'] ?? '', ['auth', 'login'], true)) {
-                // For `login <provider>`, rewrite to `auth login <provider>`.
-                if ($options['command'] === 'login') {
-                    $options['auth_args'] = array_merge(['login'], $positional);
-                } else {
-                    $options['auth_args'] = $positional;
+        // If the in-loop scanner found a subcommand, route the raw post-
+        // subcommand args (including flags like `--models X`) to the right
+        // slot. Otherwise fall back to the legacy positional-only path
+        // (preserves behavior for `chat <prompt>` and the older subcommands
+        // that only used positional sub-subcommands).
+        if ($options['command'] !== null && $subcommandRaw !== null) {
+            $cmd = $options['command'];
+            $slot = match ($cmd) {
+                'auth', 'login' => 'auth_args',
+                'models'        => 'models_args',
+                'mcp'           => 'mcp_args',
+                'skills'        => 'skills_args',
+                'swarm'         => 'swarm_args',
+                'health',
+                'doctor'        => 'health_args',
+                'resume'        => 'resume_args',
+                'eval'          => 'eval_args',
+                'smart'         => 'smart_args',
+                default         => null,
+            };
+            if ($cmd === 'login') {
+                // `login <provider>` → reuse `auth_args` with leading 'login'.
+                $options['auth_args'] = array_merge(['login'], $subcommandRaw);
+            } elseif ($slot !== null) {
+                $options[$slot] = $subcommandRaw;
+            } else {
+                // `chat <prompt>` etc. — join the positional remnants.
+                $promptParts = array_values(array_filter(
+                    $subcommandRaw,
+                    fn ($a) => ! str_starts_with((string) $a, '-'),
+                ));
+                if (! empty($promptParts)) {
+                    $options['prompt'] = implode(' ', $promptParts);
                 }
-                $positional = [];
             }
-
-            if (($options['command'] ?? '') === 'mcp') {
-                $options['mcp_args'] = $positional;
-                $positional = [];
-            }
-
-            if (($options['command'] ?? '') === 'skills') {
-                $options['skills_args'] = $positional;
-                $positional = [];
-            }
-
-            if (($options['command'] ?? '') === 'swarm') {
-                $options['swarm_args'] = $positional;
-                $positional = [];
-            }
-
-            if (($options['command'] ?? '') === 'models') {
-                $options['models_args'] = $positional;
-                $positional = [];
-            }
-
-            if (in_array($options['command'] ?? '', ['health', 'doctor'], true)) {
-                $options['health_args'] = $positional;
-                $positional = [];
-            }
-
-            if (($options['command'] ?? '') === 'resume') {
-                $options['resume_args'] = $positional;
-                $positional = [];
-            }
-
-            // Remaining positional args joined as prompt
-            if (! empty($positional)) {
-                $options['prompt'] = implode(' ', $positional);
-            }
+        } elseif (! empty($positional)) {
+            // No subcommand detected — everything left is the chat prompt.
+            $options['prompt'] = implode(' ', $positional);
         }
 
         return $options;
@@ -221,6 +241,12 @@ class SuperAgentApplication
     superagent models update            Fetch latest model catalog from remote URL
     superagent models status            Show catalog source + age
     superagent models reset             Delete user override and fall back to bundled
+    superagent eval                     Run capability evals on selected models × dims
+    superagent eval list                Show available eval dimensions
+    superagent eval show                Print current model_scores.json as a table
+    superagent smart "<task>"           Score-driven plan+route+merge for a single task
+    superagent smart "<task>" --dry-run Show the plan without executing
+    superagent smart show               List recent smart-run logs
     superagent health                   5s cURL probe of every configured provider
     superagent health --all             Probe every known provider (surface missing keys)
     superagent health --json            Machine-readable output

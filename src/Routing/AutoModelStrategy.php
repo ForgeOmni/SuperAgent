@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SuperAgent\Routing;
 
 use SuperAgent\Context\TokenEstimator;
+use SuperAgent\Evals\ScoreCatalog;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\Message;
 
@@ -59,13 +60,89 @@ final class AutoModelStrategy
         'debug a complex', 'analyze the codebase', 'find the root cause',
     ];
 
+    /**
+     * Map system-prompt intent keywords to eval dimensions. When a system
+     * prompt matches one of these, `selectWithScores()` will consult the
+     * ScoreCatalog under that dim and prefer the highest-scoring model.
+     *
+     * Kept deliberately small: false-positive routing to a model with a
+     * stale score is worse than just running the default heuristic.
+     */
+    private const INTENT_TO_DIM = [
+        'json'        => 'json_mode',
+        'reply with json' => 'json_mode',
+        'review'      => 'reasoning',
+        'audit'       => 'reasoning',
+        'design'      => 'reasoning',
+        'architect'   => 'reasoning',
+        'plan'        => 'reasoning',
+        'write code'  => 'coding',
+        'implement'   => 'coding',
+        'refactor'    => 'coding',
+        'fix the bug' => 'coding',
+    ];
+
     public function __construct(
         private TokenEstimator $tokenEstimator = new TokenEstimator(),
         private int $longContextThresholdTokens = 32_000,
         private int $toolChainThreshold = 3,
         /** @var list<string> */
         private array $proIntentKeywords = self::DEFAULT_PRO_INTENT_KEYWORDS,
+        private ?ScoreCatalog $scoreCatalog = null,
     ) {}
+
+    /**
+     * Score-aware variant of `select()`. When the eval catalog has data for
+     * the inferred intent dimension, return its top-scoring model; otherwise
+     * fall back to the original heuristic (`select()`).
+     *
+     * Callers wire this in by:
+     *   $modelId = (new AutoModelStrategy(scoreCatalog: ScoreCatalog::default()))
+     *       ->selectWithScores($messages, $systemPrompt, $options);
+     *
+     * The catalog is consulted only when:
+     *   - a catalog was injected,
+     *   - we can infer an eval dim from `$options['eval_dim']` or the system
+     *     prompt's keywords, and
+     *   - that dim has at least one scored model on disk.
+     *
+     * @param Message[]              $messages
+     * @param array<string, mixed>   $options
+     */
+    public function selectWithScores(array $messages, ?string $systemPrompt = null, array $options = []): string
+    {
+        if ($this->scoreCatalog !== null) {
+            $dim = $this->inferDim($options, $systemPrompt);
+            if ($dim !== null) {
+                $best = $this->scoreCatalog->bestModelFor($dim);
+                if ($best !== null) {
+                    return $best;
+                }
+            }
+        }
+        return $this->select($messages, $systemPrompt, $options);
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     */
+    private function inferDim(array $options, ?string $systemPrompt): ?string
+    {
+        $explicit = $options['eval_dim'] ?? null;
+        if (is_string($explicit) && $explicit !== '') {
+            return $explicit;
+        }
+        if ($systemPrompt === null) {
+            return null;
+        }
+        $lower = strtolower($systemPrompt);
+        foreach (self::INTENT_TO_DIM as $kw => $dim) {
+            if (strpos($lower, $kw) !== false) {
+                return $dim;
+            }
+        }
+        return null;
+    }
 
     /**
      * @param Message[]              $messages    full conversation so far

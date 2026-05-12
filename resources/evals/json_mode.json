@@ -1,0 +1,51 @@
+{
+  "name": "json_mode",
+  "weight": 1.0,
+  "system": "You produce strictly valid JSON. Reply with only the JSON value the user asked for. No markdown fences, no commentary.",
+  "cases": [
+    {
+      "id": "parse-address",
+      "prompt": "Extract the parts of this address into JSON with keys: street, city, state, zip.\nAddress: 1600 Amphitheatre Parkway, Mountain View, CA 94043",
+      "scorer": "rule",
+      "rule": {
+        "type": "json",
+        "must_have": ["street", "city", "state", "zip"]
+      }
+    },
+    {
+      "id": "list-of-objects",
+      "prompt": "Return a JSON array of three objects. Each object must have keys \"name\" (string) and \"age\" (integer). The names should be Alice, Bob, and Carol with ages 30, 25, and 40 respectively.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/\\[\\s*\\{.*\\}\\s*,\\s*\\{.*\\}\\s*,\\s*\\{.*\\}\\s*\\]/s" },
+          { "type": "contains", "needle": "Alice" },
+          { "type": "contains", "needle": "Bob" },
+          { "type": "contains", "needle": "Carol" }
+        ]
+      }
+    },
+    {
+      "id": "nested-shape",
+      "prompt": "Return JSON describing a user with this shape:\n{\n  \"user\": {\n    \"id\": <integer>,\n    \"profile\": {\n      \"email\": <string>,\n      \"verified\": <boolean>\n    }\n  }\n}\nUse id=42, email=\"x@example.com\", verified=true.",
+      "scorer": "rule",
+      "rule": {
+        "type": "json",
+        "must_have": ["user.id", "user.profile.email", "user.profile.verified"]
+      }
+    },
+    {
+      "id": "no-prose",
+      "prompt": "Return ONLY the JSON: {\"ok\": true}. Do not add any explanation or markdown.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "json", "must_have": ["ok"] },
+          { "type": "not_contains", "needle": "```" }
+        ]
+      }
+    }
+  ]
+}

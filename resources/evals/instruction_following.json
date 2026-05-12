@@ -1,0 +1,59 @@
+{
+  "name": "instruction_following",
+  "weight": 1.0,
+  "system": "Follow the user's formatting instructions exactly.",
+  "cases": [
+    {
+      "id": "exactly-three-bullets",
+      "prompt": "List exactly three benefits of unit testing. Use markdown bullets. Do not number them. Each bullet on its own line. No introduction or conclusion.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/^[\\s\\S]*(?:^|\\n)\\s*[-*]\\s+.+(?:\\n|\\r\\n?)\\s*[-*]\\s+.+(?:\\n|\\r\\n?)\\s*[-*]\\s+.+/" },
+          { "type": "not_contains", "needle": "1." }
+        ]
+      }
+    },
+    {
+      "id": "one-sentence-summary",
+      "prompt": "Summarize the plot of \"Romeo and Juliet\" in exactly ONE sentence. Do not start with \"Romeo and Juliet is\".",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/^[^.!?]+[.!?]\\s*$/s" },
+          { "type": "not_contains", "needle": "Romeo and Juliet is" },
+          { "type": "not_contains", "needle": "is a play" }
+        ]
+      }
+    },
+    {
+      "id": "shouting",
+      "prompt": "Reply with the word \"yes\" in all uppercase letters and nothing else.",
+      "scorer": "rule",
+      "rule": { "type": "exact", "expected": "YES" }
+    },
+    {
+      "id": "word-count-cap",
+      "prompt": "Explain what a hash table is in 20 words or fewer.",
+      "scorer": "rule",
+      "rule": { "type": "regex", "pattern": "/^(?:\\S+\\s+){0,19}\\S+\\s*[.!?]?\\s*$/s" }
+    },
+    {
+      "id": "no-emojis",
+      "prompt": "Write a one-line congratulatory message for finishing a marathon. Do not use any emojis.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/^[^\\n\\r]{1,200}$/" },
+          { "type": "not_contains", "needle": "🎉" },
+          { "type": "not_contains", "needle": "🏆" },
+          { "type": "not_contains", "needle": "🏃" },
+          { "type": "not_contains", "needle": "👏" }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "name": "reasoning",
+  "weight": 1.0,
+  "system": "Think step by step, then give the final answer on its own last line as: Answer: <value>.",
+  "cases": [
+    {
+      "id": "apples-arithmetic",
+      "prompt": "Alice has 12 apples. She gives 3 to Bob, then buys 5 more, then eats 2. How many apples does she have? Answer with a number.",
+      "scorer": "rule",
+      "rule": { "type": "regex", "pattern": "/Answer:\\s*12\\b/i" }
+    },
+    {
+      "id": "odd-one-out",
+      "prompt": "Which one is the odd one out: cat, dog, salmon, parrot? Give a one-word answer.",
+      "scorer": "rule",
+      "rule": { "type": "regex", "pattern": "/\\bsalmon\\b/i" }
+    },
+    {
+      "id": "date-math",
+      "prompt": "If today is Wednesday, what day of the week is 16 days from now? Answer with the day name.",
+      "scorer": "rule",
+      "rule": { "type": "regex", "pattern": "/\\bfriday\\b/i" }
+    },
+    {
+      "id": "logic-knights",
+      "prompt": "On an island, knights always tell the truth and knaves always lie. You meet two people, A and B. A says: 'B is a knave.' B says: 'A and I are both knaves.' Who is the knight? Answer with just the letter (A or B).",
+      "scorer": "rule",
+      "rule": { "type": "regex", "pattern": "/Answer:\\s*A\\b/i" }
+    },
+    {
+      "id": "percent-discount",
+      "prompt": "A $80 jacket is 25% off, and you have a coupon for an extra 10% off the discounted price. What is the final price? Answer with a number with two decimal places.",
+      "scorer": "rule",
+      "rule": {
+        "type": "any_of",
+        "rules": [
+          { "type": "regex", "pattern": "/\\$?54\\.00\\b/" },
+          { "type": "regex", "pattern": "/\\b54(?:\\.0+)?\\b/" }
+        ]
+      }
+    }
+  ]
+}

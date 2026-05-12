@@ -1,0 +1,84 @@
+{
+  "name": "coding",
+  "weight": 1.0,
+  "system": "You are a careful coding assistant. Reply with code only, no prose. Use the language the user asks for.",
+  "cases": [
+    {
+      "id": "php-fibonacci-iter",
+      "prompt": "Write a PHP function `fibonacci(int $n): int` that returns the nth Fibonacci number using iteration (not recursion). n=0 should return 0, n=1 should return 1.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/function\\s+fibonacci\\s*\\(/i" },
+          {
+            "type": "any_of",
+            "rules": [
+              { "type": "regex", "pattern": "/for\\s*\\(/" },
+              { "type": "regex", "pattern": "/while\\s*\\(/" }
+            ]
+          },
+          { "type": "not_contains", "needle": "fibonacci($n - 1)" }
+        ]
+      }
+    },
+    {
+      "id": "py-reverse-list-inplace",
+      "prompt": "Write a Python function `reverse_in_place(items: list) -> None` that reverses the list in place. Do not return a new list.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/def\\s+reverse_in_place\\s*\\(/" },
+          {
+            "type": "any_of",
+            "rules": [
+              { "type": "regex", "pattern": "/\\.reverse\\s*\\(\\s*\\)/" },
+              { "type": "regex", "pattern": "/items\\[.*\\]\\s*,\\s*items\\[.*\\]\\s*=/" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "sql-top3-by-revenue",
+      "prompt": "Write a SQL query that returns the top 3 customers by total revenue. Tables: customers(id, name), orders(customer_id, amount). Order by total revenue descending.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/SUM\\s*\\(\\s*\\w*amount\\w*\\s*\\)/i" },
+          { "type": "regex", "pattern": "/GROUP\\s+BY/i" },
+          { "type": "regex", "pattern": "/ORDER\\s+BY[^;]*DESC/is" },
+          { "type": "regex", "pattern": "/LIMIT\\s+3|TOP\\s+3|FETCH\\s+FIRST\\s+3/i" }
+        ]
+      }
+    },
+    {
+      "id": "js-debounce-200ms",
+      "prompt": "Write a JavaScript function `debounce(fn, ms)` that returns a debounced version of fn. Use setTimeout/clearTimeout. No external libraries.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/function\\s+debounce\\s*\\(|const\\s+debounce\\s*=|let\\s+debounce\\s*=/" },
+          { "type": "contains", "needle": "setTimeout" },
+          { "type": "contains", "needle": "clearTimeout" }
+        ]
+      }
+    },
+    {
+      "id": "php-class-singleton",
+      "prompt": "Write a PHP class `Config` implementing the singleton pattern. The constructor must be private. Provide a static `getInstance(): Config` method.",
+      "scorer": "rule",
+      "rule": {
+        "type": "all_of",
+        "rules": [
+          { "type": "regex", "pattern": "/class\\s+Config/i" },
+          { "type": "regex", "pattern": "/private\\s+function\\s+__construct/i" },
+          { "type": "regex", "pattern": "/public\\s+static\\s+function\\s+getInstance/i" }
+        ]
+      }
+    }
+  ]
+}
