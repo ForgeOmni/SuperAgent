@@ -12,6 +12,7 @@ use SuperAgent\Messages\Usage;
 use SuperAgent\Messages\UserMessage;
 use SuperAgent\Providers\ModelCatalog;
 use SuperAgent\Providers\ProviderRegistry;
+use Symfony\Component\Process\Process;
 
 /**
  * "Smart" mode — eval-score-driven task orchestration.
@@ -26,13 +27,20 @@ use SuperAgent\Providers\ProviderRegistry;
  *        - hard   → `ScoreCatalog::bestModelFor($dim)`  (top by score)
  *        - easy   → `ScoreCatalog::cheapestPassingFor($dim, threshold)`
  *      Both fall back to the brain when scores are missing.
- *   4. Subtasks run sequentially in this PHP process. The `concurrency`
- *      flag from the plan only affects whether prior outputs are stitched
- *      into the next subtask's context:
- *        - serial   → prior outputs prepended (data-dependent chain)
- *        - parallel → each subtask sees only the original task (independent)
- *      Genuine OS-level concurrency is a follow-up — providers stream SSE
- *      synchronously today, so parallel HTTP would require an async refactor.
+ *   4. Execution depends on the plan's `concurrency` flag:
+ *        - serial   → subtasks run one after another in this PHP process;
+ *                     each one sees prior outputs as context.
+ *        - parallel → real OS-level concurrency. We spawn one
+ *                     `superagent _subtask` subprocess per subtask via
+ *                     Symfony Process, fire them all at once, and wait
+ *                     for completion. Each subprocess sees only the
+ *                     original task as context (no sibling outputs).
+ *                     Providers' synchronous SSE pipes are sidestepped
+ *                     by isolating each call in its own process — N
+ *                     curl connections run truly in parallel against
+ *                     N endpoints. Falls back to serial-in-process when
+ *                     symfony/process is missing or the bin entry can't
+ *                     be located.
  *   5. Brain consolidates outputs into a final answer.
  *
  * The full run (plan + outputs + routing decisions + costs) is persisted to
@@ -125,53 +133,20 @@ final class SmartOrchestrator
         [$plan, $planRaw, $planUsage] = $this->plan($brainProvider, $task);
         $this->emit(['type' => 'plan', 'plan' => $plan]);
 
-        $subtaskResults = [];
         $totalCost = $this->costOf($brain, $planUsage);
         $startedAll = microtime(true);
 
-        $priorOutputs = [];
-        foreach ($plan['subtasks'] as $idx => $st) {
-            $modelId = $this->routeSubtask($st, $brain);
-            $this->emit([
-                'type' => 'subtask_routed',
-                'id' => $st['id'],
-                'model' => $modelId,
-                'difficulty' => $st['difficulty'],
-                'dim' => $st['dim'],
-            ]);
-
-            $context = $plan['concurrency'] === 'serial' ? $priorOutputs : [];
-            $stPrompt = $this->renderSubtaskPrompt($st, $task, $context);
-
-            $started = microtime(true);
-            try {
-                [$output, $usage] = $this->oneShot($this->buildProvider($modelId), $stPrompt);
-            } catch (\Throwable $e) {
-                $output = '[subtask failed: ' . $e->getMessage() . ']';
-                $usage = null;
-            }
-            $latency = (int) round((microtime(true) - $started) * 1000);
-            $cost = $this->costOf($modelId, $usage);
-            $totalCost += $cost;
-
-            $subtaskResults[] = [
-                'id'         => $st['id'],
-                'prompt'     => $st['prompt'],
-                'difficulty' => $st['difficulty'],
-                'dim'        => $st['dim'],
-                'model'      => $modelId,
-                'output'     => $output,
-                'latency_ms' => $latency,
-                'cost_usd'   => $cost,
-            ];
-            $priorOutputs[] = ['id' => $st['id'], 'output' => $output];
-
-            $this->emit([
-                'type' => 'subtask_done',
-                'id' => $st['id'],
-                'latency_ms' => $latency,
-                'cost_usd' => $cost,
-            ]);
+        if (
+            $plan['concurrency'] === 'parallel'
+            && count($plan['subtasks']) > 1
+            && self::canSpawnSubprocesses()
+        ) {
+            $subtaskResults = $this->executeParallel($task, $plan, $brain);
+        } else {
+            $subtaskResults = $this->executeSerial($task, $plan, $brain);
+        }
+        foreach ($subtaskResults as $r) {
+            $totalCost += (float) ($r['cost_usd'] ?? 0.0);
         }
 
         // Skip merge when there's only one subtask — the output is already the answer.
@@ -345,6 +320,211 @@ TXT;
     {
         $v = is_string($value) ? strtolower(trim($value)) : '';
         return in_array($v, $allowed, true) ? $v : $default;
+    }
+
+    /**
+     * Sequential in-process execution. Each subtask sees prior outputs as
+     * context — this is what `concurrency=serial` semantically means.
+     *
+     * @param Plan $plan
+     * @return list<array<string, mixed>>
+     */
+    private function executeSerial(string $task, array $plan, string $brain): array
+    {
+        $results = [];
+        $priorOutputs = [];
+        foreach ($plan['subtasks'] as $st) {
+            $modelId = $this->routeSubtask($st, $brain);
+            $this->emit([
+                'type' => 'subtask_routed', 'id' => $st['id'], 'model' => $modelId,
+                'difficulty' => $st['difficulty'], 'dim' => $st['dim'],
+            ]);
+
+            $stPrompt = $this->renderSubtaskPrompt($st, $task, $priorOutputs);
+
+            $started = microtime(true);
+            try {
+                [$output, $usage] = $this->oneShot($this->buildProvider($modelId), $stPrompt);
+            } catch (\Throwable $e) {
+                $output = '[subtask failed: ' . $e->getMessage() . ']';
+                $usage = null;
+            }
+            $latency = (int) round((microtime(true) - $started) * 1000);
+            $cost = $this->costOf($modelId, $usage);
+
+            $results[] = [
+                'id' => $st['id'], 'prompt' => $st['prompt'], 'difficulty' => $st['difficulty'],
+                'dim' => $st['dim'], 'model' => $modelId, 'output' => $output,
+                'latency_ms' => $latency, 'cost_usd' => $cost,
+            ];
+            $priorOutputs[] = ['id' => $st['id'], 'output' => $output];
+            $this->emit(['type' => 'subtask_done', 'id' => $st['id'], 'latency_ms' => $latency, 'cost_usd' => $cost]);
+        }
+        return $results;
+    }
+
+    /**
+     * Real OS-level concurrent execution.
+     *
+     * Each subtask becomes a `superagent _subtask` subprocess fed via stdin.
+     * We `start()` all of them, then poll until every Process reports
+     * isTerminated(). That gives genuine parallel HTTP — N curl streams run
+     * concurrently, not serially. Wall-clock latency on N subtasks of equal
+     * duration drops from ~N×t to ~max(t) plus a small (~150ms) PHP boot
+     * cost per worker.
+     *
+     * Parallel subprocesses don't see each other's outputs — only the
+     * original task — matching the documented semantics of
+     * `concurrency=parallel`. The brain merges everything at the end.
+     *
+     * @param Plan $plan
+     * @return list<array<string, mixed>>
+     */
+    private function executeParallel(string $task, array $plan, string $brain): array
+    {
+        $bin = self::findBinEntry();
+        $php = self::findPhpBinary();
+        if ($bin === null || $php === null) {
+            $this->emit(['type' => 'parallel_fallback', 'reason' => 'bin/superagent or php binary not found']);
+            return $this->executeSerial($task, $plan, $brain);
+        }
+
+        $processes = [];
+        $modelByStId = [];
+        $promptByStId = [];
+        $stByStId = [];
+        foreach ($plan['subtasks'] as $st) {
+            $modelId = $this->routeSubtask($st, $brain);
+            $modelByStId[$st['id']] = $modelId;
+            $stByStId[$st['id']] = $st;
+            $this->emit([
+                'type' => 'subtask_routed', 'id' => $st['id'], 'model' => $modelId,
+                'difficulty' => $st['difficulty'], 'dim' => $st['dim'],
+            ]);
+
+            // In parallel mode subtasks are independent — only the original task is in scope.
+            $stPrompt = $this->renderSubtaskPrompt($st, $task, []);
+            $promptByStId[$st['id']] = $stPrompt;
+
+            $payload = json_encode([
+                'model'  => $modelId,
+                'prompt' => $stPrompt,
+                'system' => null,
+                'max_tokens' => 4000,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if ($payload === false) {
+                $this->emit(['type' => 'subtask_error', 'id' => $st['id'], 'error' => 'failed to encode subtask payload']);
+                continue;
+            }
+
+            $process = new Process([$php, $bin, '_subtask']);
+            $process->setInput($payload);
+            // No idle timeout — model calls can be long.
+            $process->setTimeout(null);
+            $process->start();
+            $processes[$st['id']] = ['process' => $process, 'started' => microtime(true)];
+        }
+
+        $this->emit(['type' => 'parallel_started', 'count' => count($processes)]);
+
+        // Block until every subprocess finishes. `wait()` is per-process but the
+        // sibling processes keep running in the meantime — total wall-clock is
+        // bounded by the slowest subprocess, not the sum.
+        $results = [];
+        foreach ($processes as $stId => $bundle) {
+            /** @var Process $proc */
+            $proc = $bundle['process'];
+            try {
+                $proc->wait();
+            } catch (\Throwable $e) {
+                // Surface as a failed subtask rather than crash the whole run.
+            }
+            $latency = (int) round((microtime(true) - $bundle['started']) * 1000);
+            $stdout = $proc->getOutput();
+            $stderr = $proc->getErrorOutput();
+            $st = $stByStId[$stId];
+            $modelId = $modelByStId[$stId];
+
+            $decoded = json_decode(trim($stdout), true);
+            if (! is_array($decoded) || ! ($decoded['ok'] ?? false)) {
+                $err = is_array($decoded) ? (string) ($decoded['error'] ?? 'subprocess returned non-ok envelope') : ('subprocess output unparseable; stderr: ' . trim($stderr));
+                $results[] = [
+                    'id' => $stId, 'prompt' => $st['prompt'], 'difficulty' => $st['difficulty'],
+                    'dim' => $st['dim'], 'model' => $modelId,
+                    'output' => '[subtask failed: ' . $err . ']',
+                    'latency_ms' => $latency, 'cost_usd' => 0.0,
+                ];
+                $this->emit(['type' => 'subtask_error', 'id' => $stId, 'error' => $err]);
+                continue;
+            }
+
+            $results[] = [
+                'id' => $stId, 'prompt' => $st['prompt'], 'difficulty' => $st['difficulty'],
+                'dim' => $st['dim'], 'model' => $modelId,
+                'output' => (string) ($decoded['output'] ?? ''),
+                'latency_ms' => (int) ($decoded['latency_ms'] ?? $latency),
+                'cost_usd' => (float) ($decoded['cost_usd'] ?? 0.0),
+            ];
+            $this->emit([
+                'type' => 'subtask_done', 'id' => $stId,
+                'latency_ms' => (int) ($decoded['latency_ms'] ?? $latency),
+                'cost_usd' => (float) ($decoded['cost_usd'] ?? 0.0),
+            ]);
+        }
+
+        // Restore the plan's subtask order in the result list — `wait()` doesn't
+        // preserve insertion order if processes finish out-of-order via array iteration.
+        $byId = [];
+        foreach ($results as $r) {
+            $byId[$r['id']] = $r;
+        }
+        $ordered = [];
+        foreach ($plan['subtasks'] as $st) {
+            if (isset($byId[$st['id']])) {
+                $ordered[] = $byId[$st['id']];
+            }
+        }
+        return $ordered;
+    }
+
+    /**
+     * Symfony Process is the only hard requirement for parallel execution.
+     * Listed as a dev/suggest dep — gracefully fall back to serial if missing.
+     */
+    private static function canSpawnSubprocesses(): bool
+    {
+        return class_exists(Process::class);
+    }
+
+    /**
+     * Locate the `bin/superagent` entry. In standalone installs this lives
+     * at the package root; when installed as a Composer dep, the vendor/bin
+     * symlink works too — but we point at the package's own script so
+     * autoloading is consistent.
+     */
+    private static function findBinEntry(): ?string
+    {
+        $candidates = [
+            // Inside the package (standalone or vendored).
+            dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'bin' . DIRECTORY_SEPARATOR . 'superagent',
+            // The current entry script the parent process was launched with.
+            $_SERVER['SCRIPT_FILENAME'] ?? '',
+            $_SERVER['argv'][0] ?? '',
+        ];
+        foreach ($candidates as $c) {
+            if (is_string($c) && $c !== '' && is_file($c)) {
+                return $c;
+            }
+        }
+        return null;
+    }
+
+    private static function findPhpBinary(): ?string
+    {
+        if (defined('PHP_BINARY') && PHP_BINARY !== '' && is_file(PHP_BINARY)) {
+            return PHP_BINARY;
+        }
+        return null;
     }
 
     /**

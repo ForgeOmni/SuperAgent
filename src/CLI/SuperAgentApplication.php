@@ -14,6 +14,7 @@ use SuperAgent\CLI\Commands\ModelsCommand;
 use SuperAgent\CLI\Commands\ResumeCommand;
 use SuperAgent\CLI\Commands\SkillsCommand;
 use SuperAgent\CLI\Commands\SmartCommand;
+use SuperAgent\CLI\Commands\SubtaskCommand;
 use SuperAgent\CLI\Commands\SwarmCommand;
 
 /**
@@ -73,6 +74,10 @@ class SuperAgentApplication
             // subtasks routed to (best | cheapest-passing) by dim, then merged.
             // Distinct from the existing keyword-heuristic AutoMode.
             'smart'   => (new SmartCommand())->execute($options),
+            // INTERNAL — single-subtask worker spawned by SmartOrchestrator's
+            // parallel path. Not exposed in `--help`; reads stdin JSON, emits
+            // stdout JSON. See SubtaskCommand for the protocol.
+            '_subtask' => (new SubtaskCommand())->execute($options),
             // 0.9.7+ — cross-harness session resume (jcode-style). Imports
             // Claude Code / Codex CLI session logs into Message[] that any
             // SuperAgent provider can replay (typically via `Transcoder`).
@@ -121,7 +126,7 @@ class SuperAgentApplication
         // doesn't recognize (e.g. `eval run --models X --dims Y`) end up here
         // and are routed below to the subcommand's `<name>_args` slot.
         $subcommandRaw = null;
-        $knownSubcommands = ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume', 'eval', 'smart'];
+        $knownSubcommands = ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume', 'eval', 'smart', '_subtask'];
 
         while ($i < count($args)) {
             $arg = $args[$i];
@@ -193,6 +198,7 @@ class SuperAgentApplication
                 'resume'        => 'resume_args',
                 'eval'          => 'eval_args',
                 'smart'         => 'smart_args',
+                '_subtask'      => null,  // takes JSON on stdin, no args
                 default         => null,
             };
             if ($cmd === 'login') {
