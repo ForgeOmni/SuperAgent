@@ -194,7 +194,10 @@
       "Bash(ps -o pid,etime,command -p 59082)",
       "Bash(ps -o pid,etime,command)",
       "Bash(kill -9 59082 59081)",
-      "Bash(./vendor/bin/phpunit tests/Unit/Evals/SmartOrchestratorTest.php tests/Unit/CLI/SmartCommandTest.php)"
+      "Bash(./vendor/bin/phpunit tests/Unit/Evals/SmartOrchestratorTest.php tests/Unit/CLI/SmartCommandTest.php)",
+      "Bash(git merge *)",
+      "Bash(git check-ignore *)",
+      "Bash(findstr /i claude)"
     ]
   }
 }
