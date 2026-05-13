@@ -7,10 +7,13 @@ namespace SuperAgent\AutoMode;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use SuperAgent\Agent\Agent;
-use SuperAgent\Agent\AgentResult;
+use SuperAgent\AgentResult;
 use SuperAgent\Context\Context;
+use SuperAgent\Messages\AssistantMessage;
+use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Swarm\AgentSpawnConfig;
 use SuperAgent\Swarm\Backends\InProcessBackend;
+use SuperAgent\Swarm\ParallelAgentCoordinator;
 use SuperAgent\Swarm\TeamContext;
 use SuperAgent\Swarm\Templates\AgentTemplateManager;
 use SuperAgent\Console\Output\ParallelAgentDisplay;
@@ -415,58 +418,77 @@ class AutoModeAgent
     }
     
     /**
-     * Collect results from all agents.
+     * Collect real agent outputs from the coordinator.
+     *
+     * Each spawn stored a `\SuperAgent\AgentResult` keyed by agentId in
+     * `ParallelAgentCoordinator` (see InProcessBackend's fiber). We pull
+     * those out here. Agents that failed (no stored result) get a
+     * placeholder so downstream merging still has every slot.
      */
     private function collectResults(InProcessBackend $backend, array $agentIds): array
     {
+        $coordinator = ParallelAgentCoordinator::getInstance();
         $results = [];
-        
+
         foreach ($agentIds as $agentId) {
             $status = $backend->getStatus($agentId);
-            
-            // Get agent's output (would need to be implemented in backend)
-            // For now, create a placeholder result
+            $agentResult = $coordinator->getAgentResult($agentId);
+            $content = $agentResult?->text();
+            if ($content === null || $content === '') {
+                $content = sprintf('[%s produced no output (status: %s)]', $agentId, $status?->value ?? 'unknown');
+            }
             $results[] = [
                 'agent_id' => $agentId,
-                'status' => $status,
-                'content' => "Agent $agentId completed its task",
+                'status'   => $status,
+                'content'  => $content,
+                'result'   => $agentResult,
             ];
         }
-        
+
         return $results;
     }
     
     /**
-     * Merge results from multiple agents.
+     * Merge results from multiple agents into a canonical AgentResult.
+     *
+     * Naive concatenation — for a smarter consolidation that uses a strong
+     * model to deduplicate and integrate, see `SmartOrchestrator::merge()`.
+     * AutoMode keeps this dumb on purpose: it has no eval-score notion of
+     * which model is the strongest, so it just hands the user the union.
+     *
+     * The returned AgentResult wraps a synthetic AssistantMessage; total
+     * cost/usage is summed across constituent agent results so the cost
+     * footer in the CLI is accurate.
      */
     private function mergeResults(array $results, string $originalPrompt): AgentResult
     {
-        // Combine all agent outputs
-        $combinedContent = "Multi-agent execution completed:\n\n";
-        $totalTokens = 0;
-        
-        foreach ($results as $result) {
-            $combinedContent .= sprintf(
-                "Agent %s:\n%s\n\n",
-                $result['agent_id'],
-                $result['content']
-            );
+        $body = ["Multi-agent execution completed:\n"];
+        $allResponses = [];
+        $totalCost = 0.0;
+        foreach ($results as $r) {
+            $body[] = sprintf("--- Agent %s ---\n%s", $r['agent_id'], $r['content']);
+            if (($r['result'] ?? null) instanceof AgentResult) {
+                /** @var AgentResult $sub */
+                $sub = $r['result'];
+                $totalCost += (float) $sub->totalCostUsd;
+                foreach ($sub->allResponses as $resp) {
+                    $allResponses[] = $resp;
+                }
+            }
         }
-        
-        // Create merged result
+
+        $msg = new AssistantMessage();
+        $msg->content = [ContentBlock::text(implode("\n", $body))];
+        $msg->metadata = [
+            'mode'           => 'multi-agent',
+            'agent_count'    => count($results),
+            'original_prompt'=> $originalPrompt,
+        ];
+
         return new AgentResult(
-            content: $combinedContent,
-            model: $this->config['model'] ?? 'unknown',
-            usage: [
-                'input_tokens' => 0,
-                'output_tokens' => 0,
-                'total_tokens' => $totalTokens,
-            ],
-            metadata: [
-                'mode' => 'multi-agent',
-                'agent_count' => count($results),
-                'original_prompt' => $originalPrompt,
-            ]
+            message: $msg,
+            allResponses: $allResponses === [] ? [$msg] : $allResponses,
+            totalCostUsd: $totalCost,
         );
     }
 }

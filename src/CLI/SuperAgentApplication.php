@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SuperAgent\CLI;
 
 use SuperAgent\CLI\Commands\AuthCommand;
+use SuperAgent\CLI\Commands\AutoCommand;
 use SuperAgent\CLI\Commands\ChatCommand;
 use SuperAgent\CLI\Commands\EvalCommand;
 use SuperAgent\CLI\Commands\HealthCommand;
@@ -70,6 +71,10 @@ class SuperAgentApplication
             // and persist scores to ~/.superagent/model_scores.json — the input
             // AutoModelStrategy uses for score-aware routing.
             'eval'    => (new EvalCommand())->execute($options),
+            // Heuristic auto-mode (keyword + structure analysis). Single
+            // model handles every subtask. See AutoCommand docblock for
+            // the distinction from `smart`.
+            'auto'    => (new AutoCommand())->execute($options),
             // Eval-score-driven task orchestration: brain model plans + splits,
             // subtasks routed to (best | cheapest-passing) by dim, then merged.
             // Distinct from the existing keyword-heuristic AutoMode.
@@ -119,6 +124,7 @@ class SuperAgentApplication
         $options['health_args'] = [];
         $options['eval_args'] = [];
         $options['smart_args'] = [];
+        $options['auto_args'] = [];
         // 0.9.7+ — `superagent resume <list|show|load> --from <harness> ...`
         $options['resume_args'] = [];
 
@@ -126,7 +132,7 @@ class SuperAgentApplication
         // doesn't recognize (e.g. `eval run --models X --dims Y`) end up here
         // and are routed below to the subcommand's `<name>_args` slot.
         $subcommandRaw = null;
-        $knownSubcommands = ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume', 'eval', 'smart', '_subtask'];
+        $knownSubcommands = ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume', 'eval', 'smart', 'auto', '_subtask'];
 
         while ($i < count($args)) {
             $arg = $args[$i];
@@ -198,6 +204,7 @@ class SuperAgentApplication
                 'resume'        => 'resume_args',
                 'eval'          => 'eval_args',
                 'smart'         => 'smart_args',
+                'auto'          => 'auto_args',
                 '_subtask'      => null,  // takes JSON on stdin, no args
                 default         => null,
             };
@@ -253,6 +260,8 @@ class SuperAgentApplication
     superagent smart "<task>"           Score-driven plan+route+merge for a single task
     superagent smart "<task>" --dry-run Show the plan without executing
     superagent smart show               List recent smart-run logs
+    superagent auto "<task>"            Heuristic auto-mode (single vs multi-agent)
+    superagent auto "<task>" --analyze-only  Show complexity analysis without running
     superagent health                   5s cURL probe of every configured provider
     superagent health --all             Probe every known provider (surface missing keys)
     superagent health --json            Machine-readable output
