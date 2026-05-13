@@ -29,7 +29,7 @@ use SuperAgent\CLI\Commands\SwarmCommand;
  */
 class SuperAgentApplication
 {
-    private const VERSION = '0.9.8';
+    private const VERSION = '0.9.9';
     private const NAME = 'SuperAgent';
 
     public function run(): int
@@ -259,7 +259,10 @@ class SuperAgentApplication
     superagent eval show                Print current model_scores.json as a table
     superagent smart "<task>"           Score-driven plan+route+merge for a single task
     superagent smart "<task>" --dry-run Show the plan without executing
+    superagent smart "<task>" --max-cost 0.5  Abort if running spend exceeds the cap
     superagent smart show               List recent smart-run logs
+    superagent smart show <id|--last>   Print one run's summary
+    superagent smart replay <id|--last> Re-execute a saved plan (skip planning)
     superagent auto "<task>"            Heuristic auto-mode (single vs multi-agent)
     superagent auto "<task>" --analyze-only  Show complexity analysis without running
     superagent health                   5s cURL probe of every configured provider

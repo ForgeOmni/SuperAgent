@@ -1095,6 +1095,11 @@ superagent mcp list / add / remove / sync / auth / reset-auth / test / status / 
 superagent skills install / list / show / remove / path
 superagent swarm <prompt>                   # 规划 + 执行 swarm
 superagent health [--all] [--json] [--providers=a,b,c]   # provider 可达性
+superagent eval [list|show|run]             # 能力评测 → ~/.superagent/model_scores.json
+superagent smart "<task>"                   # 基于评测分数的 plan + 路由 + 合并
+superagent smart "<task>" --max-cost 0.5    # 超过预算上限自动中止
+superagent smart show [<id|--last>]         # 列出 / 查看已持久化的运行
+superagent smart replay <id|--last>         # 用新的路由参数重放已保存的 plan
 ```
 
 **选项：**
@@ -1123,6 +1128,7 @@ superagent health [--all] [--json] [--providers=a,b,c]   # provider 可达性
   /cost                    显示成本跟踪
   /compact                 强制上下文压缩
   /session save|load|list|delete
+  /smart <task>            基于评测分数的 plan+路由+合并（同 `superagent smart`）
   /clear                   清空对话
   /quit                    退出
 ```

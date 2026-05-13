@@ -410,6 +410,40 @@ No extra config — the shadow git repo is created lazily on first snapshot. Req
 
 *Since v0.9.0*
 
+### Smart mode (eval-score-driven orchestration)
+
+Two-step setup. First, build a score catalog by evaluating the models you actually have keys for:
+
+```bash
+# Probe model strengths on the bundled eval cases — coding / reasoning /
+# json_mode / instruction_following — and write ~/.superagent/model_scores.json.
+superagent eval run
+
+# Inspect what you got:
+superagent eval show
+```
+
+Then run a task. The orchestrator reads that catalog to pick a "brain" model for planning + merging, and routes each subtask to the model that scored best on the relevant dimension:
+
+```bash
+superagent smart "<task>"                   # end-to-end
+superagent smart "<task>" --dry-run         # plan only, no execution
+superagent smart "<task>" --max-cost 0.50   # abort if running spend exceeds the cap
+superagent smart "<task>" --max-parallel 3  # cap concurrent subprocesses (default 4)
+superagent smart "<task>" --json | jq       # JSON envelope on stdout, events on stderr
+
+# Inspect persisted runs:
+superagent smart show                       # newest 20
+superagent smart show <id|--last>           # one run's plan + subtask outputs
+superagent smart replay <id|--last>         # re-execute a saved plan with new routing knobs
+```
+
+REPL: inside `superagent` interactive mode, `/smart <task>` runs the same orchestration inline.
+
+Run logs persist to `~/.superagent/smart_runs/<ISO>_<shortid>.json`. The full pipeline + flag reference is in [ADVANCED_USAGE §59](docs/ADVANCED_USAGE.md#59-superagent-smart--eval-score-driven-orchestration).
+
+*Since v0.9.9 (CLI subcommand + guardrails).*
+
 ---
 
 ## Verification

@@ -105,6 +105,10 @@ This document consolidates all advanced feature documentation for SuperAgent int
 - [70. Interactive `/model` Picker & Slash Commands](#70-interactive-model-picker--slash-commands)
 - [71. Embedding the CLI Harness in Your App](#71-embedding-the-cli-harness-in-your-app)
 
+### Eval-Driven Orchestration (v0.9.10)
+
+- [59. `superagent smart` — eval-score-driven orchestration](#59-superagent-smart--eval-score-driven-orchestration)
+
 ---
 
 ## 1. Pipeline DSL
@@ -8741,3 +8745,97 @@ Codex's workspace-plugin-sharing pattern, simplified to JSON-manifest level (no 
 - **`UsageRecorder` cache_hit_rate is metadata-only.** Older rows that pre-date the field are treated as "no signal" — the dashboard column shows `—` rather than `0%`.
 - **`/v1/usage` is a new route**, doesn't shadow anything. The HTML `usage.index` route still works.
 - **`WorkspacePluginRegistry` is purely a registry.** Actually installing plugins still goes through the existing `PluginInstaller` — the registry just answers "which entries should we attempt to install".
+
+---
+
+## 59. `superagent smart` — eval-score-driven orchestration
+
+> A single-task orchestrator that asks a "brain" model to plan + split the task into subtasks, routes each subtask to the model that scored best on the relevant capability dimension (according to `superagent eval run`), then merges the outputs. The whole pipeline is one PHP process — no Agent loop, no tools.
+
+### How it differs from `AutoMode`
+
+| | `AutoMode` (existing) | `smart` (this) |
+|---|---|---|
+| Routing input | keyword heuristics on the prompt | empirical scores from `superagent eval run` |
+| Per-subtask runtime | full sub-Agents (tool loop) | single one-shot HTTP call |
+| Concurrency | background sub-Agents | OS-level parallel via `Symfony Process` |
+| Output | streamed assistant turn | merged final string + persisted run-log JSON |
+
+### Pipeline
+
+1. **Pick the brain.** `--brain <model>` wins; otherwise the highest `overall` in `~/.superagent/model_scores.json`; otherwise the configured `superagent.default_model`; otherwise a hardcoded fallback.
+2. **Plan.** The brain produces a JSON `Plan` describing complexity, primary dim, concurrency, and 1–5 subtasks tagged `(difficulty: easy|hard, dim)`. If the response doesn't parse, the orchestrator retries once with a sharper "JSON only" reminder before falling back to a single-subtask plan.
+3. **Route each subtask.** `hard` → `ScoreCatalog::bestModelFor($dim)`; `easy` → `ScoreCatalog::cheapestPassingFor($dim, threshold)`. Both fall back to the brain when the catalog is empty.
+4. **Execute.** `serial` runs in-process and feeds prior outputs into later subtasks. `parallel` shells out one `superagent _subtask` worker per subtask via `Symfony\Component\Process\Process` for real concurrent HTTP — bounded by `--max-parallel` (default 4) so a 50-subtask plan doesn't open 50 sockets at once.
+5. **Merge.** The brain consolidates the parts; tokens stream to stdout via the `onMergeDelta` callback. Skipped when there's exactly one subtask.
+6. **Persist.** The full run (plan, outputs, routing decisions, costs, latencies) writes to `~/.superagent/smart_runs/<ISO>_<shortid>.json`.
+
+### CLI
+
+```bash
+# End-to-end
+superagent smart "<task>"
+superagent smart "<task>" --brain claude-opus-4-7 --threshold 0.8
+superagent smart "<task>" --max-cost 0.50 --max-parallel 3
+superagent smart "<task>" --dry-run                # plan only, no execution
+superagent smart "<task>" --json                   # full run as JSON to stdout (events go to stderr)
+
+# Inspect persisted runs
+superagent smart show                              # list newest 20
+superagent smart show <id|--last>                  # one run's plan + subtask outputs
+
+# Re-run a saved plan with different routing knobs
+superagent smart replay <id|--last> --brain <other-model> --threshold 0.7
+```
+
+Exit codes: `0` success, `2` usage error / unresolvable id / unknown brain, `3` budget cap hit.
+
+### Guardrails
+
+| Flag | What it does |
+|---|---|
+| `--max-cost <usd>` | Throws `BudgetExceededException` after planning, after each subtask, and pre-merge. The check fires *between* model calls — an in-flight HTTP request can't be interrupted, so the effective spend can briefly overshoot by one call. Parallel workers in flight are stopped via `Process::stop(0)` and reported as `subtask_cancelled`. |
+| `--max-parallel <n>` | Sliding-window cap on subprocess fan-out. `0` disables the cap (legacy behavior). Default `4`. |
+| `--brain <model>` | Validated against `ModelCatalog::model()` at construction time so a typo fails before paying for planning. |
+| Plan retry | If the brain's first response doesn't yield a parseable plan, the orchestrator retries once with a stricter system-prompt reminder. Both calls' usage is summed in the cost ledger. |
+
+### REPL integration
+
+Inside `superagent` interactive mode, `/smart <task>` runs the same orchestration inline using all defaults — no flags, no run-log printing, just the merged final string with a one-line `brain · subtasks · cost` footer.
+
+### Run-log shape
+
+```json
+{
+  "task": "...",
+  "brain": "claude-opus-4-7",
+  "plan": {
+    "complexity": "complex",
+    "primary_dim": "coding",
+    "concurrency": "parallel",
+    "subtasks": [
+      {"id": "1", "prompt": "...", "difficulty": "hard", "dim": "coding"}
+    ]
+  },
+  "subtask_results": [
+    {"id": "1", "model": "claude-opus-4-7", "output": "...", "latency_ms": 1840, "cost_usd": 0.0123}
+  ],
+  "final": "...",
+  "total_cost_usd": 0.0289,
+  "total_latency_ms": 2450,
+  "ran_at": "2026-05-12T10:00:00+00:00",
+  "plan_raw": "..."   // brain's raw response — useful for debugging plan-parse fallbacks
+}
+```
+
+### When `smart` makes sense
+
+- **Multi-aspect tasks** where different parts benefit from different specialists — e.g. "draft this SQL migration AND write the rollback note": one is `coding`, the other `instruction_following`.
+- **You've already run `superagent eval run`** and have a populated `model_scores.json`. Without scores, every subtask routes to the brain and `smart` degrades to "ask the brain N times" — usually not worth it.
+- **You want a JSON record** of which model handled what, with costs/latencies, for cost-attribution dashboards or downstream replay.
+
+### When to skip it
+
+- Plain Q&A or single-domain tasks — `superagent "<task>"` is faster and cheaper.
+- You need tool use (file edits, MCP, bash) — `smart` subtasks are tool-less one-shot calls. Use the regular Agent loop or `swarm` instead.
+- Deeply iterative work where each step's output reshapes the next plan — the brain plans once at the start.

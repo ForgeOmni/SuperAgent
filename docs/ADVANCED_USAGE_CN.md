@@ -116,6 +116,10 @@
 - [70. 交互式 `/model` 选择器与斜杠命令](#70-交互式-model-选择器与斜杠命令)
 - [71. 嵌入 CLI Harness 到你的应用](#71-嵌入-cli-harness-到你的应用)
 
+### 评测分数驱动的编排 (v0.9.9)
+
+- [59. `superagent smart` —— 基于评测分数的编排](#59-superagent-smart--基于评测分数的编排)
+
 ---
 
 ## 1. 流水线 DSL
@@ -9313,4 +9317,98 @@ Codex workspace-plugin 共享模式简化到 JSON 清单层（无市场、无签
 - **`UsageRecorder` cache_hit_rate 仅是 metadata。** 字段问世前的旧行视为"无信号" —— 仪表盘列显示 `—` 而不是 `0%`。
 - **`/v1/usage` 是新路由**，不抢任何东西。HTML `usage.index` 路由继续工作。
 - **`WorkspacePluginRegistry` 纯是注册表。** 真正装插件仍走既有 `PluginInstaller` —— 注册表只回答"我们应该尝试装哪些条目"。
+
+---
+
+## 59. `superagent smart` —— 基于评测分数的编排
+
+> 单任务编排器：让一个「brain」模型 plan + 拆分任务，按子任务能力维度（来自 `superagent eval run` 的实测分数）路由到最适合的模型，再合并输出。整条管线在一个 PHP 进程里跑完 —— 没有 Agent loop，没有工具。
+
+### 与 `AutoMode` 的区别
+
+| | `AutoMode`（既有） | `smart`（本文） |
+|---|---|---|
+| 路由依据 | prompt 上的关键字启发 | `superagent eval run` 跑出来的实测分数 |
+| 子任务运行 | 完整 sub-Agent（带工具循环） | 单次一次性 HTTP 调用 |
+| 并发 | 后台 sub-Agent | OS 级并发，`Symfony Process` |
+| 输出 | 流式 assistant 轮次 | 合并后的 final 字符串 + 持久化的 run-log JSON |
+
+### 管线
+
+1. **挑 brain。** `--brain <model>` 优先；否则 `~/.superagent/model_scores.json` 里 `overall` 最高的；否则配置的 `superagent.default_model`；否则一个硬编码兜底值。
+2. **Plan。** brain 产出一个 JSON `Plan`，描述 complexity、primary_dim、concurrency 和 1–5 个子任务（每个标了 `(difficulty: easy|hard, dim)`）。如果响应不可解析，编排器会用更强硬的「JSON only」reminder 重试一次,然后才退化为单子任务 plan。
+3. **路由每个子任务。** `hard` → `ScoreCatalog::bestModelFor($dim)`；`easy` → `ScoreCatalog::cheapestPassingFor($dim, threshold)`。catalog 为空时都退到 brain。
+4. **执行。** `serial` 在进程内跑，把前面子任务的输出灌给后面的。`parallel` 通过 `Symfony\Component\Process\Process` 给每个子任务起一个 `superagent _subtask` worker，做真正的并发 HTTP —— 由 `--max-parallel`（默认 4）封顶，避免 50 个子任务一次开 50 个 socket。
+5. **合并。** brain 把各部分整合；token 通过 `onMergeDelta` 回调流式打到 stdout。只有 1 个子任务时跳过。
+6. **持久化。** 完整运行（plan、输出、路由决策、成本、延迟）写到 `~/.superagent/smart_runs/<ISO>_<shortid>.json`。
+
+### CLI
+
+```bash
+# 端到端
+superagent smart "<task>"
+superagent smart "<task>" --brain claude-opus-4-7 --threshold 0.8
+superagent smart "<task>" --max-cost 0.50 --max-parallel 3
+superagent smart "<task>" --dry-run                # 只出 plan，不执行
+superagent smart "<task>" --json                   # stdout 是完整 JSON，事件走 stderr
+
+# 查看持久化的运行
+superagent smart show                              # 最近 20 条
+superagent smart show <id|--last>                  # 单次运行的 plan + 子任务输出
+
+# 用新的路由参数重放保存的 plan
+superagent smart replay <id|--last> --brain <other-model> --threshold 0.7
+```
+
+退出码：`0` 成功，`2` 参数错误 / 未找到 id / 未知 brain，`3` 触发预算上限。
+
+### 护栏
+
+| 参数 | 作用 |
+|---|---|
+| `--max-cost <usd>` | 在 plan、每个子任务、merge 之前检查；超就抛 `BudgetExceededException`。检查发生在两次模型调用之间 —— 已经发出去的 HTTP 请求不能中断,所以实际花费可能短暂超过上限一个调用的量。并行模式中其余 worker 用 `Process::stop(0)` 终止,事件类型 `subtask_cancelled`。 |
+| `--max-parallel <n>` | 子进程 fan-out 的滑动窗口上限。`0` 表示不封顶（旧行为）。默认 `4`。 |
+| `--brain <model>` | 构造时就用 `ModelCatalog::model()` 校验，typo 在付钱 plan 之前就报错。 |
+| Plan 重试 | brain 第一次响应不可解析时,用更严格的 system-prompt reminder 重试一次。两次的 usage 都计入成本账本。 |
+
+### REPL 集成
+
+在 `superagent` 交互模式里，`/smart <task>` 用全部默认参数内联跑同样的编排 —— 没有 flag、没有 run-log 打印,只输出合并后的 final 字符串加一行 `brain · subtasks · cost` 的尾巴。
+
+### Run-log 形状
+
+```json
+{
+  "task": "...",
+  "brain": "claude-opus-4-7",
+  "plan": {
+    "complexity": "complex",
+    "primary_dim": "coding",
+    "concurrency": "parallel",
+    "subtasks": [
+      {"id": "1", "prompt": "...", "difficulty": "hard", "dim": "coding"}
+    ]
+  },
+  "subtask_results": [
+    {"id": "1", "model": "claude-opus-4-7", "output": "...", "latency_ms": 1840, "cost_usd": 0.0123}
+  ],
+  "final": "...",
+  "total_cost_usd": 0.0289,
+  "total_latency_ms": 2450,
+  "ran_at": "2026-05-12T10:00:00+00:00",
+  "plan_raw": "..."   // brain 的原始响应 —— 用来 debug plan 解析降级很有用
+}
+```
+
+### 什么时候用 `smart` 合适
+
+- **多方面任务**，不同部分受益于不同专长 —— 比如「写这条 SQL migration 同时也写回滚说明」：一个是 `coding`，一个是 `instruction_following`。
+- **你已经跑过 `superagent eval run`** 并且 `model_scores.json` 有数据。没有分数,每个子任务都路由到 brain，`smart` 退化成「问 brain N 次」—— 一般不值得。
+- **你需要一份 JSON 记录**，知道哪个模型处理了哪部分,带成本/延迟，给成本归因 dashboard 或下游 replay 用。
+
+### 什么时候不用
+
+- 普通问答或单领域任务 —— `superagent "<task>"` 更快更便宜。
+- 你需要工具调用（文件编辑、MCP、bash）—— `smart` 子任务是无工具的一次性调用。用普通 Agent loop 或 `swarm`。
+- 深度迭代型工作，每一步的输出都改变下一步的 plan —— brain 只在开头 plan 一次。
 
