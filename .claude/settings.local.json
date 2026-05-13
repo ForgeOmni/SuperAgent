@@ -197,7 +197,9 @@
       "Bash(./vendor/bin/phpunit tests/Unit/Evals/SmartOrchestratorTest.php tests/Unit/CLI/SmartCommandTest.php)",
       "Bash(git merge *)",
       "Bash(git check-ignore *)",
-      "Bash(findstr /i claude)"
+      "Bash(findstr /i claude)",
+      "Bash(git ls-remote *)",
+      "Bash(git tag *)"
     ]
   }
 }
