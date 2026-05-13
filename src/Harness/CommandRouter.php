@@ -220,6 +220,27 @@ class CommandRouter
         $this->register('quit', 'Exit the session', function (string $args, array $ctx): string {
             return '__QUIT__';
         });
+
+        $this->register('smart', 'Run an eval-score-driven smart task (plan+route+merge)', function (string $args, array $ctx): string {
+            $task = trim($args);
+            if ($task === '') {
+                return "Usage: /smart <task>\nReads ~/.superagent/model_scores.json to pick a brain model, plan + route subtasks, and merge.";
+            }
+            try {
+                $catalog = \SuperAgent\Evals\ScoreCatalog::default();
+                $orchestrator = new \SuperAgent\Evals\SmartOrchestrator(catalog: $catalog);
+                $result = $orchestrator->run($task);
+                $cost = sprintf('%.4f', (float) ($result['total_cost_usd'] ?? 0.0));
+                $brain = (string) ($result['brain'] ?? '?');
+                $count = is_array($result['subtask_results'] ?? null) ? count($result['subtask_results']) : 0;
+                $final = (string) ($result['final'] ?? '');
+                return $final . "\n\n— smart: brain={$brain} · subtasks={$count} · cost=\${$cost}";
+            } catch (\SuperAgent\Exceptions\BudgetExceededException $e) {
+                return sprintf('Smart run aborted — budget cap of $%.4f exceeded (spent $%.4f).', $e->budget, $e->spent);
+            } catch (\Throwable $e) {
+                return 'Smart run failed: ' . $e->getMessage();
+            }
+        });
     }
 
     /**

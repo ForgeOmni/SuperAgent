@@ -1129,6 +1129,11 @@ superagent mcp list / add / remove / sync / auth / reset-auth / test / status / 
 superagent skills install / list / show / remove / path
 superagent swarm <prompt>                   # plan + execute a swarm
 superagent health [--all] [--json] [--providers=a,b,c]   # provider reachability
+superagent eval [list|show|run]             # capability evals → ~/.superagent/model_scores.json
+superagent smart "<task>"                   # eval-score-driven plan + route + merge
+superagent smart "<task>" --max-cost 0.5    # abort if running spend exceeds the cap
+superagent smart show [<id|--last>]         # list / inspect persisted runs
+superagent smart replay <id|--last>         # re-execute a saved plan with new routing knobs
 ```
 
 **Options:**
@@ -1157,6 +1162,7 @@ superagent health [--all] [--json] [--providers=a,b,c]   # provider reachability
   /cost                    show cost tracking
   /compact                 force context compaction
   /session save|load|list|delete
+  /smart <task>            eval-score-driven plan+route+merge (see `superagent smart`)
   /clear                   clear conversation
   /quit                    exit
 ```

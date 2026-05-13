@@ -116,6 +116,10 @@
 - [70. Sélecteur `/model` Interactif & Commandes Slash](#70-sélecteur-model-interactif--commandes-slash)
 - [71. Intégrer le Harness CLI dans votre application](#71-intégrer-le-harness-cli-dans-votre-application)
 
+### Orchestration pilotée par scores d'éval (v0.9.9)
+
+- [59. `superagent smart` — orchestration pilotée par scores d'éval](#59-superagent-smart--orchestration-pilotée-par-scores-déval)
+
 ---
 
 ## 1. Pipeline DSL
@@ -9866,3 +9870,97 @@ Pattern de partage de plugin workspace de codex, simplifié au niveau manifest J
 - **Le cache_hit_rate de `UsageRecorder` est metadata-only.** Les anciennes lignes qui pré-datent le champ sont traitées comme « pas de signal » — la colonne dashboard affiche `—` plutôt que `0%`.
 - **`/v1/usage` est une nouvelle route**, ne shadow rien. La route HTML `usage.index` marche toujours.
 - **`WorkspacePluginRegistry` est purement un registre.** Installer effectivement les plugins passe toujours par l'`PluginInstaller` existant — le registre répond juste « quelles entrées on devrait essayer d'installer ».
+
+---
+
+## 59. `superagent smart` — orchestration pilotée par scores d'éval
+
+> Orchestrateur mono-tâche : un modèle « brain » planifie + découpe la tâche en sous-tâches, chaque sous-tâche est routée vers le modèle qui a le meilleur score sur la dimension de capacité concernée (selon `superagent eval run`), puis les sorties sont fusionnées. Toute la chaîne tient dans un seul process PHP — pas de boucle Agent, pas d'outils.
+
+### Différence avec `AutoMode`
+
+| | `AutoMode` (existant) | `smart` (ici) |
+|---|---|---|
+| Entrée du routage | heuristiques de mots-clés sur le prompt | scores empiriques de `superagent eval run` |
+| Runtime par sous-tâche | sous-Agents complets (boucle d'outils) | un seul appel HTTP one-shot |
+| Concurrence | sous-Agents en arrière-plan | parallélisme OS via `Symfony Process` |
+| Sortie | tour assistant streamé | chaîne finale fusionnée + run-log JSON persisté |
+
+### Pipeline
+
+1. **Choisir le brain.** `--brain <model>` gagne ; sinon le `overall` le plus haut dans `~/.superagent/model_scores.json` ; sinon `superagent.default_model` configuré ; sinon un fallback hardcodé.
+2. **Plan.** Le brain produit un `Plan` JSON décrivant complexité, dim principale, concurrence, et 1–5 sous-tâches taggées `(difficulty: easy|hard, dim)`. Si la réponse ne parse pas, l'orchestrateur retente une fois avec un rappel « JSON only » plus net avant de retomber sur un plan mono-sous-tâche.
+3. **Router chaque sous-tâche.** `hard` → `ScoreCatalog::bestModelFor($dim)` ; `easy` → `ScoreCatalog::cheapestPassingFor($dim, threshold)`. Tous deux retombent sur le brain si le catalogue est vide.
+4. **Exécuter.** `serial` tourne en process et passe les sorties précédentes aux suivantes. `parallel` shell-out un worker `superagent _subtask` par sous-tâche via `Symfony\Component\Process\Process` pour du HTTP réellement concurrent — borné par `--max-parallel` (défaut 4) pour qu'un plan à 50 sous-tâches n'ouvre pas 50 sockets d'un coup.
+5. **Fusion.** Le brain consolide les morceaux ; les tokens streament sur stdout via le callback `onMergeDelta`. Sautée s'il n'y a qu'une seule sous-tâche.
+6. **Persister.** Le run complet (plan, sorties, décisions de routage, coûts, latences) est écrit dans `~/.superagent/smart_runs/<ISO>_<shortid>.json`.
+
+### CLI
+
+```bash
+# Bout-en-bout
+superagent smart "<task>"
+superagent smart "<task>" --brain claude-opus-4-7 --threshold 0.8
+superagent smart "<task>" --max-cost 0.50 --max-parallel 3
+superagent smart "<task>" --dry-run                # plan seul, pas d'exécution
+superagent smart "<task>" --json                   # run complet en JSON sur stdout (événements sur stderr)
+
+# Inspecter les runs persistés
+superagent smart show                              # 20 plus récents
+superagent smart show <id|--last>                  # plan + sorties d'un run
+
+# Rejouer un plan sauvegardé avec d'autres réglages de routage
+superagent smart replay <id|--last> --brain <other-model> --threshold 0.7
+```
+
+Codes de sortie : `0` succès, `2` usage / id introuvable / brain inconnu, `3` plafond budget atteint.
+
+### Garde-fous
+
+| Flag | Effet |
+|---|---|
+| `--max-cost <usd>` | Lève `BudgetExceededException` après planning, après chaque sous-tâche, et pré-merge. Le check intervient *entre* les appels modèle — une requête HTTP en vol ne peut pas être interrompue, la dépense effective peut donc déborder du plafond d'un appel au plus. Les workers parallèles en vol sont stoppés via `Process::stop(0)` et reportés en `subtask_cancelled`. |
+| `--max-parallel <n>` | Plafond fenêtre-glissante sur le fan-out de sous-processus. `0` désactive le plafond (comportement legacy). Défaut `4`. |
+| `--brain <model>` | Validé contre `ModelCatalog::model()` au moment de la construction — une typo échoue avant qu'on paie pour le planning. |
+| Retry du plan | Si la première réponse du brain ne donne pas un plan parsable, l'orchestrateur retente une fois avec un rappel system-prompt plus strict. L'usage des deux appels est sommé dans le journal des coûts. |
+
+### Intégration REPL
+
+Dans le mode interactif `superagent`, `/smart <task>` lance la même orchestration en ligne avec tous les défauts — pas de flags, pas d'impression du run-log, juste la chaîne finale fusionnée plus un pied de page d'une ligne `brain · subtasks · cost`.
+
+### Forme du run-log
+
+```json
+{
+  "task": "...",
+  "brain": "claude-opus-4-7",
+  "plan": {
+    "complexity": "complex",
+    "primary_dim": "coding",
+    "concurrency": "parallel",
+    "subtasks": [
+      {"id": "1", "prompt": "...", "difficulty": "hard", "dim": "coding"}
+    ]
+  },
+  "subtask_results": [
+    {"id": "1", "model": "claude-opus-4-7", "output": "...", "latency_ms": 1840, "cost_usd": 0.0123}
+  ],
+  "final": "...",
+  "total_cost_usd": 0.0289,
+  "total_latency_ms": 2450,
+  "ran_at": "2026-05-12T10:00:00+00:00",
+  "plan_raw": "..."   // réponse brute du brain — utile pour debug les fallbacks de parsing
+}
+```
+
+### Quand `smart` a du sens
+
+- **Tâches multi-aspects** où différentes parties bénéficient de spécialistes différents — ex. « rédige cette migration SQL ET écris la note de rollback » : l'une est `coding`, l'autre `instruction_following`.
+- **Vous avez déjà fait `superagent eval run`** et possédez un `model_scores.json` rempli. Sans scores, toutes les sous-tâches sont routées vers le brain et `smart` dégénère en « pose la question N fois au brain » — rarement utile.
+- **Vous voulez un enregistrement JSON** de quel modèle a traité quoi, avec coûts/latences, pour dashboards d'attribution de coûts ou replay downstream.
+
+### Quand l'éviter
+
+- Q&A simple ou tâches mono-domaine — `superagent "<task>"` est plus rapide et moins cher.
+- Vous avez besoin de tool use (édition de fichiers, MCP, bash) — les sous-tâches `smart` sont des appels one-shot sans outils. Utilisez la boucle Agent normale ou `swarm`.
+- Travail profondément itératif où la sortie de chaque étape redéfinit le plan suivant — le brain ne planifie qu'une seule fois au démarrage.

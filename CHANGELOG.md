@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-05-12
+
+### 💻 Summary
+
+**Eval-score-driven orchestration becomes a first-class CLI subcommand.** The
+0.9.9 cycle hardens `superagent smart` from a thin core into a production-shaped
+tool: cost cap, parallel cap, brain validation, plan-JSON retry, streaming
+merge, persisted-run inspection (`smart show <id>`) and replay (`smart replay
+<id>` for A/B'ing routing knobs against the same plan), `--json` mode that
+keeps stdout clean for piping, and a `/smart` REPL slash command. Plus 37 new
+unit tests, a fully fleshed-out §59 in `docs/ADVANCED_USAGE.md`, and parity
+entries in the CN/FR docs.
+
+### `superagent smart` — eval-score-driven orchestration
+
+The early-0.9.9 introduction of `superagent smart` shipped the core pipeline
+(brain → plan → route by score → merge with real OS-level subprocess
+parallelism). This drop fills in the operational rough edges:
+
+- **Cost guardrail** (`--max-cost <usd>`): aborts the run with
+  `BudgetExceededException` if the running total crosses the cap. Fires after
+  planning, after each subtask, and pre-merge. Parallel workers in flight are
+  stopped via `Process::stop(0)` and reported as `subtask_cancelled`.
+- **Parallel cap** (`--max-parallel <n>`, default `4`): sliding-window
+  fan-out — at most `n` `_subtask` workers alive at once. Replaces the previous
+  "start them all and wait" code path that could open N sockets for an N-subtask
+  plan. `0` disables the cap.
+- **Brain validation**: `--brain` is checked against `ModelCatalog::model()`
+  at construction time so a typo fails loudly before paying for planning.
+- **Plan-JSON retry**: if the brain's first response doesn't parse into a valid
+  plan, the orchestrator retries once with a sharper "JSON only" reminder
+  before falling back to a single-subtask plan. Both attempts' usage is
+  combined in the cost ledger via a new `mergeUsage()` helper.
+- **Streaming merge**: optional `onMergeDelta` callback streams the merge
+  response token-by-token. The CLI uses it to print the final answer
+  incrementally instead of leaving the user staring at a silent terminal.
+- **`smart show <id|--last>`**: prints a single run's summary (plan, subtasks,
+  cost, latency, truncated outputs) instead of just listing filenames.
+- **`smart replay <id|--last>` [--brain X] [--threshold N] [--max-cost N]**:
+  re-executes a persisted plan without re-asking the brain. Useful for A/B
+  comparing routing knobs against the same plan without paying for planning.
+- **`--json` cleanliness**: in JSON mode, all human-facing event chatter goes
+  to stderr; stdout is reserved for the final JSON envelope so `superagent
+  smart "..." --json | jq` works.
+- **`/smart <task>` REPL slash command**: runs the orchestrator inline in
+  interactive mode with all defaults; appends a one-line `brain · subtasks ·
+  cost` footer.
+- **Docs**: new §59 in `docs/ADVANCED_USAGE.md` covers pipeline, CLI,
+  guardrails, run-log shape, REPL integration, and the `smart` vs `AutoMode`
+  decision matrix.
+- **Tests**: 19 unit tests for `SmartOrchestrator` (parsing, routing, brain
+  validation, budget assertion, usage merging, end-to-end via a `FakeProvider`)
+  and 18 for `SmartCommand` (argv routing, flag clamping, `show`/`replay` exit
+  codes, run-log discovery). `final` was lifted from `SmartOrchestrator` and
+  `buildProvider()` was made `protected` to enable in-process provider stubs.
+
 ## [0.9.8] - 2026-05-04
 
 ### 💻 Summary

@@ -7,6 +7,7 @@ namespace SuperAgent\Evals;
 use SuperAgent\Config\ConfigRepository;
 use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\CostCalculator;
+use SuperAgent\Exceptions\BudgetExceededException;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\Usage;
 use SuperAgent\Messages\UserMessage;
@@ -58,24 +59,54 @@ use Symfony\Component\Process\Process;
  *   subtasks: list<array{id:string, prompt:string, difficulty:string, dim:string}>
  * }
  */
-final class SmartOrchestrator
+class SmartOrchestrator
 {
     public const DEFAULT_EASY_THRESHOLD = 0.6;
+    public const DEFAULT_MAX_PARALLEL = 4;
 
     private const KNOWN_DIMS = ['coding', 'reasoning', 'json_mode', 'instruction_following'];
 
     /** @var callable(array<string, mixed>): void|null */
     private $onEvent;
 
+    /** @var callable(string): void|null */
+    private $onMergeDelta;
+
+    /**
+     * @param ?float $maxCostUsd  Abort the run when running total cost reaches this ceiling.
+     *                            Null = uncapped (legacy behavior). The check fires after the
+     *                            plan + each subtask + the merge — it cannot interrupt an
+     *                            in-flight HTTP call, so the effective spend can briefly exceed
+     *                            the cap by at most one model call.
+     * @param int  $maxParallel   Subprocess fan-out ceiling for parallel mode. The orchestrator
+     *                            keeps at most `maxParallel` workers alive at once; remaining
+     *                            subtasks are queued and started as siblings finish. Set to 0
+     *                            for unlimited (matches the pre-guardrail behavior).
+     */
     public function __construct(
         private ScoreCatalog $catalog,
         private ?string $brainOverride = null,
         private float $easyThreshold = self::DEFAULT_EASY_THRESHOLD,
         ?callable $onEvent = null,
         private ?string $runLogDir = null,
+        private ?float $maxCostUsd = null,
+        private int $maxParallel = self::DEFAULT_MAX_PARALLEL,
+        ?callable $onMergeDelta = null,
     ) {
         $this->onEvent = $onEvent;
+        $this->onMergeDelta = $onMergeDelta;
         $this->runLogDir ??= self::defaultRunLogDir();
+
+        // Validate the brain override eagerly — a typo'd model name should fail at
+        // construction time, not after we've already paid for planning.
+        if ($this->brainOverride !== null && $this->brainOverride !== '') {
+            if (ModelCatalog::model($this->brainOverride) === null) {
+                throw new \InvalidArgumentException(
+                    "Brain model '{$this->brainOverride}' is not in the catalog. "
+                    . "Run `superagent models list` to see available ids."
+                );
+            }
+        }
     }
 
     public static function defaultRunLogDir(): string
@@ -135,15 +166,16 @@ final class SmartOrchestrator
 
         $totalCost = $this->costOf($brain, $planUsage);
         $startedAll = microtime(true);
+        $this->assertBudget($totalCost, 'planning');
 
         if (
             $plan['concurrency'] === 'parallel'
             && count($plan['subtasks']) > 1
             && self::canSpawnSubprocesses()
         ) {
-            $subtaskResults = $this->executeParallel($task, $plan, $brain);
+            $subtaskResults = $this->executeParallel($task, $plan, $brain, $totalCost);
         } else {
-            $subtaskResults = $this->executeSerial($task, $plan, $brain);
+            $subtaskResults = $this->executeSerial($task, $plan, $brain, $totalCost);
         }
         foreach ($subtaskResults as $r) {
             $totalCost += (float) ($r['cost_usd'] ?? 0.0);
@@ -154,6 +186,7 @@ final class SmartOrchestrator
             $final = $subtaskResults[0]['output'];
             $this->emit(['type' => 'merge_skipped', 'reason' => 'single subtask']);
         } else {
+            $this->assertBudget($totalCost, 'pre-merge');
             $this->emit(['type' => 'merging_started']);
             [$final, $mergeUsage] = $this->merge($brainProvider, $task, $plan, $subtaskResults);
             $totalCost += $this->costOf($brain, $mergeUsage);
@@ -190,9 +223,83 @@ final class SmartOrchestrator
         return $plan;
     }
 
+    /**
+     * Re-execute a previously persisted plan without re-asking the brain.
+     *
+     * Useful for A/B routing experiments — change `$brainOverride` or
+     * `$easyThreshold` between runs and replay the same plan to compare
+     * outputs without paying for planning again. Returns the same shape as
+     * `run()`.
+     *
+     * @param Plan $plan
+     * @return array{
+     *   final: string,
+     *   plan: Plan,
+     *   brain: string,
+     *   subtask_results: list<array<string, mixed>>,
+     *   total_cost_usd: float,
+     *   total_latency_ms: int,
+     *   run_log_path: ?string
+     * }
+     */
+    public function replayFromPlan(string $task, array $plan): array
+    {
+        $brain = $this->pickBrain();
+        $this->emit(['type' => 'brain_picked', 'model' => $brain]);
+        $this->emit(['type' => 'plan_replayed', 'plan' => $plan]);
+
+        $brainProvider = $this->buildProvider($brain);
+        $totalCost = 0.0;
+        $startedAll = microtime(true);
+
+        if (
+            $plan['concurrency'] === 'parallel'
+            && count($plan['subtasks']) > 1
+            && self::canSpawnSubprocesses()
+        ) {
+            $subtaskResults = $this->executeParallel($task, $plan, $brain, $totalCost);
+        } else {
+            $subtaskResults = $this->executeSerial($task, $plan, $brain, $totalCost);
+        }
+        foreach ($subtaskResults as $r) {
+            $totalCost += (float) ($r['cost_usd'] ?? 0.0);
+        }
+
+        if (count($subtaskResults) === 1) {
+            $final = $subtaskResults[0]['output'];
+            $this->emit(['type' => 'merge_skipped', 'reason' => 'single subtask']);
+        } else {
+            $this->assertBudget($totalCost, 'pre-merge');
+            $this->emit(['type' => 'merging_started']);
+            [$final, $mergeUsage] = $this->merge($brainProvider, $task, $plan, $subtaskResults);
+            $totalCost += $this->costOf($brain, $mergeUsage);
+        }
+
+        $totalLatency = (int) round((microtime(true) - $startedAll) * 1000);
+        $result = [
+            'final'             => $final,
+            'plan'              => $plan,
+            'brain'             => $brain,
+            'subtask_results'   => $subtaskResults,
+            'total_cost_usd'    => round($totalCost, 6),
+            'total_latency_ms'  => $totalLatency,
+            'run_log_path'      => null,
+        ];
+        $logPath = $this->persistRun($task, $result, ['plan_raw' => '(replayed)']);
+        $result['run_log_path'] = $logPath;
+        $this->emit(['type' => 'run_persisted', 'path' => $logPath]);
+        return $result;
+    }
+
     // --- Internals ------------------------------------------------------
 
     /**
+     * Ask the brain for a plan. We try once at the model's default temperature,
+     * and — if the result doesn't parse into a valid Plan — retry once with a
+     * sharper "JSON only, no prose" reminder before falling back to a single-
+     * subtask plan. The retry has caught real cases where the brain prepends a
+     * sentence of preamble despite the system prompt's instructions.
+     *
      * @return array{0: Plan, 1: string, 2: ?Usage}
      */
     private function plan(LLMProvider $brain, string $task): array
@@ -200,6 +307,33 @@ final class SmartOrchestrator
         $system = $this->plannerSystemPrompt();
         $user = $this->plannerUserPrompt($task);
 
+        [$rawFirst, $usageFirst] = $this->callPlanner($brain, $system, $user);
+        $plan = $this->tryParsePlan($rawFirst);
+        if ($plan !== null) {
+            return [$plan, $rawFirst, $usageFirst];
+        }
+
+        $this->emit(['type' => 'plan_retry', 'reason' => 'first response did not parse']);
+        [$rawSecond, $usageSecond] = $this->callPlanner(
+            $brain,
+            $system . "\n\nREMINDER: Reply with ONLY the JSON object — no preamble, no markdown fences, no trailing commentary.",
+            $user,
+        );
+        $plan = $this->tryParsePlan($rawSecond);
+        if ($plan !== null) {
+            // Combine usage across both attempts so the cost ledger is honest.
+            return [$plan, $rawSecond, $this->mergeUsage($usageFirst, $usageSecond)];
+        }
+
+        // Last resort — a single-subtask plan so the run still completes.
+        return [$this->fallbackPlan($task), $rawSecond, $this->mergeUsage($usageFirst, $usageSecond)];
+    }
+
+    /**
+     * @return array{0: string, 1: ?Usage}
+     */
+    private function callPlanner(LLMProvider $brain, string $system, string $user): array
+    {
         $messages = [new UserMessage($user)];
         $final = null;
         foreach ($brain->chat($messages, [], $system, ['max_tokens' => 1500]) as $chunk) {
@@ -207,9 +341,57 @@ final class SmartOrchestrator
                 $final = $chunk;
             }
         }
-        $raw = $final?->text() ?? '';
-        $plan = $this->parsePlan($raw, $task);
-        return [$plan, $raw, $final?->usage];
+        return [$final?->text() ?? '', $final?->usage];
+    }
+
+    /**
+     * Strict parse: returns null when the input fails the Plan schema. Use
+     * this in places where we want to *decide* whether to retry — unlike
+     * `parsePlan()` which always returns a Plan by silently substituting a
+     * fallback.
+     *
+     * @return Plan|null
+     */
+    private function tryParsePlan(string $raw): ?array
+    {
+        $decoded = json_decode(trim($raw), true);
+        if (! is_array($decoded) && preg_match('/(\{.*\})/s', $raw, $m)) {
+            $decoded = json_decode($m[1], true);
+        }
+        if (! is_array($decoded)) {
+            return null;
+        }
+        $rawSubs = is_array($decoded['subtasks'] ?? null) ? $decoded['subtasks'] : [];
+        $hasValidSubtask = false;
+        foreach ($rawSubs as $st) {
+            if (is_array($st) && trim((string) ($st['prompt'] ?? '')) !== '') {
+                $hasValidSubtask = true;
+                break;
+            }
+        }
+        if (! $hasValidSubtask) {
+            return null;
+        }
+        // Delegate normalisation to the legacy parser, now that we know it'll succeed.
+        return $this->parsePlan($raw, '');
+    }
+
+    private function mergeUsage(?Usage $a, ?Usage $b): ?Usage
+    {
+        if ($a === null) {
+            return $b;
+        }
+        if ($b === null) {
+            return $a;
+        }
+        $cacheCreate = ($a->cacheCreationInputTokens ?? 0) + ($b->cacheCreationInputTokens ?? 0);
+        $cacheRead = ($a->cacheReadInputTokens ?? 0) + ($b->cacheReadInputTokens ?? 0);
+        return new Usage(
+            $a->inputTokens + $b->inputTokens,
+            $a->outputTokens + $b->outputTokens,
+            $cacheCreate > 0 ? $cacheCreate : null,
+            $cacheRead > 0 ? $cacheRead : null,
+        );
     }
 
     private function plannerSystemPrompt(): string
@@ -326,10 +508,15 @@ TXT;
      * Sequential in-process execution. Each subtask sees prior outputs as
      * context — this is what `concurrency=serial` semantically means.
      *
+     * `$runningCost` is the cost accrued *before* this method runs (planning,
+     * usually). We add each subtask's cost into it and let `assertBudget()`
+     * tear the run down with a `BudgetExceededException` if the cap is hit —
+     * caller catches that and surfaces a partial-results error.
+     *
      * @param Plan $plan
      * @return list<array<string, mixed>>
      */
-    private function executeSerial(string $task, array $plan, string $brain): array
+    private function executeSerial(string $task, array $plan, string $brain, float $runningCost): array
     {
         $results = [];
         $priorOutputs = [];
@@ -359,6 +546,9 @@ TXT;
             ];
             $priorOutputs[] = ['id' => $st['id'], 'output' => $output];
             $this->emit(['type' => 'subtask_done', 'id' => $st['id'], 'latency_ms' => $latency, 'cost_usd' => $cost]);
+
+            $runningCost += $cost;
+            $this->assertBudget($runningCost, "subtask {$st['id']}");
         }
         return $results;
     }
@@ -367,11 +557,11 @@ TXT;
      * Real OS-level concurrent execution.
      *
      * Each subtask becomes a `superagent _subtask` subprocess fed via stdin.
-     * We `start()` all of them, then poll until every Process reports
-     * isTerminated(). That gives genuine parallel HTTP — N curl streams run
-     * concurrently, not serially. Wall-clock latency on N subtasks of equal
-     * duration drops from ~N×t to ~max(t) plus a small (~150ms) PHP boot
-     * cost per worker.
+     * Subtasks are dispatched through a sliding window of size `$maxParallel`
+     * — we start up to that many workers immediately, then start a new one
+     * each time an existing one finishes. This gives bounded fan-out: 50
+     * subtasks with maxParallel=4 won't hammer the provider with 50 concurrent
+     * curls. Setting `$maxParallel` to 0 disables the cap (legacy behavior).
      *
      * Parallel subprocesses don't see each other's outputs — only the
      * original task — matching the documented semantics of
@@ -380,108 +570,134 @@ TXT;
      * @param Plan $plan
      * @return list<array<string, mixed>>
      */
-    private function executeParallel(string $task, array $plan, string $brain): array
+    private function executeParallel(string $task, array $plan, string $brain, float $runningCost): array
     {
         $bin = self::findBinEntry();
         $php = self::findPhpBinary();
         if ($bin === null || $php === null) {
             $this->emit(['type' => 'parallel_fallback', 'reason' => 'bin/superagent or php binary not found']);
-            return $this->executeSerial($task, $plan, $brain);
+            return $this->executeSerial($task, $plan, $brain, $runningCost);
         }
 
-        $processes = [];
-        $modelByStId = [];
-        $promptByStId = [];
+        // Pre-route every subtask up front so we don't recompute on each batch.
         $stByStId = [];
+        $modelByStId = [];
         foreach ($plan['subtasks'] as $st) {
             $modelId = $this->routeSubtask($st, $brain);
-            $modelByStId[$st['id']] = $modelId;
             $stByStId[$st['id']] = $st;
+            $modelByStId[$st['id']] = $modelId;
             $this->emit([
                 'type' => 'subtask_routed', 'id' => $st['id'], 'model' => $modelId,
                 'difficulty' => $st['difficulty'], 'dim' => $st['dim'],
             ]);
+        }
 
-            // In parallel mode subtasks are independent — only the original task is in scope.
+        $queue = array_map(fn ($st) => $st['id'], $plan['subtasks']);
+        $cap = $this->maxParallel > 0 ? $this->maxParallel : PHP_INT_MAX;
+        $results = [];
+        /** @var array<string, array{process: Process, started: float}> */
+        $running = [];
+
+        $startOne = function (string $stId) use (&$running, $php, $bin, $stByStId, $modelByStId, $task): void {
+            $st = $stByStId[$stId];
+            $modelId = $modelByStId[$stId];
             $stPrompt = $this->renderSubtaskPrompt($st, $task, []);
-            $promptByStId[$st['id']] = $stPrompt;
-
             $payload = json_encode([
-                'model'  => $modelId,
-                'prompt' => $stPrompt,
-                'system' => null,
-                'max_tokens' => 4000,
+                'model' => $modelId, 'prompt' => $stPrompt, 'system' => null, 'max_tokens' => 4000,
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             if ($payload === false) {
-                $this->emit(['type' => 'subtask_error', 'id' => $st['id'], 'error' => 'failed to encode subtask payload']);
+                $this->emit(['type' => 'subtask_error', 'id' => $stId, 'error' => 'failed to encode subtask payload']);
+                return;
+            }
+            $process = new Process([$php, $bin, '_subtask']);
+            $process->setInput($payload);
+            $process->setTimeout(null);
+            $process->start();
+            $running[$stId] = ['process' => $process, 'started' => microtime(true)];
+        };
+
+        // Prime the window.
+        while (! empty($queue) && count($running) < $cap) {
+            $startOne(array_shift($queue));
+        }
+        $this->emit(['type' => 'parallel_started', 'count' => count($running), 'cap' => $this->maxParallel]);
+
+        while (! empty($running)) {
+            // Poll all running processes for completion. usleep avoids burning CPU
+            // — 50ms is a good balance between latency and load.
+            $finishedStId = null;
+            foreach ($running as $stId => $bundle) {
+                if ($bundle['process']->isTerminated()) {
+                    $finishedStId = $stId;
+                    break;
+                }
+            }
+            if ($finishedStId === null) {
+                usleep(50_000);
                 continue;
             }
 
-            $process = new Process([$php, $bin, '_subtask']);
-            $process->setInput($payload);
-            // No idle timeout — model calls can be long.
-            $process->setTimeout(null);
-            $process->start();
-            $processes[$st['id']] = ['process' => $process, 'started' => microtime(true)];
-        }
-
-        $this->emit(['type' => 'parallel_started', 'count' => count($processes)]);
-
-        // Block until every subprocess finishes. `wait()` is per-process but the
-        // sibling processes keep running in the meantime — total wall-clock is
-        // bounded by the slowest subprocess, not the sum.
-        $results = [];
-        foreach ($processes as $stId => $bundle) {
-            /** @var Process $proc */
+            $bundle = $running[$finishedStId];
+            unset($running[$finishedStId]);
             $proc = $bundle['process'];
-            try {
-                $proc->wait();
-            } catch (\Throwable $e) {
-                // Surface as a failed subtask rather than crash the whole run.
-            }
             $latency = (int) round((microtime(true) - $bundle['started']) * 1000);
             $stdout = $proc->getOutput();
             $stderr = $proc->getErrorOutput();
-            $st = $stByStId[$stId];
-            $modelId = $modelByStId[$stId];
+            $st = $stByStId[$finishedStId];
+            $modelId = $modelByStId[$finishedStId];
 
             $decoded = json_decode(trim($stdout), true);
             if (! is_array($decoded) || ! ($decoded['ok'] ?? false)) {
-                $err = is_array($decoded) ? (string) ($decoded['error'] ?? 'subprocess returned non-ok envelope') : ('subprocess output unparseable; stderr: ' . trim($stderr));
-                $results[] = [
-                    'id' => $stId, 'prompt' => $st['prompt'], 'difficulty' => $st['difficulty'],
+                $err = is_array($decoded)
+                    ? (string) ($decoded['error'] ?? 'subprocess returned non-ok envelope')
+                    : ('subprocess output unparseable; stderr: ' . trim($stderr));
+                $results[$finishedStId] = [
+                    'id' => $finishedStId, 'prompt' => $st['prompt'], 'difficulty' => $st['difficulty'],
                     'dim' => $st['dim'], 'model' => $modelId,
                     'output' => '[subtask failed: ' . $err . ']',
                     'latency_ms' => $latency, 'cost_usd' => 0.0,
                 ];
-                $this->emit(['type' => 'subtask_error', 'id' => $stId, 'error' => $err]);
-                continue;
+                $this->emit(['type' => 'subtask_error', 'id' => $finishedStId, 'error' => $err]);
+            } else {
+                $cost = (float) ($decoded['cost_usd'] ?? 0.0);
+                $results[$finishedStId] = [
+                    'id' => $finishedStId, 'prompt' => $st['prompt'], 'difficulty' => $st['difficulty'],
+                    'dim' => $st['dim'], 'model' => $modelId,
+                    'output' => (string) ($decoded['output'] ?? ''),
+                    'latency_ms' => (int) ($decoded['latency_ms'] ?? $latency),
+                    'cost_usd' => $cost,
+                ];
+                $this->emit([
+                    'type' => 'subtask_done', 'id' => $finishedStId,
+                    'latency_ms' => (int) ($decoded['latency_ms'] ?? $latency),
+                    'cost_usd' => $cost,
+                ]);
+                $runningCost += $cost;
             }
 
-            $results[] = [
-                'id' => $stId, 'prompt' => $st['prompt'], 'difficulty' => $st['difficulty'],
-                'dim' => $st['dim'], 'model' => $modelId,
-                'output' => (string) ($decoded['output'] ?? ''),
-                'latency_ms' => (int) ($decoded['latency_ms'] ?? $latency),
-                'cost_usd' => (float) ($decoded['cost_usd'] ?? 0.0),
-            ];
-            $this->emit([
-                'type' => 'subtask_done', 'id' => $stId,
-                'latency_ms' => (int) ($decoded['latency_ms'] ?? $latency),
-                'cost_usd' => (float) ($decoded['cost_usd'] ?? 0.0),
-            ]);
+            // Budget check: if we've blown the cap, kill the rest and bail with a
+            // partial-results error. The caller surfaces this as a normal failure.
+            try {
+                $this->assertBudget($runningCost, "subtask {$finishedStId}");
+            } catch (BudgetExceededException $e) {
+                foreach ($running as $remStId => $remBundle) {
+                    try { $remBundle['process']->stop(0); } catch (\Throwable) {}
+                    $this->emit(['type' => 'subtask_cancelled', 'id' => $remStId, 'reason' => 'budget exceeded']);
+                }
+                throw $e;
+            }
+
+            // Slide the window forward.
+            if (! empty($queue)) {
+                $startOne(array_shift($queue));
+            }
         }
 
-        // Restore the plan's subtask order in the result list — `wait()` doesn't
-        // preserve insertion order if processes finish out-of-order via array iteration.
-        $byId = [];
-        foreach ($results as $r) {
-            $byId[$r['id']] = $r;
-        }
+        // Restore the plan's subtask order — finishes come in arbitrary order.
         $ordered = [];
         foreach ($plan['subtasks'] as $st) {
-            if (isset($byId[$st['id']])) {
-                $ordered[] = $byId[$st['id']];
+            if (isset($results[$st['id']])) {
+                $ordered[] = $results[$st['id']];
             }
         }
         return $ordered;
@@ -593,12 +809,41 @@ TXT;
 
         $messages = [new UserMessage(implode("\n\n", $parts))];
         $final = null;
+        $lastEmitted = '';
         foreach ($brain->chat($messages, [], $system, ['max_tokens' => 4000]) as $chunk) {
             if ($chunk instanceof AssistantMessage) {
                 $final = $chunk;
+                // Emit only the delta since the previous chunk so callers can
+                // render a streaming view. Providers yield cumulative messages,
+                // so we diff against the last emitted prefix.
+                if ($this->onMergeDelta !== null) {
+                    $full = $chunk->text();
+                    if (str_starts_with($full, $lastEmitted) && strlen($full) > strlen($lastEmitted)) {
+                        $delta = substr($full, strlen($lastEmitted));
+                        ($this->onMergeDelta)($delta);
+                        $lastEmitted = $full;
+                    }
+                }
             }
         }
         return [$final?->text() ?? '', $final?->usage];
+    }
+
+    /**
+     * @throws BudgetExceededException when `$maxCostUsd` is set and `$spent` is over it.
+     */
+    private function assertBudget(float $spent, string $stage): void
+    {
+        if ($this->maxCostUsd === null) {
+            return;
+        }
+        if ($spent > $this->maxCostUsd) {
+            $this->emit([
+                'type' => 'budget_exceeded', 'stage' => $stage,
+                'spent_usd' => round($spent, 6), 'cap_usd' => $this->maxCostUsd,
+            ]);
+            throw new BudgetExceededException($spent, $this->maxCostUsd);
+        }
     }
 
     /**
@@ -616,7 +861,7 @@ TXT;
         return [$final?->text() ?? '', $final?->usage];
     }
 
-    private function buildProvider(string $modelId): LLMProvider
+    protected function buildProvider(string $modelId): LLMProvider
     {
         $entry = ModelCatalog::model($modelId);
         $provider = is_array($entry) ? (string) ($entry['provider'] ?? '') : '';

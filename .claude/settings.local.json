@@ -188,7 +188,13 @@
       "Bash(./vendor/bin/phpunit tests/Unit/WorkspacePluginRegistryTest.php)",
       "Bash(./vendor/bin/phpunit tests/Unit/SuperAgentBackendTest.php)",
       "Bash(./vendor/bin/phpunit tests/Unit/UsageRecorderCacheHitRateTest.php tests/Unit/ApprovalGateTest.php tests/Unit/WorkspacePluginRegistryTest.php)",
-      "Bash(./vendor/bin/phpunit tests/Unit/Providers/DeepSeekProviderTest.php tests/Unit/Context/Strategies/CacheAwareCompressorTest.php tests/Unit/Routing/AutoModelStrategyTest.php tests/Unit/Security/UntrustedInputTest.php tests/Unit/Goals/GoalManagerTest.php tests/Unit/Swarm/AgentDepthGuardTest.php tests/Unit/Providers/Transport/TokenBucketTest.php tests/Unit/Conversation/ForkTest.php tests/Unit/Memory/AdHocMemoryProviderTest.php)"
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/DeepSeekProviderTest.php tests/Unit/Context/Strategies/CacheAwareCompressorTest.php tests/Unit/Routing/AutoModelStrategyTest.php tests/Unit/Security/UntrustedInputTest.php tests/Unit/Goals/GoalManagerTest.php tests/Unit/Swarm/AgentDepthGuardTest.php tests/Unit/Providers/Transport/TokenBucketTest.php tests/Unit/Conversation/ForkTest.php tests/Unit/Memory/AdHocMemoryProviderTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Evals/SmartOrchestratorTest.php)",
+      "Bash(./vendor/bin/phpunit tests/Unit/CLI/SmartCommandTest.php)",
+      "Bash(ps -o pid,etime,command -p 59082)",
+      "Bash(ps -o pid,etime,command)",
+      "Bash(kill -9 59082 59081)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Evals/SmartOrchestratorTest.php tests/Unit/CLI/SmartCommandTest.php)"
     ]
   }
 }

@@ -410,6 +410,40 @@ Pas de config supplémentaire — le repo shadow est créé à la demande au pre
 
 *Depuis v0.9.0*
 
+### Mode Smart (orchestration par score d'évaluation)
+
+Deux étapes. D'abord, construire un catalogue de scores en évaluant les modèles dont vous avez les clés :
+
+```bash
+# Évalue chaque modèle sur les cas livrés (coding / reasoning / json_mode /
+# instruction_following) et écrit ~/.superagent/model_scores.json.
+superagent eval run
+
+# Inspecter le résultat :
+superagent eval show
+```
+
+Puis lancer une tâche. L'orchestrateur lit ce catalogue pour choisir un modèle « brain » (planning + merge) et route chaque sous-tâche vers le modèle qui a le meilleur score sur la dimension concernée :
+
+```bash
+superagent smart "<task>"                   # bout-en-bout
+superagent smart "<task>" --dry-run         # plan seul, sans exécution
+superagent smart "<task>" --max-cost 0.50   # interrompt si la dépense dépasse le plafond
+superagent smart "<task>" --max-parallel 3  # plafond de sous-processus concurrents (défaut 4)
+superagent smart "<task>" --json | jq       # JSON sur stdout, événements sur stderr
+
+# Inspecter les runs persistés :
+superagent smart show                       # 20 plus récents
+superagent smart show <id|--last>           # plan + sorties de sous-tâches d'un run
+superagent smart replay <id|--last>         # rejoue un plan sauvegardé avec d'autres réglages
+```
+
+REPL : dans le mode interactif `superagent`, `/smart <task>` lance la même orchestration en ligne.
+
+Les run-logs vont dans `~/.superagent/smart_runs/<ISO>_<shortid>.json`. Pipeline complet + référence des flags dans [ADVANCED_USAGE §59](docs/ADVANCED_USAGE.md#59-superagent-smart--eval-score-driven-orchestration).
+
+*Depuis v0.9.9 (sous-commande CLI + garde-fous).*
+
 ---
 
 ## Vérification

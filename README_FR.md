@@ -1096,6 +1096,11 @@ superagent mcp list / add / remove / sync / auth / reset-auth / test / status / 
 superagent skills install / list / show / remove / path
 superagent swarm <prompt>                   # plan + exécution swarm
 superagent health [--all] [--json] [--providers=a,b,c]   # joignabilité providers
+superagent eval [list|show|run]             # évals capacité → ~/.superagent/model_scores.json
+superagent smart "<task>"                   # plan + routage par score + fusion
+superagent smart "<task>" --max-cost 0.5    # interrompt si la dépense dépasse le plafond
+superagent smart show [<id|--last>]         # liste / inspecte les runs persistés
+superagent smart replay <id|--last>         # rejoue un plan sauvegardé avec d'autres réglages
 ```
 
 **Options :**
@@ -1124,6 +1129,7 @@ superagent health [--all] [--json] [--providers=a,b,c]   # joignabilité provide
   /cost                    coût du run
   /compact                 compaction manuelle du contexte
   /session save|load|list|delete
+  /smart <task>            plan+routage+fusion par score (cf. `superagent smart`)
   /clear                   vider la conversation
   /quit                    quitter
 ```

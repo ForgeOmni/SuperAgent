@@ -410,6 +410,40 @@ $mgr->restoreFiles($list[0]);   // 把已跟踪文件回滚到 snapshot
 
 *v0.9.0 起*
 
+### Smart 模式（基于评测分数的编排）
+
+两步走。先在你实际有 key 的模型上跑一轮能力评测，写出分数 catalog：
+
+```bash
+# 在内置评测案例（coding / reasoning / json_mode / instruction_following）
+# 上探测每个模型的强项,写到 ~/.superagent/model_scores.json。
+superagent eval run
+
+# 看一下结果：
+superagent eval show
+```
+
+然后跑任务。Orchestrator 读这份 catalog 来挑「brain」模型做 plan + merge,并把每个子任务路由到该维度上分数最高的模型：
+
+```bash
+superagent smart "<task>"                   # 端到端
+superagent smart "<task>" --dry-run         # 只出 plan，不执行
+superagent smart "<task>" --max-cost 0.50   # 累计花费超过上限就中止
+superagent smart "<task>" --max-parallel 3  # 并发子进程上限（默认 4）
+superagent smart "<task>" --json | jq       # stdout 是 JSON，事件走 stderr
+
+# 查看持久化的运行：
+superagent smart show                       # 最近 20 条
+superagent smart show <id|--last>           # 单次运行的 plan + 子任务输出
+superagent smart replay <id|--last>         # 用新的路由参数重放已保存的 plan
+```
+
+REPL：在 `superagent` 交互模式里 `/smart <task>` 直接内联跑同样的编排。
+
+运行日志写到 `~/.superagent/smart_runs/<ISO>_<shortid>.json`。完整管线和参数见 [ADVANCED_USAGE §59](docs/ADVANCED_USAGE.md#59-superagent-smart--eval-score-driven-orchestration)。
+
+*v0.9.9 起（CLI 子命令 + 护栏）。*
+
 ---
 
 ## 验证
