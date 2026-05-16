@@ -125,6 +125,19 @@ class PipelineConfig
     }
 
     /**
+     * Wrap one already-built definition (composed in PHP, not parsed
+     * from YAML). Used by `Squad\SquadComposer` so the existing
+     * PipelineEngine can run programmatic plans without round-tripping
+     * through YAML serialisation.
+     */
+    public static function fromDefinition(PipelineDefinition $definition): self
+    {
+        $config = new self();
+        $config->pipelines[$definition->name] = $definition;
+        return $config;
+    }
+
+    /**
      * Validate the configuration and return any errors.
      *
      * @return string[]

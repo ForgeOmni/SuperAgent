@@ -9412,3 +9412,328 @@ superagent smart replay <id|--last> --brain <other-model> --threshold 0.7
 - 你需要工具调用（文件编辑、MCP、bash）—— `smart` 子任务是无工具的一次性调用。用普通 Agent loop 或 `swarm`。
 - 深度迭代型工作，每一步的输出都改变下一步的 plan —— brain 只在开头 plan 一次。
 
+---
+
+## 60. Squad 模式 —— 自适应跨模型小队
+
+> 对等协作的多 agent 工作流，**没有主控 agent**。管线定义本身就是编排器；每个步骤都是一个被钉到最适合**它自己**难度档的模型上的对等节点。通过 `superagent auto` 在 `--squad` flag 或 `prefer_squad` 配置开关打开后进入。
+
+### 和 `Coordinator\CoordinatorMode` 的差别
+
+| | `CoordinatorMode`（主从） | `Squad`（对等） |
+|---|---|---|
+| 编排器 | "coordinator" LLM 通过 `Agent` 工具派生 worker | 声明式 `PipelineDefinition` 本身 |
+| 中途干预 | 由 coordinator 决定 —— 没有外部暂停/跳过语义 | HITL 卡点（`ApprovalStep`）内嵌；`SquadResumeManager` 可跳过/重启任意步骤 |
+| 模型分配 | 一个模型负责 coordinator 那一轮；worker 通常共用同一个模型 | 每个子任务通过 `ModelTierMap` 选自己的 (provider, model) —— 默认就跨厂商 |
+| 会话复用 | 每次 spawn 出新 worker，无 cache 连续性 | `squad:{squadId}:role:{roleName}` 稳定，跨 resume 复用，provider 的 prompt-cache 前缀保留 |
+| 成本控制 | coordinator 自行决定 | `maxCostUsd` 硬上限 + 80% 自动降档 |
+
+### 管线
+
+```
+prompt → TaskDecomposer → SubTask[] → SquadComposer → PipelineDefinition
+                                          ↓
+PipelineEngine.run(definition)  ←  PeerOrchestrator 串联：
+                                          • 每个角色的 agentDispatcher
+                                          • SquadConsoleListener 输出事件
+                                          • SquadCheckpointStore 每步落盘
+                                          • 成本降档策略
+                                          • approval 处理器
+```
+
+每个子任务要么变成 `AgentStep`（单模型派发），要么变成 `ParallelStep`（fan-out 组）。标了 `requiresReview` 的子任务后面紧跟一个 `ApprovalStep`。
+
+### 分解规则（`TaskDecomposer`）
+
+纯启发式（不调 LLM），所以规划免费且确定性。识别的信号：
+
+| 信号 | 行为 |
+|---|---|
+| 编号列表 `1. … 2. …` | 每项一个子任务 |
+| 步骤关键词 `then / 然后 / next / 最后 / finally / 另外` | 围绕它们切分 |
+| 并行触发词 `同时 / 并行 / in parallel / concurrently` | 打开并行组；段内再按 `和 / and / 、 / ,` 拆 |
+| 汇总收尾词 `综合 / 汇总 / synthesize / aggregate` | 关闭并行组；下一个顺序子任务依赖 `parallel-gN` |
+| 角色动词 `调研 / research`、`设计 / design / architect`、`敲定 / decide`、`实现 / implement`、`验证 / verify` | 选规范角色 |
+| 审核关键词 `审核 / review / human-in-the-loop / approve before` | 强制 `requires_review = true` |
+
+没有任何信号命中时，整个 prompt 变成单个 `MODERATE` 子任务 —— squad 降级为单 agent pipeline。
+
+### 难度档（`DifficultyClass`）
+
+5 档枚举。阈值与 `SmartContext\TaskComplexity` 对齐，"复杂到值得 DEEP_THINKING" 的 prompt 一定落在 HARD/EXPERT：
+
+| 档 | 分数 | 默认模型 | 自动卡点？ |
+|---|---|---|---|
+| TRIVIAL | `< 0.25` | `anthropic / claude-haiku-4-5-20251001` | 否 |
+| EASY | `0.25–0.45` | `deepseek / deepseek-v4-flash` | 否 |
+| MODERATE | `0.45–0.70` | `anthropic / claude-sonnet-4-6` | 否 |
+| HARD | `0.70–0.85` | `deepseek / deepseek-v4-pro` | **是** |
+| EXPERT | `>= 0.85` | `anthropic / claude-opus-4-7` | **是** |
+
+### `ModelTierMap` —— 跨厂商档位表
+
+```php
+use SuperAgent\Squad\{ModelTierMap, DifficultyClass};
+
+// 默认就是跨厂商（Anthropic + DeepSeek）。
+$map = new ModelTierMap();
+
+// 单档覆盖；其余档位回退到默认。
+$map = $map->with(DifficultyClass::EXPERT, 'openai', 'gpt-5-pro');
+
+// 或者从评测目录里推导（每个维度选分数最高的模型）。
+use SuperAgent\Evals\ScoreCatalog;
+$map = ModelTierMap::fromCatalog(ScoreCatalog::default());
+```
+
+`ModelTierMap::resolve(band)` 在主 provider 没注册时走**回退梯子**：先往便宜的档（向下）走，再往强的档（向上）走，最后是任意已注册条目。这避免了 `deepseek` 没配 key 就让 HARD 子任务挂掉。
+
+### 角色级工具授权
+
+`SquadComposer` 根据角色给 `AgentStep` 设 `allowedTools` 和 `readOnly`：
+
+| 角色 | 工具 | 只读 |
+|---|---|---|
+| `research` | Read, Grep, Glob, WebFetch, WebSearch | 是 |
+| `design` | Read, Grep, Glob | 是 |
+| `decide` | _（无）_ | 是 |
+| `implement` | _（不限）_ | 否 |
+| `verify` | Read, Grep, Glob, Bash | 是 |
+| `execute` | _（不限）_ | 否 |
+
+`decide` 角色故意没工具 —— 它的输出是为了在内嵌的 `ApprovalStep` 给人工审。
+
+### 并行组
+
+```
+同时调研竞品A的认证方案和竞品B的认证方案，综合两份调研结果给出建议
+                          ↓
+SubTask[research-01, parallelGroup=g1, dependsOn=[]]
+SubTask[research-02, parallelGroup=g1, dependsOn=[]]
+SubTask[design-03,   parallelGroup=null, dependsOn=[parallel-g1]]
+                          ↓
+ParallelStep[parallel-g1]
+    └─ AgentStep[research-01]
+    └─ AgentStep[research-02]
+AgentStep[design-03]
+```
+
+两个 `research-*` 并发跑；`design-03` 等外层 `parallel-g1` 完成后接收两份输出。
+
+### 会话复用 + prompt-cache 连续性
+
+```
+squad-id     = "refactor-2026-05"
+role.name    = "design-02"
+session_id   = "squad:refactor-2026-05:role:design-02"   ← 跨 resume 稳定
+```
+
+`AutoModeAgent::runSquad` 里的默认 dispatcher 会把这个 `session_id` 写到 `Context` 元数据，并把角色的 `systemPrompt` 通过 `Agent::setSystemPrompt()` 传过去 —— provider 每次都看到同一个稳定前缀，重跑 `design-02` 按 cache-hit 计费而不是重新喂上下文。
+
+### 成本预算 + 降档策略
+
+```php
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    maxCostUsd: 5.00,
+);
+```
+
+每次 dispatcher 调用可以返回 `['output' => string, 'cost_usd' => float]`。累计花费超过 `0.8 * maxCostUsd` 时，**下一个**步骤自动降一档（EXPERT → HARD，HARD → MODERATE，…）。每次运行只降一次 —— 反复触发不会再降，避免长尾把整个 pipeline 都拉到 TRIVIAL。
+
+### 每步 checkpoint
+
+```php
+$store = new SquadCheckpointStore('/var/lib/superagent/squad');
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    checkpointStore: $store,
+);
+
+$result = $orchestrator->run('refactor-2026-05', $subTasks);
+// 新进程里用同一个 squadId、不传 seed 再 .run() 时，自动从磁盘 rehydrate，跳过已完成步骤。
+```
+
+文件结构（`{checkpoint_dir}/{squadId}.json`）：
+
+```json
+{
+    "squad_id": "refactor-2026-05",
+    "updated_at": "2026-05-16T10:42:13+08:00",
+    "steps": {
+        "research-01": { "output": "…", "status": "completed" },
+        "design-02":   { "output": "…", "status": "completed" }
+    }
+}
+```
+
+### 续跑 + 跳过语义（`SquadResumeManager`）
+
+```php
+$manager = new SquadResumeManager();
+
+// 跳过已经验收过的步骤：
+$seed = $manager->buildPreSeed($subTasks, $priorResult, skipSteps: ['research-01']);
+
+// 从某一步开始重跑 —— 下游自动失效：
+$seed = $manager->buildPreSeed($subTasks, $priorResult, fromStep: 'design-02');
+
+$result = $orchestrator->run($squadId, $subTasks, preSeededStepOutputs: $seed);
+```
+
+`fromStep: 'design-02'` 失效 `design-02` 并 BFS 遍历 DAG，把所有传递依赖于它的步骤一并失效。上游保持缓存。
+
+### LLM 辅助分解（可选）
+
+```php
+$decomposer = (new TaskDecomposer())->withLlmRefiner(
+    function (string $prompt, array $heuristicPlan) {
+        // 调一个便宜模型（比如 Haiku）返回精炼后的 SubTask[]。
+        return $myLlmCall($prompt, $heuristicPlan);
+    },
+    confidenceFloor: 0.5,
+);
+
+$subTasks = $decomposer->decomposeRefined($prompt);
+```
+
+启发式返回一个置信度分（0.2–1.0），仅在低于 `confidenceFloor` 时才跑 refiner。高置信度计划（数字列表、明确步骤词）直接跳过 LLM 调用。
+
+### 实时进度
+
+```php
+use SuperAgent\Squad\PeerOrchestrator;
+use Symfony\Component\Console\Output\ConsoleOutput;
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    output: new ConsoleOutput(ConsoleOutput::VERBOSITY_VERBOSE),
+);
+```
+
+`SquadConsoleListener` 自动挂载并渲染 `pipeline.start / step.start / step.end / step.retry / pipeline.end` 事件：
+
+```
+[squad] starting squad-refactor-2026-05 (4 steps)
+  → research-01 — Agent step 'research-01': run 'research' agent
+  ✓ research-01 [completed, 1820ms]
+  → design-02   — Agent step 'design-02': run 'design' agent
+  ✓ design-02 [completed, 3450ms]
+[squad] done — status=completed (5270ms)
+```
+
+### Human-in-the-Loop 卡点
+
+默认 `requiresReview = true` 是自动通过（适合库和测试）。CLI host 里挂真实的交互式 handler：
+
+```php
+use SuperAgent\Squad\ConsoleApprovalHandler;
+
+$handler = new ConsoleApprovalHandler($input, $output);
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    approvalHandler: $handler,
+);
+```
+
+输出长这样：
+
+```
+══ Human review required ══
+Review the 'topic-decision' step output before continuing. Output:
+… (step 的输出) …
+
+Approve step "topic-decision"? [y/N]
+```
+
+### 什么时候用 squad
+
+- prompt 天然分成 2+ 个阶段（research → design → implement → verify）。
+- 有些阶段明显比其他便宜 —— squad 的跨模型派发最容易拿到这个红利。
+- 你想在关键决策上加人工卡点，又不想用主控 agent 来挡前面。
+- 你预期会续跑 —— 长管线里不想再付前面步骤的钱。
+
+### 什么时候不用
+
+- 单步问答 —— `AutoMode` 单 agent 或裸 `Agent::run()` 就够。
+- prompt 没有可分解结构 —— squad 会降级到单子任务但多出编排开销。
+- 你确实想要一个 coordinator LLM 当场决定派单 —— 那是 `CoordinatorMode` 的地盘，不是 squad。
+
+### 对等 agent 间通信（peer messaging）
+
+上面那一套让每个子任务选自己的模型。**Peer messaging** 让这些子任务**互相对话** —— 跨模型、在同一个进程内 —— 让每个 agent 维护自己的上下文，按需向同伴拉协助，而不是等主控 agent 把摘要喂过来。
+
+```
+designer (sonnet)                 researcher (haiku)            verifier (deepseek-pro)
+    │                                  │                                │
+    │  PeerAsk(to=researcher,          │                                │
+    │          q="signing algo?")      │                                │
+    │ ───────────────────────────────► │                                │
+    │  (answerer 用 researcher 自己的    │                                │
+    │   stable session_id 派一次性 turn) │                                │
+    │ ◄─────────────────────────────── │                                │
+    │  "JWT, HS256"                    │                                │
+    │                                  │                                │
+    │  PeerSend(to=verifier,           │                                │
+    │           "expect HS256")        │                                │
+    │ ──────────────────────────────────────────────────────────────► [inbox]
+```
+
+三个原语：
+
+| 操作 | 方法 | 语义 |
+|---|---|---|
+| Tell | `PeerMailbox::send($from, $to, $body)` | 投递即返回。塞进收件人的 inbox，对方在下一步开头看到。 |
+| Broadcast | `PeerMailbox::broadcast($from, $body)` | 广播给除自己外所有同伴。 |
+| Ask | `PeerMailbox::ask($from, $to, $question)` | 同步 —— 阻塞到对方的 `PeerAnswerer` 回答。对方在**自己的** `session_id` 上看到问题（prompt cache 保留）。 |
+
+每个 squad 自动获得一个 `PeerMailbox` —— `PeerOrchestrator::run()` 创建并注册所有角色。当前步骤的 inbox 在派发前被自动 drain 并拼到 prompt 开头：
+
+```
+## Peer messages
+- **researcher** → you: use SHA-256
+- **verifier** → you: don't trust the redirect URI without origin check
+
+（原始步骤 prompt 在下方…）
+```
+
+把 mailbox 包成工具（让 agent 的 LLM 可以在 tool loop 内主动调用同伴）：
+
+```php
+use SuperAgent\Squad\Tools\{PeerAskTool, PeerSendTool, PeerInboxTool};
+
+// 在你的自定义 squad dispatcher 内：
+if ($req->mailbox !== null) {
+    $agent->addTool(new PeerAskTool($req->mailbox,  selfRole: $req->role->name));
+    $agent->addTool(new PeerSendTool($req->mailbox, selfRole: $req->role->name));
+    $agent->addTool(new PeerInboxTool($req->mailbox, selfRole: $req->role->name));
+}
+```
+
+三个工具都是只读的，归属在 `squad` 工具分类下 —— 给 research / verify 这类只读角色也安全。`AutoModeAgent::runSquad` 默认 dispatcher 用的是不跑 tool loop 的单次 `Agent`，所以工具只在你换上自己的 dispatcher（用顶层 `SuperAgent\Agent` + `addTool()`）时才生效。
+
+自定义 `PeerAnswerer`：
+
+```php
+use SuperAgent\Squad\{PeerAnswerer, PeerMailbox, SquadRole};
+
+$mailbox = new PeerMailbox(new class implements PeerAnswerer {
+    public function answer(SquadRole $peerRole, string $question, string $fromRole): string {
+        // 转给远程 worker、队列、MCP server —— 都行。
+        return $this->myRemoteRpc->ask($peerRole->name, $question);
+    }
+});
+```
+
+为什么这**不是**主控 agent：
+
+- 没有任何一个 LLM 同时看到对话两边 —— asker 只看到自己显式收到的问题和答复文本。
+- 被问的同伴**看不到** asker 的完整上下文 —— 只看到框起来的 `[peer-question from=X]` prompt + 自己的会话历史。
+- 每个同伴的 session ID 稳定，所以每轮 Q&A 后 prompt cache 都还在。
+- mailbox 只是哑通路，路由决策在每个 agent 的工具调用里。
+
+审计 —— 每次 `tell / ask / reply` 都进 `PeerMailbox::log()`，并通过 `SquadResult::$mailbox` 暴露出去，方便回放或归因谁告诉谁了什么。
+
+*v0.9.9 起。*
+

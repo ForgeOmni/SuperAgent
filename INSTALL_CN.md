@@ -444,6 +444,48 @@ REPL：在 `superagent` 交互模式里 `/smart <task>` 直接内联跑同样的
 
 *v0.9.9 起（CLI 子命令 + 护栏）。*
 
+### Squad 模式（自适应跨模型小队）
+
+Squad 模式是 auto 模式的对等协作变体：每个子任务按难度档（TRIVIAL/EASY/MODERATE/HARD/EXPERT）路由到对应模型。无主控 agent，HITL 卡点内嵌，任意步骤可断点续跑。通过 `superagent auto` 开启。
+
+环境变量（写到 `.env` 或 provider 配置）：
+
+```bash
+SUPERAGENT_PREFER_SQUAD=true            # 默认开启；置 false 回退到旧的 multi-agent 主从模式
+SUPERAGENT_SQUAD_MAX_COST=5.00          # USD 预算，剩余步骤在 80% 时自动降档
+SUPERAGENT_SQUAD_CHECKPOINT_DIR=/var/lib/superagent/squad   # 每步 JSON 快照目录
+```
+
+触发方式：
+
+```bash
+# Auto 模式在 prompt 跨 2+ 个难度档时自动选 squad
+superagent auto "1. 调研认证模块  2. 设计迁移方案  3. 实现 OAuth2"
+
+# 强制启用 squad（即使启发式判断不会选）：
+superagent auto "<task>" --squad
+
+# 单次禁用 squad：
+superagent auto "<task>" --no-squad
+
+# 单次成本上限（覆盖 SUPERAGENT_SQUAD_MAX_COST）：
+superagent auto "<task>" --max-cost 2.50
+```
+
+默认 `ModelTierMap` 是跨厂商的（Anthropic + DeepSeek）。可在 `config/superagent.php` 单独覆盖任意一档：
+
+```php
+'squad' => [
+    'tier_map' => [
+        'expert' => ['provider' => 'openai', 'model' => 'gpt-5-pro'],
+    ],
+],
+```
+
+完整说明（分解规则、并行组、resume 语义、checkpoint 文件格式）见 [ADVANCED_USAGE §60](docs/ADVANCED_USAGE.md#60-squad-mode--adaptive-cross-model-squad)。
+
+*v0.9.9 起。*
+
 ---
 
 ## 验证

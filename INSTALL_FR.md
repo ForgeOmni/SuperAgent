@@ -444,6 +444,48 @@ Les run-logs vont dans `~/.superagent/smart_runs/<ISO>_<shortid>.json`. Pipeline
 
 *Depuis v0.9.9 (sous-commande CLI + garde-fous).*
 
+### Mode Squad (Équipe adaptative multi-modèles)
+
+Le mode Squad est une variante en collaboration pair-à-pair du mode auto : chaque sous-tâche est dispatchée vers un modèle choisi par sa classe de difficulté (TRIVIAL/EASY/MODERATE/HARD/EXPERT). Aucun agent maître, verrous HITL en ligne, reprise possible depuis n'importe quelle étape. Accessible via `superagent auto` une fois activé.
+
+Variables d'environnement (à placer dans `.env` ou la config provider) :
+
+```bash
+SUPERAGENT_PREFER_SQUAD=true            # défaut ; mettre à false pour garder le multi-agent classique
+SUPERAGENT_SQUAD_MAX_COST=5.00          # plafond USD ; les étapes restantes rétrogradent à 80 %
+SUPERAGENT_SQUAD_CHECKPOINT_DIR=/var/lib/superagent/squad   # snapshots JSON par étape
+```
+
+Déclencheurs :
+
+```bash
+# Auto-mode choisit squad automatiquement quand le prompt couvre 2+ bandes de difficulté.
+superagent auto "1. étudier le module d'auth  2. concevoir la migration  3. implémenter"
+
+# Forcer squad même quand l'heuristique ne l'aurait pas choisi :
+superagent auto "<task>" --squad
+
+# Désactiver squad pour cette invocation :
+superagent auto "<task>" --no-squad
+
+# Plafond de coût par exécution (surcharge SUPERAGENT_SQUAD_MAX_COST) :
+superagent auto "<task>" --max-cost 2.50
+```
+
+La `ModelTierMap` par défaut est multi-fournisseurs (Anthropic + DeepSeek). Surcharger une bande dans `config/superagent.php` :
+
+```php
+'squad' => [
+    'tier_map' => [
+        'expert' => ['provider' => 'openai', 'model' => 'gpt-5-pro'],
+    ],
+],
+```
+
+Référence complète du mode (règles de décomposition, groupes parallèles, sémantique de reprise, format checkpoint) dans [ADVANCED_USAGE §60](docs/ADVANCED_USAGE.md#60-squad-mode--adaptive-cross-model-squad).
+
+*Depuis v0.9.9.*
+
 ---
 
 ## Vérification

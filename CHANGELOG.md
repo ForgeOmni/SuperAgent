@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-16
+
+### 💻 Summary
+
+**Adaptive Cross-Model Squad (ACMS) — declarative peer collaboration replaces master-slave orchestration as the SDK's flagship multi-agent path.** This is the 1.0 release: the architecture story finally hangs together. Three coordination modes now coexist and answer different questions on the same complexity-scoring foundation — **smart** picks the thinking budget per turn, **auto** picks single vs. multi-agent for the whole task, **squad** picks the model per subtask AND lets those subtasks talk directly without a coordinator LLM in the middle.
+
+What 1.0.0 actually delivers vs. 0.9.9: every "limitation" we were honest about in the smart-orchestrator docs (no inline HITL, no resume from arbitrary step, one model per run, no inter-agent communication) is now addressed in `Squad`. The smart / auto paths are unchanged and fully backward compatible.
+
+### `Squad` — Adaptive Cross-Model Squad
+
+A peer-collaboration multi-agent workflow with **no master agent**. The pipeline definition is the orchestrator; each step is a peer pinned to the model best suited for its own difficulty. Reached from `superagent auto` when the prompt decomposes into 2+ subtasks spanning multiple difficulty bands, or forced with `--squad`.
+
+- **Five-band difficulty taxonomy** (`Squad\DifficultyClass`): TRIVIAL → EASY → MODERATE → HARD → EXPERT. Thresholds **deliberately aligned** with `SmartContext\TaskComplexity` so a "complex enough for DEEP_THINKING" prompt always lands in HARD/EXPERT. HARD/EXPERT auto-gate for human review.
+- **Cross-vendor tier map** (`Squad\ModelTierMap`): defaults route TRIVIAL → Anthropic Haiku, EASY → DeepSeek V4-Flash, MODERATE → Anthropic Sonnet, HARD → DeepSeek V4-Pro, EXPERT → Anthropic Opus. Single-band override via `with()`; full map override via constructor; or derive the whole map from your eval catalog via `fromCatalog(ScoreCatalog)`.
+- **Provider fallback ladder**: `resolve()` walks down (cheaper bands) then up (more capable) when the band's primary provider isn't registered, with a final escape to any registered entry. A misconfigured `deepseek` key no longer crashes a HARD subtask.
+- **Heuristic decomposer** (`Squad\TaskDecomposer`): zero-LLM-cost. Splits on numbered lists, step keywords (`then / 然后 / next / finally / 最后 / 另外`), parallel openers (`同时 / 并行 / in parallel`) split on `和 / and / 、`, synthesis closers (`综合 / synthesize / aggregate`). Picks canonical role from verbs (`research / design / decide / implement / verify`). Auto-injects HITL gates on `审核 / review / approve before` keywords.
+- **Optional LLM refiner** (`TaskDecomposer::withLlmRefiner()`): heuristic returns a 0.2–1.0 confidence score; below `confidenceFloor` (default 0.5) an injected cheap-model callable re-decomposes via structured output. High-confidence plans skip the LLM round-trip entirely.
+- **Parallel groups**: subtasks sharing a `parallelGroup` label execute through a single `ParallelStep`. Downstream subtasks depend on the synthetic `parallel-gN` step and receive all peer outputs.
+- **Per-role tool grants** (`SquadComposer`): `research` / `verify` are read-only with curated tool sets, `decide` is tool-less (human is the decider), `implement` is unrestricted. Set on `AgentStep::allowedTools` + `readOnly` automatically.
+- **Agent template integration**: composer queries `Swarm\Templates\AgentTemplateManager` by role (`research` → `researcher`, `design` → `architect`, `implement` → `code-writer`, `verify` → `verifier`, `decide` → `decision-maker`) so system prompts come from preset templates when available.
+- **Stable per-role session IDs**: `squad:{squadId}:role:{roleName}` is reused across resumes. The default dispatcher in `AutoModeAgent::runSquad` threads the session ID into `Context` metadata and passes the role's `systemPrompt` to `Agent::setSystemPrompt()` — providers see the same stable prefix on each run, so re-executing a step re-bills at cache-hit rates instead of re-priming the model.
+- **Skip + restart-from-step** (`Squad\SquadResumeManager`): `buildPreSeed()` with `skipSteps: [...]` re-uses prior outputs; with `fromStep: N` it BFS-invalidates the transitive descendants while keeping upstream cached. Same role → same session → warm prompt cache on rerun.
+- **Cost budget + downshift** (`PeerOrchestrator(maxCostUsd:)`): each dispatcher invocation may return `['output' => string, 'cost_usd' => float]`. At 80 % of the cap, the orchestrator drops the next step one band cheaper (EXPERT → HARD → MODERATE → …) — fires once per run to avoid cascading collapse.
+- **Per-step checkpointing** (`Squad\SquadCheckpointStore`): every successful step is persisted as JSON. `PeerOrchestrator` auto-rehydrates from `{checkpoint_dir}/{squadId}.json` on a fresh process call if no pre-seed is supplied. Atomic temp-file write + rename.
+- **Streaming progress** (`Squad\SquadConsoleListener`): subscribes to `pipeline.start / step.start / step.end / step.retry / pipeline.end` events on `PipelineEngine` and writes formatted progress to any `OutputInterface`. Auto-attached when `PeerOrchestrator` is constructed with `output:`.
+- **Real HITL approval** (`Squad\ConsoleApprovalHandler`): wraps Symfony Console `QuestionHelper` so `ApprovalStep` actually prompts the human. Library / test default remains auto-approve.
+
+### Peer-to-peer agent messaging — `Squad\PeerMailbox`
+
+Cross-model agents now talk **directly** without a coordinator LLM relaying summaries. Each agent keeps its own context and pulls help on demand.
+
+- **Three primitives**: `send(from, to, body)` (fire-and-forget into recipient's inbox), `broadcast(from, body)` (tell every peer except self), `ask(from, to, question)` (synchronous — blocks until peer answers).
+- **Stable session continuity**: `PeerAnswerer` strategy turns "agent A asks peer B" into a one-shot dispatch against B's `session_id`, so B sees the question in its own context and its prompt cache survives.
+- **DispatcherPeerAnswerer** (default): routes peer questions through the SAME agent dispatcher the orchestrator uses for ordinary steps. Hosts can plug a custom `PeerAnswerer` for cross-process / queue-based / MCP-backed routing without touching the rest.
+- **Auto-drain on dispatch**: queued tells are prepended to the recipient's prompt as a `## Peer messages` block at the top of its next step.
+- **Three read-only tools** in the `squad` category — `PeerAskTool`, `PeerSendTool` (with `to: '*'` broadcast), `PeerInboxTool` (mid-step inbox re-read) — let an agent's LLM call peers from inside its own tool loop. Wired in by any dispatcher that builds a tool-capable `SuperAgent\Agent`.
+- **Audit trail**: every `tell / ask / reply` lands in `PeerMailbox::log()` and is surfaced on `SquadResult::$mailbox` for replay or attribution.
+
+### CLI + config integration
+
+- `superagent auto "<task>" --squad` forces squad mode even when the heuristic wouldn't pick it; `--no-squad` reverts to the legacy master-slave path.
+- `--max-cost <usd>` caps spend with automatic downshift.
+- New `config/superagent.php → 'squad'` block: `prefer_squad`, `max_cost_usd`, `checkpoint_dir`, `tier_map` (any/all bands).
+- Environment variables: `SUPERAGENT_PREFER_SQUAD`, `SUPERAGENT_SQUAD_MAX_COST`, `SUPERAGENT_SQUAD_CHECKPOINT_DIR`.
+- `PipelineConfig::fromDefinition()` — wrap an in-memory `PipelineDefinition` so programmatic plans run on the existing `PipelineEngine` without YAML round-tripping.
+
+### Tests
+
+- **39 new unit tests** in `tests/Unit/Squad/`: `DifficultyClassTest`, `ModelTierMapTest`, `TaskDecomposerTest`, `SquadComposerTest` (implicit via parallel + checkpoint tests), `PeerOrchestratorTest` (cross-model dispatch, stable sessions, skip-step resume, cascading invalidation), `CostBudgetTest` (downshift at 80 %, no downshift under budget), `SquadCheckpointStoreTest` (persistence + rehydrate), `ParallelCompositionTest`, `DecomposerRefinerTest` (high-conf skips refiner, low-conf invokes it, confidence scoring), `PeerMailboxTest` (send/ask/broadcast/drain/render/unknown-peer), `PeerToolsTest` (each tool happy path + rejections + broadcast + read-only flag).
+- All 39 passing; the 11 pre-existing `Phase2PipelineTest` errors (Laravel `config()` helper unavailable in plain phpunit) are unrelated and present on `main`.
+
+### Docs
+
+- **README** (EN/CN/FR): new `Squad mode` subsection under `Auto-mode`, plus peer-messaging bullet.
+- **INSTALL** (EN/CN/FR): new `Squad mode` setup subsection under `Smart mode` covering env vars, CLI flags, and tier-map overrides.
+- **ADVANCED_USAGE** (EN/CN/FR): new **§60 Squad mode — Adaptive Cross-Model Squad**, covering pipeline diagram, decomposition rules, difficulty bands, tier map + fallback ladder, role tool grants, parallel groups, session reuse + prompt-cache continuity, cost downshift, per-step checkpointing, resume + skip semantics, LLM refiner, streaming progress, HITL gates, "when to use / when to skip", **and** a dedicated `Peer-to-peer agent messaging` subsection with the ASCII flow diagram, primitives table, tools, custom `PeerAnswerer` recipe, and "why this is not a master agent" rationale.
+
+### Why 1.0
+
+The major-version bump reflects that the multi-agent story is now coherent end-to-end rather than a collection of features bolted on:
+
+- **The master-slave path is no longer the recommended default** — `prefer_squad = true` ships on by default and the legacy `CoordinatorMode` is still available but explicitly described as the niche path in docs.
+- **Three modes share one complexity-scoring foundation** — smart / auto / squad all read from `SmartContext\TaskComplexity` thresholds, so user mental model is consistent regardless of which entry point they pick.
+- **Backward compatibility is preserved** — `prefer_squad: false` keeps the 0.9.x routing unchanged; all 0.9.x APIs remain on their existing namespaces; no breaking changes to `Agent`, `AutoMode`, `SmartContext`, `Coordinator`, or `Pipeline` public surfaces.
+
 ## [0.9.9] - 2026-05-12
 
 ### 💻 Summary

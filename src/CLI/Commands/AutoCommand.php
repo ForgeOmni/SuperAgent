@@ -59,6 +59,20 @@ final class AutoCommand
         $autoConfig = $cfg->get('superagent.auto_mode', []);
         $autoConfig = is_array($autoConfig) ? $autoConfig : [];
 
+        $squadConfig = $cfg->get('superagent.squad', []);
+        $squadConfig = is_array($squadConfig) ? $squadConfig : [];
+
+        // Per-invocation squad flags:
+        //   --no-squad        force the legacy master-slave path
+        //   --squad           force squad even when heuristics wouldn't pick it
+        //   --max-cost <usd>  cost cap for the run
+        $preferSquad = $squadConfig['prefer_squad'] ?? true;
+        if ($opts['no_squad'] ?? false) {
+            $preferSquad = false;
+        } elseif ($opts['force_squad'] ?? false) {
+            $preferSquad = true;
+        }
+
         $autoModeAgent = new AutoModeAgent(
             config: [
                 'auto_mode'         => true,
@@ -70,6 +84,12 @@ final class AutoCommand
                     'backend'          => 'in_process',
                     'enable_display'   => $verbose,
                     'refresh_interval' => 500,
+                ],
+                'prefer_squad' => $preferSquad,
+                'squad' => [
+                    'max_cost_usd'   => $opts['max_cost'] ?? ($squadConfig['max_cost_usd'] ?? null),
+                    'checkpoint_dir' => $squadConfig['checkpoint_dir'] ?? null,
+                    'tier_map'       => $squadConfig['tier_map'] ?? [],
                 ],
             ],
             logger: null,
@@ -118,6 +138,9 @@ final class AutoCommand
             'provider'     => null,
             'analyze_only' => false,
             'verbose'      => false,
+            'no_squad'     => false,
+            'force_squad'  => false,
+            'max_cost'     => null,
         ];
         $promptParts = [];
         for ($i = 0; $i < count($args); $i++) {
@@ -130,6 +153,12 @@ final class AutoCommand
                 $opts['analyze_only'] = true;
             } elseif ($a === '--verbose' || $a === '-v') {
                 $opts['verbose'] = true;
+            } elseif ($a === '--no-squad') {
+                $opts['no_squad'] = true;
+            } elseif ($a === '--squad') {
+                $opts['force_squad'] = true;
+            } elseif ($a === '--max-cost') {
+                $opts['max_cost'] = (float) ($args[++$i] ?? 0);
             } elseif (! str_starts_with($a, '-')) {
                 $promptParts[] = $a;
             }
@@ -142,10 +171,14 @@ final class AutoCommand
         $renderer->line('Usage:');
         $renderer->line('  superagent auto "<task>" [--model <m>] [--provider <p>]');
         $renderer->line('                           [--analyze-only] [--verbose]');
+        $renderer->line('                           [--squad | --no-squad] [--max-cost <usd>]');
         $renderer->line('');
-        $renderer->line('Auto mode uses keyword + structure heuristics to decide single-vs-multi-agent');
-        $renderer->line('and runs the same model on every subtask. For eval-score-driven routing,');
-        $renderer->line('use `superagent smart` instead.');
+        $renderer->line('Auto mode picks single, multi-agent, or squad mode based on prompt shape.');
+        $renderer->line('  --squad        force squad (cross-model peer collaboration)');
+        $renderer->line('  --no-squad     skip squad, fall back to master-slave multi-agent');
+        $renderer->line('  --max-cost N   stop or downshift remaining steps when spend approaches N USD');
+        $renderer->line('');
+        $renderer->line('For eval-score-driven routing on a single agent, use `superagent smart`.');
         return 2;
     }
 }

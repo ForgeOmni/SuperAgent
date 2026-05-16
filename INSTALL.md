@@ -444,6 +444,48 @@ Run logs persist to `~/.superagent/smart_runs/<ISO>_<shortid>.json`. The full pi
 
 *Since v0.9.9 (CLI subcommand + guardrails).*
 
+### Squad mode (Adaptive Cross-Model Squad)
+
+Squad mode is a peer-collaboration variant of auto mode: each subtask is dispatched to a model picked by its difficulty class (TRIVIAL/EASY/MODERATE/HARD/EXPERT). No master agent, HITL gates inline, resumable from any step. Reached through `superagent auto` once you flip it on.
+
+Environment toggles (drop into `.env` or your provider config):
+
+```bash
+SUPERAGENT_PREFER_SQUAD=true            # default; flip false to keep legacy multi-agent
+SUPERAGENT_SQUAD_MAX_COST=5.00          # USD cap; remaining steps downshift at 80 %
+SUPERAGENT_SQUAD_CHECKPOINT_DIR=/var/lib/superagent/squad   # per-step JSON snapshots
+```
+
+Triggers:
+
+```bash
+# Auto mode picks squad automatically when the prompt spans 2+ difficulty bands.
+superagent auto "1. research the auth module  2. design migration  3. implement"
+
+# Force squad even when the heuristic wouldn't:
+superagent auto "<task>" --squad
+
+# Disable squad for this invocation:
+superagent auto "<task>" --no-squad
+
+# Per-run cost cap (overrides SUPERAGENT_SQUAD_MAX_COST):
+superagent auto "<task>" --max-cost 2.50
+```
+
+The default `ModelTierMap` is cross-vendor (Anthropic + DeepSeek). Override individual bands in `config/superagent.php`:
+
+```php
+'squad' => [
+    'tier_map' => [
+        'expert' => ['provider' => 'openai', 'model' => 'gpt-5-pro'],
+    ],
+],
+```
+
+The full mode reference (decomposition rules, parallel groups, resume semantics, checkpoint format) is in [ADVANCED_USAGE §60](docs/ADVANCED_USAGE.md#60-squad-mode--adaptive-cross-model-squad).
+
+*Since v0.9.9.*
+
 ---
 
 ## Verification

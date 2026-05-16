@@ -712,6 +712,57 @@ new Agent([
 ]);
 ```
 
+### Mode Squad — Équipe adaptative multi-modèles *(v0.9.9)*
+
+Auto-mode choisit entre agent unique et multi-agents. Le **mode Squad** va plus loin : quand un prompt se décompose en 2+ sous-tâches couvrant plusieurs niveaux de difficulté, chaque sous-tâche est dispatchée vers son propre modèle — Haiku pour l'extraction triviale, Sonnet pour les refactos modérés, DeepSeek-Pro / Opus pour le raisonnement difficile. **Aucun agent maître** — la définition du workflow est l'orchestrateur, chaque étape est un pair. Les verrous Human-in-the-Loop s'insèrent en ligne sous forme d'`ApprovalStep`.
+
+```php
+use SuperAgent\Squad\{TaskDecomposer, PeerOrchestrator, SquadCheckpointStore};
+
+$subTasks = (new TaskDecomposer())->decompose(
+    "1. Étudier le module d'authentification\n".
+    "2. Concevoir un plan de migration (la décision finale nécessite une revue humaine)\n".
+    "3. Implémenter OAuth2"
+);
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $myDispatcher,                          // (SquadDispatchRequest $r) => string|array
+    checkpointStore: new SquadCheckpointStore('/tmp/cp'),    // reprise après crash par étape
+    output: $consoleOutput,                                  // diffuse les événements d'étape
+    maxCostUsd: 5.00,                                        // rétrograde les étapes restantes à 80 % du plafond
+);
+
+$result = $orchestrator->run('refactor-2026-05', $subTasks);
+```
+
+Ce que le chemin maître-esclave ne donne pas :
+
+- **Multi-modèles** : chaque sous-tâche choisit son propre couple (provider, model) via `ModelTierMap`. Les défauts sont délibérément multi-fournisseurs (Anthropic + DeepSeek + …) pour qu'une sous-tâche HARD ne paie pas le tarif Opus parce qu'une voisine EASY tourne aussi.
+- **Sessions stables par rôle** : `squad:{squadId}:role:{roleName}` est réutilisé entre reprises — le préfixe de cache de prompt du provider survit, donc rejouer l'étape N ne réamorce pas le modèle.
+- **Skip + redémarrage** : `SquadResumeManager` réinjecte les sorties d'étapes déjà terminées et invalide en BFS uniquement ce qui dépend d'une étape redémarrée.
+- **Groupes parallèles** : les prompts avec `同时 / in parallel` sont fractionnés sur `和 / and`, et les pairs d'un même groupe s'exécutent via un seul `ParallelStep`.
+- **Rétrogradation de coût** : à 80 % de `maxCostUsd`, les étapes restantes descendent d'un cran (EXPERT → HARD → MODERATE → …).
+- **Échelle de repli provider** : si le provider principal d'une bande n'est pas enregistré, `ModelTierMap::resolve()` descend puis remonte jusqu'à trouver une alternative enregistrée.
+- **Déclenchement auto** : `AutoModeAgent` route vers squad quand le prompt décomposé couvre ≥ 2 bandes. Forcer avec `superagent auto "<task>" --squad`, désactiver avec `--no-squad`.
+- **Messagerie pair-à-pair** : les agents se parlent directement via `PeerMailbox` (`tell` / `broadcast` / `ask`) — pas d'agent maître relayant les résumés. `PeerAsk` route via la session stable du pair pour que son cache de prompt survive. Outils en lecture seule `PeerAsk` / `PeerSend` / `PeerInbox` pour que l'agent appelle ses pairs depuis sa boucle d'outils.
+
+CLI :
+```bash
+superagent auto "<task>" --squad --max-cost 5.00 --verbose
+```
+
+Configuration (`config/superagent.php`) :
+```php
+'squad' => [
+    'prefer_squad'   => true,
+    'max_cost_usd'   => 5.00,
+    'checkpoint_dir' => '/var/lib/superagent/squad',
+    'tier_map' => [                  // surcharge n'importe quelle bande ; les défauts remplissent le reste
+        'expert' => ['provider' => 'openai', 'model' => 'gpt-5-pro'],
+    ],
+],
+```
+
 ### Idempotence
 
 ```php

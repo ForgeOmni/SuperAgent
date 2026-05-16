@@ -9964,3 +9964,330 @@ Dans le mode interactif `superagent`, `/smart <task>` lance la même orchestrati
 - Q&A simple ou tâches mono-domaine — `superagent "<task>"` est plus rapide et moins cher.
 - Vous avez besoin de tool use (édition de fichiers, MCP, bash) — les sous-tâches `smart` sont des appels one-shot sans outils. Utilisez la boucle Agent normale ou `swarm`.
 - Travail profondément itératif où la sortie de chaque étape redéfinit le plan suivant — le brain ne planifie qu'une seule fois au démarrage.
+
+---
+
+## 60. Mode Squad — Équipe adaptative multi-modèles
+
+> Workflow multi-agents en collaboration pair-à-pair, **sans agent maître**. La définition de pipeline est l'orchestrateur ; chaque étape est un pair épinglé au modèle le plus adapté à *sa propre* difficulté. Accessible via `superagent auto` une fois le flag `--squad` ou la clé de config `prefer_squad` activé.
+
+### Différences avec `Coordinator\CoordinatorMode`
+
+| | `CoordinatorMode` (maître-esclave) | `Squad` (pair) |
+|---|---|---|
+| Orchestrateur | Un LLM "coordinator" qui spawne des workers via l'outil `Agent` | La `PipelineDefinition` déclarative elle-même |
+| Intervention en cours d'exécution | Le coordinator décide — pas de sémantique externe de pause/skip | Verrous HITL (`ApprovalStep`) en ligne ; `SquadResumeManager` peut skipper/redémarrer n'importe quelle étape |
+| Attribution de modèle | Un modèle pour le tour coordinator ; les workers partagent généralement son modèle | Chaque sous-tâche choisit son (provider, model) via `ModelTierMap` — multi-fournisseurs par défaut |
+| Réutilisation de session | Nouveau worker par spawn ; pas de continuité de cache | `squad:{squadId}:role:{roleName}` est stable, donc le préfixe de cache de prompt du provider survit aux reprises |
+| Contrôle de coût | Le coordinator décide | Plafond dur via `maxCostUsd` + rétrogradation auto à 80 % |
+
+### Pipeline
+
+```
+prompt → TaskDecomposer → SubTask[] → SquadComposer → PipelineDefinition
+                                          ↓
+PipelineEngine.run(definition)  ←  PeerOrchestrator branche :
+                                          • agentDispatcher par rôle
+                                          • SquadConsoleListener pour les événements
+                                          • SquadCheckpointStore par étape
+                                          • politique de rétrogradation de coût
+                                          • handler d'approbation
+```
+
+Chaque sous-tâche devient soit un `AgentStep` (dispatch mono-modèle), soit un `ParallelStep` (groupe en éventail). Verrous d'approbation en ligne sous forme d'`ApprovalStep` après toute sous-tâche marquée `requiresReview`.
+
+### Règles de décomposition (`TaskDecomposer`)
+
+Heuristique uniquement (pas d'appel LLM) — la planification est gratuite et déterministe. Signaux compris :
+
+| Signal | Effet |
+|---|---|
+| Listes numérotées `1. … 2. …` | Une sous-tâche par item |
+| Mots-clés d'étape `then / 然后 / next / 最后 / finally / 另外` | Découpe autour d'eux |
+| Déclencheurs parallèles `同时 / 并行 / in parallel / concurrently` | Ouvre un groupe parallèle ; le segment est aussi splitté sur `和 / and / 、 / ,` |
+| Clôtureurs de synthèse `综合 / 汇总 / synthesize / aggregate` | Ferme le groupe parallèle ; la sous-tâche séquentielle suivante dépend de `parallel-gN` |
+| Verbes de rôle `调研 / research`, `设计 / design / architect`, `敲定 / decide`, `实现 / implement`, `验证 / verify` | Choisit le rôle canonique |
+| Mots-clés de revue `审核 / review / human-in-the-loop / approve before` | Force `requires_review = true` |
+
+Quand aucun signal ne se déclenche, le prompt devient une unique sous-tâche `MODERATE` — squad dégrade en pipeline mono-agent.
+
+### Bandes de difficulté (`DifficultyClass`)
+
+Enum à 5 bandes. Les seuils s'alignent avec `SmartContext\TaskComplexity` pour qu'un prompt "assez complexe pour DEEP_THINKING" atterrisse toujours en HARD/EXPERT :
+
+| Bande | Score | Modèle par défaut | Verrou auto ? |
+|---|---|---|---|
+| TRIVIAL | `< 0.25` | `anthropic / claude-haiku-4-5-20251001` | non |
+| EASY | `0.25–0.45` | `deepseek / deepseek-v4-flash` | non |
+| MODERATE | `0.45–0.70` | `anthropic / claude-sonnet-4-6` | non |
+| HARD | `0.70–0.85` | `deepseek / deepseek-v4-pro` | **oui** |
+| EXPERT | `>= 0.85` | `anthropic / claude-opus-4-7` | **oui** |
+
+### `ModelTierMap` — table de tiers multi-fournisseurs
+
+```php
+use SuperAgent\Squad\{ModelTierMap, DifficultyClass};
+
+// Les défauts sont multi-fournisseurs (Anthropic + DeepSeek).
+$map = new ModelTierMap();
+
+// Surcharge par bande ; les bandes manquantes reviennent aux défauts.
+$map = $map->with(DifficultyClass::EXPERT, 'openai', 'gpt-5-pro');
+
+// Ou dérivez du catalogue d'évals (choisit le meilleur modèle par dim).
+use SuperAgent\Evals\ScoreCatalog;
+$map = ModelTierMap::fromCatalog(ScoreCatalog::default());
+```
+
+`ModelTierMap::resolve(band)` parcourt une **échelle de repli** quand le provider principal de la bande n'est pas enregistré : essaie d'abord les bandes moins chères (vers le bas), puis les plus capables (vers le haut), puis n'importe quelle entrée enregistrée. Empêche une clé `deepseek` manquante de faire planter une sous-tâche HARD.
+
+### Octroi d'outils par rôle
+
+`SquadComposer` règle `allowedTools` et `readOnly` sur chaque `AgentStep` selon le rôle :
+
+| Rôle | Outils | Lecture seule |
+|---|---|---|
+| `research` | Read, Grep, Glob, WebFetch, WebSearch | oui |
+| `design` | Read, Grep, Glob | oui |
+| `decide` | _(aucun)_ | oui |
+| `implement` | _(non restreint)_ | non |
+| `verify` | Read, Grep, Glob, Bash | oui |
+| `execute` | _(non restreint)_ | non |
+
+Le rôle `decide` est intentionnellement sans outils — sa sortie est destinée à la revue humaine à l'`ApprovalStep` en ligne.
+
+### Groupes parallèles
+
+```
+同时调研竞品A的认证方案和竞品B的认证方案，综合两份调研结果给出建议
+                          ↓
+SubTask[research-01, parallelGroup=g1, dependsOn=[]]
+SubTask[research-02, parallelGroup=g1, dependsOn=[]]
+SubTask[design-03,   parallelGroup=null, dependsOn=[parallel-g1]]
+                          ↓
+ParallelStep[parallel-g1]
+    └─ AgentStep[research-01]
+    └─ AgentStep[research-02]
+AgentStep[design-03]
+```
+
+Les deux étapes `research-*` tournent en concurrence ; `design-03` attend le `parallel-g1` englobant et reçoit les deux sorties.
+
+### Réutilisation de session + continuité du cache de prompt
+
+```
+squad-id     = "refactor-2026-05"
+role.name    = "design-02"
+session_id   = "squad:refactor-2026-05:role:design-02"   ← stable entre reprises
+```
+
+Le dispatcher par défaut dans `AutoModeAgent::runSquad` propage ce `session_id` dans les métadonnées du `Context` et passe le `systemPrompt` du rôle à `Agent::setSystemPrompt()` — les providers voient le même préfixe stable à chaque exécution, donc rejouer `design-02` se facture aux tarifs cache-hit au lieu de réamorcer le modèle.
+
+### Budget de coût + politique de rétrogradation
+
+```php
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    maxCostUsd: 5.00,
+);
+```
+
+Chaque invocation du dispatcher peut retourner `['output' => string, 'cost_usd' => float]`. Quand le cumul dépasse `0.8 * maxCostUsd`, l'orchestrateur descend l'étape *suivante* d'une bande (EXPERT → HARD, HARD → MODERATE, …). La rétrogradation se déclenche une fois par exécution — les déclenchements répétés stoppent les chutes automatiques pour que le pipeline ne s'effondre pas vers TRIVIAL sur un long tail.
+
+### Checkpointing par étape
+
+```php
+$store = new SquadCheckpointStore('/var/lib/superagent/squad');
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    checkpointStore: $store,
+);
+
+$result = $orchestrator->run('refactor-2026-05', $subTasks);
+// Sur un nouveau process, rappeler .run() avec le même squadId sans pre-seed
+// rehydrate depuis le disque et saute les étapes terminées.
+```
+
+Disposition fichier (`{checkpoint_dir}/{squadId}.json`) :
+
+```json
+{
+    "squad_id": "refactor-2026-05",
+    "updated_at": "2026-05-16T10:42:13+08:00",
+    "steps": {
+        "research-01": { "output": "…", "status": "completed" },
+        "design-02":   { "output": "…", "status": "completed" }
+    }
+}
+```
+
+### Sémantique de reprise + skip (`SquadResumeManager`)
+
+```php
+$manager = new SquadResumeManager();
+
+// Skipper les étapes déjà bonnes :
+$seed = $manager->buildPreSeed($subTasks, $priorResult, skipSteps: ['research-01']);
+
+// Redémarrer à partir d'une étape donnée — la descendance s'auto-invalide :
+$seed = $manager->buildPreSeed($subTasks, $priorResult, fromStep: 'design-02');
+
+$result = $orchestrator->run($squadId, $subTasks, preSeededStepOutputs: $seed);
+```
+
+`fromStep: 'design-02'` invalide `design-02` et parcourt le DAG en BFS pour que chaque étape qui en dépend transitivement soit aussi rejouée. Les étapes amont restent en cache.
+
+### Affinage par LLM (optionnel)
+
+```php
+$decomposer = (new TaskDecomposer())->withLlmRefiner(
+    function (string $prompt, array $heuristicPlan) {
+        // Appeler un modèle bon marché (ex Haiku) pour retourner un SubTask[] affiné.
+        return $myLlmCall($prompt, $heuristicPlan);
+    },
+    confidenceFloor: 0.5,
+);
+
+$subTasks = $decomposer->decomposeRefined($prompt);
+```
+
+L'heuristique retourne un score de confiance (0.2–1.0) basé sur les signaux détectés ; le refiner ne tourne qu'en dessous de `confidenceFloor`. Les plans à confiance élevée (listes numérotées, mots-clés d'étape explicites) sautent complètement l'appel LLM.
+
+### Progression en streaming
+
+```php
+use SuperAgent\Squad\PeerOrchestrator;
+use Symfony\Component\Console\Output\ConsoleOutput;
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    output: new ConsoleOutput(ConsoleOutput::VERBOSITY_VERBOSE),
+);
+```
+
+`SquadConsoleListener` s'attache automatiquement et rend les événements `pipeline.start / step.start / step.end / step.retry / pipeline.end` :
+
+```
+[squad] starting squad-refactor-2026-05 (4 steps)
+  → research-01 — Agent step 'research-01': run 'research' agent
+  ✓ research-01 [completed, 1820ms]
+  → design-02   — Agent step 'design-02': run 'design' agent
+  ✓ design-02 [completed, 3450ms]
+[squad] done — status=completed (5270ms)
+```
+
+### Verrous Human-in-the-Loop
+
+Par défaut `requiresReview = true` est auto-approuvé (convient aux libs et aux tests). Dans un host CLI, brancher le vrai handler :
+
+```php
+use SuperAgent\Squad\ConsoleApprovalHandler;
+
+$handler = new ConsoleApprovalHandler($input, $output);
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    approvalHandler: $handler,
+);
+```
+
+Affichage :
+
+```
+══ Human review required ══
+Review the 'topic-decision' step output before continuing. Output:
+… (la sortie de l'étape) …
+
+Approve step "topic-decision"? [y/N]
+```
+
+### Quand choisir squad
+
+- Le prompt énumère naturellement 2+ étapes (research → design → implement → verify).
+- Certaines étapes sont clairement moins chères que d'autres — le dispatch multi-modèles de squad capture facilement ce gain.
+- Vous voulez un checkpoint humain sur les décisions clés sans coller un agent maître devant.
+- Vous prévoyez de reprendre — pipelines longs où vous ne voulez pas re-payer les premières étapes.
+
+### Quand l'éviter
+
+- Q&A en une étape — `AutoMode` mono-agent ou `Agent::run()` brut suffit.
+- Le prompt n'a aucune structure décomposable — squad dégrade en une seule sous-tâche mais ajoute du surcoût d'orchestration.
+- Vous voulez réellement un coordinator LLM qui décide du routage à la volée — c'est le territoire de `CoordinatorMode`, pas squad.
+
+### Messagerie pair-à-pair entre agents
+
+Les pièces ci-dessus laissent chaque sous-tâche choisir son modèle. La **messagerie pair-à-pair** laisse ces sous-tâches *se parler entre elles* — entre modèles, dans le même process — pour que chaque agent garde son contexte et demande de l'aide à la demande, au lieu d'attendre qu'un maître relaie les résumés.
+
+```
+designer (sonnet)                 researcher (haiku)            verifier (deepseek-pro)
+    │                                  │                                │
+    │  PeerAsk(to=researcher,          │                                │
+    │          q="signing algo?")      │                                │
+    │ ───────────────────────────────► │                                │
+    │  (l'answerer dispatch un tour    │                                │
+    │   one-shot sur le session_id     │                                │
+    │   stable du researcher)          │                                │
+    │ ◄─────────────────────────────── │                                │
+    │  "JWT, HS256"                    │                                │
+    │                                  │                                │
+    │  PeerSend(to=verifier,           │                                │
+    │           "expect HS256")        │                                │
+    │ ──────────────────────────────────────────────────────────────► [inbox]
+```
+
+Trois primitives :
+
+| Opération | Méthode | Sémantique |
+|---|---|---|
+| Tell | `PeerMailbox::send($from, $to, $body)` | Envoi-et-oubli. Mis en file dans l'inbox ; le destinataire le voit en haut de son prochain pas. |
+| Broadcast | `PeerMailbox::broadcast($from, $body)` | Tell à tous les pairs sauf soi-même. |
+| Ask | `PeerMailbox::ask($from, $to, $question)` | Synchrone — bloque jusqu'à ce que le `PeerAnswerer` du pair réponde. Le pair voit la question sur son propre `session_id` (cache préservé). |
+
+Chaque squad reçoit automatiquement un `PeerMailbox` — `PeerOrchestrator::run()` en crée un et enregistre les rôles. L'inbox du rôle courant est auto-drainée et préfixée au prompt de l'agent :
+
+```
+## Peer messages
+- **researcher** → you: use SHA-256
+- **verifier** → you: don't trust the redirect URI without origin check
+
+(le prompt original de l'étape suit…)
+```
+
+Outils qui enrobent le mailbox (pour que le LLM de l'agent puisse appeler les pairs depuis sa boucle d'outils) :
+
+```php
+use SuperAgent\Squad\Tools\{PeerAskTool, PeerSendTool, PeerInboxTool};
+
+// Dans votre dispatcher squad personnalisé :
+if ($req->mailbox !== null) {
+    $agent->addTool(new PeerAskTool($req->mailbox,  selfRole: $req->role->name));
+    $agent->addTool(new PeerSendTool($req->mailbox, selfRole: $req->role->name));
+    $agent->addTool(new PeerInboxTool($req->mailbox, selfRole: $req->role->name));
+}
+```
+
+Tous trois sont en lecture seule et vivent dans la catégorie d'outils `squad` — sûrs à accorder à des rôles research / verify. Le dispatcher par défaut de `AutoModeAgent::runSquad` utilise un `Agent` one-shot qui ne tourne pas une boucle d'outils, donc les outils de pair ne sont invoqués que si vous fournissez votre propre dispatcher (par ex. qui construit un `SuperAgent\Agent` de haut niveau avec `addTool()`).
+
+`PeerAnswerer` personnalisé :
+
+```php
+use SuperAgent\Squad\{PeerAnswerer, PeerMailbox, SquadRole};
+
+$mailbox = new PeerMailbox(new class implements PeerAnswerer {
+    public function answer(SquadRole $peerRole, string $question, string $fromRole): string {
+        // Router vers un worker distant, une queue, un serveur MCP — au choix.
+        return $this->myRemoteRpc->ask($peerRole->name, $question);
+    }
+});
+```
+
+Pourquoi ce n'est *pas* un agent maître :
+
+- Aucun LLM unique ne voit les deux côtés de la conversation — l'asker ne voit que le texte de la question et de la réponse qu'il reçoit explicitement.
+- Le pair ne voit jamais le contexte complet de l'asker — uniquement le prompt encadré `[peer-question from=X]` plus son propre historique de session.
+- Le session ID de chaque pair est stable, donc son cache de prompt survit à chaque round de Q&A.
+- Le mailbox est de la plomberie bête ; les décisions de routage vivent dans les appels d'outils de chaque agent.
+
+Piste d'audit — chaque `tell / ask / reply` est ajouté à `PeerMailbox::log()` et exposé sur `SquadResult::$mailbox` pour que les appelants puissent rejouer ou attribuer qui a dit quoi à qui.
+
+*Depuis v0.9.9.*

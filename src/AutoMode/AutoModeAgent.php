@@ -17,11 +17,20 @@ use SuperAgent\Swarm\ParallelAgentCoordinator;
 use SuperAgent\Swarm\TeamContext;
 use SuperAgent\Swarm\Templates\AgentTemplateManager;
 use SuperAgent\Console\Output\ParallelAgentDisplay;
+use SuperAgent\Squad\PeerOrchestrator;
+use SuperAgent\Squad\SquadDispatchRequest;
+use SuperAgent\Squad\TaskDecomposer;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\NullOutput;
 
 /**
- * Agent that automatically decides between single and multi-agent mode.
+ * Agent that automatically decides between single, multi-agent, or squad mode.
+ *
+ * Squad mode is the cross-model peer-collaboration path: when a prompt
+ * decomposes cleanly into >= 2 sub-tasks with distinct difficulty
+ * bands, we skip the master-slave coordinator and run an
+ * `Adaptive Cross-Model Squad` instead — each sub-task picks its own
+ * model tier via `Squad\ModelTierMap`.
  */
 class AutoModeAgent
 {
@@ -89,13 +98,116 @@ class AutoModeAgent
         }
         
         if ($analysis->shouldUseMultiAgent()) {
-            // Use multi-agent mode
+            // Squad mode beats the master-slave coordinator when the
+            // prompt naturally decomposes into well-shaped sub-tasks
+            // AND the caller opted in (auto_mode.prefer_squad).
+            if (($this->config['prefer_squad'] ?? true) && $this->shouldUseSquad($prompt)) {
+                return $this->runSquad($prompt, $options);
+            }
+
+            // Use legacy multi-agent (master-slave) mode
             $suggestion = $this->analyzer->suggestConfiguration($analysis);
             return $this->runMultiAgent($prompt, $suggestion, $options);
         } else {
             // Use single agent mode
             return $this->runSingleAgent($prompt, $options);
         }
+    }
+
+    /**
+     * Squad mode is appropriate when the prompt decomposes into 2+
+     * meaningful sub-tasks AND those sub-tasks span at least two
+     * difficulty bands — otherwise the cross-model overhead doesn't
+     * earn its keep.
+     */
+    private function shouldUseSquad(string $prompt): bool
+    {
+        $subTasks = (new TaskDecomposer())->decompose($prompt);
+
+        if (count($subTasks) < 2) {
+            return false;
+        }
+
+        $bands = [];
+        foreach ($subTasks as $s) {
+            $bands[$s->difficulty->value] = true;
+        }
+
+        return count($bands) >= 2;
+    }
+
+    /**
+     * Run the squad pipeline. The caller can plug a real dispatcher
+     * via `$this->config['squad']['dispatcher']`; if absent, we use
+     * an in-process dispatcher that delegates to a fresh `Agent` per
+     * step, honouring the per-step provider/model.
+     */
+    private function runSquad(string $prompt, array $options = []): AgentResult
+    {
+        $subTasks = (new TaskDecomposer())->decompose($prompt);
+        $squadId = 'auto_' . uniqid();
+
+        $dispatcher = $this->config['squad']['dispatcher'] ?? function (SquadDispatchRequest $req) {
+            $ctx = new Context();
+            if ($req->provider !== '') {
+                $ctx->setMetadata('provider', $req->provider);
+            }
+            // Stable session ID per role → provider sees the same session
+            // across the squad's lifetime, so its prompt-cache prefix
+            // (system prompt + prior assistant messages) stays warm and
+            // re-billed at cache-hit rates instead of fresh-prefix rates.
+            if ($req->sessionId !== null && $req->sessionId !== '') {
+                $ctx->setMetadata('session_id', $req->sessionId);
+            }
+            // Per-role allowed-tools / read-only flags are surfaced via
+            // the dispatch request's role so an integration host that
+            // honours these can lock down researcher / verify steps.
+            $ctx->setMetadata('squad_role', $req->role->name);
+            $ctx->setMetadata('squad_role_tier', $req->role->tier->value);
+
+            $agent = new Agent(context: $ctx, logger: $this->logger);
+            if ($req->model !== '') {
+                $agent->setModel($req->model);
+            }
+            if ($req->systemPrompt !== null && $req->systemPrompt !== '') {
+                // Use the real system-prompt slot so providers can cache
+                // it as a stable prefix instead of treating it as a user
+                // message that varies turn-to-turn.
+                $agent->setSystemPrompt($req->systemPrompt);
+            }
+            // Peer messaging: the default `Agent\Agent` used here is
+            // a single-shot chat agent (no tool loop), so peer tools
+            // can't be invoked by the model on this path. Inbox
+            // messages still reach the agent — the orchestrator
+            // prepends them to the prompt via PeerMailbox.
+            // Hosts that need an in-loop PeerAsk/PeerSend call should
+            // plug a `squad.dispatcher` that builds a tool-capable
+            // `SuperAgent\Agent` and addTool(PeerAskTool…) when
+            // $req->mailbox is non-null. See ADVANCED_USAGE §60.
+            $result = $agent->run($req->prompt);
+            return [
+                'output'   => $result->text(),
+                'cost_usd' => $result->totalCostUsd,
+            ];
+        };
+
+        $orchestrator = new PeerOrchestrator($dispatcher, null, $this->logger);
+        $squadResult = $orchestrator->run($squadId, $subTasks);
+
+        $summary = '';
+        foreach ($squadResult->pipelineResult->getStepResults() as $r) {
+            $summary .= "## " . $r->stepName . " (" . $r->status->value . ")\n";
+            $summary .= (string) $r->output . "\n\n";
+        }
+
+        $msg = new AssistantMessage();
+        $msg->content = [ContentBlock::text(trim($summary))];
+
+        return new AgentResult(
+            message: $msg,
+            allResponses: [$msg],
+            messages: [$msg],
+        );
     }
     
     /**

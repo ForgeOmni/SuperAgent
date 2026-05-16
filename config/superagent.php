@@ -37,6 +37,35 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Adaptive Cross-Model Squad (ACMS)
+    |--------------------------------------------------------------------------
+    |
+    | Peer-collaboration mode that decomposes a prompt into subtasks
+    | and routes each to its own model tier. Triggered from `auto_mode`
+    | when the prompt naturally splits and spans multiple difficulty
+    | bands. Set `prefer_squad` to false to fall back to the legacy
+    | master-slave multi-agent path.
+    |
+    */
+    'squad' => [
+        'prefer_squad'   => (bool) env('SUPERAGENT_PREFER_SQUAD', true),
+        'max_cost_usd'   => env('SUPERAGENT_SQUAD_MAX_COST') !== false
+            ? (float) env('SUPERAGENT_SQUAD_MAX_COST')
+            : null,
+        'checkpoint_dir' => env('SUPERAGENT_SQUAD_CHECKPOINT_DIR'),
+        // Override the band → (provider, model) map. Anything missing
+        // falls back to ModelTierMap::defaults().
+        'tier_map' => [
+            // 'trivial'  => ['provider' => 'anthropic', 'model' => 'claude-haiku-4-5-20251001'],
+            // 'easy'     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-flash'],
+            // 'moderate' => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6'],
+            // 'hard'     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-pro'],
+            // 'expert'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-7'],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Default LLM Provider
     |--------------------------------------------------------------------------
     */

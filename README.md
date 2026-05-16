@@ -745,6 +745,57 @@ new Agent([
 ]);
 ```
 
+### Squad mode — Adaptive Cross-Model Squad *(v0.9.9)*
+
+Auto-mode picks single vs. multi-agent. **Squad mode** goes further: when a prompt decomposes into 2+ subtasks spanning multiple difficulty bands, each subtask is dispatched to its own model — Haiku for trivial extraction, Sonnet for moderate refactors, DeepSeek-Pro / Opus for hard reasoning. **There is no master agent** — the workflow definition is the orchestrator and every step is a peer. Human-in-the-Loop gates sit inline as `ApprovalStep`s.
+
+```php
+use SuperAgent\Squad\{TaskDecomposer, PeerOrchestrator, SquadCheckpointStore};
+
+$subTasks = (new TaskDecomposer())->decompose(
+    "1. Research the auth module\n".
+    "2. Architect a migration plan (敲定方案需要人工审核)\n".
+    "3. Implement OAuth2"
+);
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $myDispatcher,                          // (SquadDispatchRequest $r) => string|array
+    checkpointStore: new SquadCheckpointStore('/tmp/cp'),    // per-step crash recovery
+    output: $consoleOutput,                                  // streams progress events
+    maxCostUsd: 5.00,                                        // downshift remaining steps at 80% of cap
+);
+
+$result = $orchestrator->run('refactor-2026-05', $subTasks);
+```
+
+What it gives you that the master-slave path doesn't:
+
+- **Cross-model**: each subtask picks its own (provider, model) via `ModelTierMap`. Defaults are intentionally cross-vendor (Anthropic + DeepSeek + …) so a HARD subtask doesn't pay Opus rates for an EASY peer.
+- **Stable per-role sessions**: `squad:{squadId}:role:{roleName}` is reused across resumes — the provider's prompt-cache prefix survives, so re-running step N doesn't re-prime the model.
+- **Skip + restart**: `SquadResumeManager` re-seeds completed step outputs and BFS-invalidates only what depends on a restarted step.
+- **Parallel groups**: prompts with `同时 / in parallel` are split on `和 / and`, and peers in the same group execute through a single `ParallelStep`.
+- **Cost downshift**: at 80% of `maxCostUsd`, remaining steps drop one tier (EXPERT → HARD → MODERATE → …).
+- **Provider fallback ladder**: if a band's primary provider isn't registered, `ModelTierMap::resolve()` walks down then up to a registered alternative.
+- **Auto-trigger from auto mode**: `AutoModeAgent` routes into squad when the decomposed prompt spans ≥ 2 difficulty bands. Force with `superagent auto "<task>" --squad`, opt out with `--no-squad`.
+- **Peer-to-peer messaging**: agents talk directly via `PeerMailbox` (`tell` / `broadcast` / `ask`) — no master agent relaying summaries. `PeerAsk` routes through the peer's stable session so its prompt cache survives. Read-only `PeerAsk` / `PeerSend` / `PeerInbox` tools let an agent call peers from inside its own tool loop.
+
+CLI:
+```bash
+superagent auto "<task>" --squad --max-cost 5.00 --verbose
+```
+
+Config (`config/superagent.php`):
+```php
+'squad' => [
+    'prefer_squad'   => true,
+    'max_cost_usd'   => 5.00,
+    'checkpoint_dir' => '/var/lib/superagent/squad',
+    'tier_map' => [                  // override any/all bands; defaults fill the rest
+        'expert' => ['provider' => 'openai', 'model' => 'gpt-5-pro'],
+    ],
+],
+```
+
 ### Idempotency
 
 ```php

@@ -8839,3 +8839,330 @@ Inside `superagent` interactive mode, `/smart <task>` runs the same orchestratio
 - Plain Q&A or single-domain tasks — `superagent "<task>"` is faster and cheaper.
 - You need tool use (file edits, MCP, bash) — `smart` subtasks are tool-less one-shot calls. Use the regular Agent loop or `swarm` instead.
 - Deeply iterative work where each step's output reshapes the next plan — the brain plans once at the start.
+
+---
+
+## 60. Squad mode — Adaptive Cross-Model Squad
+
+> Peer-collaboration multi-agent workflow with no master agent. The pipeline definition is the orchestrator; each step is a peer pinned to the model best suited for *its* difficulty. Reachable from `superagent auto` once `--squad` flag or the `prefer_squad` config knob is on.
+
+### Why it's different from `Coordinator\CoordinatorMode`
+
+| | `CoordinatorMode` (master-slave) | `Squad` (peer) |
+|---|---|---|
+| Orchestrator | A "coordinator" LLM spawning workers via the `Agent` tool | The declarative `PipelineDefinition` itself |
+| Mid-flight intervention | Coordinator decides — no external pause/skip semantics | HITL gates (`ApprovalStep`) sit inline; `SquadResumeManager` can skip/restart any step |
+| Model assignment | One model handles the coordinator turn; workers usually share its model | Each subtask picks its own (provider, model) via `ModelTierMap` — cross-vendor by default |
+| Session reuse | New worker per spawn; no cache continuity | `squad:{squadId}:role:{roleName}` is stable, so the provider's prompt-cache prefix survives resumes |
+| Cost control | Coordinator decides | Hard cap via `maxCostUsd` + automatic downshift at 80 % |
+
+### Pipeline
+
+```
+prompt → TaskDecomposer → SubTask[] → SquadComposer → PipelineDefinition
+                                          ↓
+PipelineEngine.run(definition)  ←  PeerOrchestrator wires:
+                                          • agentDispatcher per role
+                                          • SquadConsoleListener for events
+                                          • SquadCheckpointStore per step
+                                          • cost-downshift policy
+                                          • approval handler
+```
+
+Each subtask becomes either an `AgentStep` (single-model dispatch) or a `ParallelStep` (fan-out group). Approval gates inline as `ApprovalStep` after any subtask flagged `requiresReview`.
+
+### Decomposition rules (`TaskDecomposer`)
+
+Heuristic-only (no LLM call) so planning is free and deterministic. Signals it understands:
+
+| Signal | Effect |
+|---|---|
+| Numbered lists `1. … 2. …` | One subtask per item |
+| Step keywords `then / 然后 / next / 最后 / finally / 另外` | Split around them |
+| Parallel openers `同时 / 并行 / in parallel / concurrently` | Open a parallel group; segment is split on `和 / and / 、 / ,` |
+| Synthesis closers `综合 / 汇总 / synthesize / aggregate` | Close the parallel group; next sequential subtask depends on `parallel-gN` |
+| Role verbs `调研 / research`, `设计 / design / architect`, `敲定 / decide`, `实现 / implement`, `验证 / verify` | Pick the canonical role |
+| Review keywords `审核 / review / human-in-the-loop / approve before` | Force `requires_review = true` |
+
+When no signal fires the prompt becomes a single `MODERATE` subtask — squad degrades to a one-agent pipeline.
+
+### Difficulty bands (`DifficultyClass`)
+
+Five-band enum. Thresholds align with `SmartContext\TaskComplexity` so a "complex enough for DEEP_THINKING" prompt always lands in HARD/EXPERT:
+
+| Band | Score | Default model | Auto-gate? |
+|---|---|---|---|
+| TRIVIAL | `< 0.25` | `anthropic / claude-haiku-4-5-20251001` | no |
+| EASY | `0.25–0.45` | `deepseek / deepseek-v4-flash` | no |
+| MODERATE | `0.45–0.70` | `anthropic / claude-sonnet-4-6` | no |
+| HARD | `0.70–0.85` | `deepseek / deepseek-v4-pro` | **yes** |
+| EXPERT | `>= 0.85` | `anthropic / claude-opus-4-7` | **yes** |
+
+### `ModelTierMap` — cross-vendor tier map
+
+```php
+use SuperAgent\Squad\{ModelTierMap, DifficultyClass};
+
+// Defaults are cross-vendor (Anthropic + DeepSeek).
+$map = new ModelTierMap();
+
+// Override individual bands; missing bands fall back to defaults.
+$map = $map->with(DifficultyClass::EXPERT, 'openai', 'gpt-5-pro');
+
+// Or derive from your eval catalog (chooses best model per dim).
+use SuperAgent\Evals\ScoreCatalog;
+$map = ModelTierMap::fromCatalog(ScoreCatalog::default());
+```
+
+`ModelTierMap::resolve(band)` walks a **fallback ladder** when the band's primary provider isn't registered: it tries cheaper bands first (down the ladder), then more capable ones (up), then any registered entry. This keeps a misconfigured `deepseek` key from crashing a HARD subtask.
+
+### Per-role tool grants
+
+`SquadComposer` sets `allowedTools` and `readOnly` on each `AgentStep` based on role:
+
+| Role | Tools | Read-only |
+|---|---|---|
+| `research` | Read, Grep, Glob, WebFetch, WebSearch | yes |
+| `design` | Read, Grep, Glob | yes |
+| `decide` | _(none)_ | yes |
+| `implement` | _(unrestricted)_ | no |
+| `verify` | Read, Grep, Glob, Bash | yes |
+| `execute` | _(unrestricted)_ | no |
+
+The `decide` role is intentionally tool-less — its output is intended for human review at the inline `ApprovalStep`.
+
+### Parallel groups
+
+```
+同时调研竞品A的认证方案和竞品B的认证方案，综合两份调研结果给出建议
+                          ↓
+SubTask[research-01, parallelGroup=g1, dependsOn=[]]
+SubTask[research-02, parallelGroup=g1, dependsOn=[]]
+SubTask[design-03,   parallelGroup=null, dependsOn=[parallel-g1]]
+                          ↓
+ParallelStep[parallel-g1]
+    └─ AgentStep[research-01]
+    └─ AgentStep[research-02]
+AgentStep[design-03]
+```
+
+Both `research-*` steps run concurrently; `design-03` waits on the wrapping `parallel-g1` and receives both outputs.
+
+### Session reuse + prompt-cache continuity
+
+```
+squad-id     = "refactor-2026-05"
+role.name    = "design-02"
+session_id   = "squad:refactor-2026-05:role:design-02"   ← stable across resumes
+```
+
+The default dispatcher in `AutoModeAgent::runSquad` threads this `session_id` into the `Context` metadata and passes the role's `systemPrompt` to `Agent::setSystemPrompt()` — providers see the same stable prefix on each run, so re-executing step `design-02` re-bills at cache-hit rates instead of re-priming the model.
+
+### Cost budget + downshift policy
+
+```php
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    maxCostUsd: 5.00,
+);
+```
+
+Each dispatcher invocation may return `['output' => string, 'cost_usd' => float]`. When cumulative spend crosses `0.8 * maxCostUsd`, the orchestrator drops the *next* step one band cheaper (EXPERT → HARD, HARD → MODERATE, …). Downshift fires once per run — repeated triggers stop further automatic drops so the pipeline doesn't collapse to TRIVIAL across a long tail.
+
+### Per-step checkpointing
+
+```php
+$store = new SquadCheckpointStore('/var/lib/superagent/squad');
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    checkpointStore: $store,
+);
+
+$result = $orchestrator->run('refactor-2026-05', $subTasks);
+// On a fresh process, calling .run() again with the same squadId and
+// no pre-seed re-hydrates from disk and skips completed steps.
+```
+
+File layout (`{checkpoint_dir}/{squadId}.json`):
+
+```json
+{
+    "squad_id": "refactor-2026-05",
+    "updated_at": "2026-05-16T10:42:13+08:00",
+    "steps": {
+        "research-01": { "output": "…", "status": "completed" },
+        "design-02":   { "output": "…", "status": "completed" }
+    }
+}
+```
+
+### Resume + skip semantics (`SquadResumeManager`)
+
+```php
+$manager = new SquadResumeManager();
+
+// Skip already-good steps:
+$seed = $manager->buildPreSeed($subTasks, $priorResult, skipSteps: ['research-01']);
+
+// Restart from a specific step — downstream auto-invalidates:
+$seed = $manager->buildPreSeed($subTasks, $priorResult, fromStep: 'design-02');
+
+$result = $orchestrator->run($squadId, $subTasks, preSeededStepOutputs: $seed);
+```
+
+`fromStep: 'design-02'` invalidates `design-02` and BFS-walks the DAG so every step transitively depending on it is also re-run. Upstream steps stay cached.
+
+### LLM-assisted refinement (optional)
+
+```php
+$decomposer = (new TaskDecomposer())->withLlmRefiner(
+    function (string $prompt, array $heuristicPlan) {
+        // Call a cheap model (e.g. Haiku) to return a refined SubTask[].
+        return $myLlmCall($prompt, $heuristicPlan);
+    },
+    confidenceFloor: 0.5,
+);
+
+$subTasks = $decomposer->decomposeRefined($prompt);
+```
+
+The heuristic returns a confidence score (0.2–1.0) based on detected signals; the refiner only runs below `confidenceFloor`. High-confidence plans (numbered lists, explicit step keywords) skip the LLM call entirely.
+
+### Streaming progress
+
+```php
+use SuperAgent\Squad\PeerOrchestrator;
+use Symfony\Component\Console\Output\ConsoleOutput;
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    output: new ConsoleOutput(ConsoleOutput::VERBOSITY_VERBOSE),
+);
+```
+
+`SquadConsoleListener` is auto-attached and renders `pipeline.start / step.start / step.end / step.retry / pipeline.end` events:
+
+```
+[squad] starting squad-refactor-2026-05 (4 steps)
+  → research-01 — Agent step 'research-01': run 'research' agent
+  ✓ research-01 [completed, 1820ms]
+  → design-02   — Agent step 'design-02': run 'design' agent
+  ✓ design-02 [completed, 3450ms]
+[squad] done — status=completed (5270ms)
+```
+
+### Human-in-the-Loop gates
+
+By default `requiresReview = true` is auto-approved (suitable for libraries and tests). In a CLI host, wire the real handler:
+
+```php
+use SuperAgent\Squad\ConsoleApprovalHandler;
+
+$handler = new ConsoleApprovalHandler($input, $output);
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $dispatcher,
+    approvalHandler: $handler,
+);
+```
+
+Output looks like:
+
+```
+══ Human review required ══
+Review the 'topic-decision' step output before continuing. Output:
+… (the step's output) …
+
+Approve step "topic-decision"? [y/N]
+```
+
+### When to reach for squad
+
+- The prompt naturally enumerates 2+ stages (research → design → implement → verify).
+- Some stages are clearly cheaper than others — squad's cross-model dispatch is the easiest win here.
+- You want a human checkpoint on key decisions without sticking a master agent in front.
+- You expect to resume — long pipelines where you don't want to re-pay for early steps.
+
+### When to skip it
+
+- Single-step Q&A — `AutoMode` single-agent or plain `Agent::run()` is enough.
+- The prompt has no decomposable structure — squad degrades to one subtask but adds orchestration overhead.
+- You actually want a coordinator LLM that decides routing on the fly — that's `CoordinatorMode` territory, not squad.
+
+### Peer-to-peer agent messaging
+
+The pieces above let each subtask pick its own model. **Peer messaging** lets those subtasks *talk to each other* — across models, in process — so each agent keeps its own context and pulls help on demand instead of waiting for a master to relay summaries.
+
+```
+designer (sonnet)                 researcher (haiku)            verifier (deepseek-pro)
+    │                                  │                                │
+    │  PeerAsk(to=researcher,          │                                │
+    │          q="signing algo?")      │                                │
+    │ ───────────────────────────────► │                                │
+    │  (answerer dispatches a one-shot │                                │
+    │   turn against researcher's      │                                │
+    │   stable session_id)             │                                │
+    │ ◄─────────────────────────────── │                                │
+    │  "JWT, HS256"                    │                                │
+    │                                  │                                │
+    │  PeerSend(to=verifier,           │                                │
+    │           "expect HS256")        │                                │
+    │ ──────────────────────────────────────────────────────────────► [inbox]
+```
+
+Three primitives:
+
+| Operation | Method | Semantics |
+|---|---|---|
+| Tell | `PeerMailbox::send($from, $to, $body)` | Fire-and-forget. Queued in recipient's inbox; recipient sees it at the top of its next step. |
+| Broadcast | `PeerMailbox::broadcast($from, $body)` | Tell every peer except self. |
+| Ask | `PeerMailbox::ask($from, $to, $question)` | Synchronous — blocks until the peer's `PeerAnswerer` returns a reply. The peer sees the question on its own `session_id` (cache continuity preserved). |
+
+Each squad gets a `PeerMailbox` automatically — `PeerOrchestrator::run()` creates one and registers the squad's roles. The inbox for the current role is auto-drained and prepended to the agent's prompt:
+
+```
+## Peer messages
+- **researcher** → you: use SHA-256
+- **verifier** → you: don't trust the redirect URI without origin check
+
+(original step prompt follows…)
+```
+
+Tools that wrap the mailbox (so the agent's LLM can choose to call peers from inside its tool loop):
+
+```php
+use SuperAgent\Squad\Tools\{PeerAskTool, PeerSendTool, PeerInboxTool};
+
+// Inside your custom squad dispatcher:
+if ($req->mailbox !== null) {
+    $agent->addTool(new PeerAskTool($req->mailbox,  selfRole: $req->role->name));
+    $agent->addTool(new PeerSendTool($req->mailbox, selfRole: $req->role->name));
+    $agent->addTool(new PeerInboxTool($req->mailbox, selfRole: $req->role->name));
+}
+```
+
+All three are read-only and live in the `squad` tool category — safe to grant to research / verify roles. The default `AutoModeAgent::runSquad` dispatcher uses a single-shot `Agent` that doesn't run a tool loop, so peer tools are only invoked when you supply your own dispatcher (e.g. one that builds a top-level `SuperAgent\Agent` with `addTool()` support).
+
+Custom `PeerAnswerer`:
+
+```php
+use SuperAgent\Squad\{PeerAnswerer, PeerMailbox, SquadRole};
+
+$mailbox = new PeerMailbox(new class implements PeerAnswerer {
+    public function answer(SquadRole $peerRole, string $question, string $fromRole): string {
+        // Route to a remote worker, a queue, an MCP server — whatever.
+        return $this->myRemoteRpc->ask($peerRole->name, $question);
+    }
+});
+```
+
+Why this is *not* a master agent:
+
+- No single LLM sees both sides of the conversation — the asker sees only the question and reply text it explicitly receives.
+- The peer never sees the asker's full context — only the framed `[peer-question from=X]` prompt plus its own session history.
+- Each peer's session ID is stable, so its prompt cache survives every Q&A round.
+- The mailbox is dumb plumbing; routing decisions sit inside each agent's tool calls.
+
+Audit trail — every `tell / ask / reply` is appended to `PeerMailbox::log()` and surfaced on `SquadResult::$mailbox` so callers can replay or attribute who told whom what.
+
+*Since v0.9.9.*

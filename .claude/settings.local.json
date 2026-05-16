@@ -199,7 +199,10 @@
       "Bash(git check-ignore *)",
       "Bash(findstr /i claude)",
       "Bash(git ls-remote *)",
-      "Bash(git tag *)"
+      "Bash(git tag *)",
+      "Bash(./vendor/bin/phpunit --testsuite Unit --filter 'Squad')",
+      "Bash(./vendor/bin/phpunit --testsuite Unit --filter 'AutoMode|Pipeline')",
+      "Bash(./vendor/bin/phpunit --testsuite Unit --filter 'Phase2PipelineTest')"
     ]
   }
 }

@@ -711,6 +711,57 @@ new Agent([
 ]);
 ```
 
+### Squad 模式 — 自适应跨模型小队 *(v0.9.9)*
+
+Auto 模式只决定"单 agent 还是多 agent"。**Squad 模式**更进一步：当 prompt 可分解为 2+ 个跨难度档的子任务时，每个子任务派发给最适配的模型 — TRIVIAL 走 Haiku，MODERATE 走 Sonnet，HARD/EXPERT 走 DeepSeek-Pro / Opus。**没有主控 agent** — 工作流定义本身就是编排器，每个步骤都是对等节点。Human-in-the-Loop 卡点以 `ApprovalStep` 形式内嵌在流程里。
+
+```php
+use SuperAgent\Squad\{TaskDecomposer, PeerOrchestrator, SquadCheckpointStore};
+
+$subTasks = (new TaskDecomposer())->decompose(
+    "1. 调研认证模块\n".
+    "2. 设计迁移方案（敲定方案需要人工审核）\n".
+    "3. 实现 OAuth2"
+);
+
+$orchestrator = new PeerOrchestrator(
+    agentDispatcher: $myDispatcher,                          // (SquadDispatchRequest $r) => string|array
+    checkpointStore: new SquadCheckpointStore('/tmp/cp'),    // 每步崩溃可恢复
+    output: $consoleOutput,                                  // 实时输出步骤事件
+    maxCostUsd: 5.00,                                        // 达到 80% 预算时自动降档
+);
+
+$result = $orchestrator->run('refactor-2026-05', $subTasks);
+```
+
+主从模式给不了你的东西：
+
+- **跨模型**：每个子任务通过 `ModelTierMap` 选自己的 (provider, model)。默认就是跨厂商（Anthropic + DeepSeek + …），HARD 子任务不会因为同组里有 EASY 同伴就被迫支付 Opus 价格。
+- **稳定的角色会话 ID**：`squad:{squadId}:role:{roleName}` 跨 resume 复用 — provider 的 prompt-cache 前缀保留，重跑第 N 步不需要再喂上下文。
+- **跳过 + 重跑**：`SquadResumeManager` 把已完成步骤的输出回灌，并通过 BFS 只让依赖被重跑步骤的下游失效。
+- **并行组**：含有 `同时 / in parallel` 的 prompt 会按 `和 / and` 拆分，同组对等节点用单个 `ParallelStep` 并发执行。
+- **成本降档**：到 `maxCostUsd` 的 80%，剩余步骤自动降一档（EXPERT → HARD → MODERATE → …）。
+- **Provider 回退梯**：某档主 provider 没注册时，`ModelTierMap::resolve()` 先往下找便宜的，再往上找更强的。
+- **从 auto 自动触发**：`AutoModeAgent` 在分解后跨档数 ≥ 2 时自动进入 squad。强制启用：`superagent auto "<task>" --squad`；强制关闭：`--no-squad`。
+- **对等 agent 间通信**：通过 `PeerMailbox` 直接对话（`tell` / `broadcast` / `ask`），没有主控 agent 转述。`PeerAsk` 用对方的稳定 session 派一次性 turn，prompt cache 保留。只读的 `PeerAsk` / `PeerSend` / `PeerInbox` 工具让 agent 在自己的 tool loop 里向同伴提问。
+
+CLI：
+```bash
+superagent auto "<task>" --squad --max-cost 5.00 --verbose
+```
+
+配置（`config/superagent.php`）：
+```php
+'squad' => [
+    'prefer_squad'   => true,
+    'max_cost_usd'   => 5.00,
+    'checkpoint_dir' => '/var/lib/superagent/squad',
+    'tier_map' => [                  // 覆盖任意档，未指定的回退到默认
+        'expert' => ['provider' => 'openai', 'model' => 'gpt-5-pro'],
+    ],
+],
+```
+
 ### 幂等性
 
 ```php
