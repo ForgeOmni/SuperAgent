@@ -1,0 +1,38 @@
+name: data-anomaly-detector
+description: |
+  Observability triage: watcher consumes raw signal stream, diagnostician
+  proposes hypotheses, mitigation-advisor recommends action. Use when
+  a dashboard is screaming and you need a structured second opinion.
+
+steps:
+  - name: watch
+    role: watcher
+    difficulty: moderate
+    system: |
+      Enumerate every signal in the input: deviating metric,
+      timestamp, magnitude. Strict observation only — no causes.
+    prompt: "Signals:\n{{task}}"
+
+  - name: hypothesise
+    role: diagnostician
+    difficulty: hard
+    depends_on: [watch]
+    system: |
+      Propose causes ranked by likelihood. For each: one-line
+      "cheap probe to confirm." Don't recommend action yet.
+    prompt: "Signals enumerated:\n{{steps.watch.output}}"
+
+  - name: advise
+    role: mitigation-advisor
+    difficulty: hard
+    depends_on: [hypothesise]
+    system: |
+      For each top-3 hypothesis: suggested mitigation, expected
+      blast radius, reversibility. No destructive actions without a
+      ROLLBACK plan beside them.
+    prompt: |
+      Hypotheses:
+      {{steps.hypothesise.output}}
+
+metadata:
+  tags: [data, observability, ops]

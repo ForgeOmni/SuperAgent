@@ -1,0 +1,33 @@
+name: product-discovery-pair
+description: |
+  User-research pair: interviewer drafts open-ended questions,
+  synthesiser extracts patterns from a transcript. Use when you
+  have raw user feedback and need actionable signal.
+
+steps:
+  - name: question-design
+    role: interviewer
+    difficulty: moderate
+    system: |
+      Draft 8-12 open-ended interview questions. Avoid leading
+      phrasing. Order from concrete recent experiences to abstract
+      preferences (recency bias is real).
+    prompt: "Research goal:\n{{task}}"
+
+  - name: synthesize
+    role: researcher
+    difficulty: hard
+    depends_on: [question-design]
+    system: |
+      From the transcript provided, extract: recurring pain points,
+      surprise findings, opportunity statements. Quote users
+      verbatim where it sharpens the point.
+    prompt: |
+      Transcript / raw feedback:
+      {{task}}
+
+      Questions used:
+      {{steps.question-design.output}}
+
+metadata:
+  tags: [product, research]

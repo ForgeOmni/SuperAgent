@@ -1,0 +1,49 @@
+name: docs-api-spec-pipeline
+description: |
+  API documentation pipeline: spec author drafts the contract,
+  example author produces curl + SDK examples, reviewer verifies
+  consistency between spec and examples.
+
+steps:
+  - name: spec
+    role: spec-author
+    difficulty: hard
+    system: |
+      Write the API spec in OpenAPI-shaped prose: endpoint, method,
+      auth, request body, response codes, error shapes. Be exhaustive
+      on error codes.
+    prompt: "API to document:\n{{task}}"
+
+  - name: examples
+    role: example-author
+    difficulty: moderate
+    depends_on: [spec]
+    system: |
+      Produce examples in three forms: curl, a popular SDK, and a
+      common failure case (4xx with body). Examples must be runnable.
+    prompt: |
+      Spec:
+      {{steps.spec.output}}
+
+  - name: cross-check
+    role: reviewer
+    difficulty: hard
+    depends_on: [examples]
+    system: |
+      Verify every example matches the spec exactly (params,
+      response shape, status codes). Flag every discrepancy.
+    prompt: |
+      Spec:
+      {{steps.spec.output}}
+
+      Examples:
+      {{steps.examples.output}}
+
+loops:
+  - writer: examples
+    reviewer: cross-check
+    feedback_key: cross-check.feedback
+    max_retries: 2
+
+metadata:
+  tags: [docs, api]

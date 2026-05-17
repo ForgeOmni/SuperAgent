@@ -486,6 +486,51 @@ The full mode reference (decomposition rules, parallel groups, resume semantics,
 
 *Since v0.9.9.*
 
+### YAML team library *(v1.0.1)*
+
+The SDK ships 21 ready-to-use squad teams as YAML under `resources/squad-teams/`. No configuration is required — they're auto-discovered by `Squad\TeamRegistry`.
+
+```bash
+# List every team known to the registry (bundled + host overlays):
+php -r "require 'vendor/autoload.php'; print_r((new SuperAgent\Squad\TeamRegistry())->list());"
+
+# Run one (any agent dispatcher works — see ADVANCED_USAGE §61):
+superagent auto --squad --team code-review-loop "<task>"
+```
+
+To layer your own team YAMLs on top of the bundled set, point the registry at a directory at boot:
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$registry = new TeamRegistry();
+$registry->addDirectory('/etc/myapp/squad-teams');   // overrides bundled by name
+$plan = $registry->require('my-custom-team');
+```
+
+Later directories override earlier ones; runtime `register($name, $plan)` overrides everything. Same 3-tier pattern as `ModelCatalog`.
+
+### Cross-mode orchestration *(v1.0.1)*
+
+The three modes (`auto / smart / squad`) now share a `ModeContext` so they can nest, hand off, and accumulate cost in one ledger. Most callers don't need new env vars — recursion happens automatically when a YAML step declares `mode: smart` or `mode: squad`.
+
+Optional policy tuning (drop into `.env`):
+
+```bash
+# Maximum cross-mode recursion depth before throwing. Default 4.
+SUPERAGENT_MODE_MAX_DEPTH=4
+
+# Hard cost cap across the whole nested run. Default unlimited.
+SUPERAGENT_MODE_BUDGET_USD=10.00
+
+# Whether ReviewerLoopRunner escalates to a bigger mode on max_retries.
+# Default true. Target mode (default `smart`) controlled by SUPERAGENT_MODE_ESCALATE_TO.
+SUPERAGENT_MODE_AUTO_ESCALATE=true
+SUPERAGENT_MODE_ESCALATE_TO=smart
+```
+
+Full reference (ModeContext lifecycle, SPI installation, cycle detection, ReviewerLoopRunner escalation) is in [ADVANCED_USAGE §62](docs/ADVANCED_USAGE.md#62-cross-mode-orchestration).
+
 ---
 
 ## Verification

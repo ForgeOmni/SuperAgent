@@ -1,0 +1,58 @@
+name: code-perf-optimize
+description: |
+  Performance optimisation pipeline: profile → identify hotspot →
+  propose optimisation → apply → verify the benchmark improved.
+  Refuses to apply changes without a measured baseline.
+
+steps:
+  - name: profile
+    role: profiler
+    difficulty: hard
+    system: |
+      Establish the baseline. Cite specific measurements: wall time,
+      CPU, allocations, query count. Do NOT propose changes yet.
+    prompt: "Target & workload:\n{{task}}"
+
+  - name: identify-hotspot
+    role: analyst
+    difficulty: hard
+    depends_on: [profile]
+    system: |
+      Rank the hotspots by impact (time saved if eliminated × ease).
+      Justify the #1 pick with the measurements.
+    prompt: "Baseline:\n{{steps.profile.output}}"
+
+  - name: optimise
+    role: writer
+    difficulty: hard
+    depends_on: [identify-hotspot]
+    system: |
+      Apply the smallest change that addresses the #1 hotspot.
+      Preserve externally observable behaviour.
+    prompt: |
+      Hotspot:
+      {{steps.identify-hotspot.output}}
+
+  - name: bench
+    role: bench-runner
+    difficulty: expert
+    depends_on: [optimise]
+    system: |
+      Re-run the original workload. Compare against baseline. Reply
+      "IMPROVED: <delta>" or "REGRESSED: <reason>" or
+      "INCONCLUSIVE: <evidence>".
+    prompt: |
+      Baseline:
+      {{steps.profile.output}}
+
+      Optimisation:
+      {{steps.optimise.output}}
+
+loops:
+  - writer: optimise
+    reviewer: bench
+    feedback_key: bench.feedback
+    max_retries: 2
+
+metadata:
+  tags: [engineering, performance]

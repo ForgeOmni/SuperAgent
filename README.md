@@ -796,6 +796,96 @@ Config (`config/superagent.php`):
 ],
 ```
 
+### YAML team library *(v1.0.1)*
+
+A `SquadPlan` no longer requires PHP code. Drop a YAML file, register it, run it:
+
+```yaml
+# resources/squad-teams/code-review-loop.yaml (bundled)
+name: code-review-loop
+description: Writer + reviewer with feedback-injection loop
+tier_map:
+  hard:   {provider: anthropic, model: claude-opus-4-7}
+  expert: {provider: openai,    model: gpt-5.1-codex}
+steps:
+  - name: write
+    difficulty: hard
+    prompt: "{{task}}"
+  - name: review
+    difficulty: expert
+    depends_on: [write]
+    prompt: "Artefact:\n{{steps.write.output}}"
+    pause_after: true                # optional HITL gate
+loops:
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+```
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$plan = (new TeamRegistry())->require('code-review-loop');
+$result = $orchestrator->run('refactor-2026-05', $plan->subTasks, /* … */);
+```
+
+**21 production-grade teams ship in `resources/squad-teams/`** — engineering (`code-review-loop`, `code-bug-triage`, `code-test-driven`, `code-security-audit`, `code-perf-optimize`, …), architecture (`arch-from-scratch`, `arch-decision-record`, `arch-migration-plan`), QA/SRE (`qa-ship-gate`, `qa-multi-model-council`, `qa-incident-response`), product (`product-strategy-trio`, `product-discovery-pair`), docs (`docs-tech-pipeline`, `docs-api-spec-pipeline`), data (`data-research-trio`, `data-anomaly-detector`), ops/growth (`release-coordination`, `growth-hypothesis-test`).
+
+**Three-tier override**: hosts call `addDirectory('/path/to/host-teams')` to layer additional YAML files on top of the bundled library, or `register($name, $plan)` for programmatic overrides. Later directories override earlier ones; runtime registrations override directory entries. Same pattern `ModelCatalog` uses.
+
+**Reviewer-loop runner**: `Squad\ReviewerLoopRunner` wraps any `agentDispatcher` callable. When the reviewer's first non-blank line doesn't start with `APPROVED` (case-insensitive), the runner prepends the reviewer's feedback to the writer's prompt and re-dispatches the writer. Loop exits on approval or `max_retries`.
+
+### Cross-mode orchestration *(v1.0.1)*
+
+`auto / smart / squad` can now compose, recurse, and hand off through one shared `ModeContext`. A squad step can declare `mode: smart` and recurse into the orchestrator; a smart sub-task can land on a full squad; a reviewer that hits `max_retries` escalates to `smart` automatically. Across every layer, blackboard reads, cost-ledger writes, and prompt-cache session ids share one object — there are no isolated child islands.
+
+```yaml
+steps:
+  - name: research
+    mode: smart                      # recurse: smart decomposes + routes internally
+    prompt: "Investigate {{task}}"
+
+  - name: implement
+    mode: squad
+    team: code-review-loop           # use a bundled team for this step
+    prompt: "Build based on {{steps.research.output}}"
+
+  - name: stress-test
+    mode_chain: [single, smart, squad]   # escalation chain on failure
+    fail_criteria: "REJECTED|error"
+    prompt: "Stress-test the build"
+```
+
+The `ModeContext` flows through every recursion level:
+
+```php
+use SuperAgent\Modes\{ModeContext, ModeRouter, CrossModePolicy};
+
+$ctx = ModeContext::root('squad', policy: new CrossModePolicy(
+    maxDepth: 4,
+    budgetCapUsd: 5.00,
+    autoEscalateOnFailure: true,
+    escalateTo: 'smart',
+));
+
+$router = new ModeRouter();
+$router->register(new AutoModeAdapter($autoModeAgent));
+$router->register(new SmartModeAdapter($smartOrchestrator));
+$router->register(new SquadModeAdapter());
+
+$result = $router->dispatch('squad', $task, $ctx);
+// $ctx->costLedger->total()  → every leaf dispatch summed
+// $ctx->costLedger->byMode() → {squad: 0.31, smart: 0.18, auto: 0.02}
+// $ctx->blackboard->entries() → every claim / evidence / risk / decision
+```
+
+**Loose-coupling SPIs**:
+- `Squad\SquadDispatcherRegistry::set($dispatcher)` — hosts install a default squad dispatcher (e.g. a CLI-aware one)
+- `Modes\ModeRouterRegistry::set($router)` — hosts install a default cross-mode router (e.g. one that knows `cli:claude_cli` leaf tags alongside the three mode names)
+
+Both are class-level static slots. SDK code paths consult them before falling back to internal defaults. SDK itself never sets either — slots are reserved for hosts.
+
 ### Idempotency
 
 ```php

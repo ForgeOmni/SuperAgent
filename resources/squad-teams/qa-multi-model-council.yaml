@@ -1,0 +1,48 @@
+name: qa-multi-model-council
+description: |
+  Parallel multi-model review — three different model families
+  review the same artefact, a chair consolidates. Breaks
+  model-specific blind spots better than running one model twice.
+
+tier_map:
+  hard: {provider: cli:claude_cli, model: claude-opus-4-7}
+
+steps:
+  - name: claude-review
+    role: claude-reviewer
+    difficulty: hard
+    parallel_group: reviews
+    system: "Reply as: claims / risks / verdict (approve|revise|reject)."
+    prompt: "Artefact:\n{{task}}"
+
+  - name: codex-review
+    role: codex-reviewer
+    difficulty: hard
+    parallel_group: reviews
+    system: "Same shape as the other reviewers; alternate-model perspective."
+    prompt: "Artefact:\n{{task}}"
+
+  - name: gemini-review
+    role: gemini-reviewer
+    difficulty: hard
+    parallel_group: reviews
+    system: "Same shape; specifically hunt edge cases others might miss."
+    prompt: "Artefact:\n{{task}}"
+
+  - name: chair
+    role: chair
+    difficulty: hard
+    depends_on: [claude-review, codex-review, gemini-review]
+    system: "Common ground first, divergences second, recommended action last."
+    prompt: |
+      Claude said:
+      {{steps.claude-review.output}}
+
+      Codex said:
+      {{steps.codex-review.output}}
+
+      Gemini said:
+      {{steps.gemini-review.output}}
+
+metadata:
+  tags: [qa, multi-model]

@@ -1,0 +1,43 @@
+name: data-research-trio
+description: |
+  Three-stage data investigation: query designer crafts the data
+  pull, analyst interprets results, presenter packages findings for
+  stakeholders.
+
+steps:
+  - name: query-design
+    role: data-engineer
+    difficulty: hard
+    system: |
+      Draft the query (SQL or DSL) that answers the question. Note
+      schema assumptions explicitly. Prefer narrow date ranges first
+      to control cost.
+    prompt: "Research question:\n{{task}}"
+
+  - name: analyze
+    role: analyst
+    difficulty: hard
+    depends_on: [query-design]
+    system: |
+      Interpret the query results (provided below). Report
+      surprises, not summaries. State assumptions you had to make.
+    prompt: |
+      Query:
+      {{steps.query-design.output}}
+
+      Results:
+      {{task}}
+
+  - name: present
+    role: presenter
+    difficulty: moderate
+    depends_on: [analyze]
+    system: |
+      Package findings for a non-data audience: one headline, three
+      bullet points, one chart recommendation. No jargon.
+    prompt: |
+      Analysis:
+      {{steps.analyze.output}}
+
+metadata:
+  tags: [data, research]

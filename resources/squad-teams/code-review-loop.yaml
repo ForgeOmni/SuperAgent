@@ -1,0 +1,47 @@
+name: code-review-loop
+description: |
+  Writer + reviewer loop with feedback injection. Anthropic writes,
+  OpenAI reviews; rejection re-runs the writer with the reviewer's
+  feedback prepended. Exit condition is "reviewer says APPROVED",
+  not "first draft done."
+
+tier_map:
+  hard:   {provider: cli:claude_cli, model: claude-opus-4-7}
+  expert: {provider: cli:codex_cli,  model: gpt-5.1-codex}
+
+steps:
+  - name: write
+    role: writer
+    difficulty: hard
+    system: |
+      You are a senior engineer. Produce production-grade code.
+      Respond with the diff or file content only — no preamble.
+    prompt: "{{task}}"
+
+  - name: review
+    role: reviewer
+    difficulty: expert
+    depends_on: [write]
+    system: |
+      You are a strict code reviewer. First non-blank line must be
+      "APPROVED" or "REJECTED". On rejection, enumerate concrete
+      issues the writer must fix.
+    prompt: |
+      Artefact under review:
+
+      {{steps.write.output}}
+
+  - name: synthesize
+    role: lead
+    difficulty: moderate
+    depends_on: [review]
+    prompt: "Reviewer approved. Final:\n\n{{steps.write.output}}"
+
+loops:
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+
+metadata:
+  tags: [engineering, code-review, loop]

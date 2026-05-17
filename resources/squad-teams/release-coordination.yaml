@@ -1,0 +1,75 @@
+name: release-coordination
+description: |
+  Multi-team release plan coordination. Engineering / docs / ops /
+  marketing each draft their slice in parallel, release manager
+  consolidates with explicit hand-off times. Pauses for boss
+  sign-off before lock.
+
+steps:
+  - name: eng-slice
+    role: eng-lead
+    difficulty: hard
+    parallel_group: slices
+    system: |
+      Draft the engineering slice: code freeze date, branch cut,
+      hotfix window, on-call coverage. Be concrete with timestamps.
+    prompt: "Release brief:\n{{task}}"
+
+  - name: docs-slice
+    role: docs-lead
+    difficulty: moderate
+    parallel_group: slices
+    system: "Draft the docs slice: what changes, owner, ready-by date."
+    prompt: "Release brief:\n{{task}}"
+
+  - name: ops-slice
+    role: ops-lead
+    difficulty: hard
+    parallel_group: slices
+    system: |
+      Draft the ops slice: rollout shape (canary / blue-green /
+      flag-gated), rollback trigger, monitoring change-list.
+    prompt: "Release brief:\n{{task}}"
+
+  - name: marketing-slice
+    role: marketing-lead
+    difficulty: moderate
+    parallel_group: slices
+    system: |
+      Draft the announcement slice: blog post owner, social copy,
+      embargo window if any.
+    prompt: "Release brief:\n{{task}}"
+
+  - name: consolidate
+    role: release-manager
+    difficulty: hard
+    depends_on: [eng-slice, docs-slice, ops-slice, marketing-slice]
+    system: |
+      Merge all four slices into one timeline. Flag conflicts
+      (e.g. docs ready-by AFTER eng code freeze). Output a single
+      ordered timeline + a "blocked on human" list.
+    prompt: |
+      Engineering:
+      {{steps.eng-slice.output}}
+
+      Docs:
+      {{steps.docs-slice.output}}
+
+      Ops:
+      {{steps.ops-slice.output}}
+
+      Marketing:
+      {{steps.marketing-slice.output}}
+
+  - name: lock
+    role: release-manager
+    difficulty: moderate
+    depends_on: [consolidate]
+    pause_after: true
+    prompt: |
+      Final plan. Approve to lock, or push back.
+
+      {{steps.consolidate.output}}
+
+metadata:
+  tags: [release, coordination]

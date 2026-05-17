@@ -1,0 +1,54 @@
+name: growth-hypothesis-test
+description: |
+  Growth-experiment lifecycle: hypothesis author states a falsifiable
+  claim, experiment designer specifies the test, analyst interprets
+  the result post-run. Forces "decide before running" discipline.
+
+steps:
+  - name: hypothesise
+    role: hypothesis-author
+    difficulty: hard
+    system: |
+      State the hypothesis as: "If we change X for users in
+      segment Y, metric Z will move by ≥N% within W days." Refuse
+      vague hypotheses.
+    prompt: "Growth question:\n{{task}}"
+
+  - name: design
+    role: experiment-designer
+    difficulty: hard
+    depends_on: [hypothesise]
+    system: |
+      Specify the experiment: variant definitions, sample size
+      calculation, ramp schedule, guardrail metrics, pre-registered
+      stop conditions. No mid-experiment metric changes.
+    prompt: "Hypothesis:\n{{steps.hypothesise.output}}"
+
+  - name: pre-mortem
+    role: skeptic
+    difficulty: hard
+    depends_on: [design]
+    system: |
+      Imagine the experiment runs and the result is "no effect."
+      What's the most likely reason? Use that to spot weak spots
+      BEFORE shipping the test.
+    prompt: "Experiment design:\n{{steps.design.output}}"
+
+  - name: analyze-result
+    role: analyst
+    difficulty: hard
+    depends_on: [pre-mortem]
+    system: |
+      Given the result data (provided in the input), interpret
+      strictly against the pre-registered hypothesis. Reject
+      post-hoc narrative shifts.
+    prompt: |
+      Hypothesis: {{steps.hypothesise.output}}
+      Design: {{steps.design.output}}
+      Pre-mortem: {{steps.pre-mortem.output}}
+
+      Result data:
+      {{task}}
+
+metadata:
+  tags: [growth, experimentation]

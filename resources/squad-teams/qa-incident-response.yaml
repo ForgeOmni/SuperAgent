@@ -1,0 +1,63 @@
+name: qa-incident-response
+description: |
+  SRE-style incident response: observer collates signals, diagnostician
+  hypothesises causes, responder proposes mitigation, postmortem-writer
+  captures lessons. Boss-decision gate before any destructive action.
+
+steps:
+  - name: observe
+    role: observer
+    difficulty: moderate
+    system: |
+      Collate all observable signals: symptoms, timestamps, affected
+      surface. Do NOT speculate on causes.
+    prompt: "Incident report:\n{{task}}"
+
+  - name: diagnose
+    role: diagnostician
+    difficulty: hard
+    depends_on: [observe]
+    system: |
+      Hypothesise causes, ranked by likelihood. For each: how to
+      confirm with a cheap probe before committing to a fix.
+    prompt: |
+      Signals:
+      {{steps.observe.output}}
+
+  - name: mitigate
+    role: responder
+    difficulty: hard
+    depends_on: [diagnose]
+    system: |
+      Propose mitigation steps. Distinguish stop-the-bleeding (now)
+      from root-cause fix (later). Note any destructive actions.
+    prompt: |
+      Hypotheses:
+      {{steps.diagnose.output}}
+
+  - name: approve
+    role: oncall-lead
+    difficulty: hard
+    depends_on: [mitigate]
+    pause_after: true
+    prompt: |
+      Authorise mitigation? Reply: GO / HOLD / ESCALATE.
+
+      Plan:
+      {{steps.mitigate.output}}
+
+  - name: postmortem
+    role: postmortem-writer
+    difficulty: moderate
+    depends_on: [approve]
+    system: |
+      Draft postmortem: timeline, root cause, what went well, what
+      didn't, action items. Blameless tone.
+    prompt: |
+      Signals: {{steps.observe.output}}
+      Hypotheses: {{steps.diagnose.output}}
+      Mitigation: {{steps.mitigate.output}}
+      Decision: {{steps.approve.output}}
+
+metadata:
+  tags: [qa, sre, incident]

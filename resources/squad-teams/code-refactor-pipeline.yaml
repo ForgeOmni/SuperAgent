@@ -1,0 +1,61 @@
+name: code-refactor-pipeline
+description: |
+  Analyze → propose → apply → verify. Splits a refactor into
+  inspect-then-act so the model can't sneak in scope drift between
+  "what should change" and "the diff".
+
+steps:
+  - name: analyze
+    role: analyzer
+    difficulty: hard
+    system: |
+      You are a refactoring analyst. Read the target and list:
+        - smells found
+        - boundaries to introduce
+        - dead/duplicate code
+      Do NOT propose changes yet.
+    prompt: "Target:\n{{task}}"
+
+  - name: propose
+    role: planner
+    difficulty: hard
+    depends_on: [analyze]
+    system: "Propose an ordered list of refactor steps, smallest first."
+    prompt: |
+      Smells & boundaries:
+      {{steps.analyze.output}}
+
+  - name: apply
+    role: writer
+    difficulty: hard
+    depends_on: [propose]
+    system: "Apply the plan as concrete code changes. One diff per step."
+    prompt: |
+      Plan:
+      {{steps.propose.output}}
+
+      Original:
+      {{task}}
+
+  - name: verify
+    role: verifier
+    difficulty: expert
+    depends_on: [apply]
+    system: |
+      Verify the refactor preserves behaviour and improves on the
+      smells listed in analyze. Reply "PASS" or "FAIL: <reasons>".
+    prompt: |
+      Smells expected to be fixed:
+      {{steps.analyze.output}}
+
+      Refactored output:
+      {{steps.apply.output}}
+
+loops:
+  - writer: apply
+    reviewer: verify
+    feedback_key: verify.feedback
+    max_retries: 2
+
+metadata:
+  tags: [engineering, refactor]

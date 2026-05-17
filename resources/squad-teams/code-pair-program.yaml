@@ -1,0 +1,43 @@
+name: code-pair-program
+description: |
+  Two writers alternate — driver writes, navigator critiques and
+  rewrites. Useful when you want stylistic and structural diversity
+  baked in instead of getting one model's habits twice.
+
+tier_map:
+  hard: {provider: cli:claude_cli, model: claude-opus-4-7}
+
+steps:
+  - name: driver-pass
+    role: driver
+    difficulty: hard
+    system: "You write the initial implementation. Aim for clarity."
+    prompt: "{{task}}"
+
+  - name: navigator-pass
+    role: navigator
+    difficulty: hard
+    depends_on: [driver-pass]
+    system: |
+      You are the navigator. Read the driver's pass and rewrite it
+      with: better naming, removed duplication, sharper boundaries.
+      Preserve the externally observable behaviour.
+    prompt: |
+      Driver's pass:
+
+      {{steps.driver-pass.output}}
+
+      Task (for reference):
+      {{task}}
+
+  - name: reconcile
+    role: lead
+    difficulty: moderate
+    depends_on: [navigator-pass]
+    prompt: |
+      Final implementation incorporating navigator's revisions:
+
+      {{steps.navigator-pass.output}}
+
+metadata:
+  tags: [engineering, pairing]

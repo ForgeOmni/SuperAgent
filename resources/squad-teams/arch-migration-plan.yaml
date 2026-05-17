@@ -1,0 +1,54 @@
+name: arch-migration-plan
+description: |
+  Legacy → target migration pipeline. Inspector profiles the legacy
+  surface, planner sequences the migration, risk-ranker tags
+  per-step blast radius, boss signs off.
+
+steps:
+  - name: inspect
+    role: inspector
+    difficulty: hard
+    system: |
+      Profile the legacy system: surface area, hidden contracts,
+      undocumented dependencies. Cite specific files / endpoints.
+    prompt: "Legacy target:\n{{task}}"
+
+  - name: plan
+    role: planner
+    difficulty: hard
+    depends_on: [inspect]
+    system: |
+      Sequence the migration into steps, smallest reversible first.
+      For each step: prerequisites, exit criteria, rollback path.
+    prompt: |
+      Inspection:
+      {{steps.inspect.output}}
+
+  - name: risk-rank
+    role: risk-analyst
+    difficulty: expert
+    depends_on: [plan]
+    system: |
+      Tag each step with blast radius (LOW/MED/HIGH), reversibility
+      (EASY/HARD/IMPOSSIBLE), and an estimated time-to-rollback.
+    prompt: |
+      Plan:
+      {{steps.plan.output}}
+
+  - name: sign-off
+    role: tech-lead
+    difficulty: hard
+    depends_on: [risk-rank]
+    pause_after: true
+    prompt: |
+      Approve the migration plan as written, or push back with
+      specific change requests.
+
+      Plan:
+      {{steps.plan.output}}
+
+      Risk rank:
+      {{steps.risk-rank.output}}
+
+metadata:
+  tags: [architecture, migration]

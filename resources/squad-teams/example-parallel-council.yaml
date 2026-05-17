@@ -1,0 +1,31 @@
+name: example-parallel-council
+description: |
+  Minimal example showing parallel_group fan-out plus a synthesizer
+  step. Two reviewers share a parallel_group and run concurrently;
+  the synthesizer waits on both.
+
+steps:
+  - name: review-a
+    role: reviewer-a
+    difficulty: hard
+    parallel_group: reviews
+    prompt: "Review:\n{{task}}"
+
+  - name: review-b
+    role: reviewer-b
+    difficulty: hard
+    parallel_group: reviews
+    prompt: "Review (alternate perspective):\n{{task}}"
+
+  - name: synthesize
+    role: chair
+    difficulty: moderate
+    depends_on: [review-a, review-b]
+    prompt: |
+      Consolidate into one verdict.
+
+      A said:
+      {{steps.review-a.output}}
+
+      B said:
+      {{steps.review-b.output}}

@@ -486,6 +486,72 @@ superagent auto "<task>" --max-cost 2.50
 
 *v0.9.9 起。*
 
+### YAML 团队库 *(v1.0.1)*
+
+SDK 在 `resources/squad-teams/` 自带 21 个开箱即用的 squad 团队。零配置 —— `Squad\TeamRegistry` 自动发现。
+
+```bash
+# 列出 registry 中所有团队（自带 + host 叠加）：
+php -r "require 'vendor/autoload.php'; print_r((new SuperAgent\Squad\TeamRegistry())->list());"
+
+# 跑某个团队（任何 agent dispatcher 都可以 —— 见 ADVANCED_USAGE §61）：
+superagent auto --squad --team code-review-loop "<task>"
+```
+
+要在自带库之上叠加自己的团队 YAML，把 registry 指向额外目录：
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$registry = new TeamRegistry();
+$registry->addDirectory('/etc/myapp/squad-teams');   // 同名覆盖自带的
+$plan = $registry->require('my-custom-team');
+```
+
+后注册的目录覆盖先注册的；运行时 `register($name, $plan)` 覆盖一切。和 `ModelCatalog` 同样的三层模式。
+
+**SquadPlan 仍然可以 PHP 定义** —— YAML 只是产 SquadPlan 的一种方式，直接 `new SquadPlan(...)` 也完全等价：
+
+```php
+use SuperAgent\Squad\{SquadPlan, SubTask, ReviewerLoopBinding, DifficultyClass};
+
+$plan = new SquadPlan(
+    name: 'my-custom-team',
+    description: 'Code review with feedback injection',
+    subTasks: [
+        new SubTask('write', 'writer', '{{task}}', DifficultyClass::HARD),
+        new SubTask('review', 'reviewer', "Artefact:\n{{steps.write.output}}", DifficultyClass::EXPERT, ['write']),
+    ],
+    tierMap: [
+        'hard'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-7'],
+        'expert' => ['provider' => 'openai',    'model' => 'gpt-5.1-codex'],
+    ],
+    loops: [new ReviewerLoopBinding('write', 'review', 'review.feedback', maxRetries: 3)],
+);
+$registry->register('my-custom-team', $plan);
+```
+
+### 跨模式协同 *(v1.0.1)*
+
+三模式（`auto / smart / squad`）共享 `ModeContext`，可以嵌套、切换、把成本累加到同一份 ledger。绝大多数调用者无需新加环境变量 —— 一旦 YAML 某步声明 `mode: smart` 或 `mode: squad`，递归自动发生。
+
+可选的策略调优（写进 `.env`）：
+
+```bash
+# 跨模式递归最大深度，超出抛错。默认 4。
+SUPERAGENT_MODE_MAX_DEPTH=4
+
+# 整个嵌套调用的硬成本上限。默认无限。
+SUPERAGENT_MODE_BUDGET_USD=10.00
+
+# 是否在 ReviewerLoopRunner 耗尽 max_retries 时升级到更大的模式。
+# 默认 true。目标模式（默认 `smart`）由 SUPERAGENT_MODE_ESCALATE_TO 控制。
+SUPERAGENT_MODE_AUTO_ESCALATE=true
+SUPERAGENT_MODE_ESCALATE_TO=smart
+```
+
+完整参考（ModeContext 生命周期、SPI 注入、循环检测、ReviewerLoopRunner 升级）见 [ADVANCED_USAGE §62](docs/ADVANCED_USAGE.md#62-cross-mode-orchestration)。
+
 ---
 
 ## 验证

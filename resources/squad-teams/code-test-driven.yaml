@@ -1,0 +1,61 @@
+name: code-test-driven
+description: |
+  Test-first development. Tests get written before implementation,
+  so the implementation has to satisfy a fixed contract instead of
+  drifting toward whatever shape was easiest. Implementation step
+  loops against the test-runner until green.
+
+steps:
+  - name: spec
+    role: spec-writer
+    difficulty: moderate
+    system: |
+      Translate the requirement into a list of testable assertions.
+      One assertion per bullet; concrete inputs and expected outputs.
+    prompt: "Requirement:\n{{task}}"
+
+  - name: tests
+    role: test-author
+    difficulty: hard
+    depends_on: [spec]
+    system: |
+      Write executable tests covering every assertion. Use the
+      project's test framework (look it up if needed).
+    prompt: |
+      Assertions:
+      {{steps.spec.output}}
+
+  - name: implement
+    role: writer
+    difficulty: hard
+    depends_on: [tests]
+    system: "Implement the minimum code that satisfies every test."
+    prompt: |
+      Tests:
+      {{steps.tests.output}}
+
+      Requirement (for context):
+      {{task}}
+
+  - name: check
+    role: runner
+    difficulty: expert
+    depends_on: [implement]
+    system: |
+      Verify every test in the test file passes against the
+      implementation. Reply "PASS" or "FAIL: <which tests, why>".
+    prompt: |
+      Tests:
+      {{steps.tests.output}}
+
+      Implementation:
+      {{steps.implement.output}}
+
+loops:
+  - writer: implement
+    reviewer: check
+    feedback_key: check.feedback
+    max_retries: 3
+
+metadata:
+  tags: [engineering, tdd]

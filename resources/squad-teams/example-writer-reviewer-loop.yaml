@@ -1,0 +1,26 @@
+name: example-writer-reviewer-loop
+description: |
+  Minimal example illustrating the YamlSquadLoader format. A writer
+  produces output; a reviewer approves or rejects with feedback;
+  rejection re-runs the writer with feedback injected. Used by SDK
+  unit tests; hosts that want a real team library ship their own.
+
+steps:
+  - name: write
+    role: writer
+    difficulty: hard
+    system: "Produce the artefact concisely."
+    prompt: "{{task}}"
+
+  - name: review
+    role: reviewer
+    difficulty: expert
+    depends_on: [write]
+    system: "Reply 'APPROVED' or 'REJECTED: <reasons>'."
+    prompt: "Artefact:\n{{steps.write.output}}"
+
+loops:
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3

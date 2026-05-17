@@ -1,0 +1,63 @@
+name: code-security-audit
+description: |
+  Two-pass vulnerability audit: a discovery pass enumerates
+  candidates; a verification pass confirms each is real (not a
+  false positive); a remediation pass produces patches.
+
+tier_map:
+  expert: {provider: cli:claude_cli, model: claude-opus-4-7}
+
+steps:
+  - name: discover
+    role: auditor
+    difficulty: expert
+    system: |
+      Enumerate security issues in the artefact. Categorise by
+      OWASP-style class. Note ALL candidates — false positives are
+      cheaper than missed vulnerabilities.
+    prompt: "Code to audit:\n{{task}}"
+
+  - name: verify
+    role: confirmer
+    difficulty: expert
+    depends_on: [discover]
+    system: |
+      For each candidate, decide CONFIRMED / FALSE-POSITIVE /
+      UNCLEAR with one-line justification. Be ruthless — only
+      confirmed issues advance.
+    prompt: |
+      Candidates:
+      {{steps.discover.output}}
+
+      Original code:
+      {{task}}
+
+  - name: remediate
+    role: writer
+    difficulty: hard
+    depends_on: [verify]
+    system: "Write patches for every CONFIRMED issue."
+    prompt: |
+      Confirmed issues:
+      {{steps.verify.output}}
+
+      Original code:
+      {{task}}
+
+  - name: boss-review
+    role: security-lead
+    difficulty: expert
+    depends_on: [remediate]
+    pause_after: true
+    prompt: |
+      Decision required: ship patches as-is, request changes, or
+      escalate to a vendor advisory.
+
+      Confirmed issues:
+      {{steps.verify.output}}
+
+      Proposed patches:
+      {{steps.remediate.output}}
+
+metadata:
+  tags: [engineering, security]

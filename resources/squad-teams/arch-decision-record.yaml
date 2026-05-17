@@ -1,0 +1,62 @@
+name: arch-decision-record
+description: |
+  Produces an ADR (Architecture Decision Record) with multi-model
+  review. One proposer drafts the ADR; three reviewers come at it
+  from different angles in parallel; a synthesizer merges concerns.
+
+steps:
+  - name: propose
+    role: proposer
+    difficulty: hard
+    system: |
+      Draft an ADR with sections: Context, Decision, Consequences,
+      Alternatives Considered. Be concrete, not aspirational.
+    prompt: "Decision needed:\n{{task}}"
+
+  - name: review-tech
+    role: tech-reviewer
+    difficulty: hard
+    parallel_group: reviews
+    depends_on: [propose]
+    system: "Review for technical correctness and edge cases."
+    prompt: "ADR:\n{{steps.propose.output}}"
+
+  - name: review-ops
+    role: ops-reviewer
+    difficulty: hard
+    parallel_group: reviews
+    depends_on: [propose]
+    system: "Review for operability: monitoring, rollback, on-call."
+    prompt: "ADR:\n{{steps.propose.output}}"
+
+  - name: review-cost
+    role: cost-reviewer
+    difficulty: hard
+    parallel_group: reviews
+    depends_on: [propose]
+    system: "Review for cost and maintenance burden."
+    prompt: "ADR:\n{{steps.propose.output}}"
+
+  - name: synthesize
+    role: chair
+    difficulty: hard
+    depends_on: [review-tech, review-ops, review-cost]
+    pause_after: true
+    system: |
+      Consolidate reviews into a final ADR. Note dissents explicitly.
+      Mark the decision PROVISIONAL until human sign-off.
+    prompt: |
+      Original ADR:
+      {{steps.propose.output}}
+
+      Tech review:
+      {{steps.review-tech.output}}
+
+      Ops review:
+      {{steps.review-ops.output}}
+
+      Cost review:
+      {{steps.review-cost.output}}
+
+metadata:
+  tags: [architecture, governance]

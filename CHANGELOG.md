@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-05-17
+
+### 💻 Summary
+
+**Three-mode interop: `auto / smart / squad` can now compose, recurse, and hand off through one shared `ModeContext`.** 1.0.0 made the three modes cleanly separate; 1.0.1 makes them cleanly *composable*. A squad step can declare `mode: smart` to recurse into the orchestrator; a smart sub-task can land on a full squad; a reviewer that hits `max_retries` in a squad now escalates to `smart` automatically. Across every layer, blackboard reads, cost-ledger writes, and prompt-cache session ids share one object — there are no more isolated child islands.
+
+Also lands: a **YAML team library** (`Squad\YamlSquadLoader` + `Squad\TeamRegistry`) with **21 production-grade teams** bundled under `resources/squad-teams/`, a **typed `Blackboard`** (claim / evidence / risk / decision kinds), a **`Squad\ReviewerLoopRunner`** that wraps any dispatcher so reviewer rejections re-inject feedback into the writer's next attempt, and a host-extension SPI (`Squad\SquadDispatcherRegistry` + `Modes\ModeRouterRegistry`) so host applications can install their own dispatchers or routers without touching SDK code.
+
+No breaking changes. Every new piece is opt-in; pre-1.0.1 callers see byte-identical behaviour.
+
+### Added — Cross-mode contract (`src/Modes/`)
+
+A new namespace introducing the shared vocabulary every cross-mode-aware orchestrator speaks.
+
+- **`Modes\ModeContext`** — the single value object that flows through every level of `auto/smart/squad` nesting. Carries the shared `Blackboard`, an optional `PeerMailbox`, a `CostLedger`, a stable `rootSessionId`, the current `depth`, the `modeStack` (e.g. `['squad', 'smart', 'auto']`), and a `CrossModePolicy`. Static factory `ModeContext::root($entryMode)` builds a fresh root; `$ctx->descend($childMode)` produces a child while checking depth / cycle / budget against the policy. Blackboard / mailbox / ledger are shared *by reference* across parent and children — a child write is visible at every depth.
+- **`Modes\ModeOrchestrator`** — the single interface every cross-mode-aware orchestrator implements: `execute(string $task, ModeContext $context, array $options): ModeResult` + `modeName(): string`. The method is named `execute()` rather than `run()` because `AutoModeAgent::run()` / `SmartOrchestrator::run()` already exist with different signatures — `execute()` is the cross-mode-shaped entry point, often delegating to `run()` after argument translation.
+- **`Modes\ModeResult`** — uniform return shape: `text`, `costUsd`, `mode`, `trace` (the mode stack the result traversed), and a `modeSpecific` free bag for fields only one mode produces (e.g. `subtask_results` for smart, `squad_id` / `roles` / `mailbox_log` for squad).
+- **`Modes\ModeRouter`** — dispatches a task to the right `ModeOrchestrator` by mode name. `register($orch)` adds an orchestrator under its `modeName()`. `dispatch($mode, $task, $ctx)` runs it. `descend($mode, $task, $parentCtx)` automatically calls `$parentCtx->descend()` before dispatching — the standard pattern for "I'm a parent mode recursing into a sibling mode."
+- **`Modes\ModeRouterRegistry`** — process-scoped SPI for the default `ModeRouter`. Mirrors `Squad\SquadDispatcherRegistry`: single static slot, `set / get / has / clear`. Hosts (SuperAICore, jcode, custom apps) install their own router once at boot; SDK code paths that recurse on a `SubTask.mode` consult this slot before falling back to internal defaults.
+- **`Modes\CrossModePolicy`** — the decision rules: `maxDepth` (default 4), `budgetCapUsd` (default null), `detectCycles` (default true — flags `[…, X, X]`), `autoEscalateOnFailure` + `escalateAfterRetries` + `escalateTo` (default `smart`), and optional `downgradeBelowScore` / `downgradeTo`. Held inside `ModeContext`, consulted at every `descend()`.
+- **`Modes\CostLedger`** — append-mostly ledger tracking every leaf dispatch in a cross-mode run. `record(mode, costUsd, step?, model?)` appends; `total()` returns the running sum without re-walking; `byMode()` buckets for rendering "auto: $0.02, smart: $0.18, squad: $0.31".
+- **`Modes\AutoModeAdapter`**, **`SmartModeAdapter`**, **`SquadModeAdapter`** — thin shims making `AutoModeAgent` / `SmartOrchestrator` / `PeerOrchestrator` callable through the `ModeOrchestrator` contract. Each adapter translates `task + context + options` to the inner orchestrator's native shape, records the leaf cost into the shared ledger, and wraps the return in a `ModeResult`. Existing direct callers of those orchestrators see no change — the adapters are additive seams.
+- Distinct exception types: `ModeDepthExceededException`, `ModeCycleException`, `ModeBudgetExceededException`, `ModeNotRegisteredException`. Hosts catch the specific subtype to surface different UX (e.g. depth exceeded → "your team plan is too deep, simplify", budget → "raise --max-cost or trim scope").
+
+### Added — YAML team library
+
+The squad workflow used to require PHP code to declare `SubTask` instances. 1.0.1 ships a full YAML format plus a 3-tier catalog so hosts can ship and override teams without rebuilding the registry.
+
+- **`Squad\YamlSquadLoader`** — parses a YAML team file into a `SquadPlan`. Validates aggressively at load time (missing `name` / `steps`, duplicate step names, dangling `depends_on` references, malformed `loops` blocks) so CI catches typos before a paid model call fires. Loader is strict on required fields, lenient on unknown extras — future fields don't break older loaders.
+- **`Squad\SquadPlan`** — value object: `name`, `description`, `subTasks[]`, `tierMap` (band → {provider, model}), `loops[]` (writer-reviewer bindings), `metadata` (free-form tags). Hosts persist it, executors consume it, `TeamRegistry` registers it.
+- **`Squad\ReviewerLoopBinding`** — pairs a writer step with a reviewer step plus a feedback key + `maxRetries`. Built by `YamlSquadLoader` from the YAML `loops:` block; consumed by `ReviewerLoopRunner` to drive the loop.
+- **`Squad\ReviewerLoopRunner`** — wraps any `agentDispatcher` callable so reviewer rejections re-inject feedback into the writer's next attempt instead of terminating the loop. When the reviewer's first non-blank line starts with `APPROVED` (case-insensitive), the loop exits. Otherwise the reviewer's output is prepended to the writer's prompt as a `## Reviewer feedback (must address before re-submit)` block and the writer re-runs. The wrapper is transparent — pipelines without `loops:` blocks see no behaviour change. **Cross-mode escalation:** when `max_retries` is exhausted AND a `ModeRouter` is registered via `ModeRouterRegistry`, the runner hands the task off to the `escalateTo` mode (default `smart`) one last time and substitutes its output for the failing artefact. Silent no-op when no router is registered.
+- **`Squad\TeamRegistry`** — 3-tier catalog mirroring the existing `ModelCatalog` pattern:
+  - **Bundled tier** — SDK ships ~20 teams in `resources/squad-teams/`. Single source of truth.
+  - **Directory tier** — host calls `addDirectory($path)` at boot to layer additional YAML files on top. Later directories override earlier ones.
+  - **Runtime tier** — host calls `register($name, $plan)` for programmatic plans.
+  Resolution order: runtime > directories (last wins) > bundled. `list()` returns every name across tiers (deduped); `load($name)` resolves through the priority chain; `origin($name)` reports which tier a name resolved through.
+- **21 bundled teams** under `resources/squad-teams/` (alphabetical):
+  - **Engineering**: `code-review-loop`, `code-pair-program`, `code-refactor-pipeline`, `code-bug-triage`, `code-test-driven`, `code-security-audit`, `code-perf-optimize`
+  - **Architecture**: `arch-from-scratch`, `arch-decision-record`, `arch-migration-plan`
+  - **QA / SRE**: `qa-ship-gate`, `qa-multi-model-council`, `qa-incident-response`
+  - **Product**: `product-strategy-trio`, `product-discovery-pair`
+  - **Docs**: `docs-tech-pipeline`, `docs-api-spec-pipeline`
+  - **Data**: `data-research-trio`, `data-anomaly-detector`
+  - **Ops / Growth**: `release-coordination`, `growth-hypothesis-test`
+  - **Examples** (illustrative, used by tests): `example-writer-reviewer-loop`, `example-parallel-council`
+
+### Added — Cross-mode YAML fields on `SubTask`
+
+Six new optional fields, all default null. Backward compatible — pre-1.0.1 subtasks behave identically.
+
+- **`mode: auto|smart|squad`** — the step recurses into that mode via `ModeRouter` instead of executing as a plain leaf dispatch.
+- **`team: <name>`** — when `mode: squad`, loads a team from `TeamRegistry` to execute for this step. Pairs with `mode` rather than replacing it.
+- **`mode_chain: [single, smart, squad]`** — fallback escalation list. The dispatcher tries each mode in order until one's output passes the `fail_criteria` regex. (Wire-up scaffold lands here; full execution in 1.0.2.)
+- **`fail_criteria: <regex>`** — applied to step output; match means "this attempt failed, try the next in `mode_chain`."
+- **`parallel_modes: [{mode: smart}, {mode: squad, team: code-pair-program}]`** — fork-join: run multiple modes on the same prompt, then merge via `merge_prompt`.
+- **`merge_prompt`** — the prompt used to consolidate `parallel_modes` outputs.
+
+`SubTask::isCrossMode()` returns true when any of these fields is set — single helper for executors that want to special-case cross-mode steps.
+
+### Added — Typed `Blackboard`
+
+The shared scratchpad is no longer just untyped KV. Every entry carries a `kind` field (defaults to `'note'`) so downstream renderers and merge templates can bucket findings into structured sections.
+
+- **Five known kinds**: `KIND_NOTE` (default), `KIND_CLAIM` (agent assertions), `KIND_EVIDENCE` (data/citations), `KIND_RISK` (concerns), `KIND_DECISION` (final calls). Hosts can introduce additional kinds — the blackboard buckets by string, doesn't validate the set.
+- **Convenience methods**: `claim($role, $key, $value)`, `evidence(...)`, `risk(...)`, `decision(...)` — typed sugar over the existing `write(...)` signature.
+- **Filtering**: `entriesBy($kind)` returns one bucket; `entriesByKind()` returns the full `kind → entries[]` map for templates that render "Claims / Evidence / Risks" sections separately.
+- **`Blackboard::fromEntries()` is forward-compatible**: pre-1.0.1 entries without a `kind` field are backfilled to `'note'`.
+- Constructor stays final-public but the class is no longer `final` — hosts can subclass to add typed-write enforcement or persistence hooks. Existing direct construction works unchanged.
+
+### Added — Squad dispatcher SPI
+
+- **`Squad\SquadDispatcherRegistry`** — process-scoped extension point for the default squad dispatcher. Single static slot, `set / get / has / clear`. SDK paths that build an in-process default dispatcher (`AutoMode\AutoModeAgent::runSquad`, by extension the bundled `superagent auto --squad` CLI) consult this registry BEFORE falling back to their built-in default. Hosts that want to drive cross-CLI / cross-backend squads from inside SDK code install their dispatcher once at boot and every default squad spawn routes through it.
+- **`AutoMode\AutoModeAgent::runSquad`** — the 40-line inline default dispatcher is extracted to a new `buildDefaultSquadDispatcher()` method. Resolution precedence is now: per-instance `config['squad']['dispatcher']` → `SquadDispatcherRegistry::get()` → `buildDefaultSquadDispatcher()`. Behaviour of the fallback is byte-identical to pre-1.0.1.
+
+### Changed
+
+- **`Squad\Blackboard` is no longer `final`** so hosts can subclass for typed-write enforcement or persistence. Existing direct construction / `new Blackboard()` is unchanged.
+- **`AutoMode\AutoModeAgent::runSquad`** internal restructure (see above). Public method signature unchanged.
+
+### Tests
+
+- **+13 unit tests** under `tests/Unit/Modes/`:
+  - `ModeContextTest` (8) — root construction, descend semantics, shared ledger, shared blackboard, depth cap, cycle detection, cycle bypass, budget cap, `withMetadata`.
+  - `ModeRouterTest` (5) — register / dispatch, unknown-mode throws, descend advances stack, registry persists / clears, multi-orchestrator routing.
+- **+13 unit tests** under `tests/Unit/Squad/`:
+  - `BlackboardKindTest` (4) — default kind, convenience methods, kind filtering, forward-compatible rehydrate.
+  - `YamlSquadLoaderTest` (8) — minimal load, `pause_after` mapping, loops parsing, missing-name throws, missing-steps throws, dangling depends_on throws, duplicate step name throws, malformed loops throws.
+  - `TeamRegistryTest` (8) — auto-discover bundled dir, load returns plan, unknown name returns null / require throws, runtime overrides bundled, directory overrides bundled, lazy parsing isolates broken YAML, addDirectory idempotent, unregister.
+  - `SquadDispatcherRegistryTest` (5) — unset by default, set persists, set replaces, set null = clear, clear drops.
+- All passing. **78 squad+modes tests total** (vs 39 in 1.0.0).
+
+### Docs
+
+- **README** (EN/CN/FR): new `YAML team library` subsection under `Squad mode`. New `Cross-mode orchestration` subsection covering when to recurse, mode_stack, shared blackboard / ledger.
+- **INSTALL** (EN/CN/FR): team library setup paragraph (zero config — bundled teams are auto-discovered; optional `addDirectory` for host overlays).
+- **ADVANCED_USAGE** (EN/CN/FR): two new sections —
+  - **§61 YAML team library + `TeamRegistry`**: file format reference, 3-tier catalog, listing/loading, overlay strategy, the 21 bundled team summaries.
+  - **§62 Cross-mode orchestration**: `ModeContext`, `ModeRouter`, the SPI, `SubTask` cross-mode fields, ReviewerLoopRunner escalation, depth/cycle/budget enforcement, sequence diagram for "squad → smart → cli leaf" with shared ledger.
+
+### Compatibility
+
+- **No breaking changes.** Every new piece is additive. Existing PHP-built `SubTask`s, `PeerOrchestrator` callers, and `AutoModeAgent` callers see no behaviour change.
+- The two SPIs (`SquadDispatcherRegistry`, `ModeRouterRegistry`) ship un-set — SDK fallbacks fire until a host opts in.
+- `Blackboard` shape: pre-1.0.1 entries gain a `'kind' => 'note'` field when rehydrated via `fromEntries()`. Direct `entries()` reads gain the `kind` field on every row — code that inspected `entries[$i]['kind']` would have hit "undefined index" before; now it gets `'note'`. We consider this strictly forward-compatible.
+
+### Trade-offs
+
+- **Cross-mode recursion can multiply cost quickly** if the policy lets it: a `squad → smart → squad` chain pays the squad-merge cost twice. `CrossModePolicy::budgetCapUsd` and `maxDepth` are the two knobs that bound this; defaults (4 deep, no cap) suit most workloads but tighten for cost-sensitive production runs.
+- **ReviewerLoopRunner escalation is opt-in.** When `ModeRouterRegistry::get() === null` (no host has installed one), max_retries terminates the loop with the last writer output unchanged — same behaviour as 1.0.0. Hosts that want the escalation install a router as part of normal boot.
+- **YamlSquadLoader requires `symfony/yaml`**. The dependency is already pulled in transitively by Symfony Console; an explicit `composer require symfony/yaml` is only needed in a no-Symfony setup.
+
 ## [1.0.0] - 2026-05-16
 
 ### 💻 Summary

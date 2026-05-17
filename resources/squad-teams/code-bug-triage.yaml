@@ -1,0 +1,57 @@
+name: code-bug-triage
+description: |
+  Reproduce → root-cause → fix → verify. Forces the agent to prove
+  the bug exists before it tries to fix anything — eliminates the
+  "fixed the wrong code path" failure mode.
+
+steps:
+  - name: reproduce
+    role: reproducer
+    difficulty: moderate
+    system: |
+      Construct a minimal reproduction. Output a self-contained code
+      snippet or shell command, plus the expected vs actual outcome.
+    prompt: "Bug report:\n{{task}}"
+
+  - name: root-cause
+    role: investigator
+    difficulty: hard
+    depends_on: [reproduce]
+    system: |
+      Trace the failure to its first divergence point. Cite specific
+      lines or call sites. Distinguish symptom from cause.
+    prompt: |
+      Reproduction:
+      {{steps.reproduce.output}}
+
+  - name: fix
+    role: writer
+    difficulty: hard
+    depends_on: [root-cause]
+    system: "Apply the minimal patch that resolves the root cause."
+    prompt: |
+      Root cause:
+      {{steps.root-cause.output}}
+
+  - name: verify
+    role: verifier
+    difficulty: expert
+    depends_on: [fix]
+    system: |
+      Re-run the reproduction against the patch. Reply "FIXED" or
+      "STILL BROKEN: <evidence>".
+    prompt: |
+      Reproduction:
+      {{steps.reproduce.output}}
+
+      Patch:
+      {{steps.fix.output}}
+
+loops:
+  - writer: fix
+    reviewer: verify
+    feedback_key: verify.feedback
+    max_retries: 2
+
+metadata:
+  tags: [engineering, bug-fix, debugging]

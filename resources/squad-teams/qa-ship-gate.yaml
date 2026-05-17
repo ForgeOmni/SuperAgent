@@ -1,0 +1,43 @@
+name: qa-ship-gate
+description: |
+  Pre-ship pipeline: QA pass + UAT pass + boss decision with a
+  pause_after gate. Use before merging anything user-facing.
+
+steps:
+  - name: qa
+    role: qa-engineer
+    difficulty: moderate
+    system: |
+      Run a QA pass. Categorise findings as blocker / major / minor.
+      Respond as a numbered list, blockers first.
+    prompt: "Artefact:\n{{task}}"
+
+  - name: uat
+    role: acceptance-tester
+    difficulty: moderate
+    depends_on: [qa]
+    system: |
+      Walk through the main happy-path flow as an end user. Where
+      would a real user get stuck or confused?
+    prompt: |
+      Artefact:
+      {{task}}
+
+      QA findings (already filed):
+      {{steps.qa.output}}
+
+  - name: boss-decision
+    role: product-owner
+    difficulty: hard
+    depends_on: [uat]
+    pause_after: true
+    system: "Reply with one of: SHIP / FIX-THEN-SHIP / BLOCK."
+    prompt: |
+      QA findings:
+      {{steps.qa.output}}
+
+      UAT findings:
+      {{steps.uat.output}}
+
+metadata:
+  tags: [qa, shipping]

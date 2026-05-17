@@ -17,29 +17,32 @@ namespace SuperAgent\Squad;
  * name AND the role identifier on the blackboard. Keep it stable
  * across decompositions of the same prompt so resume can match a
  * prior step's checkpoint by name.
+ *
+ * Cross-mode fields (added with `Modes\ModeRouter`):
+ *
+ *   - `$mode`           — when set (`'auto'`|`'smart'`|`'squad'`),
+ *                          the step recurses into that mode via
+ *                          `ModeRouter` instead of executing as a
+ *                          plain leaf dispatch.
+ *   - `$teamRef`        — when `$mode === 'squad'`, name of a
+ *                          team in `TeamRegistry` to load and run
+ *                          for this step.
+ *   - `$modeChain`      — fallback escalation: try modes in order
+ *                          until one succeeds. Failure detection is
+ *                          governed by `$failCriteria`.
+ *   - `$failCriteria`   — regex applied to step output; match = fail
+ *                          → escalate to next entry in modeChain.
+ *   - `$parallelModes`  — fork-join: run multiple modes on the same
+ *                          prompt, then merge via `$mergePrompt`.
+ *
+ * Every cross-mode field defaults to null — pre-existing subtasks
+ * are byte-compatible.
  */
 final class SubTask
 {
     /**
-     *
-     * @param string         $name           Stable step / role identifier
-     *                                       (kebab-case, e.g. "topic-decision").
-     * @param string         $role           Human-readable role label
-     *                                       (e.g. "topic-strategist").
-     * @param string         $prompt         Prompt template — can reference
-     *                                       prior steps via `{{steps.X.output}}`.
-     * @param DifficultyClass $difficulty    Difficulty band.
-     * @param string[]       $dependsOn      Names of subtasks this one needs.
-     * @param bool           $requiresReview Whether to inject an HITL
-     *                                       approval gate AFTER this step.
-     * @param string|null    $systemPrompt   Optional system prompt; if null
-     *                                       the composer uses a role default.
-     * @param string|null    $templateRef    Optional reference to a preset
-     *                                       template name in AgentTemplateManager.
-     * @param string|null    $parallelGroup  Label identifying a fan-out
-     *                                       cluster. Subtasks sharing a
-     *                                       non-null label run in parallel
-     *                                       inside one `ParallelStep`.
+     * @param array<array{mode:string, team?:string, options?:array}>|null $parallelModes
+     * @param list<string>|null $modeChain
      */
     public function __construct(
         public readonly string $name,
@@ -51,7 +54,25 @@ final class SubTask
         public readonly ?string $systemPrompt = null,
         public readonly ?string $templateRef = null,
         public readonly ?string $parallelGroup = null,
+        public readonly ?string $mode = null,
+        public readonly ?string $teamRef = null,
+        public readonly ?array $modeChain = null,
+        public readonly ?string $failCriteria = null,
+        public readonly ?array $parallelModes = null,
+        public readonly ?string $mergePrompt = null,
     ) {}
+
+    /**
+     * Whether this step recurses into another mode rather than
+     * running as a plain leaf dispatch. True when any of the
+     * cross-mode fields is set.
+     */
+    public function isCrossMode(): bool
+    {
+        return $this->mode !== null
+            || $this->modeChain !== null
+            || $this->parallelModes !== null;
+    }
 
     public function toArray(): array
     {
@@ -65,6 +86,12 @@ final class SubTask
             'system_prompt'   => $this->systemPrompt,
             'template_ref'    => $this->templateRef,
             'parallel_group'  => $this->parallelGroup,
+            'mode'            => $this->mode,
+            'team_ref'        => $this->teamRef,
+            'mode_chain'      => $this->modeChain,
+            'fail_criteria'   => $this->failCriteria,
+            'parallel_modes'  => $this->parallelModes,
+            'merge_prompt'    => $this->mergePrompt,
         ];
     }
 }

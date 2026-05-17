@@ -762,6 +762,96 @@ superagent auto "<task>" --squad --max-cost 5.00 --verbose
 ],
 ```
 
+### YAML 团队库 *(v1.0.1)*
+
+`SquadPlan` 不再需要 PHP 代码定义。放一个 YAML，注册，跑：
+
+```yaml
+# resources/squad-teams/code-review-loop.yaml（自带）
+name: code-review-loop
+description: 写手 + 审查者，反馈注入闭环
+tier_map:
+  hard:   {provider: anthropic, model: claude-opus-4-7}
+  expert: {provider: openai,    model: gpt-5.1-codex}
+steps:
+  - name: write
+    difficulty: hard
+    prompt: "{{task}}"
+  - name: review
+    difficulty: expert
+    depends_on: [write]
+    prompt: "待审查产物：\n{{steps.write.output}}"
+    pause_after: true                # 可选的 HITL 审批门
+loops:
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+```
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$plan = (new TeamRegistry())->require('code-review-loop');
+$result = $orchestrator->run('refactor-2026-05', $plan->subTasks, /* … */);
+```
+
+**21 个生产级团队随 `resources/squad-teams/` 一起发布**：工程类（`code-review-loop` / `code-bug-triage` / `code-test-driven` / `code-security-audit` / `code-perf-optimize` …）、架构类（`arch-from-scratch` / `arch-decision-record` / `arch-migration-plan`）、QA/SRE（`qa-ship-gate` / `qa-multi-model-council` / `qa-incident-response`）、产品（`product-strategy-trio` / `product-discovery-pair`）、文档（`docs-tech-pipeline` / `docs-api-spec-pipeline`）、数据（`data-research-trio` / `data-anomaly-detector`）、运营/增长（`release-coordination` / `growth-hypothesis-test`）。
+
+**三层覆盖**：host 调 `addDirectory('/path/to/host-teams')` 在自带库之上叠加额外 YAML，或者 `register($name, $plan)` 编程式覆盖。后注册的目录覆盖先注册的；运行时注册覆盖目录中的同名条目。复用 `ModelCatalog` 的同一模式。
+
+**反馈循环执行器**：`Squad\ReviewerLoopRunner` 包装任意 `agentDispatcher` callable。审查者首个非空行不以 `APPROVED`（不区分大小写）开头时，runner 把审查者反馈拼到 writer prompt 前面重发。批准或达到 `max_retries` 后退出。
+
+### 跨模式协同 *(v1.0.1)*
+
+`auto / smart / squad` 现在可以组合、嵌套、互相切换 —— 三模式共用同一个 `ModeContext`。squad 的某一步可以声明 `mode: smart` 递归到 smart 编排；smart 的某个子任务可以落到一整个 squad；squad 的 reviewer 用尽 `max_retries` 时会自动升级到 `smart`。黑板读取、cost-ledger 累加、prompt-cache session id —— 每一层共享同一个对象，没有子层孤岛。
+
+```yaml
+steps:
+  - name: research
+    mode: smart                      # 递归：smart 内部分解 + 路由
+    prompt: "调研 {{task}}"
+
+  - name: implement
+    mode: squad
+    team: code-review-loop           # 该步引用自带团队
+    prompt: "基于 {{steps.research.output}} 构建"
+
+  - name: stress-test
+    mode_chain: [single, smart, squad]   # 失败升级链
+    fail_criteria: "REJECTED|error"
+    prompt: "对构建结果做压力测试"
+```
+
+`ModeContext` 贯穿每一层递归：
+
+```php
+use SuperAgent\Modes\{ModeContext, ModeRouter, CrossModePolicy};
+
+$ctx = ModeContext::root('squad', policy: new CrossModePolicy(
+    maxDepth: 4,
+    budgetCapUsd: 5.00,
+    autoEscalateOnFailure: true,
+    escalateTo: 'smart',
+));
+
+$router = new ModeRouter();
+$router->register(new AutoModeAdapter($autoModeAgent));
+$router->register(new SmartModeAdapter($smartOrchestrator));
+$router->register(new SquadModeAdapter());
+
+$result = $router->dispatch('squad', $task, $ctx);
+// $ctx->costLedger->total()  → 每一次 leaf dispatch 求和
+// $ctx->costLedger->byMode() → {squad: 0.31, smart: 0.18, auto: 0.02}
+// $ctx->blackboard->entries() → 全部 claim / evidence / risk / decision
+```
+
+**松耦合 SPI**：
+- `Squad\SquadDispatcherRegistry::set($dispatcher)` —— host 注入默认 squad 派发器（如 CLI-aware 的版本）
+- `Modes\ModeRouterRegistry::set($router)` —— host 注入默认跨模式路由器（如能识别 `cli:claude_cli` 等 leaf tag 的版本）
+
+两者都是类级静态槽。SDK 任何路径在用 fallback 之前都会先查这两个槽。SDK 自己永远不调用 `set()` —— 槽位保留给 host。
+
 ### 幂等性
 
 ```php

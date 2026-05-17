@@ -486,6 +486,72 @@ Référence complète du mode (règles de décomposition, groupes parallèles, s
 
 *Depuis v0.9.9.*
 
+### Bibliothèque d'équipes YAML *(v1.0.1)*
+
+Le SDK livre 21 équipes squad prêtes à l'emploi sous `resources/squad-teams/`. Aucune configuration nécessaire — `Squad\TeamRegistry` les découvre automatiquement.
+
+```bash
+# Lister toutes les équipes connues du registre (livrées + surcharges hôte) :
+php -r "require 'vendor/autoload.php'; print_r((new SuperAgent\Squad\TeamRegistry())->list());"
+
+# Exécuter une équipe (tout dispatcher d'agent fonctionne — voir ADVANCED_USAGE §61) :
+superagent auto --squad --team code-review-loop "<task>"
+```
+
+Pour superposer vos propres YAML par-dessus la bibliothèque livrée, pointez le registre vers un répertoire au démarrage :
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$registry = new TeamRegistry();
+$registry->addDirectory('/etc/myapp/squad-teams');   // surcharge les livrées par nom
+$plan = $registry->require('my-custom-team');
+```
+
+Les répertoires ajoutés plus tard surchargent les précédents ; `register($name, $plan)` runtime surcharge tout. Même schéma à 3 niveaux que `ModelCatalog`.
+
+**SquadPlan reste définissable en PHP** — YAML n'est qu'une façon de produire un SquadPlan ; `new SquadPlan(...)` est strictement équivalent :
+
+```php
+use SuperAgent\Squad\{SquadPlan, SubTask, ReviewerLoopBinding, DifficultyClass};
+
+$plan = new SquadPlan(
+    name: 'my-custom-team',
+    description: 'Code review with feedback injection',
+    subTasks: [
+        new SubTask('write', 'writer', '{{task}}', DifficultyClass::HARD),
+        new SubTask('review', 'reviewer', "Artefact :\n{{steps.write.output}}", DifficultyClass::EXPERT, ['write']),
+    ],
+    tierMap: [
+        'hard'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-7'],
+        'expert' => ['provider' => 'openai',    'model' => 'gpt-5.1-codex'],
+    ],
+    loops: [new ReviewerLoopBinding('write', 'review', 'review.feedback', maxRetries: 3)],
+);
+$registry->register('my-custom-team', $plan);
+```
+
+### Orchestration cross-mode *(v1.0.1)*
+
+Les trois modes (`auto / smart / squad`) partagent un `ModeContext` afin de pouvoir s'imbriquer, se transmettre la main et accumuler le coût dans un seul registre. La plupart des appelants n'ont pas besoin de nouvelles variables d'environnement — la récursion se produit automatiquement quand une étape YAML déclare `mode: smart` ou `mode: squad`.
+
+Réglage optionnel de la politique (à mettre dans `.env`) :
+
+```bash
+# Profondeur maximale de récursion cross-mode avant déclenchement d'une erreur. Défaut 4.
+SUPERAGENT_MODE_MAX_DEPTH=4
+
+# Plafond de coût strict sur l'ensemble du run imbriqué. Défaut illimité.
+SUPERAGENT_MODE_BUDGET_USD=10.00
+
+# Activer la remontée vers un mode plus grand quand ReviewerLoopRunner épuise max_retries.
+# Défaut true. Mode cible (défaut `smart`) contrôlé par SUPERAGENT_MODE_ESCALATE_TO.
+SUPERAGENT_MODE_AUTO_ESCALATE=true
+SUPERAGENT_MODE_ESCALATE_TO=smart
+```
+
+Référence complète (cycle de vie de ModeContext, installation SPI, détection de cycles, escalade de ReviewerLoopRunner) dans [ADVANCED_USAGE §62](docs/ADVANCED_USAGE.md#62-cross-mode-orchestration).
+
 ---
 
 ## Vérification

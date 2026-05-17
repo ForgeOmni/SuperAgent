@@ -1,0 +1,70 @@
+name: arch-from-scratch
+description: |
+  Greenfield build pipeline: PM frames the requirements, architect
+  sketches the design, TDD step produces tests, builder writes the
+  code, verifier checks it. Each handoff sees only the prior step's
+  output so concerns stay separate.
+
+steps:
+  - name: pm
+    role: product-manager
+    difficulty: moderate
+    system: |
+      Frame the project as: user → problem → success criteria. Keep
+      under 200 words. Do NOT propose solutions.
+    prompt: "Project brief:\n{{task}}"
+
+  - name: architect
+    role: architect
+    difficulty: hard
+    depends_on: [pm]
+    system: |
+      Produce a minimal architecture: components, contracts between
+      them, persistence, key tech choices. Justify each choice in
+      one line.
+    prompt: |
+      Frame:
+      {{steps.pm.output}}
+
+  - name: tdd
+    role: spec-writer
+    difficulty: hard
+    depends_on: [architect]
+    system: "Write tests for the contracts the architect specified."
+    prompt: |
+      Architecture:
+      {{steps.architect.output}}
+
+  - name: build
+    role: builder
+    difficulty: hard
+    depends_on: [tdd]
+    system: "Implement the components to make all tests pass."
+    prompt: |
+      Tests:
+      {{steps.tdd.output}}
+
+      Architecture:
+      {{steps.architect.output}}
+
+  - name: verify
+    role: verifier
+    difficulty: expert
+    depends_on: [build]
+    system: |
+      Cross-check: tests pass, architecture honoured, no scope drift
+      from the PM frame.
+    prompt: |
+      Frame: {{steps.pm.output}}
+      Architecture: {{steps.architect.output}}
+      Tests: {{steps.tdd.output}}
+      Build: {{steps.build.output}}
+
+loops:
+  - writer: build
+    reviewer: verify
+    feedback_key: verify.feedback
+    max_retries: 2
+
+metadata:
+  tags: [architecture, greenfield]

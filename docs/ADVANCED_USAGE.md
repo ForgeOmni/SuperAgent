@@ -9166,3 +9166,366 @@ Why this is *not* a master agent:
 Audit trail — every `tell / ask / reply` is appended to `PeerMailbox::log()` and surfaced on `SquadResult::$mailbox` so callers can replay or attribute who told whom what.
 
 *Since v0.9.9.*
+
+## 61. YAML team library + `TeamRegistry` (v1.0.1)
+
+The squad workflow used to require PHP code to assemble a `SubTask[]`. v1.0.1 ships a YAML format plus a three-tier catalog so teams can be authored as configuration and overlaid by hosts without rebuilding the registry.
+
+### YAML schema
+
+```yaml
+name: code-review-loop                 # kebab-case, must be unique within registry
+description: |
+  Writer + reviewer loop with feedback injection.
+
+tier_map:                              # optional: override default ModelTierMap
+  hard:   {provider: anthropic, model: claude-opus-4-7}
+  expert: {provider: openai,    model: gpt-5.1-codex}
+
+steps:
+  - name: write                        # required, kebab-case, unique within file
+    role: writer                       # optional, defaults to name
+    difficulty: hard                   # trivial | easy | moderate | hard | expert; default moderate
+    system: "You are a senior engineer."     # optional system prompt
+    prompt: "{{task}}"                       # required; supports {{task}} and {{steps.X.output}}
+
+  - name: review
+    difficulty: expert
+    depends_on: [write]                # dangling refs throw at load time
+    pause_after: true                  # HITL gate after this step
+    prompt: "Artefact:\n{{steps.write.output}}"
+
+  - name: synthesize
+    depends_on: [review]
+    parallel_group: finalists          # peers in same group run via ParallelStep
+    prompt: "Final:\n{{steps.write.output}}"
+
+  # Cross-mode fields (see §62) — all optional
+  - name: deep-dive
+    mode: smart                        # recurse into smart orchestrator
+    prompt: "Investigate {{task}}"
+
+loops:                                 # optional reviewer-loop bindings
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+
+metadata:                              # free-form, surfaced on SquadPlan
+  tags: [engineering, code-review]
+```
+
+Required fields: top-level `name`, `steps[]`, and per-step `name` + `prompt`. Everything else is optional with sensible defaults.
+
+### Loader
+
+```php
+use SuperAgent\Squad\YamlSquadLoader;
+
+$loader = new YamlSquadLoader();
+$plan   = $loader->loadFile('/path/to/team.yaml');
+// or
+$plan   = $loader->loadString($yamlString, source: '<unit-test>');
+```
+
+Validation runs at load time, not run time — typos surface in CI before a paid model call:
+
+- `name` / `steps` / per-step `name` + `prompt` missing → `InvalidArgumentException`
+- Duplicate step name → throws
+- `depends_on` referencing an unknown step → throws
+- Malformed `loops[]` (missing `writer` / `reviewer`, or referencing unknown step) → throws
+
+### `SquadPlan` is also PHP-constructible
+
+YAML is just one way to produce a `SquadPlan`. Hosts that prefer code (or need to compute the plan dynamically) build the same value object directly:
+
+```php
+use SuperAgent\Squad\{SquadPlan, SubTask, ReviewerLoopBinding, DifficultyClass};
+
+$plan = new SquadPlan(
+    name: 'my-custom-team',
+    description: 'Code review with feedback injection',
+    subTasks: [
+        new SubTask(
+            name:       'write',
+            role:       'writer',
+            prompt:     '{{task}}',
+            difficulty: DifficultyClass::HARD,
+        ),
+        new SubTask(
+            name:       'review',
+            role:       'reviewer',
+            prompt:     "Artefact:\n{{steps.write.output}}",
+            difficulty: DifficultyClass::EXPERT,
+            dependsOn:  ['write'],
+            requiresReview: true,                        // pause_after
+            mode:       'smart',                         // v1.0.1 cross-mode field
+        ),
+    ],
+    tierMap: [
+        'hard'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-7'],
+        'expert' => ['provider' => 'openai',    'model' => 'gpt-5.1-codex'],
+    ],
+    loops: [
+        new ReviewerLoopBinding('write', 'review', 'review.feedback', maxRetries: 3),
+    ],
+);
+
+// Both paths produce the same SquadPlan that PeerOrchestrator consumes.
+```
+
+### `TeamRegistry` — three-tier catalog
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$registry = new TeamRegistry();   // bundled tier auto-discovered
+
+// Layer additional directories (later wins on same-name collisions):
+$registry->addDirectory('/etc/myapp/squad-teams');
+$registry->addDirectory('/home/user/.superagent/squad-teams');
+
+// Programmatic overrides (runtime tier — wins over everything):
+$registry->register('hot-patch', $myPhpBuiltPlan);
+
+// Read:
+$names  = $registry->list();                  // every name in the registry, deduped
+$plan   = $registry->load('code-review-loop'); // or null
+$plan   = $registry->require('code-review-loop'); // or throws
+$origin = $registry->origin('code-review-loop'); // {tier: bundled|directory|runtime, source: '/path/...'}
+```
+
+Resolution order: `runtime > directories (last-added first) > bundled`. Parsing is lazy — `list()` walks the index; YAML files are only parsed when their team is actually requested, so a single broken file doesn't disable the rest of the catalog.
+
+### Bundled team library
+
+The SDK ships 21 production-grade teams under `resources/squad-teams/`. Listing here for discovery; each file's `description:` and inline comments document the workflow.
+
+| Category | Teams |
+|----------|-------|
+| Engineering | `code-review-loop` · `code-pair-program` · `code-refactor-pipeline` · `code-bug-triage` · `code-test-driven` · `code-security-audit` · `code-perf-optimize` |
+| Architecture | `arch-from-scratch` · `arch-decision-record` · `arch-migration-plan` |
+| QA / SRE | `qa-ship-gate` · `qa-multi-model-council` · `qa-incident-response` |
+| Product | `product-strategy-trio` · `product-discovery-pair` |
+| Docs | `docs-tech-pipeline` · `docs-api-spec-pipeline` |
+| Data | `data-research-trio` · `data-anomaly-detector` |
+| Ops / Growth | `release-coordination` · `growth-hypothesis-test` |
+| Examples (illustrative) | `example-writer-reviewer-loop` · `example-parallel-council` |
+
+### `ReviewerLoopRunner`
+
+The class that turns `loops:` blocks into actual feedback-driven re-runs.
+
+```php
+use SuperAgent\Squad\ReviewerLoopRunner;
+
+$runner   = new ReviewerLoopRunner($plan->loops, $blackboard, $logger);
+$wrapped  = $runner->wrap($baseAgentDispatcher);
+$orch     = new PeerOrchestrator($wrapped, ...);
+```
+
+Mechanics:
+- The reviewer's output's first non-blank line determines verdict. Starts with `APPROVED` (case-insensitive) = approve, anything else = reject.
+- On rejection, the reviewer's full output is prepended to the writer's next prompt as a `## Reviewer feedback (must address before re-submit)` block.
+- The writer's prior attempt is preserved verbatim under `## Your prior attempt`, so the model sees both critique and previous output.
+- Hits `max_retries` → loop terminates; the binding's `feedback_key` is stamped on the blackboard with `{'loop_aborted': true, 'last_feedback': ..., 'attempts': N}` so downstream merge steps can flag the failure. If a `ModeRouter` is registered via `ModeRouterRegistry` (see §62), the runner additionally tries one cross-mode escalation before giving up.
+
+*Since v1.0.1.*
+
+## 62. Cross-mode orchestration (v1.0.1)
+
+In v1.0.0 the three modes (`auto / smart / squad`) were cleanly separate. v1.0.1 makes them cleanly *composable*: any mode can recurse into any other through one shared `ModeContext`, share the same blackboard / cost ledger / session id, and hand off to a bigger mode automatically when a smaller one fails.
+
+### The shared object: `ModeContext`
+
+```php
+use SuperAgent\Modes\{ModeContext, CrossModePolicy};
+
+$ctx = ModeContext::root(
+    entryMode: 'squad',
+    policy: new CrossModePolicy(
+        maxDepth: 4,
+        budgetCapUsd: 10.00,
+        detectCycles: true,
+        autoEscalateOnFailure: true,
+        escalateAfterRetries: 3,
+        escalateTo: 'smart',
+    ),
+);
+```
+
+Fields:
+- `blackboard` — typed `Squad\Blackboard` (claim / evidence / risk / decision); shared by reference across every level
+- `mailbox` — optional `Squad\PeerMailbox`; the parent squad attaches one and nested smart / auto calls see it
+- `costLedger` — append-mostly cost log; every leaf dispatch adds to it
+- `rootSessionId` — stable session id for prompt-cache continuity
+- `depth` — current recursion depth
+- `modeStack` — full call chain, e.g. `['squad', 'smart', 'auto']`
+- `policy` — the `CrossModePolicy` controlling depth / budget / cycle / escalation
+
+Spawn a child for a recursive call:
+
+```php
+$child = $ctx->descend('smart');
+// → depth += 1, modeStack appended, same blackboard/mailbox/ledger by reference
+// → throws ModeDepthExceededException / ModeCycleException / ModeBudgetExceededException
+//   if policy is violated
+```
+
+### The interface: `ModeOrchestrator`
+
+```php
+interface ModeOrchestrator
+{
+    public function execute(string $task, ModeContext $context, array $options = []): ModeResult;
+    public function modeName(): string;
+}
+```
+
+Three SDK adapters wrap the existing orchestrators:
+
+```php
+use SuperAgent\Modes\{AutoModeAdapter, SmartModeAdapter, SquadModeAdapter};
+
+$router = new ModeRouter();
+$router->register(new AutoModeAdapter($autoModeAgent));
+$router->register(new SmartModeAdapter($smartOrchestrator));
+$router->register(new SquadModeAdapter());
+
+$result = $router->dispatch('squad', $task, $ctx);
+// $result is a ModeResult: {text, costUsd, mode, trace, modeSpecific}
+```
+
+### Cross-mode YAML
+
+`SubTask` carries six optional cross-mode fields, all parsed by `YamlSquadLoader`:
+
+```yaml
+steps:
+  # Recurse: this step runs through the smart orchestrator
+  - name: research
+    mode: smart
+    prompt: "Investigate {{task}}"
+
+  # Recurse + reference another team
+  - name: implement
+    mode: squad
+    team: code-review-loop
+    prompt: "Build based on {{steps.research.output}}"
+
+  # Fallback chain: try modes in order until output passes the regex
+  - name: stress-test
+    mode_chain: [single, smart, squad]
+    fail_criteria: "REJECTED|error|FAILED"
+    prompt: "Stress-test the build"
+
+  # Fork-join: run multiple modes on the same prompt, then merge
+  - name: ab-compare
+    parallel_modes:
+      - {mode: smart}
+      - {mode: squad, team: code-pair-program}
+    merge_prompt: "Compare and synthesise: {{a}} vs {{b}}"
+```
+
+Detect at the value-object level: `$subTask->isCrossMode()` returns true when any of these fields is set.
+
+### The SPI: `ModeRouterRegistry`
+
+Hosts (SuperAICore, jcode, custom apps) register their own `ModeRouter` once at boot and SDK code paths that recurse pick it up:
+
+```php
+use SuperAgent\Modes\ModeRouterRegistry;
+
+// Host boot:
+ModeRouterRegistry::set($myCustomRouter);
+
+// SDK code that needs to recurse:
+$router = ModeRouterRegistry::get() ?? $sdkDefault;
+$router->descend('smart', $childTask, $parentCtx);
+```
+
+The slot is single-callable and replace-semantics (matches `SquadDispatcherRegistry`). SDK itself never calls `set()` — the slot is reserved for hosts.
+
+### Cost ledger across layers
+
+```php
+$ctx->costLedger->record('squad', 0.05, step: 'write', model: 'claude-opus-4-7');
+$ctx->costLedger->record('smart', 0.18);
+$ctx->costLedger->record('auto',  0.02);
+
+$ctx->costLedger->total();    // 0.25
+$ctx->costLedger->byMode();   // ['squad' => 0.05, 'smart' => 0.18, 'auto' => 0.02]
+```
+
+The same `CostLedger` is shared by reference through `$ctx->descend()`, so a leaf write at depth 3 immediately shows up in the root's `total()`.
+
+### Automatic escalation on reviewer-loop failure
+
+```yaml
+# super-dev.yaml (excerpt)
+loops:
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+```
+
+```php
+$policy = new CrossModePolicy(
+    autoEscalateOnFailure: true,
+    escalateAfterRetries: 3,
+    escalateTo: 'smart',
+);
+ModeRouterRegistry::set($routerWithSmart);
+```
+
+Sequence when the reviewer rejects 3 times:
+
+1. Attempts 1 → 3: writer re-runs with feedback prepended; reviewer rejects each time.
+2. On the 4th would-be attempt: `ReviewerLoopRunner` writes `loop_aborted: true` to the blackboard under `feedback_key`.
+3. If `ModeRouterRegistry::get()` is non-null AND `policy->autoEscalateOnFailure` is true:
+   - Build a one-shot child `ModeContext`
+   - Call `$router->descend('smart', $writerPrompt + reviewerFeedback, $ctx)`
+   - Substitute the escalation's output as the writer's final output
+4. The pipeline continues with the recovered artefact rather than the failing one.
+
+### Sequence diagram: `squad → smart → cli leaf`
+
+```
+┌─ ModeContext::root('squad'), depth=0
+│
+├─► PeerOrchestrator (squad)
+│   step 'implement', SubTask.mode='smart' →
+│       │
+│       └─► router->descend('smart', task, ctx)
+│           │
+│           ├─ ctx2 = ctx->descend('smart'), depth=1, stack=['squad','smart']
+│           │
+│           ├─► SmartModeAdapter.execute(task, ctx2)
+│           │   subtask routing: hard band → 'cli:codex_cli'
+│           │       │
+│           │       └─► CliModeRouter.dispatch('cli:codex_cli', subtask, ctx2)
+│           │           ├─ ctx3 = ctx2 (leaf, no descend)
+│           │           └─► CrossLayerDispatcher → CodexCliBackend
+│           │               (records cost into ctx.costLedger as 'cli:codex_cli')
+│           │
+│           └─ returns ModeResult(text=..., costUsd=0.18, mode='smart',
+│                                 trace=['squad','smart'])
+│
+└─ SquadResult.text includes the smart result;
+   ctx.costLedger.total() == sum across every layer
+```
+
+Cross-cutting properties:
+
+- One blackboard write at depth 2 (e.g. `$ctx3->blackboard->risk(...)`) is visible at depth 0
+- Cost ledger entries tag the leaf as `cli:codex_cli` distinct from the parent's `squad` line
+- `mode_stack` lets the envelope render the breadcrumb (`squad → smart → cli:codex_cli`)
+
+### When NOT to nest
+
+- The child mode would do exactly what the parent already does on its leaves (e.g. squad → squad without changing tier_map or team) — added recursion cost with no gain
+- A simple single-CLI dispatch suffices — wrapping it in `auto` just for consistency adds overhead
+- Production runs with strict budget caps — set `policy->maxDepth=2` to keep nesting shallow
+
+*Since v1.0.1.*

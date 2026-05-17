@@ -10291,3 +10291,366 @@ Pourquoi ce n'est *pas* un agent maître :
 Piste d'audit — chaque `tell / ask / reply` est ajouté à `PeerMailbox::log()` et exposé sur `SquadResult::$mailbox` pour que les appelants puissent rejouer ou attribuer qui a dit quoi à qui.
 
 *Depuis v0.9.9.*
+
+## 61. Bibliothèque d'équipes YAML + `TeamRegistry` (v1.0.1)
+
+Le workflow squad nécessitait jusqu'ici du code PHP pour assembler un `SubTask[]`. v1.0.1 livre un format YAML plus un catalogue à trois niveaux : les équipes deviennent de la configuration et les hôtes peuvent superposer sans reconstruire le registre.
+
+### Schéma YAML
+
+```yaml
+name: code-review-loop                 # kebab-case, unique dans le registre
+description: |
+  Boucle écrivain + relecteur avec injection de feedback.
+
+tier_map:                              # optionnel : surcharge le ModelTierMap par défaut
+  hard:   {provider: anthropic, model: claude-opus-4-7}
+  expert: {provider: openai,    model: gpt-5.1-codex}
+
+steps:
+  - name: write                        # requis, kebab-case, unique dans le fichier
+    role: writer                       # optionnel, défaut = name
+    difficulty: hard                   # trivial | easy | moderate | hard | expert ; défaut moderate
+    system: "You are a senior engineer."     # system prompt optionnel
+    prompt: "{{task}}"                       # requis ; supporte {{task}} et {{steps.X.output}}
+
+  - name: review
+    difficulty: expert
+    depends_on: [write]                # référence pendante → erreur au chargement
+    pause_after: true                  # porte HITL après cette étape
+    prompt: "Artefact :\n{{steps.write.output}}"
+
+  - name: synthesize
+    depends_on: [review]
+    parallel_group: finalists          # pairs d'un même groupe → ParallelStep
+    prompt: "Final :\n{{steps.write.output}}"
+
+  # Champs cross-mode (voir §62) — tous optionnels
+  - name: deep-dive
+    mode: smart                        # récurse dans l'orchestrateur smart
+    prompt: "Étudier {{task}}"
+
+loops:                                 # liaisons reviewer-loop optionnelles
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+
+metadata:                              # libre, surface sur SquadPlan
+  tags: [engineering, code-review]
+```
+
+Champs requis : `name` top-level, `steps[]`, et par étape `name` + `prompt`. Tout le reste est optionnel avec des défauts.
+
+### Loader
+
+```php
+use SuperAgent\Squad\YamlSquadLoader;
+
+$loader = new YamlSquadLoader();
+$plan   = $loader->loadFile('/path/to/team.yaml');
+// ou
+$plan   = $loader->loadString($yamlString, source: '<unit-test>');
+```
+
+La validation s'exécute au chargement, pas à l'exécution — les fautes de frappe émergent en CI avant un appel modèle payant :
+
+- `name` / `steps` / par-étape `name` + `prompt` manquant → `InvalidArgumentException`
+- Nom d'étape dupliqué → erreur
+- `depends_on` référençant une étape inconnue → erreur
+- `loops[]` malformé (sans `writer` / `reviewer`, ou référençant une étape inconnue) → erreur
+
+### `SquadPlan` reste constructible en PHP
+
+YAML n'est qu'une façon de produire un `SquadPlan`. Les hôtes qui préfèrent le code (ou doivent calculer le plan dynamiquement) construisent le même value object directement :
+
+```php
+use SuperAgent\Squad\{SquadPlan, SubTask, ReviewerLoopBinding, DifficultyClass};
+
+$plan = new SquadPlan(
+    name: 'my-custom-team',
+    description: 'Revue de code avec injection de feedback',
+    subTasks: [
+        new SubTask(
+            name:       'write',
+            role:       'writer',
+            prompt:     '{{task}}',
+            difficulty: DifficultyClass::HARD,
+        ),
+        new SubTask(
+            name:       'review',
+            role:       'reviewer',
+            prompt:     "Artefact :\n{{steps.write.output}}",
+            difficulty: DifficultyClass::EXPERT,
+            dependsOn:  ['write'],
+            requiresReview: true,                        // pause_after
+            mode:       'smart',                         // champ cross-mode v1.0.1
+        ),
+    ],
+    tierMap: [
+        'hard'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-7'],
+        'expert' => ['provider' => 'openai',    'model' => 'gpt-5.1-codex'],
+    ],
+    loops: [
+        new ReviewerLoopBinding('write', 'review', 'review.feedback', maxRetries: 3),
+    ],
+);
+
+// Les deux chemins produisent le même SquadPlan que PeerOrchestrator consomme.
+```
+
+### `TeamRegistry` — catalogue à trois niveaux
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$registry = new TeamRegistry();   // tier livré auto-découvert
+
+// Superposer des répertoires supplémentaires (le dernier gagne sur collision de nom) :
+$registry->addDirectory('/etc/myapp/squad-teams');
+$registry->addDirectory('/home/user/.superagent/squad-teams');
+
+// Surcharges programmatiques (tier runtime — gagne sur tout) :
+$registry->register('hot-patch', $myPhpBuiltPlan);
+
+// Lecture :
+$names  = $registry->list();                  // tous les noms du registre, dédoublonnés
+$plan   = $registry->load('code-review-loop'); // ou null
+$plan   = $registry->require('code-review-loop'); // ou erreur
+$origin = $registry->origin('code-review-loop'); // {tier: bundled|directory|runtime, source: '/path/...'}
+```
+
+Ordre de résolution : `runtime > répertoires (dernier ajouté en premier) > livré`. Parsing paresseux — `list()` parcourt l'index ; les fichiers YAML ne sont parsés que quand leur équipe est réellement demandée, donc un fichier cassé isolé ne désactive pas le reste du catalogue.
+
+### Bibliothèque livrée
+
+Le SDK livre 21 équipes de qualité production sous `resources/squad-teams/`. Liste ici pour la découverte ; chaque fichier documente son workflow via `description:` et commentaires inline.
+
+| Catégorie | Équipes |
+|----------|-------|
+| Ingénierie | `code-review-loop` · `code-pair-program` · `code-refactor-pipeline` · `code-bug-triage` · `code-test-driven` · `code-security-audit` · `code-perf-optimize` |
+| Architecture | `arch-from-scratch` · `arch-decision-record` · `arch-migration-plan` |
+| QA / SRE | `qa-ship-gate` · `qa-multi-model-council` · `qa-incident-response` |
+| Produit | `product-strategy-trio` · `product-discovery-pair` |
+| Docs | `docs-tech-pipeline` · `docs-api-spec-pipeline` |
+| Data | `data-research-trio` · `data-anomaly-detector` |
+| Ops / Croissance | `release-coordination` · `growth-hypothesis-test` |
+| Exemples (illustratifs) | `example-writer-reviewer-loop` · `example-parallel-council` |
+
+### `ReviewerLoopRunner`
+
+La classe qui transforme les blocs `loops:` en vrais re-runs pilotés par feedback.
+
+```php
+use SuperAgent\Squad\ReviewerLoopRunner;
+
+$runner   = new ReviewerLoopRunner($plan->loops, $blackboard, $logger);
+$wrapped  = $runner->wrap($baseAgentDispatcher);
+$orch     = new PeerOrchestrator($wrapped, ...);
+```
+
+Mécanique :
+- La première ligne non vide de la sortie du relecteur détermine le verdict. Commence par `APPROVED` (insensible à la casse) = approbation ; n'importe quoi d'autre = rejet.
+- En cas de rejet, la sortie complète du relecteur est préfixée au prompt suivant de l'écrivain sous forme de bloc `## Reviewer feedback (must address before re-submit)`.
+- La tentative précédente de l'écrivain est préservée mot pour mot sous `## Your prior attempt`, donc le modèle voit à la fois la critique et la sortie précédente.
+- Atteint `max_retries` → la boucle se termine ; le `feedback_key` de la liaison est marqué sur le tableau noir avec `{'loop_aborted': true, 'last_feedback': ..., 'attempts': N}` pour que les étapes de fusion en aval signalent l'échec. Si un `ModeRouter` est enregistré via `ModeRouterRegistry` (voir §62), le runner essaie en plus une escalade cross-mode avant d'abandonner.
+
+*Depuis v1.0.1.*
+
+## 62. Orchestration cross-mode (v1.0.1)
+
+En v1.0.0 les trois modes (`auto / smart / squad`) étaient proprement séparés. v1.0.1 les rend proprement *composables* : tout mode peut récurser dans tout autre via un `ModeContext` partagé, partager le même tableau noir / registre de coût / session id, et passer la main à un mode plus grand automatiquement quand un plus petit échoue.
+
+### L'objet partagé : `ModeContext`
+
+```php
+use SuperAgent\Modes\{ModeContext, CrossModePolicy};
+
+$ctx = ModeContext::root(
+    entryMode: 'squad',
+    policy: new CrossModePolicy(
+        maxDepth: 4,
+        budgetCapUsd: 10.00,
+        detectCycles: true,
+        autoEscalateOnFailure: true,
+        escalateAfterRetries: 3,
+        escalateTo: 'smart',
+    ),
+);
+```
+
+Champs :
+- `blackboard` — `Squad\Blackboard` typé (claim / evidence / risk / decision) ; partagé par référence à travers tous les niveaux
+- `mailbox` — `Squad\PeerMailbox` optionnel ; le squad parent en attache un et les appels smart / auto imbriqués le voient
+- `costLedger` — log de coût en mode append ; chaque dispatch leaf y ajoute
+- `rootSessionId` — session id stable pour la continuité du cache de prompt
+- `depth` — profondeur de récursion courante
+- `modeStack` — chaîne d'appel complète, ex. `['squad', 'smart', 'auto']`
+- `policy` — la `CrossModePolicy` contrôlant profondeur / budget / cycle / escalade
+
+Produire un enfant pour un appel récursif :
+
+```php
+$child = $ctx->descend('smart');
+// → depth += 1, modeStack étendu, même blackboard/mailbox/ledger par référence
+// → lève ModeDepthExceededException / ModeCycleException / ModeBudgetExceededException
+//   si la policy est violée
+```
+
+### L'interface : `ModeOrchestrator`
+
+```php
+interface ModeOrchestrator
+{
+    public function execute(string $task, ModeContext $context, array $options = []): ModeResult;
+    public function modeName(): string;
+}
+```
+
+Trois adapters SDK enveloppent les orchestrateurs existants :
+
+```php
+use SuperAgent\Modes\{AutoModeAdapter, SmartModeAdapter, SquadModeAdapter};
+
+$router = new ModeRouter();
+$router->register(new AutoModeAdapter($autoModeAgent));
+$router->register(new SmartModeAdapter($smartOrchestrator));
+$router->register(new SquadModeAdapter());
+
+$result = $router->dispatch('squad', $task, $ctx);
+// $result est un ModeResult : {text, costUsd, mode, trace, modeSpecific}
+```
+
+### YAML cross-mode
+
+`SubTask` porte six champs cross-mode optionnels, tous parsés par `YamlSquadLoader` :
+
+```yaml
+steps:
+  # Récursion : cette étape passe par l'orchestrateur smart
+  - name: research
+    mode: smart
+    prompt: "Étudier {{task}}"
+
+  # Récursion + référence à une autre équipe
+  - name: implement
+    mode: squad
+    team: code-review-loop
+    prompt: "Construire à partir de {{steps.research.output}}"
+
+  # Chaîne d'échec : essaie les modes en ordre jusqu'à ce qu'un passe la regex
+  - name: stress-test
+    mode_chain: [single, smart, squad]
+    fail_criteria: "REJECTED|error|FAILED"
+    prompt: "Tester en charge le résultat"
+
+  # Fork-join : plusieurs modes sur le même prompt, puis fusion
+  - name: ab-compare
+    parallel_modes:
+      - {mode: smart}
+      - {mode: squad, team: code-pair-program}
+    merge_prompt: "Comparer et synthétiser : {{a}} vs {{b}}"
+```
+
+Détection au niveau du value object : `$subTask->isCrossMode()` retourne true quand un de ces champs est défini.
+
+### Le SPI : `ModeRouterRegistry`
+
+Les hôtes (SuperAICore, jcode, applications custom) installent leur propre `ModeRouter` une fois au démarrage et les chemins de code SDK qui récursent le récupèrent :
+
+```php
+use SuperAgent\Modes\ModeRouterRegistry;
+
+// Boot hôte :
+ModeRouterRegistry::set($myCustomRouter);
+
+// Code SDK qui doit récurser :
+$router = ModeRouterRegistry::get() ?? $sdkDefault;
+$router->descend('smart', $childTask, $parentCtx);
+```
+
+Le slot est single-callable et sémantique de remplacement (cf `SquadDispatcherRegistry`). Le SDK lui-même n'appelle jamais `set()` — le slot est réservé aux hôtes.
+
+### Registre de coût à travers les couches
+
+```php
+$ctx->costLedger->record('squad', 0.05, step: 'write', model: 'claude-opus-4-7');
+$ctx->costLedger->record('smart', 0.18);
+$ctx->costLedger->record('auto',  0.02);
+
+$ctx->costLedger->total();    // 0.25
+$ctx->costLedger->byMode();   // ['squad' => 0.05, 'smart' => 0.18, 'auto' => 0.02]
+```
+
+Le même `CostLedger` est partagé par référence via `$ctx->descend()`, donc une écriture leaf à la profondeur 3 apparaît immédiatement dans le `total()` de la racine.
+
+### Escalade automatique sur échec reviewer-loop
+
+```yaml
+# super-dev.yaml (extrait)
+loops:
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+```
+
+```php
+$policy = new CrossModePolicy(
+    autoEscalateOnFailure: true,
+    escalateAfterRetries: 3,
+    escalateTo: 'smart',
+);
+ModeRouterRegistry::set($routerWithSmart);
+```
+
+Séquence quand le relecteur rejette 3 fois :
+
+1. Tentatives 1 → 3 : l'écrivain est relancé avec le feedback préfixé ; le relecteur rejette à chaque fois.
+2. Sur la 4e tentative théorique : `ReviewerLoopRunner` écrit `loop_aborted: true` sur le tableau noir sous `feedback_key`.
+3. Si `ModeRouterRegistry::get()` est non-null **et** `policy->autoEscalateOnFailure` est true :
+   - Construit un `ModeContext` enfant unique
+   - Appelle `$router->descend('smart', $writerPrompt + reviewerFeedback, $ctx)`
+   - Substitue la sortie de l'escalade comme sortie finale de l'écrivain
+4. Le pipeline continue avec l'artefact récupéré plutôt que celui en échec.
+
+### Diagramme de séquence : `squad → smart → cli leaf`
+
+```
+┌─ ModeContext::root('squad'), depth=0
+│
+├─► PeerOrchestrator (squad)
+│   step 'implement', SubTask.mode='smart' →
+│       │
+│       └─► router->descend('smart', task, ctx)
+│           │
+│           ├─ ctx2 = ctx->descend('smart'), depth=1, stack=['squad','smart']
+│           │
+│           ├─► SmartModeAdapter.execute(task, ctx2)
+│           │   routage sous-tâche : bande hard → 'cli:codex_cli'
+│           │       │
+│           │       └─► CliModeRouter.dispatch('cli:codex_cli', subtask, ctx2)
+│           │           ├─ ctx3 = ctx2 (leaf, pas de descend)
+│           │           └─► CrossLayerDispatcher → CodexCliBackend
+│           │               (enregistre le coût dans ctx.costLedger sous 'cli:codex_cli')
+│           │
+│           └─ retourne ModeResult(text=..., costUsd=0.18, mode='smart',
+│                                  trace=['squad','smart'])
+│
+└─ SquadResult.text contient le résultat smart ;
+   ctx.costLedger.total() == somme à travers toutes les couches
+```
+
+Propriétés transverses :
+
+- Une écriture sur le tableau noir à la profondeur 2 (ex. `$ctx3->blackboard->risk(...)`) est visible à la profondeur 0
+- Les entrées du ledger taguent le leaf comme `cli:codex_cli`, distinct de la ligne `squad` du parent
+- `mode_stack` permet à l'envelope d'afficher le fil d'Ariane (`squad → smart → cli:codex_cli`)
+
+### Quand NE PAS imbriquer
+
+- Le mode enfant ferait exactement ce que le parent fait déjà sur ses leaves (ex. squad → squad sans changer tier_map ou team) — coût de récursion supplémentaire sans gain
+- Un simple dispatch single-CLI suffit — emballer dans `auto` juste pour la cohérence ajoute de l'overhead
+- Runs de production avec plafonds de budget stricts — mettre `policy->maxDepth=2` pour garder l'imbrication peu profonde
+
+*Depuis v1.0.1.*

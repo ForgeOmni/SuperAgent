@@ -1,0 +1,56 @@
+name: docs-tech-pipeline
+description: |
+  Technical docs pipeline: outline → draft → polish → final review.
+  Each step has a tight scope so the model can't drift between
+  "what to write" and "how to write it."
+
+steps:
+  - name: outline
+    role: outliner
+    difficulty: moderate
+    system: |
+      Produce a numbered outline with section headings. Each
+      heading gets a one-line "what this section delivers."
+    prompt: "Topic:\n{{task}}"
+
+  - name: draft
+    role: drafter
+    difficulty: moderate
+    depends_on: [outline]
+    system: "Fill in each section. Tech docs voice — explicit, no fluff."
+    prompt: |
+      Outline:
+      {{steps.outline.output}}
+
+  - name: polish
+    role: editor
+    difficulty: moderate
+    depends_on: [draft]
+    system: |
+      Polish: tighten sentences, strip "AI tells" (em-dashes piled
+      up, "leverages", "delve into"), fix accidental ambiguity.
+      Preserve technical claims verbatim.
+    prompt: "Draft:\n{{steps.draft.output}}"
+
+  - name: review
+    role: tech-reviewer
+    difficulty: hard
+    depends_on: [polish]
+    system: |
+      Verify technical correctness. Flag any claims that aren't
+      supported by the source material.
+    prompt: |
+      Polished:
+      {{steps.polish.output}}
+
+      Original brief:
+      {{task}}
+
+loops:
+  - writer: polish
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 2
+
+metadata:
+  tags: [docs, content]

@@ -9737,3 +9737,366 @@ $mailbox = new PeerMailbox(new class implements PeerAnswerer {
 
 *v0.9.9 起。*
 
+## 61. YAML 团队库 + `TeamRegistry`（v1.0.1）
+
+squad 工作流之前要用 PHP 代码组装 `SubTask[]`。v1.0.1 提供 YAML 格式 + 三层 catalog，团队定义变成配置，host 可在不重建 registry 的前提下叠加。
+
+### YAML 结构
+
+```yaml
+name: code-review-loop                 # kebab-case，registry 内唯一
+description: |
+  写手 + 审查者，反馈注入闭环。
+
+tier_map:                              # 可选：覆盖默认 ModelTierMap
+  hard:   {provider: anthropic, model: claude-opus-4-7}
+  expert: {provider: openai,    model: gpt-5.1-codex}
+
+steps:
+  - name: write                        # 必填，kebab-case，文件内唯一
+    role: writer                       # 可选，默认等于 name
+    difficulty: hard                   # trivial | easy | moderate | hard | expert；默认 moderate
+    system: "You are a senior engineer."     # 可选 system prompt
+    prompt: "{{task}}"                       # 必填；支持 {{task}} 和 {{steps.X.output}}
+
+  - name: review
+    difficulty: expert
+    depends_on: [write]                # 引用不存在的 step 会在加载时抛错
+    pause_after: true                  # 该步后的 HITL 卡点
+    prompt: "待审产物：\n{{steps.write.output}}"
+
+  - name: synthesize
+    depends_on: [review]
+    parallel_group: finalists          # 同组 peer 经由 ParallelStep 并发
+    prompt: "最终：\n{{steps.write.output}}"
+
+  # 跨模式字段（见 §62）—— 全可选
+  - name: deep-dive
+    mode: smart                        # 递归进 smart 编排
+    prompt: "深入研究 {{task}}"
+
+loops:                                 # 可选 reviewer-loop 绑定
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+
+metadata:                              # 自由格式，surface 到 SquadPlan
+  tags: [engineering, code-review]
+```
+
+必填：顶层 `name`、`steps[]`、每个 step 的 `name` + `prompt`。其它都有默认。
+
+### Loader
+
+```php
+use SuperAgent\Squad\YamlSquadLoader;
+
+$loader = new YamlSquadLoader();
+$plan   = $loader->loadFile('/path/to/team.yaml');
+// 或
+$plan   = $loader->loadString($yamlString, source: '<unit-test>');
+```
+
+校验在加载时跑而非运行时 —— typo 在 CI 阶段就暴露，不会等到付了钱的模型调用：
+
+- 缺 `name` / `steps` / 单步 `name` + `prompt` → `InvalidArgumentException`
+- 重复的 step 名 → 抛错
+- `depends_on` 指向不存在的 step → 抛错
+- `loops[]` 残缺（缺 `writer` / `reviewer`，或引用了不存在的 step）→ 抛错
+
+### `SquadPlan` 仍然可以 PHP 定义
+
+YAML 只是产 SquadPlan 的一种方式。喜欢代码（或者需要动态计算 plan）的 host 直接 `new` 同一个 value object：
+
+```php
+use SuperAgent\Squad\{SquadPlan, SubTask, ReviewerLoopBinding, DifficultyClass};
+
+$plan = new SquadPlan(
+    name: 'my-custom-team',
+    description: '带反馈注入的代码审查',
+    subTasks: [
+        new SubTask(
+            name:       'write',
+            role:       'writer',
+            prompt:     '{{task}}',
+            difficulty: DifficultyClass::HARD,
+        ),
+        new SubTask(
+            name:       'review',
+            role:       'reviewer',
+            prompt:     "待审产物：\n{{steps.write.output}}",
+            difficulty: DifficultyClass::EXPERT,
+            dependsOn:  ['write'],
+            requiresReview: true,                        // pause_after
+            mode:       'smart',                         // v1.0.1 跨模式字段
+        ),
+    ],
+    tierMap: [
+        'hard'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-7'],
+        'expert' => ['provider' => 'openai',    'model' => 'gpt-5.1-codex'],
+    ],
+    loops: [
+        new ReviewerLoopBinding('write', 'review', 'review.feedback', maxRetries: 3),
+    ],
+);
+
+// 两条路径产出 PeerOrchestrator 都吃的同一种 SquadPlan。
+```
+
+### `TeamRegistry` —— 三层 catalog
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$registry = new TeamRegistry();   // 自带层自动发现
+
+// 叠加额外目录（同名冲突时后注册的赢）：
+$registry->addDirectory('/etc/myapp/squad-teams');
+$registry->addDirectory('/home/user/.superagent/squad-teams');
+
+// 编程式覆盖（runtime 层 —— 高于一切）：
+$registry->register('hot-patch', $myPhpBuiltPlan);
+
+// 读取：
+$names  = $registry->list();                  // 去重后的全部团队名
+$plan   = $registry->load('code-review-loop'); // 或 null
+$plan   = $registry->require('code-review-loop'); // 或抛错
+$origin = $registry->origin('code-review-loop'); // {tier: bundled|directory|runtime, source: '/path/...'}
+```
+
+解析顺序：`runtime > directories（后注册者优先）> bundled`。延迟解析 —— `list()` 走索引；YAML 文件只在实际请求其团队时才解析，所以单一坏文件不会让整个 catalog 失效。
+
+### 自带团队库
+
+SDK 在 `resources/squad-teams/` 自带 21 个生产级团队。这里列出来方便发现；每个文件的 `description:` 和行内注释都讲了工作流。
+
+| 类别 | 团队 |
+|----------|-------|
+| 工程 | `code-review-loop` · `code-pair-program` · `code-refactor-pipeline` · `code-bug-triage` · `code-test-driven` · `code-security-audit` · `code-perf-optimize` |
+| 架构 | `arch-from-scratch` · `arch-decision-record` · `arch-migration-plan` |
+| QA / SRE | `qa-ship-gate` · `qa-multi-model-council` · `qa-incident-response` |
+| 产品 | `product-strategy-trio` · `product-discovery-pair` |
+| 文档 | `docs-tech-pipeline` · `docs-api-spec-pipeline` |
+| 数据 | `data-research-trio` · `data-anomaly-detector` |
+| 运营 / 增长 | `release-coordination` · `growth-hypothesis-test` |
+| 示例（演示用）| `example-writer-reviewer-loop` · `example-parallel-council` |
+
+### `ReviewerLoopRunner`
+
+把 `loops:` 块变成真正的反馈驱动重跑。
+
+```php
+use SuperAgent\Squad\ReviewerLoopRunner;
+
+$runner   = new ReviewerLoopRunner($plan->loops, $blackboard, $logger);
+$wrapped  = $runner->wrap($baseAgentDispatcher);
+$orch     = new PeerOrchestrator($wrapped, ...);
+```
+
+机制：
+- 审查者输出的首个非空行决定结果。以 `APPROVED`（大小写不敏感）开头 = 批准；其它 = 驳回。
+- 驳回时，审查者整个输出作为 `## Reviewer feedback (must address before re-submit)` 块拼到 writer 的下一轮 prompt 前。
+- writer 上一轮的输出原样保留在 `## Your prior attempt` 下，让模型同时看到批评和上一稿。
+- 达到 `max_retries` → 循环终止；该绑定的 `feedback_key` 被打到黑板上：`{'loop_aborted': true, 'last_feedback': ..., 'attempts': N}`，下游合并步骤可以读到这个失败信号。如果通过 `ModeRouterRegistry` 注册了 `ModeRouter`（见 §62），runner 还会再做一次跨模式升级尝试。
+
+*v1.0.1 起。*
+
+## 62. 跨模式协同（v1.0.1）
+
+v1.0.0 让三个模式（`auto / smart / squad`）彼此独立。v1.0.1 让它们彼此**可组合** —— 任何一个模式可以通过一个共享的 `ModeContext` 递归进任何其他模式、共享同一份黑板 / 成本 / session id，小模式失败时自动切到更大的模式。
+
+### 共享对象：`ModeContext`
+
+```php
+use SuperAgent\Modes\{ModeContext, CrossModePolicy};
+
+$ctx = ModeContext::root(
+    entryMode: 'squad',
+    policy: new CrossModePolicy(
+        maxDepth: 4,
+        budgetCapUsd: 10.00,
+        detectCycles: true,
+        autoEscalateOnFailure: true,
+        escalateAfterRetries: 3,
+        escalateTo: 'smart',
+    ),
+);
+```
+
+字段：
+- `blackboard` —— 类型化 `Squad\Blackboard`（claim / evidence / risk / decision），每一层引用共享
+- `mailbox` —— 可选 `Squad\PeerMailbox`；父 squad 挂上后，嵌套的 smart / auto 也能看到
+- `costLedger` —— 仅追加的成本日志；每个 leaf dispatch 都累加
+- `rootSessionId` —— 稳定的 session id，prompt-cache 跨层延续
+- `depth` —— 当前递归深度
+- `modeStack` —— 完整的调用链，如 `['squad', 'smart', 'auto']`
+- `policy` —— 控制深度 / 预算 / 循环 / 升级的 `CrossModePolicy`
+
+为递归调用产出子 context：
+
+```php
+$child = $ctx->descend('smart');
+// → depth += 1，modeStack 追加，blackboard/mailbox/ledger 按引用共享
+// → policy 违规时抛 ModeDepthExceededException / ModeCycleException
+//   / ModeBudgetExceededException
+```
+
+### 接口：`ModeOrchestrator`
+
+```php
+interface ModeOrchestrator
+{
+    public function execute(string $task, ModeContext $context, array $options = []): ModeResult;
+    public function modeName(): string;
+}
+```
+
+SDK 提供三个 adapter 包装已有 orchestrator：
+
+```php
+use SuperAgent\Modes\{AutoModeAdapter, SmartModeAdapter, SquadModeAdapter};
+
+$router = new ModeRouter();
+$router->register(new AutoModeAdapter($autoModeAgent));
+$router->register(new SmartModeAdapter($smartOrchestrator));
+$router->register(new SquadModeAdapter());
+
+$result = $router->dispatch('squad', $task, $ctx);
+// $result 是 ModeResult：{text, costUsd, mode, trace, modeSpecific}
+```
+
+### 跨模式 YAML
+
+`SubTask` 增加 6 个可选跨模式字段，全部由 `YamlSquadLoader` 解析：
+
+```yaml
+steps:
+  # 递归：这一步走 smart 编排
+  - name: research
+    mode: smart
+    prompt: "调研 {{task}}"
+
+  # 递归 + 引用其它团队
+  - name: implement
+    mode: squad
+    team: code-review-loop
+    prompt: "基于 {{steps.research.output}} 构建"
+
+  # 失败链：按顺序尝试模式，直到输出通过 regex
+  - name: stress-test
+    mode_chain: [single, smart, squad]
+    fail_criteria: "REJECTED|error|FAILED"
+    prompt: "对构建结果做压力测试"
+
+  # fork-join：多模式同时跑同一 prompt，再合并
+  - name: ab-compare
+    parallel_modes:
+      - {mode: smart}
+      - {mode: squad, team: code-pair-program}
+    merge_prompt: "对比合成：{{a}} vs {{b}}"
+```
+
+value object 上一个方法判别：`$subTask->isCrossMode()` 在以上任意字段非空时返回 true。
+
+### SPI：`ModeRouterRegistry`
+
+host（SuperAICore、jcode、自建应用）在 boot 时注入自己的 `ModeRouter`，SDK 内部任何需要递归的路径都用得上：
+
+```php
+use SuperAgent\Modes\ModeRouterRegistry;
+
+// Host boot：
+ModeRouterRegistry::set($myCustomRouter);
+
+// SDK 内部需要递归时：
+$router = ModeRouterRegistry::get() ?? $sdkDefault;
+$router->descend('smart', $childTask, $parentCtx);
+```
+
+槽位 single callable，替换语义（同 `SquadDispatcherRegistry`）。SDK 自身永远不 `set()` —— 槽位保留给 host。
+
+### 跨层成本统计
+
+```php
+$ctx->costLedger->record('squad', 0.05, step: 'write', model: 'claude-opus-4-7');
+$ctx->costLedger->record('smart', 0.18);
+$ctx->costLedger->record('auto',  0.02);
+
+$ctx->costLedger->total();    // 0.25
+$ctx->costLedger->byMode();   // ['squad' => 0.05, 'smart' => 0.18, 'auto' => 0.02]
+```
+
+同一份 `CostLedger` 通过 `$ctx->descend()` 引用共享，所以 depth=3 的 leaf 写入立刻就会反映到根的 `total()`。
+
+### reviewer-loop 失败自动升级
+
+```yaml
+# super-dev.yaml（节选）
+loops:
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+```
+
+```php
+$policy = new CrossModePolicy(
+    autoEscalateOnFailure: true,
+    escalateAfterRetries: 3,
+    escalateTo: 'smart',
+);
+ModeRouterRegistry::set($routerWithSmart);
+```
+
+审查者连续驳回 3 次后的时序：
+
+1. 第 1–3 次：writer 带着 feedback 重跑；审查者继续驳回。
+2. 第 4 次（本应发生时）：`ReviewerLoopRunner` 把 `loop_aborted: true` 写到黑板该 `feedback_key` 下。
+3. 如果 `ModeRouterRegistry::get()` 非空 **且** `policy->autoEscalateOnFailure` 为 true：
+   - 构造一次性子 `ModeContext`
+   - 调 `$router->descend('smart', $writerPrompt + reviewerFeedback, $ctx)`
+   - 把升级输出替换 writer 的最终产物
+4. pipeline 用恢复出来的产物继续，而不是失败那个。
+
+### 时序示例：`squad → smart → cli leaf`
+
+```
+┌─ ModeContext::root('squad'), depth=0
+│
+├─► PeerOrchestrator (squad)
+│   step 'implement', SubTask.mode='smart' →
+│       │
+│       └─► router->descend('smart', task, ctx)
+│           │
+│           ├─ ctx2 = ctx->descend('smart'), depth=1, stack=['squad','smart']
+│           │
+│           ├─► SmartModeAdapter.execute(task, ctx2)
+│           │   子任务路由：hard 档 → 'cli:codex_cli'
+│           │       │
+│           │       └─► CliModeRouter.dispatch('cli:codex_cli', subtask, ctx2)
+│           │           ├─ ctx3 = ctx2（leaf 不再 descend）
+│           │           └─► CrossLayerDispatcher → CodexCliBackend
+│           │               （把 'cli:codex_cli' 的成本写入 ctx.costLedger）
+│           │
+│           └─ 返回 ModeResult(text=..., costUsd=0.18, mode='smart',
+│                              trace=['squad','smart'])
+│
+└─ SquadResult.text 包含 smart 的结果；
+   ctx.costLedger.total() == 跨所有层求和
+```
+
+横切特性：
+
+- depth=2 的一次黑板写入（如 `$ctx3->blackboard->risk(...)`）在 depth=0 同样可见
+- ledger 把 leaf 标记成 `cli:codex_cli`，与父层的 `squad` 分开
+- `mode_stack` 让 envelope 能 render 调用链（`squad → smart → cli:codex_cli`）
+
+### 什么时候**不**要嵌套
+
+- 子模式做的事跟父模式 leaf 已经在做的没区别（如 squad → squad 但 tier_map 和 team 都没变）—— 多花一次递归成本却没收益
+- 简单的单 CLI 调用就够了 —— 仅仅为了"统一"裹一层 `auto` 反而引入额外开销
+- 严格预算的生产环境 —— 把 `policy->maxDepth=2` 设小，限制嵌套深度
+
+*v1.0.1 起。*
+

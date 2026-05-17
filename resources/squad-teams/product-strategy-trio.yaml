@@ -1,0 +1,54 @@
+name: product-strategy-trio
+description: |
+  Three product perspectives weigh in on a strategic question,
+  architect consolidates: CEO frames market, CTO frames tech, plus
+  customer-advocate. Use for "should we build X?" decisions.
+
+steps:
+  - name: ceo-view
+    role: ceo
+    difficulty: hard
+    parallel_group: views
+    system: |
+      Take the CEO view. Market positioning, opportunity sizing,
+      competitive landscape. Be concrete, not aspirational.
+    prompt: "Question:\n{{task}}"
+
+  - name: cto-view
+    role: cto
+    difficulty: hard
+    parallel_group: views
+    system: |
+      Take the CTO view. Tech feasibility, build vs buy, debt
+      implications.
+    prompt: "Question:\n{{task}}"
+
+  - name: customer-view
+    role: customer-advocate
+    difficulty: hard
+    parallel_group: views
+    system: |
+      Take the customer advocate view. What problem does this
+      actually solve? Who specifically benefits?
+    prompt: "Question:\n{{task}}"
+
+  - name: synthesize
+    role: chief-architect
+    difficulty: expert
+    depends_on: [ceo-view, cto-view, customer-view]
+    pause_after: true
+    prompt: |
+      Consolidate the three views into a one-page recommendation
+      with explicit dissent capture.
+
+      CEO:
+      {{steps.ceo-view.output}}
+
+      CTO:
+      {{steps.cto-view.output}}
+
+      Customer:
+      {{steps.customer-view.output}}
+
+metadata:
+  tags: [product, strategy]

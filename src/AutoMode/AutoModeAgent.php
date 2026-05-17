@@ -19,6 +19,7 @@ use SuperAgent\Swarm\Templates\AgentTemplateManager;
 use SuperAgent\Console\Output\ParallelAgentDisplay;
 use SuperAgent\Squad\PeerOrchestrator;
 use SuperAgent\Squad\SquadDispatchRequest;
+use SuperAgent\Squad\SquadDispatcherRegistry;
 use SuperAgent\Squad\TaskDecomposer;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Output\NullOutput;
@@ -137,59 +138,29 @@ class AutoModeAgent
     }
 
     /**
-     * Run the squad pipeline. The caller can plug a real dispatcher
-     * via `$this->config['squad']['dispatcher']`; if absent, we use
-     * an in-process dispatcher that delegates to a fresh `Agent` per
-     * step, honouring the per-step provider/model.
+     * Run the squad pipeline. Dispatcher resolution precedence:
+     *
+     *   1. `$this->config['squad']['dispatcher']` — explicit per-instance
+     *      callable. Wins outright; supplied by users who construct
+     *      `AutoModeAgent` and want one-off behaviour.
+     *   2. `SquadDispatcherRegistry::get()` — process-scoped extension
+     *      point. Hosts (Laravel apps, CLIs, services) `set()` once at
+     *      boot and every default squad spawn routes through their
+     *      dispatcher. Lets a host run cross-CLI / cross-backend squads
+     *      from inside SDK code without monkey-patching this class.
+     *   3. Built-in inline default — single-shot `Agent` per step,
+     *      honouring the per-step provider/model. Identical to the
+     *      pre-registry behaviour, preserved so existing callers see
+     *      no regression.
      */
     private function runSquad(string $prompt, array $options = []): AgentResult
     {
         $subTasks = (new TaskDecomposer())->decompose($prompt);
         $squadId = 'auto_' . uniqid();
 
-        $dispatcher = $this->config['squad']['dispatcher'] ?? function (SquadDispatchRequest $req) {
-            $ctx = new Context();
-            if ($req->provider !== '') {
-                $ctx->setMetadata('provider', $req->provider);
-            }
-            // Stable session ID per role → provider sees the same session
-            // across the squad's lifetime, so its prompt-cache prefix
-            // (system prompt + prior assistant messages) stays warm and
-            // re-billed at cache-hit rates instead of fresh-prefix rates.
-            if ($req->sessionId !== null && $req->sessionId !== '') {
-                $ctx->setMetadata('session_id', $req->sessionId);
-            }
-            // Per-role allowed-tools / read-only flags are surfaced via
-            // the dispatch request's role so an integration host that
-            // honours these can lock down researcher / verify steps.
-            $ctx->setMetadata('squad_role', $req->role->name);
-            $ctx->setMetadata('squad_role_tier', $req->role->tier->value);
-
-            $agent = new Agent(context: $ctx, logger: $this->logger);
-            if ($req->model !== '') {
-                $agent->setModel($req->model);
-            }
-            if ($req->systemPrompt !== null && $req->systemPrompt !== '') {
-                // Use the real system-prompt slot so providers can cache
-                // it as a stable prefix instead of treating it as a user
-                // message that varies turn-to-turn.
-                $agent->setSystemPrompt($req->systemPrompt);
-            }
-            // Peer messaging: the default `Agent\Agent` used here is
-            // a single-shot chat agent (no tool loop), so peer tools
-            // can't be invoked by the model on this path. Inbox
-            // messages still reach the agent — the orchestrator
-            // prepends them to the prompt via PeerMailbox.
-            // Hosts that need an in-loop PeerAsk/PeerSend call should
-            // plug a `squad.dispatcher` that builds a tool-capable
-            // `SuperAgent\Agent` and addTool(PeerAskTool…) when
-            // $req->mailbox is non-null. See ADVANCED_USAGE §60.
-            $result = $agent->run($req->prompt);
-            return [
-                'output'   => $result->text(),
-                'cost_usd' => $result->totalCostUsd,
-            ];
-        };
+        $dispatcher = $this->config['squad']['dispatcher']
+            ?? SquadDispatcherRegistry::get()
+            ?? $this->buildDefaultSquadDispatcher();
 
         $orchestrator = new PeerOrchestrator($dispatcher, null, $this->logger);
         $squadResult = $orchestrator->run($squadId, $subTasks);
@@ -209,7 +180,54 @@ class AutoModeAgent
             messages: [$msg],
         );
     }
-    
+
+    /**
+     * Built-in fallback dispatcher for squad steps. Extracted from the
+     * old inline closure so `SquadDispatcherRegistry` callers don't
+     * fight a 40-line lambda to override. Behaviour is unchanged: one
+     * fresh single-shot `Agent` per step, honouring the per-step
+     * provider/model and propagating the role's session id for
+     * prompt-cache continuity.
+     */
+    private function buildDefaultSquadDispatcher(): callable
+    {
+        $logger = $this->logger;
+        return function (SquadDispatchRequest $req) use ($logger) {
+            $ctx = new Context();
+            if ($req->provider !== '') {
+                $ctx->setMetadata('provider', $req->provider);
+            }
+            // Stable session ID per role → provider sees the same session
+            // across the squad's lifetime, so its prompt-cache prefix
+            // (system prompt + prior assistant messages) stays warm and
+            // re-billed at cache-hit rates instead of fresh-prefix rates.
+            if ($req->sessionId !== null && $req->sessionId !== '') {
+                $ctx->setMetadata('session_id', $req->sessionId);
+            }
+            $ctx->setMetadata('squad_role', $req->role->name);
+            $ctx->setMetadata('squad_role_tier', $req->role->tier->value);
+
+            $agent = new Agent(context: $ctx, logger: $logger);
+            if ($req->model !== '') {
+                $agent->setModel($req->model);
+            }
+            if ($req->systemPrompt !== null && $req->systemPrompt !== '') {
+                $agent->setSystemPrompt($req->systemPrompt);
+            }
+            // Peer messaging note: this default builds a single-shot
+            // chat Agent (no tool loop). Inbox messages still reach
+            // the agent via the orchestrator's prompt-prepend, but
+            // PeerAsk/PeerSend tools can't be invoked here. Hosts that
+            // need in-loop peer tools register their own dispatcher
+            // via `SquadDispatcherRegistry::set()`.
+            $result = $agent->run($req->prompt);
+            return [
+                'output'   => $result->text(),
+                'cost_usd' => $result->totalCostUsd,
+            ];
+        };
+    }
+
     /**
      * Run in single agent mode.
      */

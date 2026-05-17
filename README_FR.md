@@ -763,6 +763,96 @@ Configuration (`config/superagent.php`) :
 ],
 ```
 
+### Bibliothèque d'équipes YAML *(v1.0.1)*
+
+Un `SquadPlan` ne requiert plus de code PHP. Déposez un fichier YAML, enregistrez-le, lancez-le :
+
+```yaml
+# resources/squad-teams/code-review-loop.yaml (livré avec le SDK)
+name: code-review-loop
+description: Écrivain + relecteur avec boucle d'injection de feedback
+tier_map:
+  hard:   {provider: anthropic, model: claude-opus-4-7}
+  expert: {provider: openai,    model: gpt-5.1-codex}
+steps:
+  - name: write
+    difficulty: hard
+    prompt: "{{task}}"
+  - name: review
+    difficulty: expert
+    depends_on: [write]
+    prompt: "Artefact :\n{{steps.write.output}}"
+    pause_after: true                # porte HITL optionnelle
+loops:
+  - writer: write
+    reviewer: review
+    feedback_key: review.feedback
+    max_retries: 3
+```
+
+```php
+use SuperAgent\Squad\TeamRegistry;
+
+$plan = (new TeamRegistry())->require('code-review-loop');
+$result = $orchestrator->run('refactor-2026-05', $plan->subTasks, /* … */);
+```
+
+**21 équipes de qualité production sont livrées dans `resources/squad-teams/`** — ingénierie (`code-review-loop`, `code-bug-triage`, `code-test-driven`, `code-security-audit`, `code-perf-optimize`, …), architecture (`arch-from-scratch`, `arch-decision-record`, `arch-migration-plan`), QA/SRE (`qa-ship-gate`, `qa-multi-model-council`, `qa-incident-response`), produit (`product-strategy-trio`, `product-discovery-pair`), docs (`docs-tech-pipeline`, `docs-api-spec-pipeline`), data (`data-research-trio`, `data-anomaly-detector`), ops/croissance (`release-coordination`, `growth-hypothesis-test`).
+
+**Surcharge à trois niveaux** : les hôtes appellent `addDirectory('/path/to/host-teams')` pour superposer des YAML supplémentaires par-dessus la bibliothèque livrée, ou `register($name, $plan)` pour des surcharges programmatiques. Les répertoires ajoutés plus tard surchargent les précédents ; les enregistrements runtime surchargent les entrées de répertoire. Même schéma que `ModelCatalog`.
+
+**Exécuteur de boucle relecteur** : `Squad\ReviewerLoopRunner` enveloppe n'importe quel callable `agentDispatcher`. Si la première ligne non vide du relecteur ne commence pas par `APPROVED` (insensible à la casse), le runner préfixe le feedback du relecteur au prompt de l'écrivain et redéclenche celui-ci. La boucle sort sur approbation ou au `max_retries`.
+
+### Orchestration cross-mode *(v1.0.1)*
+
+`auto / smart / squad` peuvent désormais se composer, récurser et se transmettre la main via un `ModeContext` partagé. Une étape squad peut déclarer `mode: smart` et récurser dans l'orchestrateur ; une sous-tâche smart peut atterrir sur un squad complet ; un relecteur qui épuise `max_retries` escalade automatiquement vers `smart`. À chaque niveau, les lectures du tableau noir, les écritures du registre de coût et les session ids de cache de prompt partagent un seul objet — plus d'îlots enfants isolés.
+
+```yaml
+steps:
+  - name: research
+    mode: smart                      # récursion : smart décompose + route en interne
+    prompt: "Étudier {{task}}"
+
+  - name: implement
+    mode: squad
+    team: code-review-loop           # cette étape utilise une équipe livrée
+    prompt: "Construire à partir de {{steps.research.output}}"
+
+  - name: stress-test
+    mode_chain: [single, smart, squad]   # chaîne d'escalade sur échec
+    fail_criteria: "REJECTED|error"
+    prompt: "Tester en charge le résultat"
+```
+
+Le `ModeContext` traverse chaque niveau de récursion :
+
+```php
+use SuperAgent\Modes\{ModeContext, ModeRouter, CrossModePolicy};
+
+$ctx = ModeContext::root('squad', policy: new CrossModePolicy(
+    maxDepth: 4,
+    budgetCapUsd: 5.00,
+    autoEscalateOnFailure: true,
+    escalateTo: 'smart',
+));
+
+$router = new ModeRouter();
+$router->register(new AutoModeAdapter($autoModeAgent));
+$router->register(new SmartModeAdapter($smartOrchestrator));
+$router->register(new SquadModeAdapter());
+
+$result = $router->dispatch('squad', $task, $ctx);
+// $ctx->costLedger->total()  → somme de chaque dispatch leaf
+// $ctx->costLedger->byMode() → {squad: 0.31, smart: 0.18, auto: 0.02}
+// $ctx->blackboard->entries() → toutes les claim / evidence / risk / decision
+```
+
+**SPI de couplage faible** :
+- `Squad\SquadDispatcherRegistry::set($dispatcher)` — les hôtes installent un dispatcher squad par défaut (p.ex. une version CLI-aware)
+- `Modes\ModeRouterRegistry::set($router)` — les hôtes installent un routeur cross-mode par défaut (p.ex. un qui connaît les tags leaf `cli:claude_cli` en plus des trois noms de mode)
+
+Tous deux sont des slots statiques au niveau classe. Les chemins de code du SDK les consultent avant de retomber sur les défauts internes. Le SDK lui-même n'appelle jamais `set()` — les slots sont réservés aux hôtes.
+
 ### Idempotence
 
 ```php
