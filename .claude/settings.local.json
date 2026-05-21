@@ -203,7 +203,24 @@
       "Bash(./vendor/bin/phpunit --testsuite Unit --filter 'Squad')",
       "Bash(./vendor/bin/phpunit --testsuite Unit --filter 'AutoMode|Pipeline')",
       "Bash(./vendor/bin/phpunit --testsuite Unit --filter 'Phase2PipelineTest')",
-      "Bash(composer outdated *)"
+      "Bash(composer outdated *)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Providers/GeminiProviderTest.php tests/Unit/GeminiCliCredentialsTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Guardrails/LlmLoopCheckerTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Guardrails/ tests/Unit/Providers/ tests/Unit/GeminiCliCredentialsTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Guardrails/ tests/Unit/Providers/GeminiProviderTest.php tests/Unit/GeminiCliCredentialsTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/PermissionTest.php tests/Unit/Permissions/ --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Permissions/BashArityTest.php --no-coverage)",
+      "Bash(./vendor/bin/phpunit --filter \"Compress\" --no-coverage tests/)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Format/ --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/LSP/ --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/ACP/ --no-coverage)",
+      "Bash(./vendor/bin/phpunit tests/Unit/Skills/SkillDiscoveryTest.php --no-coverage)",
+      "Bash(kill 12382 12662 12663)",
+      "Bash(./vendor/bin/phpunit --no-coverage tests/Unit/ACP/ tests/Unit/Format/ tests/Unit/LSP/ tests/Unit/Guardrails/ tests/Unit/Permissions/ tests/Unit/Providers/GeminiProviderTest.php tests/Unit/Skills/SkillDiscoveryTest.php tests/Unit/GeminiCliCredentialsTest.php tests/Unit/PermissionTest.php)",
+      "Bash(sed -n '1,20p' /Users/xiyang/PhpstormProjects/SuperAgent/README.md)",
+      "Bash(sed -n '1,20p' /Users/xiyang/PhpstormProjects/SuperAgent/README_FR.md)",
+      "Bash(sed -n '1,20p' /Users/xiyang/PhpstormProjects/SuperAgent/README_CN.md)",
+      "Bash(perl -i -pe ' *)"
     ]
   }
 }

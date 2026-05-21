@@ -552,6 +552,106 @@ SUPERAGENT_MODE_ESCALATE_TO=smart
 
 完整参考（ModeContext 生命周期、SPI 注入、循环检测、ReviewerLoopRunner 升级）见 [ADVANCED_USAGE §62](docs/ADVANCED_USAGE.md#62-cross-mode-orchestration)。
 
+### Gemini 3.5 *(v1.0.5)*
+
+无需额外安装 —— `gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` 已经在内置 `resources/models.json` 里。配好 key 即可：
+
+```bash
+export GEMINI_API_KEY=AIzaSy…    # AI Studio key，或 VERTEX_* 用 OAuth/Vertex
+superagent --provider gemini --model gemini-3.5-pro "解释这个文件" ./src/Foo.php
+```
+
+Provider 默认模型现在是 `gemini-3.5-flash`；最难的任务用 `--model gemini-3.5-pro`，最便宜的用 `--model gemini-3.5-flash-lite`。
+
+### LSP servers *(v1.0.5)*
+
+`Tools\Builtin\LSPTool` 从 PATH 自动启动 language server。装上你需要的那几个；probe 失败时 agent 不会 spawn。
+
+```bash
+# PHP
+composer global require phpactor/phpactor
+# 或者：npm i -g intelephense
+
+# JS/TS
+npm i -g typescript-language-server typescript
+
+# Go
+go install golang.org/x/tools/gopls@latest
+
+# Rust
+rustup component add rust-analyzer
+
+# Python
+npm i -g pyright
+
+# C/C++
+brew install llvm        # 或 apt install clangd
+
+# Bash
+npm i -g bash-language-server
+```
+
+验证是否被发现：
+
+```bash
+superagent run --tool LSPTool --tool-input '{"action":"diagnostics","path":"/abs/path/to/file.php"}'
+```
+
+### 自动 formatter *(v1.0.5)*
+
+`Format\Formatters` 探测约 26 种 formatter；每个只在项目明确声明时才触发（如 Pint 需要 `composer.json` 列出 `laravel/pint`，Prettier 需要 `package.json` 列出）。装上你技术栈用的那几个：
+
+```bash
+# PHP —— 项目级（推荐）
+composer require --dev laravel/pint
+
+# JS/TS —— 项目级
+npm i -D prettier
+# 或者：npm i -D --save-exact @biomejs/biome
+
+# Python
+pip install ruff
+# 或者：uv tool install ruff
+
+# Go / Rust / Zig / Terraform —— toolchain 自带
+
+# Shell
+brew install shfmt
+```
+
+### ACP server *(v1.0.5)*
+
+无需安装 —— JSON-RPC stdio server 已在包内。说 ACP 的编辑器像配 MCP server 一样接入：
+
+```jsonc
+// Zed settings.json
+{
+  "assistant": {
+    "agents": {
+      "superagent": {
+        "command": "superagent",
+        "args": ["acp"]
+      }
+    }
+  }
+}
+```
+
+之后在 Zed 里 `Cmd-Shift-A` 把 SuperAgent 选为活动 agent。
+
+### 外部 Skill 自动发现 *(v1.0.5)*
+
+`SkillManager::discoverExternalSkills()` 是 opt-in 的 —— 从 host 调用或接到 agent factory。Skills 会从 cwd 到项目根之间的任意路径自动加载：
+
+```
+.claude/skills/<name>/SKILL.md
+.agents/skills/<name>/SKILL.md
+skills/<name>/SKILL.md          （仅项目根目录）
+skill/<name>/SKILL.md           （仅项目根目录）
+```
+
+每个 SKILL.md 是 Markdown 文件，含 YAML frontmatter（`name:`、`description:`）+ skill 正文。Walk 在 worktree 边界停止，避免 monorepo 父目录污染子项目。
+
 ---
 
 ## 验证

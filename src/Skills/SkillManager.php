@@ -93,6 +93,89 @@ class SkillManager
     }
 
     /**
+     * Walk upward from $start (default cwd) until $stop (default project root)
+     * loading every external skill discovered along the way. At each directory
+     * level checks the four well-known external locations:
+     *
+     *   - `.claude/skills/&#42;&#42;/SKILL.md`  — Claude Code skill convention
+     *   - `.agents/skills/&#42;&#42;/SKILL.md`  — vendor-neutral skill convention
+     *   - `skills/&#42;&#42;/SKILL.md`          — opencode-style top-level skill dir
+     *   - `skill/&#42;&#42;/SKILL.md`           — singular form
+     *
+     * Lifted from opencode's `skill/index.ts` (`EXTERNAL_SKILL_PATTERN` +
+     * `OPENCODE_SKILL_PATTERN`). The walk stops at the worktree root so we
+     * don't accidentally pick up skills from a parent monorepo when the agent
+     * is scoped to a sub-project.
+     *
+     * Only files literally named `SKILL.md` are loaded — a sharper signal than
+     * "any .md file" because the loader can trust the frontmatter to be a
+     * skill manifest (avoids treating arbitrary docs as skills).
+     *
+     * Returns the absolute paths it actually loaded, for telemetry/UI.
+     *
+     * @return array<int, string>
+     */
+    public function discoverExternalSkills(?string $start = null, ?string $stop = null): array
+    {
+        $start = $start ?? (getcwd() ?: '/');
+        $stop = $stop ?? self::findProjectRoot();
+        $start = rtrim($start, '/');
+        $stop = rtrim($stop, '/');
+
+        // External directories scanned at each walk level.
+        $externalDirs = ['.claude/skills', '.agents/skills'];
+        // Project-style directories scanned only at the worktree root.
+        $projectDirs = ['skills', 'skill'];
+
+        $loaded = [];
+        $seen = [];
+
+        $loadSkillMd = function (string $absPath) use (&$loaded, &$seen): void {
+            $real = realpath($absPath) ?: $absPath;
+            if (isset($seen[$real]) || ! is_file($real)) {
+                return;
+            }
+            $seen[$real] = true;
+            try {
+                $this->loadMarkdownFile($real, throw: false);
+                $loaded[] = $real;
+            } catch (\Throwable) {
+                // ignore — non-skill markdown
+            }
+        };
+
+        $globSkillMd = function (string $rootDir) use ($loadSkillMd): void {
+            if (! is_dir($rootDir)) {
+                return;
+            }
+            // Only files literally named SKILL.md.
+            $hits = $this->globRecursive($rootDir, 'SKILL.md');
+            foreach ($hits as $hit) {
+                $loadSkillMd($hit);
+            }
+        };
+
+        // Walk up: $start → $stop. Same per-level dirs at every step.
+        $dir = $start;
+        for ($i = 0; $i < 30; $i++) {
+            foreach ($externalDirs as $rel) {
+                $globSkillMd($dir . '/' . $rel);
+            }
+            if ($dir === $stop || $dir === '/' || $dir === dirname($dir)) {
+                break;
+            }
+            $dir = dirname($dir);
+        }
+
+        // Project-style dirs only at worktree root.
+        foreach ($projectDirs as $rel) {
+            $globSkillMd($stop . '/' . $rel);
+        }
+
+        return $loaded;
+    }
+
+    /**
      * Register a skill.
      */
     public function register(Skill $skill): void

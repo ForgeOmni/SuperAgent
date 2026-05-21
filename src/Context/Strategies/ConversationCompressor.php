@@ -46,7 +46,17 @@ class ConversationCompressor implements CompressionStrategy
     public function compress(array $messages, array $options = []): CompressionResult
     {
         $keepRecent = $options['keep_recent'] ?? $this->config->keepRecentMessages;
-        $summaryPrompt = $options['summary_prompt'] ?? $this->getDefaultSummaryPrompt();
+        $rawPrompt = $options['summary_prompt'] ?? null;
+        // Sentinel: `summary_prompt: 'structured'` selects the opencode-style
+        // 7-section template; anything else (including unset) keeps the 9-section
+        // Claude Code default. Custom callers can still pass an arbitrary string.
+        if ($rawPrompt === 'structured') {
+            $summaryPrompt = $this->getStructuredSummaryPrompt();
+        } elseif ($rawPrompt === null || $rawPrompt === '' || $rawPrompt === 'default') {
+            $summaryPrompt = $this->getDefaultSummaryPrompt();
+        } else {
+            $summaryPrompt = $rawPrompt;
+        }
         
         // Calculate what to compress and what to keep
         $splitPoint = $this->calculateSplitPoint($messages, $keepRecent);
@@ -260,6 +270,67 @@ class ConversationCompressor implements CompressionStrategy
         return $splitPoint;
     }
     
+    /**
+     * Opencode-style 7-section structured summary. Lifted from opencode's
+     * `session/compaction.ts` SUMMARY_TEMPLATE.
+     *
+     * Differs from {@see getDefaultSummaryPrompt()} in three ways:
+     *   1. Output is a strict Markdown template, not free prose — easier for
+     *      downstream consumers to extract specific sections (Pending tasks,
+     *      Blocked items, Relevant Files).
+     *   2. Splits "Progress" into Done / In Progress / Blocked so blockers don't
+     *      get lost across multiple compactions.
+     *   3. No `<analysis>` scratchpad — the model goes straight to the template,
+     *      saving 30-50% of summary tokens.
+     *
+     * Use via `options: ['summary_prompt' => 'structured']` or by retrieving
+     * the prompt string directly.
+     */
+    public function getStructuredSummaryPrompt(): string
+    {
+        return <<<'PROMPT'
+CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+
+Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
+
+<template>
+## Goal
+- [single-sentence task summary]
+
+## Constraints & Preferences
+- [user constraints, preferences, specs, or "(none)"]
+
+## Progress
+### Done
+- [completed work or "(none)"]
+
+### In Progress
+- [current work or "(none)"]
+
+### Blocked
+- [blockers or "(none)"]
+
+## Key Decisions
+- [decision and why, or "(none)"]
+
+## Next Steps
+- [ordered next actions or "(none)"]
+
+## Critical Context
+- [important technical facts, errors, open questions, or "(none)"]
+
+## Relevant Files
+- [file or directory path: why it matters, or "(none)"]
+</template>
+
+Rules:
+- Keep every section, even when empty.
+- Use terse bullets, not prose paragraphs.
+- Preserve exact file paths, commands, error strings, and identifiers when known.
+- Do not mention the summary process or that context was compacted.
+PROMPT;
+    }
+
     /**
      * Get the default summary prompt (9-section structured format from Claude Code).
      */

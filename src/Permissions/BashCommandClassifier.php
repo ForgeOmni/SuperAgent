@@ -223,24 +223,50 @@ class BashCommandClassifier
         ];
     }
     
+    /**
+     * Identify the human-understandable command label from a parsed command line.
+     *
+     * Delegates to {@see BashArity::prefix()} for longest-prefix-wins matching
+     * against 110+ known CLI tools (git/docker/kubectl/npm/pnpm/yarn/aws/gcloud/
+     * terraform/vault/...). Falls back to the original 1-or-2-token heuristic
+     * when the command isn't in the arity table — matters for `python script.py`
+     * and similar invocations where the script name *is* the meaningful label.
+     */
     private function extractPrefix(array $commands): ?string
     {
         if (count($commands) === 0) {
             return null;
         }
-        
-        if (count($commands) === 1) {
+
+        // Drop tokens that begin with `-` (flags) before consulting the arity
+        // table — the table is keyed on subcommands only, never flags.
+        $stripped = [];
+        foreach ($commands as $tok) {
+            if ($tok !== '' && $tok[0] === '-') {
+                continue;
+            }
+            $stripped[] = $tok;
+        }
+        if ($stripped === []) {
             return $commands[0];
         }
-        
-        $first = $commands[0];
-        $second = $commands[1];
-        
-        if (str_starts_with($second, '-')) {
+
+        $first = $stripped[0];
+        $prefix = BashArity::prefix($stripped);
+
+        // If the first token is known in the arity table, trust the result.
+        $hasArity = isset(BashArity::ARITY[$first])
+            || (isset($stripped[1]) && isset(BashArity::ARITY["{$first} {$stripped[1]}"]));
+        if ($hasArity) {
+            return implode(' ', $prefix);
+        }
+
+        // Unknown command — preserve legacy heuristic (keep [first, second]
+        // when second isn't a flag, else just [first]).
+        if (count($stripped) === 1) {
             return $first;
         }
-        
-        return "{$first} {$second}";
+        return "{$first} {$stripped[1]}";
     }
     
     private function containsDangerousPatterns(string $command): bool

@@ -18,4 +18,5 @@ enum LoopType: string
     case FileReadLoop = 'file_read_loop';
     case ContentLoop  = 'content_loop';
     case ThoughtLoop  = 'thought_loop';
+    case LlmDetected  = 'llm_detected_loop';
 }

@@ -14,6 +14,7 @@ use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\Message;
 use SuperAgent\Messages\Usage;
 use SuperAgent\StreamingHandler;
+use SuperAgent\Thinking\ThinkingConfig;
 use SuperAgent\Tools\Tool;
 
 /**
@@ -48,7 +49,7 @@ class GeminiProvider implements LLMProvider
         $this->apiKey = $apiKey;
 
         $baseUrl = rtrim($config['base_url'] ?? 'https://generativelanguage.googleapis.com', '/') . '/';
-        $this->model = $config['model'] ?? 'gemini-2.0-flash';
+        $this->model = $config['model'] ?? 'gemini-3.5-flash';
         $this->maxTokens = $config['max_tokens'] ?? 8192;
         $this->maxRetries = $config['max_retries'] ?? 3;
 
@@ -180,6 +181,20 @@ class GeminiProvider implements LLMProvider
             $body['generationConfig']['stopSequences'] = $options['stop_sequences'];
         }
 
+        // Thinking / reasoning config — Gemini 3.x exposes `thinkingConfig` with
+        // either an integer `thinkingBudget` (token budget) or a `thinkingLevel`
+        // enum (LOW/HIGH). We accept both an explicit `thinking_config` array
+        // (escape hatch for advanced callers) and a generic ThinkingConfig the
+        // rest of the SDK already speaks via the same `thinking` option.
+        $thinkingCfg = $this->buildThinkingConfig(
+            $options['thinking_config'] ?? null,
+            $options['thinking'] ?? null,
+            $body['model'] ?? ($options['model'] ?? $this->model),
+        );
+        if ($thinkingCfg !== null) {
+            $body['generationConfig']['thinkingConfig'] = $thinkingCfg;
+        }
+
         if ($systemPrompt !== null && $systemPrompt !== '') {
             $body['systemInstruction'] = [
                 'parts' => [['text' => $systemPrompt]],
@@ -190,7 +205,71 @@ class GeminiProvider implements LLMProvider
             $body['tools'] = $this->formatTools($tools);
         }
 
+        // Grounding: enable Google Search and/or URL Context tools alongside
+        // user-declared function tools. Gemini accepts multiple tool entries
+        // in the `tools` array — one per capability.
+        if (! empty($options['grounding']) || ! empty($options['google_search'])) {
+            $body['tools'] = array_merge($body['tools'] ?? [], [['googleSearch' => (object) []]]);
+        }
+        if (! empty($options['url_context'])) {
+            $body['tools'] = array_merge($body['tools'] ?? [], [['urlContext' => (object) []]]);
+        }
+
         return $body;
+    }
+
+    /**
+     * Translate cross-provider ThinkingConfig (or raw options) into Gemini's
+     * `generationConfig.thinkingConfig` shape. Returns null when thinking is
+     * disabled or unsupported by the target model.
+     *
+     * Accepts (in priority order):
+     *   1. `thinking_config` raw array → returned as-is (camelCase preserved)
+     *   2. `thinking` instance of \SuperAgent\Thinking\ThinkingConfig → mapped:
+     *        adaptive → {thinkingLevel: 'HIGH', includeThoughts: true}
+     *        enabled  → {thinkingBudget: N, includeThoughts: true}
+     *        disabled → null
+     */
+    protected function buildThinkingConfig(mixed $raw, mixed $generic, string $model): ?array
+    {
+        if (is_array($raw) && ! empty($raw)) {
+            return $raw;
+        }
+
+        if ($generic instanceof ThinkingConfig) {
+            if ($generic->getMode() === 'disabled') {
+                return null;
+            }
+            if (! $this->modelSupportsThinking($model)) {
+                return null;
+            }
+            if ($generic->isAdaptive()) {
+                return ['thinkingLevel' => 'HIGH', 'includeThoughts' => true];
+            }
+            return ['thinkingBudget' => $generic->getBudgetTokens(), 'includeThoughts' => true];
+        }
+
+        return null;
+    }
+
+    /**
+     * True for Gemini 3.x Pro / 3.x Flash with thinking-enabled tier and the
+     * legacy 2.0 "thinking-exp" preview. Mirrors gemini-cli's modelDefinitions.
+     */
+    protected function modelSupportsThinking(string $model): bool
+    {
+        $m = strtolower($model);
+        if (str_contains($m, 'thinking')) {
+            return true;
+        }
+        // Gemini 3.x: pro tier ships thinking, flash tier in 3.5+
+        if (preg_match('/^gemini-3(\.\d+)?-pro/', $m)) {
+            return true;
+        }
+        if (preg_match('/^gemini-3\.\d+-flash(?!-lite)/', $m) || str_starts_with($m, 'gemini-3.5-flash')) {
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -252,9 +331,12 @@ class GeminiProvider implements LLMProvider
     {
         $message = new AssistantMessage();
         $accumulatedText = '';
+        $accumulatedThought = '';
         $toolCalls = [];
+        $groundingSources = [];
         $inputTokens = 0;
         $outputTokens = 0;
+        $thinkingTokens = 0;
         $stopReason = null;
 
         $buffer = '';
@@ -294,6 +376,14 @@ class GeminiProvider implements LLMProvider
 
                 foreach ($event['candidates'] ?? [] as $candidate) {
                     foreach ($candidate['content']['parts'] ?? [] as $part) {
+                        // Gemini 3.x thinking parts carry `thought: true` and use
+                        // `text` for the thought body. They must be surfaced as
+                        // thinking content blocks (not visible text) so the
+                        // downstream renderer/transcoder treats them correctly.
+                        if (! empty($part['thought']) && isset($part['text'])) {
+                            $accumulatedThought .= $part['text'];
+                            continue;
+                        }
                         if (isset($part['text'])) {
                             $accumulatedText .= $part['text'];
                             $handler?->emitText($part['text'], $accumulatedText);
@@ -305,6 +395,21 @@ class GeminiProvider implements LLMProvider
                             ];
                         }
                     }
+
+                    // Capture grounding citations (Google Search / URL Context).
+                    $grounding = $candidate['groundingMetadata'] ?? null;
+                    if (is_array($grounding) && ! empty($grounding['groundingChunks'])) {
+                        foreach ($grounding['groundingChunks'] as $chunk) {
+                            $web = $chunk['web'] ?? null;
+                            if (is_array($web) && ! empty($web['uri'])) {
+                                $groundingSources[] = [
+                                    'uri' => (string) $web['uri'],
+                                    'title' => (string) ($web['title'] ?? ''),
+                                ];
+                            }
+                        }
+                    }
+
                     if (isset($candidate['finishReason'])) {
                         $stopReason = $this->mapStopReason($candidate['finishReason']);
                     }
@@ -313,8 +418,15 @@ class GeminiProvider implements LLMProvider
                 if (isset($event['usageMetadata'])) {
                     $inputTokens = $event['usageMetadata']['promptTokenCount'] ?? $inputTokens;
                     $outputTokens = $event['usageMetadata']['candidatesTokenCount'] ?? $outputTokens;
+                    $thinkingTokens = $event['usageMetadata']['thoughtsTokenCount'] ?? $thinkingTokens;
                 }
             }
+        }
+
+        // Emit thinking block first so renderers can show "reasoning" before
+        // the visible answer, matching the Anthropic ordering convention.
+        if ($accumulatedThought !== '') {
+            $message->content[] = ContentBlock::thinking($accumulatedThought);
         }
 
         if ($accumulatedText !== '') {
@@ -338,7 +450,17 @@ class GeminiProvider implements LLMProvider
             $stopReason = ! empty($toolCalls) ? StopReason::ToolUse : StopReason::EndTurn;
         }
         $message->stopReason = $stopReason;
-        $message->usage = new Usage($inputTokens, $outputTokens);
+        // Surface thinking tokens via output usage (closest existing slot;
+        // Usage doesn't yet carry a separate "thinking" counter). Grounding
+        // sources are stashed on the assistant message metadata so callers
+        // that opted into search/url_context can render citations.
+        $message->usage = new Usage($inputTokens, $outputTokens + $thinkingTokens);
+        if (! empty($groundingSources) && property_exists($message, 'metadata')) {
+            $message->metadata = array_merge(
+                is_array($message->metadata ?? null) ? $message->metadata : [],
+                ['grounding_sources' => $groundingSources],
+            );
+        }
 
         yield $message;
     }

@@ -33,7 +33,7 @@ class GeminiProviderTest extends TestCase
     public function test_default_model_is_gemini_flash(): void
     {
         $p = new GeminiProvider(['api_key' => 'k']);
-        $this->assertSame('gemini-2.0-flash', $p->getModel());
+        $this->assertSame('gemini-3.5-flash', $p->getModel());
     }
 
     public function test_set_model_roundtrip(): void

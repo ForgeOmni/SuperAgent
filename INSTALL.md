@@ -531,6 +531,106 @@ SUPERAGENT_MODE_ESCALATE_TO=smart
 
 Full reference (ModeContext lifecycle, SPI installation, cycle detection, ReviewerLoopRunner escalation) is in [ADVANCED_USAGE §62](docs/ADVANCED_USAGE.md#62-cross-mode-orchestration).
 
+### Gemini 3.5 *(v1.0.5)*
+
+Nothing to install beyond the standard package — `gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` already live in the bundled `resources/models.json`. Set the key once:
+
+```bash
+export GEMINI_API_KEY=AIzaSy…    # AI Studio key, or VERTEX_* for OAuth/Vertex
+superagent --provider gemini --model gemini-3.5-pro "explain this file" ./src/Foo.php
+```
+
+The provider default is now `gemini-3.5-flash`; pass `--model gemini-3.5-pro` for hardest tasks or `--model gemini-3.5-flash-lite` for cheapest.
+
+### LSP servers *(v1.0.5)*
+
+`Tools\Builtin\LSPTool` autostarts language servers from PATH. Install whichever you need; the agent only spawns when probe succeeds.
+
+```bash
+# PHP
+composer global require phpactor/phpactor
+# or:  npm i -g intelephense
+
+# JS/TS
+npm i -g typescript-language-server typescript
+
+# Go
+go install golang.org/x/tools/gopls@latest
+
+# Rust
+rustup component add rust-analyzer
+
+# Python
+npm i -g pyright
+
+# C/C++
+brew install llvm        # or apt install clangd
+
+# Bash
+npm i -g bash-language-server
+```
+
+Verify the server is discovered:
+
+```bash
+superagent run --tool LSPTool --tool-input '{"action":"diagnostics","path":"/abs/path/to/file.php"}'
+```
+
+### Auto-formatters *(v1.0.5)*
+
+`Format\Formatters` probes for ~26 formatters; each only fires when the project declares it (e.g. Pint requires `laravel/pint` in `composer.json`, Prettier requires it in `package.json`). Install the ones your stack uses:
+
+```bash
+# PHP — project-scoped (preferred)
+composer require --dev laravel/pint
+
+# JS/TS — project-scoped
+npm i -D prettier
+# or:  npm i -D --save-exact @biomejs/biome
+
+# Python
+pip install ruff
+# or:  uv tool install ruff
+
+# Go / Rust / Zig / Terraform — bundled with the toolchain, no extra step
+
+# Shell
+brew install shfmt
+```
+
+### ACP server *(v1.0.5)*
+
+No install — the JSON-RPC stdio server lives in the package. Editors that speak ACP wire it up like an MCP server:
+
+```jsonc
+// Zed settings.json
+{
+  "assistant": {
+    "agents": {
+      "superagent": {
+        "command": "superagent",
+        "args": ["acp"]      // see superagent acp --help for flags
+      }
+    }
+  }
+}
+```
+
+Then `Cmd-Shift-A` in Zed picks SuperAgent as the active agent.
+
+### External skill auto-discovery *(v1.0.5)*
+
+`SkillManager::discoverExternalSkills()` is opt-in — call it from your host or wire it into the agent factory. Skills auto-load from any of these paths between cwd and the project root:
+
+```
+.claude/skills/<name>/SKILL.md
+.agents/skills/<name>/SKILL.md
+skills/<name>/SKILL.md          (project root only)
+skill/<name>/SKILL.md           (project root only)
+```
+
+Each SKILL.md is a Markdown file with YAML frontmatter (`name:`, `description:`) followed by the skill body. The walk stops at the worktree boundary, so a monorepo parent can't bleed skills into a sub-project.
+
 ---
 
 ## Verification

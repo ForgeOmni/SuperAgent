@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.9.8-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.0.5-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -852,6 +852,51 @@ $result = $router->dispatch('squad', $task, $ctx);
 - `Modes\ModeRouterRegistry::set($router)` — les hôtes installent un routeur cross-mode par défaut (p.ex. un qui connaît les tags leaf `cli:claude_cli` en plus des trois noms de mode)
 
 Tous deux sont des slots statiques au niveau classe. Les chemins de code du SDK les consultent avant de retomber sur les défauts internes. Le SDK lui-même n'appelle jamais `set()` — les slots sont réservés aux hôtes.
+
+### Gemini 3.5 + thinking / grounding *(v1.0.5)*
+
+`gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` sont des entrées de catalogue de premier ordre (alias `gemini` → 3.5 Pro). Les SKU previews 3.x de gemini-cli (`gemini-3-pro-preview`, `gemini-3.1-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-flash-lite-preview`) sont également livrés. Modèle par défaut du provider passé de `gemini-2.0-flash` → `gemini-3.5-flash`.
+
+```php
+$agent = new Agent([
+    'provider' => 'gemini',
+    'model'    => 'gemini-3.5-pro',
+    'options'  => [
+        'thinking'      => \SuperAgent\Thinking\ThinkingConfig::adaptive(),   // → thinkingLevel: HIGH
+        'grounding'     => true,                                              // → tools[].googleSearch
+        'url_context'   => true,                                              // → tools[].urlContext
+    ],
+]);
+```
+
+`AssistantMessage::$metadata['grounding_sources']` contient `[{uri, title}, ...]` pour chaque citation Google Search ; `parts[].thought` (parties pensantes Gemini 3.x) est rendu via `ContentBlock::thinking()`, et `usageMetadata.thoughtsTokenCount` est ajouté à `Usage::$outputTokens`.
+
+### Détection sémantique de boucle *(v1.0.5)*
+
+`Guardrails\LoopDetector` attrape déjà les répétitions hash-identiques (5 appels d'outil dupliqués, chants de 10 caractères, 8 lectures de fichier dans une fenêtre de 15 appels, …). Le nouveau `Guardrails\LlmLoopChecker` le complète avec une sonde Flash après le 30e tour — attrape les boucles *sémantiques* que les hashes ratent (le modèle paraphrase le même plan dix fois sans agir). Le prompt est le `LOOP_DETECTION_SYSTEM_PROMPT` verbatim de gemini-cli ; l'intervalle de vérification s'ajuste dynamiquement (5–15 tours).
+
+```php
+$flash = new GeminiProvider(['model' => 'gemini-3.5-flash', 'api_key' => env('GEMINI_API_KEY')]);
+$checker = new LlmLoopChecker($flash);
+foreach ($turns as $i => $turn) {
+    if ($v = $checker->turnStarted($i, $conversationHistory, $originalPrompt)) {
+        // $v->type === LoopType::LlmDetected ; arrêter et remonter à l'utilisateur
+    }
+}
+```
+
+### Six patterns d'opencode portés *(v1.0.5)*
+
+Chacun comble un gap par rapport à un agent de coding de production ; tout est opt-in et testé.
+
+| Module                              | Ce qu'il fait                                                                                                                                                                                                              |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Permissions\BashArity`             | Table d'arité 110+ CLI (git→2, `docker compose`→3, `terraform workspace`→3, `vault kv`→3, …). `BashCommandClassifier::extractPrefix()` utilise longest-prefix-wins pour que les règles de permission matchent la bonne granularité. |
+| `Context\Strategies\ConversationCompressor::getStructuredSummaryPrompt()` | Template Markdown 7 sections (Goal / Constraints / Progress·Done·InProgress·Blocked / Decisions / Next Steps / Critical Context / Relevant Files). Sélection via `options: ['summary_prompt' => 'structured']`. |
+| Espace de noms `Format\`            | 26 formateurs auto (gofmt, prettier, biome, ruff, rustfmt, **pint**, rubocop, shfmt, clang-format, terraform fmt, …). `(new FormatterRunner())->formatFile($path, $worktree)` lance tous les formateurs applicables après une édition. |
+| Espace de noms `LSP\`               | Vrai client LSP stdio JSON-RPC (était un stub `'simulated'`). 9 serveurs : phpactor/intelephense, gopls, rust-analyzer, pyright, typescript-language-server, clangd, bash-language-server, zls. `LSPTool` expose `diagnostics`/`hover`/`definition`/`touch`. |
+| Espace de noms `ACP\`               | Serveur Agent Client Protocol v1. Les éditeurs qui parlent ACP (Zed, Neovim avec Codecompanion, …) se branchent directement sur SuperAgent. `(new Server($handler))->serve()` bloque sur stdio.                            |
+| `Skills\SkillManager::discoverExternalSkills()` | Remonte de cwd à la racine du worktree en chargeant `.claude/skills/**/SKILL.md` et `.agents/skills/**/SKILL.md` à chaque niveau ; à la racine, aussi `skills/**/SKILL.md` / `skill/**/SKILL.md`. Le fichier doit être littéralement nommé `SKILL.md`. |
 
 ### Idempotence
 

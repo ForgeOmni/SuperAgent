@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-05-20
+
+### 💻 Summary
+
+**Gemini 3.5 lands as a first-class model, agents gain semantic loop detection, and six opencode patterns are absorbed into the SDK.** 1.0.5 is a *capability* release — every change is opt-in, no breaking changes, no migration steps. The headline is the Gemini 3.5 thinking + grounding + thought-part wiring through `GeminiProvider`, but the broader theme is "things a production coding agent should know how to do that SuperAgent didn't yet."
+
+Eight new modules / files, ~3 200 lines of new code, **44 new unit tests / 109 new assertions**, zero regressions on the 453-test affected-areas run. The CHANGELOG sections below are organised by capability rather than file so you can skim what's relevant. Wire protocol is unchanged; the only enum addition is `Guardrails\LoopType::LlmDetected` and pipeline consumers must handle it in their `loop_detected` event family.
+
+### Added — Gemini 3.5 support and Gemini 3.x family
+
+- **`resources/models.json`** — catalog now ships `gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` (all under family `gemini-pro`/`gemini-flash` with `gemini` / `gemini-pro` / `gemini-3` / `gemini-3.5` aliases pointing at 3.5 Pro), plus the preview SKUs `gemini-3-pro-preview`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`, `gemini-3.1-flash-lite-preview`, and the previously-missing `gemini-2.5-flash-lite`. Pricing reflects the published Gemini 3.x tier (3.5 Pro: $2 / $15 per million; Flash: $0.40 / $3; Flash-Lite: $0.10 / $0.80). OpenRouter mappings added for `google/gemini-3.5-pro`, `google/gemini-3.5-flash`, and `google/gemini-3-pro-preview`. Schema bumped to v2 — model entries now carry `capabilities` (thinking / multimodal / tools / grounding) inherited where present.
+- **`Providers\GeminiProvider`** — default model bumped from `gemini-2.0-flash` to `gemini-3.5-flash`. Three new request-body features:
+  - **Thinking** — accepts either a raw `thinking_config` array (`{thinkingBudget: int}` or `{thinkingLevel: 'HIGH'|'LOW'}`) or a generic `\SuperAgent\Thinking\ThinkingConfig` via the same `thinking` option already used cross-provider. `adaptive` maps to `{thinkingLevel: 'HIGH', includeThoughts: true}`; `enabled` maps to `{thinkingBudget: <tokens>, includeThoughts: true}`. Gated by a per-model `modelSupportsThinking()` check that recognises gemini-3.x Pro and `gemini-3.5-flash`.
+  - **Grounding** — `grounding: true` (or `google_search: true`) appends `{googleSearch: {}}` to `tools[]`; `url_context: true` appends `{urlContext: {}}`. Grounding citations from `groundingMetadata.groundingChunks` are stashed under `AssistantMessage::$metadata['grounding_sources']`.
+  - **Thought parts** — SSE `parts[].thought === true` is now emitted as a `ContentBlock::thinking(...)` (instead of being mixed into visible text), and `usageMetadata.thoughtsTokenCount` is folded into the `Usage::$outputTokens` field.
+
+### Added — `Guardrails\LlmLoopChecker` (semantic loop detection)
+
+A second-tier complement to the existing `LoopDetector`. The hash-based detector catches byte-identical repetition; this new class catches **semantic** loops — the model paraphrases the same plan for ten turns without acting, or alternates between two near-identical tool args. Lifted from gemini-cli's `LoopDetectionService` with the original prompt verbatim (it's carefully tuned to distinguish batch operations from real loops).
+
+- Probes a configured `LLMProvider` (Flash tier recommended — e.g. `gemini-3.5-flash`, `claude-haiku-4-5`, `gpt-5-nano`) after `LLM_CHECK_AFTER_TURNS = 30` model turns, then every `checkInterval` turns (default 10, narrows to 5 as confidence climbs, widens to 15 when calm).
+- Confidence ≥ 0.9 returns a `LoopViolation` of new type `LoopType::LlmDetected` carrying `confidence`, `classifier_model`, and `turn` metadata.
+- Tolerant JSON parsing — handles raw objects, ```json``` fences, and surrounding prose; classifier failures (network, parse) return null rather than crashing the host loop.
+- Stateless across prompts; construct one per user prompt (same lifecycle as `LoopDetector`).
+- 8 unit tests covering threshold gating, interval cadence, confidence-driven interval adjustment, fence-stripped JSON parsing, provider exceptions, and unparseable responses.
+
+### Changed
+
+- `Guardrails\LoopType` — added `LlmDetected = 'llm_detected_loop'` case. Stable wire identifier; downstream consumers should handle this in `loop_detected` event family.
+
+### Added — opencode borrowings
+
+Six features ported from [opencode](https://opencode.ai) (`packages/opencode/src/`). Each one fills a gap SuperAgent had relative to a production coding agent; tests included.
+
+- **`Permissions\BashArity`** — 110+ command arity table lifted verbatim from opencode's `permission/arity.ts` (longest-prefix-wins matching for `git`/`docker`/`kubectl`/`npm`/`pnpm`/`yarn`/`aws`/`gcloud`/`terraform`/`vault`/...). `BashCommandClassifier::extractPrefix()` now consults this table instead of the legacy 1-or-2-token heuristic, so permission rules can match `docker compose *` distinctly from `docker run *`, and `terraform workspace select` distinctly from `terraform apply`.
+- **`Context\Strategies\ConversationCompressor::getStructuredSummaryPrompt()`** — opencode-style 7-section Markdown summary template (Goal / Constraints / Progress[Done+InProgress+Blocked] / Decisions / Next Steps / Critical Context / Relevant Files). Selectable per-call via `options: ['summary_prompt' => 'structured']`. Produces ~30-50% fewer tokens than the default 9-section prose summary and preserves blocked-item state across consecutive compactions.
+- **`Format\` namespace** — auto-format registry (26 formatters: gofmt, prettier, biome, ruff, rustfmt, pint, rubocop, shfmt, clang-format, ocamlformat, terraform fmt, ...). `Formatters::forExtension('.php')` returns probe closures; each probe inspects the project (`composer.json`, `package.json`, `.clang-format`, ...) to decide whether to fire and returns the resolved command. `FormatterRunner::formatFile($path, $worktree)` runs every applicable formatter. Hook this into Edit/Write tool post-write paths to keep model output formatted-by-default.
+- **`LSP\` namespace** — real LSP stdio JSON-RPC client (was a `simulated` placeholder). `Client` handles initialize/didOpen/didChange/diagnostic/hover/definition with Content-Length framing; `ServerRegistry` ships defaults for 9 language servers (phpactor, intelephense, gopls, rust-analyzer, pyright, typescript-language-server, clangd, bash-language-server, zls) with per-server root markers (composer.json/go.mod/Cargo.toml/...); `Manager` per-worktree caches one client per (server-id, root-dir) pair so multi-file edits don't re-initialize. `Tools\Builtin\LSPTool` now exposes `diagnostics`/`hover`/`definition`/`touch` actions to the agent.
+- **`ACP\` namespace** — Agent Client Protocol v1 server (JSON-RPC over stdio with newline framing, not Content-Length). Editors that speak ACP — Zed, Neovim with Codecompanion, future VS Code extensions — can plug into SuperAgent directly. Components: `Protocol` (constants + envelope helpers), `Server` (transport with notification support for streaming `session/update`), `Handler` (pluggable backend interface), `DefaultHandler` (reference implementation taking a prompt closure), `SessionRegistry` + `SessionEntry` (in-memory session map). Hosts wire SuperAgent's `Agent` into a `DefaultHandler` and call `(new Server($h))->serve()`.
+- **`Skills\SkillManager::discoverExternalSkills()`** — opencode-style worktree-bounded upward walk loading SKILL.md files. At each directory level between cwd and worktree root, scans `.claude/skills/**/SKILL.md` and `.agents/skills/**/SKILL.md`; at the worktree root, also scans `skills/**/SKILL.md` and `skill/**/SKILL.md`. Files must literally be named `SKILL.md` (avoids treating arbitrary docs as skills). Walk stops at the worktree boundary so monorepo parents don't bleed in.
+
 ## [1.0.1] - 2026-05-17
 
 ### 💻 Summary

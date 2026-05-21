@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-0.9.8-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-1.0.5-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -851,6 +851,51 @@ $result = $router->dispatch('squad', $task, $ctx);
 - `Modes\ModeRouterRegistry::set($router)` —— host 注入默认跨模式路由器（如能识别 `cli:claude_cli` 等 leaf tag 的版本）
 
 两者都是类级静态槽。SDK 任何路径在用 fallback 之前都会先查这两个槽。SDK 自己永远不调用 `set()` —— 槽位保留给 host。
+
+### Gemini 3.5 + thinking / grounding *(v1.0.5)*
+
+`gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` 是一等公民 catalog 条目（别名 `gemini` → 3.5 Pro）。来自 gemini-cli 的 3.x 预览 SKU（`gemini-3-pro-preview`、`gemini-3.1-pro-preview`、`gemini-3-flash-preview`、`gemini-3.1-flash-lite-preview`）也已发布。Provider 默认模型从 `gemini-2.0-flash` → `gemini-3.5-flash`。
+
+```php
+$agent = new Agent([
+    'provider' => 'gemini',
+    'model'    => 'gemini-3.5-pro',
+    'options'  => [
+        'thinking'      => \SuperAgent\Thinking\ThinkingConfig::adaptive(),   // → thinkingLevel: HIGH
+        'grounding'     => true,                                              // → tools[].googleSearch
+        'url_context'   => true,                                              // → tools[].urlContext
+    ],
+]);
+```
+
+`AssistantMessage::$metadata['grounding_sources']` 携带每条 Google Search 引用 `[{uri, title}, ...]`；`parts[].thought`（Gemini 3.x 思考片段）现在作为 `ContentBlock::thinking()` 输出；`usageMetadata.thoughtsTokenCount` 合并进 `Usage::$outputTokens`。
+
+### 语义循环检测 *(v1.0.5)*
+
+`Guardrails\LoopDetector` 已经能抓住 hash 级别的重复（5 次相同工具调用、10 字符的"念经"、15 次调用窗口里 8 次 file-read 等）。新的 `Guardrails\LlmLoopChecker` 在第 30 轮之后用 Flash 模型补充一道**语义**循环检查 —— 抓住 hash 漏掉的"模型把同一个计划换十种说法但不动手"模式。Prompt 是 gemini-cli `LOOP_DETECTION_SYSTEM_PROMPT` 原样移植；检查间隔随信心动态调整（5–15 轮）。
+
+```php
+$flash = new GeminiProvider(['model' => 'gemini-3.5-flash', 'api_key' => env('GEMINI_API_KEY')]);
+$checker = new LlmLoopChecker($flash);
+foreach ($turns as $i => $turn) {
+    if ($v = $checker->turnStarted($i, $conversationHistory, $originalPrompt)) {
+        // $v->type === LoopType::LlmDetected；停止并上报给用户
+    }
+}
+```
+
+### 6 个 opencode 模式移植 *(v1.0.5)*
+
+每个都填补了相对于生产级 coding agent 的一项空缺；全部 opt-in，全部有测试。
+
+| 模块                                | 作用                                                                                                                                                                                                                                                |
+|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Permissions\BashArity`             | 110+ CLI arity 字典（git→2、`docker compose`→3、`terraform workspace`→3、`vault kv`→3，…）。`BashCommandClassifier::extractPrefix()` 用最长前缀匹配，让权限规则匹配到对的粒度。                                                                |
+| `Context\Strategies\ConversationCompressor::getStructuredSummaryPrompt()` | 7 段 Markdown 模板（Goal / Constraints / Progress·Done·InProgress·Blocked / Decisions / Next Steps / Critical Context / Relevant Files）。通过 `options: ['summary_prompt' => 'structured']` 启用。 |
+| `Format\` 命名空间                  | 26 个自动 formatter（gofmt、prettier、biome、ruff、rustfmt、**pint**、rubocop、shfmt、clang-format、terraform fmt，…）。`(new FormatterRunner())->formatFile($path, $worktree)` 在编辑后跑所有可用 formatter。                                |
+| `LSP\` 命名空间                     | 真正的 stdio JSON-RPC LSP 客户端（之前是 `'simulated'` 占位符）。9 个 server：phpactor/intelephense、gopls、rust-analyzer、pyright、typescript-language-server、clangd、bash-language-server、zls。`LSPTool` 暴露 `diagnostics`/`hover`/`definition`/`touch`。 |
+| `ACP\` 命名空间                     | Agent Client Protocol v1 server。说 ACP 的编辑器（Zed、Neovim Codecompanion，…）可直接接入 SuperAgent。`(new Server($handler))->serve()` 阻塞在 stdio 上。                                                                                            |
+| `Skills\SkillManager::discoverExternalSkills()` | 从 cwd 向上一直到 worktree root，每一级都扫描 `.claude/skills/**/SKILL.md` 和 `.agents/skills/**/SKILL.md`；到 root 还扫 `skills/**/SKILL.md` / `skill/**/SKILL.md`。文件必须严格命名为 `SKILL.md`。            |
 
 ### 幂等性
 

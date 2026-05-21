@@ -10654,3 +10654,527 @@ Propriétés transverses :
 - Runs de production avec plafonds de budget stricts — mettre `policy->maxDepth=2` pour garder l'imbrication peu profonde
 
 *Depuis v1.0.1.*
+
+## 72. Gemini 3.5 — thinking · grounding · thought parts (v1.0.5)
+
+La famille Gemini 3.x débarque avec trois features wire que le SDK gère désormais de bout en bout. Les trois sont opt-in via l'array `options` ; les appels antérieurs à 1.0.5 voient un comportement byte-identique.
+
+### Catalogue de modèles
+
+Trois entrées de premier rang plus les quatre SKU previews de gemini-cli :
+
+| Catalog id                          | Famille      | Input $/M | Output $/M | Alias                              |
+|-------------------------------------|--------------|----------:|-----------:|------------------------------------|
+| `gemini-3.5-pro`                    | gemini-pro   |      2.00 |      15.00 | gemini-pro, gemini-3.5, gemini, gemini-3 |
+| `gemini-3.5-flash`                  | gemini-flash |      0.40 |       3.00 | —                                  |
+| `gemini-3.5-flash-lite`             | gemini-flash |      0.10 |       0.80 | —                                  |
+| `gemini-3-pro-preview`              | gemini-pro   |      2.00 |      15.00 | —                                  |
+| `gemini-3.1-pro-preview`            | gemini-pro   |      2.00 |      15.00 | —                                  |
+| `gemini-3-flash-preview`            | gemini-flash |      0.40 |       3.00 | —                                  |
+| `gemini-3.1-flash-lite-preview`     | gemini-flash |      0.10 |       0.80 | —                                  |
+
+`ModelResolver::resolveAlias('gemini')` retourne désormais `gemini-3.5-pro` — les hôtes qui pariaient sur `gemini` → `gemini-2.0-flash` doivent en tenir compte.
+
+Mappings OpenRouter ajoutés : `google/gemini-3.5-pro`, `google/gemini-3.5-flash`, `google/gemini-3-pro-preview`.
+
+### Thinking
+
+Deux chemins vers `generationConfig.thinkingConfig` de Gemini :
+
+```php
+// (a) Shape natif — porte de sortie pour appelants avancés
+$options['thinking_config'] = ['thinkingBudget' => 8192, 'includeThoughts' => true];
+// ou :
+$options['thinking_config'] = ['thinkingLevel' => 'HIGH', 'includeThoughts' => true];
+
+// (b) ThinkingConfig cross-provider — même instance qu'on passerait à AnthropicProvider
+use SuperAgent\Thinking\ThinkingConfig;
+$options['thinking'] = ThinkingConfig::adaptive();       // → thinkingLevel: HIGH
+$options['thinking'] = ThinkingConfig::enabled(16000);   // → thinkingBudget: 16000
+$options['thinking'] = ThinkingConfig::disabled();       // → omis entièrement
+```
+
+`GeminiProvider::modelSupportsThinking($model)` gate la feature : la tier Pro gemini-3.x et `gemini-3.5-flash` qualifient, `gemini-3.5-flash-lite` et 2.5/2.0 non.
+
+Quand le modèle emet des thought parts (`parts[].thought === true`), le parser SSE les route vers `ContentBlock::thinking($text)` séparément du texte visible. `usageMetadata.thoughtsTokenCount` est ajouté à `Usage::$outputTokens` du message (pas de compteur séparé pour l'instant — la shape Usage existante reste stable).
+
+### Grounding (Google Search + URL Context)
+
+Deux flags sur l'array options ajoutent à `tools[]` :
+
+```php
+$result = $agent->run('dernier changelog pour OpenSSL 3.5', [
+    'options' => [
+        'grounding'   => true,    // → tools[].googleSearch (grounding web)
+        'url_context' => true,    // → tools[].urlContext   (autorise fetches directs d'URL)
+    ],
+]);
+```
+
+Les chunks de citations reviennent dans l'event SSE sous `candidates[].groundingMetadata.groundingChunks`. Le parser collecte chaque `{web: {uri, title}}` et les stocke sur `AssistantMessage::$metadata['grounding_sources']` :
+
+```php
+foreach ($result->message->metadata['grounding_sources'] ?? [] as $src) {
+    echo '- '.$src['title'].' — '.$src['uri']."\n";
+}
+```
+
+Les renderers qui émettent des citations à l'utilisateur consultent cette key. Array vide quand l'utilisateur n'a pas activé grounding.
+
+---
+
+## 73. Détection sémantique de boucle — `Guardrails\LlmLoopChecker` (v1.0.5)
+
+Complément tier-2 à `Guardrails\LoopDetector`. Le détecteur existant attrape les répétitions hash-identiques (hash d'appel d'outil répété 5×, chunk de contenu répété 10×, streak de file-read 8/15, thought répété 3×, …). Le nouveau `LlmLoopChecker` complète avec une sonde Flash qui attrape les boucles **sémantiques** que les hashes ratent — le modèle paraphrase le même plan dix tours sans agir.
+
+Constantes calibrées sur gemini-cli :
+
+| Constante                    | Valeur | Signification                                              |
+|------------------------------|-------:|------------------------------------------------------------|
+| `LLM_CHECK_AFTER_TURNS`      |     30 | Sauter les sondes avant ce nombre de tours dans le prompt |
+| `DEFAULT_LLM_CHECK_INTERVAL` |     10 | Intervalle initial (en tours) entre sondes                |
+| `MIN_LLM_CHECK_INTERVAL`     |      5 | Plancher quand confiance ≥ 0.7                            |
+| `MAX_LLM_CHECK_INTERVAL`     |     15 | Plafond quand confiance ≤ 0.3                             |
+| `CONFIDENCE_THRESHOLD`       |    0.9 | La sonde doit franchir ce seuil pour déclencher           |
+| `HISTORY_WINDOW`             |     20 | Messages récents envoyés au classificateur                |
+
+### Câblage
+
+Construire un par prompt (même cycle de vie que `LoopDetector`) :
+
+```php
+use SuperAgent\Guardrails\LlmLoopChecker;
+use SuperAgent\Providers\GeminiProvider;
+
+$flash = new GeminiProvider(['model' => 'gemini-3.5-flash', 'api_key' => env('GEMINI_API_KEY')]);
+$checker = new LlmLoopChecker($flash);
+$turn = 0;
+foreach ($agent->stream($prompt) as $event) {
+    if ($event instanceof TurnStarted) {
+        $turn++;
+        $v = $checker->turnStarted($turn, $conversationHistory, $originalPrompt);
+        if ($v !== null) {
+            $wireEmitter->emit(LoopDetectedEvent::fromViolation($v));
+            break;  // la policy de l'hôte décide : arrêter / escalader / injecter reset
+        }
+    }
+}
+```
+
+### La sonde
+
+Le prompt classificateur est le `LOOP_DETECTION_SYSTEM_PROMPT` verbatim de gemini-cli — soigneusement calibré pour distinguer :
+
+- ✅ Ops batch (même outil, paths différents) → PAS une boucle
+- ✅ Édits incrémentaux dans le même fichier (line ranges différents) → PAS une boucle
+- ✅ Retry avec variation (args différents) → PAS une boucle
+- ❌ Cycles alternants sans effet net → EST une boucle
+- ❌ Répétition sémantique avec outcomes identiques → EST une boucle
+- ❌ Raisonnement bloqué (paraphraser plans sans agir) → EST une boucle
+
+Réponse forcée en JSON : `{unproductive_state_analysis, unproductive_state_confidence}`. Parsing tolérant : objets bruts, ```json fences```, prose autour.
+
+### Gestion d'erreur
+
+Échecs réseau / parse retournent null (traité comme inconclusif) ; ne crash jamais la host loop. Le `LoopViolation` porte :
+
+```php
+$v->type === LoopType::LlmDetected;
+$v->metadata['confidence']        // float 0..1
+$v->metadata['classifier_model']  // 'gemini-3.5-flash' ou ce qu'on a passé
+$v->metadata['turn']              // numéro de tour où la sonde a déclenché
+```
+
+---
+
+## 74. Dictionnaire d'arité Bash — `Permissions\BashArity` (v1.0.5)
+
+Levé verbatim de opencode `packages/opencode/src/permission/arity.ts`. 110+ entrées couvrant git/docker/kubectl/npm/pnpm/yarn/aws/gcloud/terraform/vault/openssl/podman/cargo/composer/python/poetry/… — chaque CLI courant qu'un agent coding rencontre. Chaque entrée mappe un préfixe → nombre de tokens qui constituent le nom de la commande. Les flags ne comptent jamais.
+
+### Résolution
+
+`BashArity::prefix(['git', 'checkout', 'main'])` retourne `['git', 'checkout']` parce que `git` a arité 2. Le préfixe le plus long gagne :
+
+```php
+BashArity::prefix(['docker', 'compose', 'up', '-d']);
+// → ['docker', 'compose', 'up']    (l'entrée "docker compose" a arité 3)
+
+BashArity::prefix(['pnpm', 'run', 'dev']);
+// → ['pnpm', 'run', 'dev']         ("pnpm run" a arité 3)
+
+BashArity::prefix(['vault', 'kv', 'get', 'secret/api']);
+// → ['vault', 'kv', 'get']
+
+BashArity::prefix(['python', 'script.py']);
+// → ['python', 'script.py']        (pas d'entrée "python script.py" — retombe sur premier token)
+```
+
+`BashArity::label('docker compose up -d nginx')` est une commodité qui joint les tokens résultants.
+
+### Intégration
+
+`Permissions\BashCommandClassifier::extractPrefix()` consulte maintenant `BashArity` avant de retomber sur son heuristique legacy 1-ou-2-tokens. Concrètement, les règles de permission peuvent maintenant matcher :
+
+- `bash:docker run *` ≠ `bash:docker compose *` ≠ `bash:docker container *`
+- `bash:git push *` ≠ `bash:git stash pop *`
+- `bash:terraform apply` ≠ `bash:terraform workspace select *`
+- `bash:npm install` ≠ `bash:npm run dev` ≠ `bash:npm view *`
+
+Les flags sont retirés avant lookup (ex. `docker -H tcp://… compose up` se résout toujours en `docker compose up`). Pour les commandes hors table, l'heuristique legacy s'applique — empêche `python ./script.py` de s'effondrer en juste `python`.
+
+### Tables personnalisées
+
+`BashArity::ARITY` est une constante publique ; les hôtes qui doivent ajouter leurs propres entrées peuvent construire un classificateur enfant :
+
+```php
+final class HostBashArity {
+    public const ARITY = \SuperAgent\Permissions\BashArity::ARITY + [
+        'wrangler'         => 2,        // wrangler deploy
+        'wrangler secret'  => 3,        // wrangler secret put
+    ];
+}
+```
+
+---
+
+## 75. Template de compaction structuré (v1.0.5)
+
+`Context\Strategies\ConversationCompressor` livrait un prompt par défaut — le template Claude Code 9 sections avec scratchpad `<analysis>`. 1.0.5 ajoute une alternative basée sur le `SUMMARY_TEMPLATE` d'opencode `session/compaction.ts`. Sélection par appel :
+
+```php
+$result = $compressor->compress($messages, [
+    'summary_prompt' => 'structured',   // sentinel ; accepte aussi 'default' ou prompt brut
+]);
+```
+
+Le prompt structuré force une shape Markdown à 7 sections :
+
+```
+## Goal
+- [résumé de tâche en une phrase]
+
+## Constraints & Preferences
+- [contraintes / préférences / spécs utilisateur, ou "(none)"]
+
+## Progress
+### Done
+- [travail terminé ou "(none)"]
+
+### In Progress
+- [travail en cours ou "(none)"]
+
+### Blocked
+- [bloqueurs ou "(none)"]
+
+## Key Decisions
+- [décision et pourquoi, ou "(none)"]
+
+## Next Steps
+- [prochaines actions ordonnées ou "(none)"]
+
+## Critical Context
+- [faits techniques importants, erreurs, questions ouvertes, ou "(none)"]
+
+## Relevant Files
+- [chemin de fichier ou dossier : pourquoi ça compte, ou "(none)"]
+```
+
+### Pourquoi l'utiliser
+
+- **30–50% de tokens summary en moins** — pas de scratchpad `<analysis>`
+- **Items bloqués survivent à la compaction** — la sous-section Blocked est obligatoire et toujours présente, donc les bloqueurs ne se font pas résumer entre compactions consécutives
+- **Extractible machine** — les consommateurs downstream peuvent tirer des sections par header (« donne-moi juste les Next Steps »)
+- **Shape stable** — chaque compaction produit les mêmes sections dans le même ordre ; utile pour differ les summaries entre runs
+
+Le prompt par défaut reste 9 sections en prose. Les hôtes basculent via config hôte ; les appelants SDK basculent par appel.
+
+---
+
+## 76. Registre auto-formateur — `Format\` (v1.0.5)
+
+26 formateurs levés d'opencode `packages/opencode/src/format/formatter.ts`. Chaque `FormatterInfo` porte une closure probe qui inspecte le projet pour décider si le formateur est applicable.
+
+### Registry
+
+`Formatters::forExtension('.php')` retourne chaque probe dont la liste `extensions` contient `.php`. Les probes retournent `[bin, ...args]` avec placeholder littéral `$FILE`, ou `false` si non applicable :
+
+```php
+$infos = \SuperAgent\Format\Formatters::forExtension('.php');
+foreach ($infos as $info) {
+    $cmd = ($info->probe)(new \SuperAgent\Format\FormatterContext($dir, $worktree));
+    if ($cmd !== false) {
+        // ["/abs/path/vendor/bin/pint", "$FILE"]
+    }
+}
+```
+
+### Formateurs intégrés
+
+| Langage         | Formateur         | Condition de probe                                                   |
+|-----------------|-------------------|----------------------------------------------------------------------|
+| PHP             | pint              | `composer.json` liste `laravel/pint`                                  |
+| JS/TS/CSS/MD/…  | prettier          | `package.json` liste `prettier` comme (dev)dépendance                |
+| JS/TS/JSON      | biome             | `biome.json` ou `biome.jsonc` présent                                |
+| Python          | ruff              | `pyproject.toml [tool.ruff]` ou `ruff.toml` ou `.ruff.toml` présent  |
+| Go              | gofmt             | `gofmt` sur PATH                                                     |
+| Rust            | rustfmt           | `rustfmt` sur PATH                                                   |
+| C/C++           | clang-format      | `.clang-format` présent (évite réécritures surprises)                |
+| OCaml           | ocamlformat       | `.ocamlformat` présent                                               |
+| Ruby            | rubocop, standardrb | binaire sur PATH                                                   |
+| Shell           | shfmt             | binaire sur PATH                                                     |
+| Terraform       | terraform fmt     | binaire sur PATH                                                     |
+| Dart, Zig, Kotlin, Gleam, Mix (Elixir), R (air), Haskell (ormolu), Clojure (cljfmt), D (dfmt), Nix (nixfmt), LaTeX (latexindent), Erb (htmlbeautifier) | binaire sur PATH | variable |
+
+### Exécution
+
+```php
+use SuperAgent\Format\FormatterRunner;
+
+$runner = new FormatterRunner();
+$result = $runner->formatFile('/abs/path/to/file.php', $worktreeRoot);
+
+if ($result->ran()) {
+    foreach ($result->runs as $run) {
+        // FormatterRun{formatter: 'pint', command: [...], output: "...", durationMs: 245, ok: true}
+    }
+}
+```
+
+Idempotent et non fatal : chaque formateur applicable tourne en séquence ; les échecs sont collectés dans le result mais n'abortent pas l'appel. Câbler `FormatterRunner::formatFile()` dans le post-write hook d'EditTool / WriteTool / patch applier — l'output du modèle atterrit formaté par défaut.
+
+### Enregistrement personnalisé
+
+```php
+\SuperAgent\Format\Formatters::register(new FormatterInfo(
+    name: 'house-style',
+    extensions: ['.php'],
+    probe: fn (FormatterContext $c) => ['/usr/local/bin/house-style', '$FILE'],
+));
+```
+
+---
+
+## 77. Client LSP — `LSP\` (v1.0.5)
+
+Vrai client LSP stdio JSON-RPC. Remplace le placeholder `'simulated'` qu'embarquait `Tools\Builtin\LSPTool` avant 1.0.5.
+
+### Composants
+
+| Classe                        | Responsabilité                                                                                   |
+|-------------------------------|--------------------------------------------------------------------------------------------------|
+| `LSP\Client`                  | proc_open + framing Content-Length + initialize/didOpen/didChange/diagnostic/hover/definition  |
+| `LSP\Manager`                 | Cycle de vie par worktree : spawn paresseux d'un Client par paire (server-id, root-dir)         |
+| `LSP\ServerInfo`              | Description déclarative de server : id + extensions + root-finder + spawn closure                |
+| `LSP\ServerRegistry`          | Catalogue de servers intégrés + register()/unregister() pour les custom                          |
+| `LSP\LanguageExtensions`      | map extension → `languageId` LSP (~40 entrées)                                                  |
+| `Tools\Builtin\LSPTool`       | Outil face-agent : action ∈ {diagnostics, hover, definition, touch}                              |
+
+### Servers par défaut
+
+| ID                              | Extensions                            | Probe                              |
+|---------------------------------|---------------------------------------|------------------------------------|
+| `phpactor`                      | .php                                  | `which phpactor`                   |
+| `intelephense`                  | .php                                  | `which intelephense`               |
+| `gopls`                         | .go                                   | `which gopls`                      |
+| `rust-analyzer`                 | .rs                                   | `which rust-analyzer`              |
+| `pyright`                       | .py, .pyi                             | `which pyright-langserver`         |
+| `typescript-language-server`    | .ts, .tsx, .js, .jsx, .mjs, .cjs, …   | `which typescript-language-server` |
+| `clangd`                        | .c, .cpp, .h, .cc, .cxx, .hpp         | `which clangd`                     |
+| `bash-language-server`          | .sh, .bash                            | `which bash-language-server`       |
+| `zls`                           | .zig, .zon                            | `which zls`                        |
+
+Plusieurs servers peuvent gérer la même extension (phpactor + intelephense pour PHP) ; le Manager les probe dans l'ordre et utilise le premier qui spawn réellement.
+
+### Usage
+
+```php
+use SuperAgent\LSP\Manager;
+
+$mgr = new Manager(worktree: '/abs/project');
+
+// Après que l'agent a édité un fichier, pousser le nouveau contenu :
+$mgr->touchFile('/abs/project/src/Foo.php');
+
+// Pull diagnostics (modèle pull LSP 3.17+, retombe sur le cache publishDiagnostics) :
+$diags = $mgr->diagnostics('/abs/project/src/Foo.php');
+
+// Hover / go-to-definition :
+$hover = $mgr->hover('/abs/project/src/Foo.php', line: 42, character: 12);
+$defs  = $mgr->definition('/abs/project/src/Foo.php', line: 42, character: 12);
+
+$mgr->shutdownAll();
+```
+
+### Câblage dans les hooks Edit/Write
+
+Le diagnostic-comme-feedback est le killer pattern : après que le modèle a édité un fichier, le passer par LSP et nourrir les erreurs comme prochain tool result.
+
+```php
+$editTool->afterEdit(function (string $path) use ($mgr) {
+    $mgr->touchFile($path);
+    $diags = $mgr->diagnostics($path);
+    $flat = [];
+    foreach ($diags as $serverId => $items) {
+        foreach ($items as $d) {
+            $flat[] = sprintf('[%s line %d] %s', $serverId, $d['range']['start']['line'] + 1, $d['message']);
+        }
+    }
+    return $flat;   // injecté dans le prochain tool_result, le modèle voit ses propres erreurs
+});
+```
+
+### Enregistrement de server custom
+
+```php
+\SuperAgent\LSP\ServerRegistry::register(new ServerInfo(
+    id: 'kotlin-language-server',
+    extensions: ['.kt', '.kts'],
+    rootFinder: fn ($f, $w) => $w,
+    spawn: fn ($root) => ['/opt/kotlin-ls/bin/kotlin-language-server'],
+));
+```
+
+---
+
+## 78. Serveur ACP — `ACP\` (v1.0.5)
+
+Implémentation Agent Client Protocol v1 en JSON-RPC sur stdio. Les éditeurs qui parlent ACP — Zed, Neovim avec Codecompanion, futures extensions VS Code — se branchent directement sur SuperAgent. Le protocole est documenté à https://agentclientprotocol.com/.
+
+### Shape wire
+
+Un message JSON-RPC 2.0 par ligne terminée par `\n` sur stdin / stdout. **Pas de framing Content-Length** — c'est la différence principale avec LSP. Méthodes :
+
+| Méthode                | Direction       | Notes                                                  |
+|------------------------|-----------------|--------------------------------------------------------|
+| `initialize`           | client → agent  | Négociation de capabilities                            |
+| `authenticate`         | client → agent  | Flow auth optionnel                                    |
+| `session/new`          | client → agent  | Crée session, retourne sessionId                       |
+| `session/load`         | client → agent  | Reconnecte à une session persistée                     |
+| `session/prompt`       | client → agent  | Run prompt utilisateur ; agent stream via `session/update` |
+| `session/cancel`       | client → agent  | Notification (pas d'id, pas de réponse)                |
+| `session/update`       | agent → client  | Output partiel streaming                               |
+
+### Composants
+
+| Classe                 | Responsabilité                                                            |
+|------------------------|---------------------------------------------------------------------------|
+| `ACP\Protocol`         | Constantes (noms de méthode, codes d'erreur) + helpers d'envelope         |
+| `ACP\Server`           | Transport : lit lignes stdin, dispatche au Handler, écrit les réponses    |
+| `ACP\Handler`          | Interface backend pluggable — les hôtes implémentent                      |
+| `ACP\DefaultHandler`   | Implémentation de référence prenant une closure de prompt                 |
+| `ACP\SessionRegistry`  | Map en mémoire : sessionId → SessionEntry                                 |
+| `ACP\SessionEntry`     | État par session (cwd, mcpServers, sac meta libre)                        |
+| `ACP\AcpException`     | Throw avec un code d'erreur JSON-RPC ; bulle au client comme erreur propre |
+
+### Serveur minimal
+
+```php
+use SuperAgent\ACP\{DefaultHandler, Server, SessionEntry};
+
+$handler = new DefaultHandler(
+    agentName: 'superagent',
+    agentVersion: '1.0.5',
+    promptFn: function (SessionEntry $session, array $params, Server $server): array {
+        $agent = new \SuperAgent\Agent([
+            'cwd' => $session->cwd,
+            'provider' => 'anthropic',
+        ]);
+        foreach ($agent->stream($params['prompt']) as $delta) {
+            $server->notify('session/update', [
+                'sessionId' => $session->id,
+                'kind' => 'message_delta',
+                'text' => (string) $delta,
+            ]);
+        }
+        return ['stopReason' => 'end_turn'];
+    },
+);
+
+(new Server($handler))->serve();    // bloque sur EOF stdin
+```
+
+### Streaming d'output partiel
+
+Dans la closure prompt, appeler `$server->notify('session/update', $payload)` pour chaque delta streaming. Le Server interleave en toute sécurité les notifications avec les écritures de réponse (single-thread, ordre FIFO sur stdout).
+
+### Annulation
+
+L'éditeur envoie `session/cancel` (pas d'id → notification, pas de réponse). `DefaultHandler` enregistre le cancel ; le prochain `session/prompt` court-circuite avec `stopReason: 'cancelled'`. Pour l'annulation en cours de vol, la closure prompt peut poll `$handler->wasCancelled($session->id)`.
+
+### Codes d'erreur
+
+`Protocol::ERR_PARSE` / `ERR_INVALID_REQUEST` / `ERR_METHOD_NOT_FOUND` / `ERR_INVALID_PARAMS` / `ERR_INTERNAL` sont les codes JSON-RPC standard. ACP ajoute `ERR_AUTH_REQUIRED = -32001` et `ERR_SESSION_NOT_FOUND = -32002`. `AcpException` porte le code dans l'envelope de réponse.
+
+### Configuration éditeur
+
+Zed (`settings.json`) :
+
+```jsonc
+{
+  "assistant": {
+    "agents": {
+      "superagent": {
+        "command": "superagent",
+        "args": ["acp"]
+      }
+    }
+  }
+}
+```
+
+---
+
+## 79. Découverte de skills externes — `SkillManager::discoverExternalSkills()` (v1.0.5)
+
+Levé d'opencode `packages/opencode/src/skill/index.ts`. Remonte d'un répertoire de départ jusqu'à la frontière du worktree, chargeant chaque `SKILL.md` trouvé dans les emplacements externes bien connus.
+
+### Chemins de scan
+
+À chaque niveau du walk (cwd → parent → … → racine worktree) :
+
+```
+.claude/skills/<name>/SKILL.md
+.agents/skills/<name>/SKILL.md
+```
+
+Uniquement à la racine du worktree :
+
+```
+skills/<name>/SKILL.md
+skill/<name>/SKILL.md
+```
+
+Les fichiers doivent être littéralement nommés `SKILL.md` — signal plus net que « n'importe quel fichier .md » parce que le loader peut faire confiance au frontmatter pour être un manifest de skill (évite de traiter des README arbitraires comme skills).
+
+### Format SKILL.md
+
+```markdown
+---
+name: my-skill
+description: One-liner décrivant quand utiliser ce skill
+---
+
+# Corps du skill
+
+Corps Markdown injecté dans le contexte de l'agent quand le skill est activé.
+```
+
+`name` est requis ; sans lui le fichier est silencieusement skip quand `throw: false`. Les autres clés de frontmatter (`tags`, `when_to_use`, …) passent à `MarkdownSkill`.
+
+### Usage
+
+```php
+$mgr = new \SuperAgent\Skills\SkillManager(autoLoadDisk: false);
+
+// Remonte de cwd jusqu'à la racine du projet.
+$loaded = $mgr->discoverExternalSkills();
+// → ['/abs/.claude/skills/refactor/SKILL.md', '/abs/.agents/skills/explore/SKILL.md', ...]
+
+// Répertoires start + stop personnalisés :
+$loaded = $mgr->discoverExternalSkills(
+    start: '/abs/project/packages/app/src',
+    stop:  '/abs/project',
+);
+```
+
+Le walk s'arrête à la frontière du worktree — les parents monorepo ne peuvent pas injecter accidentellement de skills dans un sous-projet. Jusqu'à 30 niveaux sont scannés (cap défensif ; largement suffisant pour n'importe quel projet réel).

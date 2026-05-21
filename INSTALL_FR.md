@@ -552,6 +552,106 @@ SUPERAGENT_MODE_ESCALATE_TO=smart
 
 Référence complète (cycle de vie de ModeContext, installation SPI, détection de cycles, escalade de ReviewerLoopRunner) dans [ADVANCED_USAGE §62](docs/ADVANCED_USAGE.md#62-cross-mode-orchestration).
 
+### Gemini 3.5 *(v1.0.5)*
+
+Rien à installer au-delà du paquet standard — `gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` sont déjà dans le `resources/models.json` livré. Définir la clé :
+
+```bash
+export GEMINI_API_KEY=AIzaSy…    # clé AI Studio, ou VERTEX_* pour OAuth/Vertex
+superagent --provider gemini --model gemini-3.5-pro "explique ce fichier" ./src/Foo.php
+```
+
+Le modèle par défaut du provider est maintenant `gemini-3.5-flash` ; passer `--model gemini-3.5-pro` pour les tâches les plus dures ou `--model gemini-3.5-flash-lite` pour le moins cher.
+
+### Serveurs LSP *(v1.0.5)*
+
+`Tools\Builtin\LSPTool` démarre les serveurs depuis PATH. Installer ceux dont vous avez besoin ; l'agent ne spawn que si la sonde réussit.
+
+```bash
+# PHP
+composer global require phpactor/phpactor
+# ou :  npm i -g intelephense
+
+# JS/TS
+npm i -g typescript-language-server typescript
+
+# Go
+go install golang.org/x/tools/gopls@latest
+
+# Rust
+rustup component add rust-analyzer
+
+# Python
+npm i -g pyright
+
+# C/C++
+brew install llvm        # ou : apt install clangd
+
+# Bash
+npm i -g bash-language-server
+```
+
+Vérifier la détection :
+
+```bash
+superagent run --tool LSPTool --tool-input '{"action":"diagnostics","path":"/abs/path/to/file.php"}'
+```
+
+### Auto-formateurs *(v1.0.5)*
+
+`Format\Formatters` sonde ~26 formateurs ; chacun ne déclenche que si le projet le déclare (p.ex. Pint exige `laravel/pint` dans `composer.json`, Prettier dans `package.json`). Installer ceux de votre stack :
+
+```bash
+# PHP — niveau projet (préféré)
+composer require --dev laravel/pint
+
+# JS/TS — niveau projet
+npm i -D prettier
+# ou :  npm i -D --save-exact @biomejs/biome
+
+# Python
+pip install ruff
+# ou :  uv tool install ruff
+
+# Go / Rust / Zig / Terraform — fournis avec la toolchain
+
+# Shell
+brew install shfmt
+```
+
+### Serveur ACP *(v1.0.5)*
+
+Pas d'installation — le serveur JSON-RPC stdio fait partie du paquet. Les éditeurs qui parlent ACP le câblent comme un serveur MCP :
+
+```jsonc
+// Zed settings.json
+{
+  "assistant": {
+    "agents": {
+      "superagent": {
+        "command": "superagent",
+        "args": ["acp"]
+      }
+    }
+  }
+}
+```
+
+Puis `Cmd-Shift-A` dans Zed sélectionne SuperAgent comme agent actif.
+
+### Découverte auto de skills externes *(v1.0.5)*
+
+`SkillManager::discoverExternalSkills()` est opt-in — appeler depuis l'hôte ou câbler dans l'agent factory. Les skills se chargent depuis n'importe quel chemin entre cwd et la racine du projet :
+
+```
+.claude/skills/<name>/SKILL.md
+.agents/skills/<name>/SKILL.md
+skills/<name>/SKILL.md          (racine projet uniquement)
+skill/<name>/SKILL.md           (racine projet uniquement)
+```
+
+Chaque SKILL.md est un fichier Markdown avec frontmatter YAML (`name:`, `description:`) suivi du corps. Le walk s'arrête à la frontière du worktree — un parent monorepo ne peut pas polluer un sous-projet.
+
 ---
 
 ## Vérification

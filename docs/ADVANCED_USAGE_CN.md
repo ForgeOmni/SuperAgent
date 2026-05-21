@@ -10100,3 +10100,529 @@ ModeRouterRegistry::set($routerWithSmart);
 
 *v1.0.1 起。*
 
+
+## 72. Gemini 3.5 —— thinking · grounding · 思考片段（v1.0.5）
+
+Gemini 3.x 家族带来三项 wire 级特性，SDK 全部端到端打通。三者都是 opt-in（通过单次调用 `options` 数组）；1.0.5 之前的调用方零行为变化。
+
+### 模型 catalog
+
+三个一等公民 + 来自 gemini-cli 的四个预览 SKU：
+
+| Catalog id                          | Family       | Input $/M | Output $/M | 别名                               |
+|-------------------------------------|--------------|----------:|-----------:|------------------------------------|
+| `gemini-3.5-pro`                    | gemini-pro   |      2.00 |      15.00 | gemini-pro, gemini-3.5, gemini, gemini-3 |
+| `gemini-3.5-flash`                  | gemini-flash |      0.40 |       3.00 | —                                  |
+| `gemini-3.5-flash-lite`             | gemini-flash |      0.10 |       0.80 | —                                  |
+| `gemini-3-pro-preview`              | gemini-pro   |      2.00 |      15.00 | —                                  |
+| `gemini-3.1-pro-preview`            | gemini-pro   |      2.00 |      15.00 | —                                  |
+| `gemini-3-flash-preview`            | gemini-flash |      0.40 |       3.00 | —                                  |
+| `gemini-3.1-flash-lite-preview`     | gemini-flash |      0.10 |       0.80 | —                                  |
+
+`ModelResolver::resolveAlias('gemini')` 现在返回 `gemini-3.5-pro` —— 之前依赖 `gemini` → `gemini-2.0-flash` 的 host 请确认这点。
+
+OpenRouter 映射也补齐了：`google/gemini-3.5-pro`、`google/gemini-3.5-flash`、`google/gemini-3-pro-preview`。
+
+### Thinking
+
+两条路注入 Gemini 的 `generationConfig.thinkingConfig`：
+
+```php
+// (a) 原生 shape —— 给高级调用方的逃生口
+$options['thinking_config'] = ['thinkingBudget' => 8192, 'includeThoughts' => true];
+// 或者:
+$options['thinking_config'] = ['thinkingLevel' => 'HIGH', 'includeThoughts' => true];
+
+// (b) 跨 provider 的 ThinkingConfig —— 和 AnthropicProvider 用同一个实例
+use SuperAgent\Thinking\ThinkingConfig;
+$options['thinking'] = ThinkingConfig::adaptive();       // → thinkingLevel: HIGH
+$options['thinking'] = ThinkingConfig::enabled(16000);   // → thinkingBudget: 16000
+$options['thinking'] = ThinkingConfig::disabled();       // → 完全不下发
+```
+
+`GeminiProvider::modelSupportsThinking($model)` 负责 gate：gemini-3.x Pro 系列以及 `gemini-3.5-flash` 支持；`gemini-3.5-flash-lite` 和 2.5/2.0 不支持。
+
+当模型 emit 思考片段（`parts[].thought === true`），SSE 解析器把它们路由到 `ContentBlock::thinking($text)` —— 与可见文本分开。`usageMetadata.thoughtsTokenCount` 合并进 message 的 `Usage::$outputTokens`（暂不开新 counter —— 现有 Usage shape 保持稳定）。
+
+### Grounding（Google Search + URL Context）
+
+options 数组上两个开关，会被追加到 `tools[]`：
+
+```php
+$result = $agent->run('OpenSSL 3.5 最新 changelog', [
+    'options' => [
+        'grounding'   => true,    // → tools[].googleSearch（web grounding）
+        'url_context' => true,    // → tools[].urlContext（允许直接拉 URL）
+    ],
+]);
+```
+
+引用 chunks 通过 SSE event 的 `candidates[].groundingMetadata.groundingChunks` 返回。解析器收集每个 `{web: {uri, title}}` 并塞到 `AssistantMessage::$metadata['grounding_sources']`：
+
+```php
+foreach ($result->message->metadata['grounding_sources'] ?? [] as $src) {
+    echo '- '.$src['title'].' — '.$src['uri']."\n";
+}
+```
+
+要把引用渲染给用户的 renderer 应该读这个 key。用户没开启 grounding 时它是空数组。
+
+---
+
+## 73. 语义循环检测 —— `Guardrails\LlmLoopChecker`（v1.0.5）
+
+`Guardrails\LoopDetector` 的 tier-2 补充。已有 detector 抓 hash 级重复（工具调用 hash 重复 5 次、内容 chunk 重复 10 次、15 次调用窗口里 8 次 file-read、思考重复 3 次……）。新的 `LlmLoopChecker` 用 Flash 模型补一道**语义**循环检查 —— 抓 hash 漏掉的"模型把同一个计划换十种说法但不动手"模式。
+
+常量参照 gemini-cli 标定：
+
+| 常量                          | 值    | 含义                                                  |
+|------------------------------|------:|-------------------------------------------------------|
+| `LLM_CHECK_AFTER_TURNS`      |    30 | 单 prompt 内未达此轮数前不检查                          |
+| `DEFAULT_LLM_CHECK_INTERVAL` |    10 | 初始检查间隔（按轮）                                    |
+| `MIN_LLM_CHECK_INTERVAL`     |     5 | 信心 ≥ 0.7 时收紧到此                                   |
+| `MAX_LLM_CHECK_INTERVAL`     |    15 | 信心 ≤ 0.3 时放宽到此                                   |
+| `CONFIDENCE_THRESHOLD`       |   0.9 | 探针需达到此值才触发 violation                          |
+| `HISTORY_WINDOW`             |    20 | 喂给分类器的最近消息数                                  |
+
+### 接线
+
+每个 prompt 构造一个（生命周期同 `LoopDetector`）：
+
+```php
+use SuperAgent\Guardrails\LlmLoopChecker;
+use SuperAgent\Providers\GeminiProvider;
+
+$flash = new GeminiProvider(['model' => 'gemini-3.5-flash', 'api_key' => env('GEMINI_API_KEY')]);
+$checker = new LlmLoopChecker($flash);
+$turn = 0;
+foreach ($agent->stream($prompt) as $event) {
+    if ($event instanceof TurnStarted) {
+        $turn++;
+        $v = $checker->turnStarted($turn, $conversationHistory, $originalPrompt);
+        if ($v !== null) {
+            $wireEmitter->emit(LoopDetectedEvent::fromViolation($v));
+            break;  // host 决定策略：停止 / 升级 / 注入重置
+        }
+    }
+}
+```
+
+### 探针
+
+分类器 prompt 是 gemini-cli `LOOP_DETECTION_SYSTEM_PROMPT` 原样照搬 —— 已仔细调优能区分：
+
+- ✅ 批量操作（同工具不同 path）→ 不是循环
+- ✅ 同文件分块编辑（不同 line range）→ 不是循环
+- ✅ 改参重试（不同参数）→ 不是循环
+- ❌ 无净效果的交替循环 → 是循环
+- ❌ 输出相同的语义重复 → 是循环
+- ❌ 停滞推理（不停换说法却不动手）→ 是循环
+
+响应强制为 JSON：`{unproductive_state_analysis, unproductive_state_confidence}`。容错解析能处理裸对象、```json fences```、夹杂 prose 的输出。
+
+### 错误处理
+
+网络 / 解析失败返回 null（视为不确定）；绝不会让 host loop crash。`LoopViolation` 携带：
+
+```php
+$v->type === LoopType::LlmDetected;
+$v->metadata['confidence']        // float 0..1
+$v->metadata['classifier_model']  // 'gemini-3.5-flash' 或你传入的任意
+$v->metadata['turn']              // 探针触发时的轮数
+```
+
+---
+
+## 74. Bash arity 字典 —— `Permissions\BashArity`（v1.0.5）
+
+来自 opencode `packages/opencode/src/permission/arity.ts` 的原样移植。110+ 条覆盖 git/docker/kubectl/npm/pnpm/yarn/aws/gcloud/terraform/vault/openssl/podman/cargo/composer/python/poetry/… —— 一个 coding agent 会遇到的常见 CLI。每条把 prefix 映射到构成命令名的 token 数。flag 永远不算。
+
+### 解析
+
+`BashArity::prefix(['git', 'checkout', 'main'])` 返回 `['git', 'checkout']`，因为 `git` arity 是 2。最长前缀获胜：
+
+```php
+BashArity::prefix(['docker', 'compose', 'up', '-d']);
+// → ['docker', 'compose', 'up']    （"docker compose" arity 3）
+
+BashArity::prefix(['pnpm', 'run', 'dev']);
+// → ['pnpm', 'run', 'dev']         （"pnpm run" arity 3）
+
+BashArity::prefix(['vault', 'kv', 'get', 'secret/api']);
+// → ['vault', 'kv', 'get']
+
+BashArity::prefix(['python', 'script.py']);
+// → ['python', 'script.py']        （表里没有"python script.py" —— 回落到取首 token）
+```
+
+`BashArity::label('docker compose up -d nginx')` 是个 convenience，把结果 token 拼起来。
+
+### 集成
+
+`Permissions\BashCommandClassifier::extractPrefix()` 现在会先查 `BashArity`，再回退到之前的 1-或-2-token 启发式。具体效果：权限规则现在能区分：
+
+- `bash:docker run *` ≠ `bash:docker compose *` ≠ `bash:docker container *`
+- `bash:git push *` ≠ `bash:git stash pop *`
+- `bash:terraform apply` ≠ `bash:terraform workspace select *`
+- `bash:npm install` ≠ `bash:npm run dev` ≠ `bash:npm view *`
+
+查表前会先剥掉 flag（如 `docker -H tcp://… compose up` 仍然解析到 `docker compose up`）。表外的命令走旧 heuristic —— 保证 `python ./script.py` 不会塌缩成 `python`。
+
+### 自定义表
+
+`BashArity::ARITY` 是 public const；host 要扩展可以建自己的 classifier：
+
+```php
+final class HostBashArity {
+    public const ARITY = \SuperAgent\Permissions\BashArity::ARITY + [
+        'wrangler'         => 2,        // wrangler deploy
+        'wrangler secret'  => 3,        // wrangler secret put
+    ];
+}
+```
+
+---
+
+## 75. 结构化压缩模板（v1.0.5）
+
+`Context\Strategies\ConversationCompressor` 原来只有一个默认 prompt —— Claude Code 9 段格式带 `<analysis>` 草稿区。1.0.5 增加了一个 opencode `session/compaction.ts SUMMARY_TEMPLATE` 风格的替代版。按调用选择：
+
+```php
+$result = $compressor->compress($messages, [
+    'summary_prompt' => 'structured',   // sentinel；也接受 'default' 或任意原始 prompt 字符串
+]);
+```
+
+结构化 prompt 强制 7 段 Markdown：
+
+```
+## Goal
+- [单句任务总结]
+
+## Constraints & Preferences
+- [用户约束/偏好/规格，或 "(none)"]
+
+## Progress
+### Done
+- [已完成工作或 "(none)"]
+
+### In Progress
+- [当前工作或 "(none)"]
+
+### Blocked
+- [阻塞项或 "(none)"]
+
+## Key Decisions
+- [决策及原因，或 "(none)"]
+
+## Next Steps
+- [按顺序的下一步行动或 "(none)"]
+
+## Critical Context
+- [重要技术事实/错误/开放问题，或 "(none)"]
+
+## Relevant Files
+- [文件或目录路径：为什么重要，或 "(none)"]
+```
+
+### 为什么用它
+
+- **节省 30–50% summary token** —— 无 `<analysis>` 草稿区
+- **Blocked 项跨多次压缩保留** —— Blocked 子段是强制的、永远存在的，所以阻塞项不会在多次压缩中被淹没
+- **机器可提取** —— 下游消费者可以按 header 拉取具体段落（"只给我 Next Steps"）
+- **稳定的 shape** —— 每次压缩都产出相同顺序的相同段落；适合在 run 之间对比 summary
+
+默认 prompt 仍为 9 段散文。Host 通过 host config 切换；SDK 调用方按调用切换。
+
+---
+
+## 76. 自动 formatter 注册表 —— `Format\`（v1.0.5）
+
+26 个 formatter 来自 opencode `packages/opencode/src/format/formatter.ts` 移植。每个 `FormatterInfo` 带一个 probe 闭包，inspect 项目判断该 formatter 是否适用。
+
+### Registry
+
+`Formatters::forExtension('.php')` 返回所有 `extensions` 列表中包含 `.php` 的 probe。Probe 返回 `[bin, ...args]`（含字面 `$FILE` 占位符），或 `false` 表示不适用：
+
+```php
+$infos = \SuperAgent\Format\Formatters::forExtension('.php');
+foreach ($infos as $info) {
+    $cmd = ($info->probe)(new \SuperAgent\Format\FormatterContext($dir, $worktree));
+    if ($cmd !== false) {
+        // ["/abs/path/vendor/bin/pint", "$FILE"]
+    }
+}
+```
+
+### 内置 formatter
+
+| 语言            | Formatter         | Probe 条件                                                                |
+|-----------------|-------------------|---------------------------------------------------------------------------|
+| PHP             | pint              | `composer.json` 含 `laravel/pint`                                          |
+| JS/TS/CSS/MD/…  | prettier          | `package.json` 含 `prettier`（dev 或 prod 依赖）                            |
+| JS/TS/JSON      | biome             | `biome.json` 或 `biome.jsonc` 存在                                          |
+| Python          | ruff              | `pyproject.toml [tool.ruff]` 或 `ruff.toml` 或 `.ruff.toml` 存在            |
+| Go              | gofmt             | PATH 中有 `gofmt`                                                         |
+| Rust            | rustfmt           | PATH 中有 `rustfmt`                                                       |
+| C/C++           | clang-format      | `.clang-format` 存在（避免意外重写）                                       |
+| OCaml           | ocamlformat       | `.ocamlformat` 存在                                                       |
+| Ruby            | rubocop, standardrb | PATH 中有对应 binary                                                    |
+| Shell           | shfmt             | PATH 中有                                                                  |
+| Terraform       | terraform fmt     | PATH 中有                                                                  |
+| Dart、Zig、Kotlin、Gleam、Mix（Elixir）、R（air）、Haskell（ormolu）、Clojure（cljfmt）、D（dfmt）、Nix（nixfmt）、LaTeX（latexindent）、Erb（htmlbeautifier） | PATH 中有 binary | 各异 |
+
+### 运行
+
+```php
+use SuperAgent\Format\FormatterRunner;
+
+$runner = new FormatterRunner();
+$result = $runner->formatFile('/abs/path/to/file.php', $worktreeRoot);
+
+if ($result->ran()) {
+    foreach ($result->runs as $run) {
+        // FormatterRun{formatter: 'pint', command: [...], output: "...", durationMs: 245, ok: true}
+    }
+}
+```
+
+幂等且非致命：所有适用 formatter 顺序运行；失败收集进 result 但不中止调用。把 `FormatterRunner::formatFile()` 挂到 EditTool / WriteTool / patch applier 的 post-write hook，模型生成的代码就默认是格式化好的。
+
+### 自定义注册
+
+```php
+\SuperAgent\Format\Formatters::register(new FormatterInfo(
+    name: 'house-style',
+    extensions: ['.php'],
+    probe: fn (FormatterContext $c) => ['/usr/local/bin/house-style', '$FILE'],
+));
+```
+
+---
+
+## 77. LSP 客户端 —— `LSP\`（v1.0.5）
+
+真正的 stdio JSON-RPC LSP 客户端。替换了 1.0.5 之前 `Tools\Builtin\LSPTool` 的 `'simulated'` 占位符。
+
+### 组件
+
+| 类                            | 职责                                                                                              |
+|-------------------------------|---------------------------------------------------------------------------------------------------|
+| `LSP\Client`                  | proc_open + Content-Length 帧 + initialize/didOpen/didChange/diagnostic/hover/definition         |
+| `LSP\Manager`                 | 按 worktree 管理生命周期：每个 (server-id, root-dir) 对懒加载一个 Client                              |
+| `LSP\ServerInfo`              | 声明式 server 描述：id + extensions + root-finder + spawn 闭包                                       |
+| `LSP\ServerRegistry`          | 内置 server catalog + 自定义的 register()/unregister()                                              |
+| `LSP\LanguageExtensions`      | 扩展名 → LSP `languageId` 映射（~40 条）                                                            |
+| `Tools\Builtin\LSPTool`       | 面向 agent 的工具：action ∈ {diagnostics, hover, definition, touch}                                |
+
+### 默认 server
+
+| ID                              | 扩展名                                | Probe                              |
+|---------------------------------|---------------------------------------|------------------------------------|
+| `phpactor`                      | .php                                  | `which phpactor`                   |
+| `intelephense`                  | .php                                  | `which intelephense`               |
+| `gopls`                         | .go                                   | `which gopls`                      |
+| `rust-analyzer`                 | .rs                                   | `which rust-analyzer`              |
+| `pyright`                       | .py, .pyi                             | `which pyright-langserver`         |
+| `typescript-language-server`    | .ts, .tsx, .js, .jsx, .mjs, .cjs, …   | `which typescript-language-server` |
+| `clangd`                        | .c, .cpp, .h, .cc, .cxx, .hpp         | `which clangd`                     |
+| `bash-language-server`          | .sh, .bash                            | `which bash-language-server`       |
+| `zls`                           | .zig, .zon                            | `which zls`                        |
+
+多个 server 可处理同扩展（PHP 有 phpactor + intelephense）；Manager 按顺序 probe，用第一个能 spawn 成功的。
+
+### 用法
+
+```php
+use SuperAgent\LSP\Manager;
+
+$mgr = new Manager(worktree: '/abs/project');
+
+// Agent 编辑文件后，推送新内容：
+$mgr->touchFile('/abs/project/src/Foo.php');
+
+// 拉 diagnostics（LSP 3.17+ pull model，回退到 publishDiagnostics cache）：
+$diags = $mgr->diagnostics('/abs/project/src/Foo.php');
+// ['phpactor' => [{severity: 1, message: 'Undefined variable $x', range: {...}}, ...]]
+
+// Hover / 跳转定义：
+$hover = $mgr->hover('/abs/project/src/Foo.php', line: 42, character: 12);
+$defs  = $mgr->definition('/abs/project/src/Foo.php', line: 42, character: 12);
+
+$mgr->shutdownAll();
+```
+
+### 接到 Edit/Write hook
+
+"诊断即反馈"是杀手锏：模型编辑文件后，过一遍 LSP，把任何错误作为下一个 tool result 喂回去。
+
+```php
+$editTool->afterEdit(function (string $path) use ($mgr) {
+    $mgr->touchFile($path);
+    $diags = $mgr->diagnostics($path);
+    $flat = [];
+    foreach ($diags as $serverId => $items) {
+        foreach ($items as $d) {
+            $flat[] = sprintf('[%s line %d] %s', $serverId, $d['range']['start']['line'] + 1, $d['message']);
+        }
+    }
+    return $flat;   // 注入到下一个 tool_result，模型能看到自己引入的错误
+});
+```
+
+### 自定义 server 注册
+
+```php
+\SuperAgent\LSP\ServerRegistry::register(new ServerInfo(
+    id: 'kotlin-language-server',
+    extensions: ['.kt', '.kts'],
+    rootFinder: fn ($f, $w) => $w,
+    spawn: fn ($root) => ['/opt/kotlin-ls/bin/kotlin-language-server'],
+));
+```
+
+---
+
+## 78. ACP server —— `ACP\`（v1.0.5）
+
+JSON-RPC over stdio 的 Agent Client Protocol v1 实现。说 ACP 的编辑器 —— Zed、Neovim Codecompanion、未来的 VS Code 扩展 —— 都能直接接入 SuperAgent。协议文档：https://agentclientprotocol.com/。
+
+### Wire 形态
+
+stdin / stdout 上每行一个换行符分隔的 JSON-RPC 2.0 消息。**不用 Content-Length 帧** —— 这是与 LSP 的主要区别。方法：
+
+| 方法                   | 方向            | 备注                                                  |
+|------------------------|-----------------|-------------------------------------------------------|
+| `initialize`           | client → agent  | 能力协商                                              |
+| `authenticate`         | client → agent  | 可选 auth 流程                                        |
+| `session/new`          | client → agent  | 创建 session，返回 sessionId                          |
+| `session/load`         | client → agent  | 重新 attach 到之前持久化的 session                    |
+| `session/prompt`       | client → agent  | 跑用户 prompt；agent 通过 `session/update` 流式输出   |
+| `session/cancel`       | client → agent  | Notification（无 id 无响应）                          |
+| `session/update`       | agent → client  | 流式片段                                              |
+
+### 组件
+
+| 类                     | 职责                                                                       |
+|------------------------|----------------------------------------------------------------------------|
+| `ACP\Protocol`         | 常量（方法名、错误码）+ envelope helper                                     |
+| `ACP\Server`           | 传输层：读 stdin 行，派发到 Handler，写响应                                  |
+| `ACP\Handler`          | 可插拔后端 interface —— host 实现                                            |
+| `ACP\DefaultHandler`   | 参考实现，接受一个 prompt 闭包                                              |
+| `ACP\SessionRegistry`  | 内存 map：sessionId → SessionEntry                                          |
+| `ACP\SessionEntry`     | 每 session 状态（cwd、mcpServers、自由 meta bag）                            |
+| `ACP\AcpException`     | 抛 JSON-RPC 错误码；冒泡到 client 变成标准错误                              |
+
+### 最小 server
+
+```php
+use SuperAgent\ACP\{DefaultHandler, Server, SessionEntry};
+
+$handler = new DefaultHandler(
+    agentName: 'superagent',
+    agentVersion: '1.0.5',
+    promptFn: function (SessionEntry $session, array $params, Server $server): array {
+        // 为 $session->cwd 构建/复用 Agent，跑 $params['prompt']
+        $agent = new \SuperAgent\Agent([
+            'cwd' => $session->cwd,
+            'provider' => 'anthropic',
+        ]);
+        foreach ($agent->stream($params['prompt']) as $delta) {
+            $server->notify('session/update', [
+                'sessionId' => $session->id,
+                'kind' => 'message_delta',
+                'text' => (string) $delta,
+            ]);
+        }
+        return ['stopReason' => 'end_turn'];
+    },
+);
+
+(new Server($handler))->serve();    // 阻塞到 stdin EOF
+```
+
+### 流式片段
+
+prompt 闭包内部，对每个流式 delta 调用 `$server->notify('session/update', $payload)`。Server 安全地把 notification 和 response 写交错（单线程，stdout FIFO 顺序）。
+
+### 取消
+
+编辑器发送 `session/cancel`（无 id → notification，无响应）。`DefaultHandler` 记录该 cancel；下一个 `session/prompt` 会短路返回 `stopReason: 'cancelled'`。要做中途取消，prompt 闭包可以 poll `$handler->wasCancelled($session->id)`。
+
+### 错误码
+
+`Protocol::ERR_PARSE` / `ERR_INVALID_REQUEST` / `ERR_METHOD_NOT_FOUND` / `ERR_INVALID_PARAMS` / `ERR_INTERNAL` 是标准 JSON-RPC 码。ACP 增加 `ERR_AUTH_REQUIRED = -32001` 和 `ERR_SESSION_NOT_FOUND = -32002`。`AcpException` 把错误码塞进响应 envelope。
+
+### 编辑器配置
+
+Zed（`settings.json`）：
+
+```jsonc
+{
+  "assistant": {
+    "agents": {
+      "superagent": {
+        "command": "superagent",
+        "args": ["acp"]
+      }
+    }
+  }
+}
+```
+
+---
+
+## 79. 外部 Skill 发现 —— `SkillManager::discoverExternalSkills()`（v1.0.5）
+
+来自 opencode `packages/opencode/src/skill/index.ts` 移植。从起始目录向上一路走到 worktree 边界，加载知名外部位置下的所有 `SKILL.md`。
+
+### 扫描路径
+
+每个 walk level（cwd → 父目录 → … → worktree root）都扫：
+
+```
+.claude/skills/<name>/SKILL.md
+.agents/skills/<name>/SKILL.md
+```
+
+仅在 worktree root 扫：
+
+```
+skills/<name>/SKILL.md
+skill/<name>/SKILL.md
+```
+
+文件必须严格命名为 `SKILL.md` —— 比"任意 .md 文件"更明确的信号，loader 可以信任 frontmatter 就是 skill manifest（避免把任意 README 当成 skill）。
+
+### SKILL.md 格式
+
+```markdown
+---
+name: my-skill
+description: 一句话描述何时用这个 skill
+---
+
+# Skill body
+
+Skill 激活时被注入 agent context 的 Markdown 正文。
+```
+
+`name` 必填；缺失时如果 `throw: false` 则静默跳过文件。其他 frontmatter key（`tags`、`when_to_use`，…）会传递到 `MarkdownSkill`。
+
+### 用法
+
+```php
+$mgr = new \SuperAgent\Skills\SkillManager(autoLoadDisk: false);
+
+// 从 cwd 走到项目 root
+$loaded = $mgr->discoverExternalSkills();
+// → ['/abs/.claude/skills/refactor/SKILL.md', '/abs/.agents/skills/explore/SKILL.md', ...]
+
+// 自定义起止目录：
+$loaded = $mgr->discoverExternalSkills(
+    start: '/abs/project/packages/app/src',
+    stop:  '/abs/project',
+);
+```
+
+Walk 在 worktree 边界停止 —— monorepo 父目录不会意外注入 skill 到子项目。最多扫 30 级（防御上限；对任何实际项目都绰绰有余）。
