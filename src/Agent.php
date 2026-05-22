@@ -520,6 +520,72 @@ class Agent
     }
 
     /**
+     * Pi-borrowed: enqueue a mid-turn correction without aborting the
+     * current turn. Differs from {@see prompt()} (which starts a new turn)
+     * and {@see followUp()} (which queues for after current turn ends).
+     *
+     * The steer is recorded as an in-memory queue on the agent; the
+     * agent engine should drain it at its next safe checkpoint (between
+     * tool calls or stream messages) and prepend the steer's content as
+     * a synthetic user message before the next LLM call.
+     *
+     * Currently this is an enqueue-only API; engines that haven't yet
+     * adopted the drain protocol will treat the steered message as a
+     * normal next-turn prompt. See pi.dev/docs/latest/rpc §steer.
+     */
+    public function steer(string $message): void
+    {
+        if (!isset($this->options['_steer_queue']) || !is_array($this->options['_steer_queue'])) {
+            $this->options['_steer_queue'] = [];
+        }
+        $this->options['_steer_queue'][] = [
+            'message' => $message,
+            'at' => microtime(true),
+        ];
+    }
+
+    /**
+     * Pi-borrowed: enqueue a prompt to be sent after the current turn
+     * completes. Equivalent to the multi-message "send while still
+     * generating" pattern in pi's RPC.
+     */
+    public function followUp(string $message): void
+    {
+        if (!isset($this->options['_followup_queue']) || !is_array($this->options['_followup_queue'])) {
+            $this->options['_followup_queue'] = [];
+        }
+        $this->options['_followup_queue'][] = [
+            'message' => $message,
+            'at' => microtime(true),
+        ];
+    }
+
+    /**
+     * Drain and return the steer queue (called by the engine at safe
+     * checkpoints). Returns the entries in FIFO order; empties the queue.
+     *
+     * @return list<array{message:string,at:float}>
+     */
+    public function drainSteer(): array
+    {
+        $queue = $this->options['_steer_queue'] ?? [];
+        $this->options['_steer_queue'] = [];
+        return is_array($queue) ? array_values($queue) : [];
+    }
+
+    /**
+     * Drain and return the follow-up queue.
+     *
+     * @return list<array{message:string,at:float}>
+     */
+    public function drainFollowUp(): array
+    {
+        $queue = $this->options['_followup_queue'] ?? [];
+        $this->options['_followup_queue'] = [];
+        return is_array($queue) ? array_values($queue) : [];
+    }
+
+    /**
      * Run the agent with a prompt. Executes the full agentic loop.
      * @deprecated Use run() instead for auto-mode support
      */
@@ -530,6 +596,7 @@ class Agent
 
         $lastMessage = null;
         $allResponses = [];
+        $totalCost = 0.0;
 
         foreach ($engine->run($prompt) as $assistantMessage) {
             $lastMessage = $assistantMessage;
@@ -537,12 +604,39 @@ class Agent
         }
 
         $this->messages = $engine->getMessages();
+        $totalCost += $engine->getTotalCostUsd();
+
+        // Pi-borrowed follow-up drain: prompts queued via Agent::followUp()
+        // while the main turn was running get processed in FIFO order
+        // before returning. Each follow-up reuses the same Agent so
+        // message history accumulates naturally — matches pi's
+        // "backpressure-aware multi-message send" semantics.
+        // See pi.dev/docs/latest/rpc §follow_up.
+        $maxFollowUps = (int) ($this->options['_max_followups_per_call'] ?? 8);
+        $processed = 0;
+        while ($processed < $maxFollowUps && ($followUps = $this->drainFollowUp()) !== []) {
+            foreach ($followUps as $fu) {
+                if ($processed >= $maxFollowUps) break;
+                $msg = (string) ($fu['message'] ?? '');
+                if ($msg === '') { continue; }
+
+                $followEngine = $this->createEngine($streamingHandler);
+                $followEngine->setMessages($this->messages);
+                foreach ($followEngine->run($msg) as $assistantMessage) {
+                    $lastMessage = $assistantMessage;
+                    $allResponses[] = $assistantMessage;
+                }
+                $this->messages = $followEngine->getMessages();
+                $totalCost += $followEngine->getTotalCostUsd();
+                $processed++;
+            }
+        }
 
         return new AgentResult(
             message: $lastMessage,
             allResponses: $allResponses,
             messages: $this->messages,
-            totalCostUsd: $engine->getTotalCostUsd(),
+            totalCostUsd: $totalCost,
             idempotencyKey: isset($this->options['idempotency_key']) && is_string($this->options['idempotency_key'])
                 ? substr($this->options['idempotency_key'], 0, 80)
                 : null,
@@ -583,7 +677,7 @@ class Agent
 
     protected function createEngine(?StreamingHandler $overrideHandler = null): QueryEngine
     {
-        return new QueryEngine(
+        $engine = new QueryEngine(
             provider: $this->provider,
             tools: $this->tools,
             systemPrompt: $this->systemPrompt,
@@ -594,6 +688,14 @@ class Agent
             deniedTools: $this->deniedTools,
             maxBudgetUsd: $this->maxBudgetUsd,
         );
+
+        // Pi-borrowed: let the engine pull mid-turn corrections from this
+        // Agent instance's steer queue. The drainer is invoked between
+        // turns so steer() calls made on the Agent (typically from a host
+        // RPC handler) actually affect the in-flight prompt.
+        $engine->setSteerDrainer(fn() => $this->drainSteer());
+
+        return $engine;
     }
 
     protected function resolveProvider(array $config): LLMProvider

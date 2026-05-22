@@ -131,4 +131,68 @@ final class DefaultHandler implements Handler
     {
         return isset($this->cancelled[$sessionId]);
     }
+
+    public function steer(array $params): void
+    {
+        $sessionId = (string) ($params['sessionId'] ?? '');
+        if ($sessionId === '') return;
+        $entry = $this->sessions->get($sessionId);
+        if ($entry === null) return;
+
+        $prompt = $params['prompt'] ?? [];
+        if (!isset($entry->meta['steerQueue']) || !is_array($entry->meta['steerQueue'])) {
+            $entry->meta['steerQueue'] = [];
+        }
+        $entry->meta['steerQueue'][] = [
+            'prompt' => $prompt,
+            'at' => microtime(true),
+        ];
+    }
+
+    public function followUp(array $params): void
+    {
+        $sessionId = (string) ($params['sessionId'] ?? '');
+        if ($sessionId === '') return;
+        $entry = $this->sessions->get($sessionId);
+        if ($entry === null) return;
+
+        $prompt = $params['prompt'] ?? [];
+        if (!isset($entry->meta['followUpQueue']) || !is_array($entry->meta['followUpQueue'])) {
+            $entry->meta['followUpQueue'] = [];
+        }
+        $entry->meta['followUpQueue'][] = [
+            'prompt' => $prompt,
+            'at' => microtime(true),
+        ];
+    }
+
+    /**
+     * Pop the steer queue for a session (host calls this inside promptFn at
+     * safe checkpoints). Empties the queue and returns the entries in FIFO.
+     *
+     * @return list<array{prompt:mixed,at:float}>
+     */
+    public function drainSteer(string $sessionId): array
+    {
+        $entry = $this->sessions->get($sessionId);
+        if ($entry === null) return [];
+        $queue = $entry->meta['steerQueue'] ?? [];
+        $entry->meta['steerQueue'] = [];
+        return is_array($queue) ? array_values($queue) : [];
+    }
+
+    /**
+     * Pop the follow-up queue (called by the host at the start of the next
+     * prompt cycle, or whenever it wants to consume backlogged user input).
+     *
+     * @return list<array{prompt:mixed,at:float}>
+     */
+    public function drainFollowUp(string $sessionId): array
+    {
+        $entry = $this->sessions->get($sessionId);
+        if ($entry === null) return [];
+        $queue = $entry->meta['followUpQueue'] ?? [];
+        $entry->meta['followUpQueue'] = [];
+        return is_array($queue) ? array_values($queue) : [];
+    }
 }

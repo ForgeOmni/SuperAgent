@@ -65,4 +65,32 @@ interface Handler
      * @return array<string, mixed> AuthenticateResponse.
      */
     public function authenticate(array $params): array;
+
+    /**
+     * Pi-borrowed: inject a mid-turn correction without aborting the current
+     * turn. The currently-running `prompt()` should observe the steer via
+     * its session entry (e.g. via `Server::peekSteer($sessionId)`) at its
+     * next safe checkpoint and adjust its plan accordingly.
+     *
+     * Differences vs. `cancel`: cancel terminates; steer continues but with
+     * a redirected goal. Differences vs. `prompt`: prompt starts a new turn;
+     * steer modifies the in-flight turn.
+     *
+     * Default impl in {@see DefaultHandler}: append to the session's
+     * `steerQueue`; the user's promptFn closure is responsible for draining
+     * it at each iteration.
+     *
+     * @param array<string, mixed> $params {sessionId, prompt[]}
+     */
+    public function steer(array $params): void;
+
+    /**
+     * Pi-borrowed: queue a prompt for after the current turn completes.
+     * Equivalent to a backpressure-aware multi-message send. The
+     * follow-ups should be drained by the host in FIFO order at the next
+     * `prompt()` call boundary.
+     *
+     * @param array<string, mixed> $params {sessionId, prompt[]}
+     */
+    public function followUp(array $params): void;
 }

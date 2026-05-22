@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-1.0.5-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-1.0.6-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -896,6 +896,165 @@ foreach ($turns as $i => $turn) {
 | `LSP\` 命名空间                     | 真正的 stdio JSON-RPC LSP 客户端（之前是 `'simulated'` 占位符）。9 个 server：phpactor/intelephense、gopls、rust-analyzer、pyright、typescript-language-server、clangd、bash-language-server、zls。`LSPTool` 暴露 `diagnostics`/`hover`/`definition`/`touch`。 |
 | `ACP\` 命名空间                     | Agent Client Protocol v1 server。说 ACP 的编辑器（Zed、Neovim Codecompanion，…）可直接接入 SuperAgent。`(new Server($handler))->serve()` 阻塞在 stdio 上。                                                                                            |
 | `Skills\SkillManager::discoverExternalSkills()` | 从 cwd 向上一直到 worktree root，每一级都扫描 `.claude/skills/**/SKILL.md` 和 `.agents/skills/**/SKILL.md`；到 root 还扫 `skills/**/SKILL.md` / `skill/**/SKILL.md`。文件必须严格命名为 `SKILL.md`。            |
+
+### Chrome Trace Event 时间线 *(v1.0.6)*
+
+每个长跑编排（debate、red-team、错误恢复、cost-autopilot、并行 agent）现在都向一个无锁 ring buffer 推 `TraceEvent`。触发点（出错、snapshot 工具调用、协议结束）将 ring 落盘到 `.json` 文件，可在 `chrome://tracing` 或 `ui.perfetto.dev` 中打开。
+
+```php
+use SuperAgent\Tracing\TraceCollector;
+
+$end = TraceCollector::getInstance()->span('llm.dispatch', 'llm', 'session:abc');
+$result = $provider->call(...);
+$end(['model' => $result->model, 'cost_usd' => $result->cost]);
+
+// 在触发点 —— 错误、debate 结束、agent 自我快照等：
+$path = TraceCollector::getInstance()->dump(trigger: 'manual', reason: 'inspect after demo');
+// → /tmp/superagent-traces/trace_superagent_{session}_{ts}_manual.json
+```
+
+已接入的发射点：`Debate\DebateOrchestrator`（`debate.start` / `debate.rounds` / `debate.round_N` / `debate.judge` / `debate.total` 加上 `redteam.*` / `ensemble.*`）、`ErrorRecovery\ErrorRecoveryManager`（不可恢复 / 重试耗尽时自动 dump 最近 N 条事件）、`CostAutopilot\CostAutopilot`（`budget.spend` counter + `budget.tier_change` instant）、`Console\Output\ParallelAgentDisplay::exportPerfettoJson()`（整个 team 的一次性快照）。环境变量：`SUPERAGENT_TRACE_ENABLED=false` 关闭、`SUPERAGENT_TRACE_PATH=…` 改路径。
+
+agent 自己也可以调用 `snapshot('about to git reset', tag: 'pre_destructive')`（新 `SnapshotTool`）—— 纯观测，`isReadOnly === true`。
+
+### Pi 对齐的 JSON Event Stream *(v1.0.6)*
+
+借鉴 [pi 的 JSON Event Stream Mode](https://pi.dev/docs/latest/json) 的 18 类规范 session 事件，SuperAgent 的 session 可被任意 pi 兼容查看器回放。
+
+```php
+use SuperAgent\Tracing\PiEventStream;
+use SuperAgent\Tracing\PiEventStreamWriter;
+
+PiEventStream::subscribe(new PiEventStreamWriter('/path/to/session.events.jsonl'));
+
+PiEventStream::emit(PiEventStream::AGENT_START, ['sessionId' => 's-1']);
+PiEventStream::emit(PiEventStream::TURN_START, ['turnId' => 't-1', 'sessionId' => 's-1', 'model' => 'claude-opus-4-7']);
+// ...
+PiEventStream::emit(PiEventStream::AGENT_END, ['sessionId' => 's-1']);
+```
+
+事件类型：`session` / `agent_start` / `agent_end` / `turn_start` / `turn_end` / `message_start` / `message_update` / `message_end` / `tool_execution_start` / `tool_execution_update` / `tool_execution_end` / `queue_update` / `compaction_start` / `compaction_end` / `auto_retry_start` / `auto_retry_end` / `model_change` / `thinking_level_change`。SuperAgent 旧事件名通过 `PiEventStream::translateLegacy()` 反查到新名字。
+
+### 回合内 steer + follow-up 队列 *(v1.0.6)*
+
+借鉴 pi 的回合内纠偏（不打断当前 turn）+ 当前 turn 结束后排队的 follow-up。运维（或宿主 RPC handler）可以在不丢工具状态的情况下纠正一个正在跑的 agent。
+
+```php
+// agent 还在 mid-turn 的时候，从另一个事件处理器：
+$agent->steer('停一下，bug 在 src/Auth/Session.php，不在 src/Auth/Login.php');
+// QueryEngine 下一次迭代会 drain 队列，把 steer 作为一个合成 user message 前置进去。
+
+// 或者排个 follow-up，等当前 turn 跑完后再发：
+$agent->followUp('跑完之后再帮我跑 tests/Unit/Auth/ 下的测试');
+```
+
+ACP 侧同样支持：说协议的编辑器发送 `session/steer` / `session/follow_up` JSON-RPC（常量 `Protocol::METHOD_SESSION_STEER` / `METHOD_SESSION_FOLLOW_UP`）。`Handler` 接口新增 `steer($params)` / `followUp($params)`；`DefaultHandler` 提供 `drainSteer($sessionId)` / `drainFollowUp($sessionId)`，host 在 `promptFn` 的安全 checkpoint 消费。
+
+### RTK 结构化输出压缩 *(v1.0.6)*
+
+`git diff` / `grep -rn` / `find` / `ls -R` / `tree` 的输出在 coding session 里占很大 token —— 一般占每 turn 输入预算的 30-50 %，其中大量是装饰性噪音。`Tools\Compression\RtkPipeline`（借鉴 9Router + claude-octopus）以"对模型无损"的方式压缩它们：路径、行号、diff hunk 原样保留；装饰性噪音被丢弃。已接入 `QueryEngine` —— 每个非错误工具结果都过一遍。
+
+| 工具 | 典型节省 | 保留内容 |
+|------|----------|----------|
+| `git diff` | 40-65 % | `diff --git`、`--- a/`、`+++ b/`、`@@` hunk、所有 `+`/`-` 行、文件模式 marker |
+| `grep` / `rg` | 30-50 % | `file:line:match` 规范命中；重复路径压成缩进 |
+| `find` | 25-40 % | 叶子文件名；折叠重复目录前缀 |
+| `ls -R`、`tree` | 20-35 % | 结构符 (`├─` / `└─` / `│`)；丢字节 / size 注解 |
+
+按调用关闭：`options: ['disable_rtk_compression' => true]`。统计：`$pipeline->stats()`（`bytes_in` / `bytes_out` / `saved_bytes` / `ratio`）。
+
+### 跨厂商工具 schema 可移植性 *(v1.0.6)*
+
+Anthropic、OpenAI、Gemini 各自接受 JSON Schema 的子集略有不同（Gemini 拒绝 `$ref` / `$defs` / 顶层 `oneOf`；OpenAI 严格模式比非严格更严，等等）。`Tools\Schema\Schema` 让你只声明一次（带 intent 标记）；`ProviderNormalizer` 按厂商改写。
+
+```php
+use SuperAgent\Tools\Schema\Schema;
+use SuperAgent\Tools\Schema\ProviderNormalizer;
+
+$inputSchema = Schema::object([
+    'mode' => Schema::stringEnum(['read', 'write', 'delete']),
+    'path' => Schema::string('绝对路径'),
+], required: ['mode', 'path']);
+
+// 在 tool 的 inputSchema() 里，发送前按 provider 改写：
+$anthropic = ProviderNormalizer::forAnthropic($inputSchema);
+$openai    = ProviderNormalizer::forOpenAI($inputSchema);
+$gemini    = ProviderNormalizer::forGemini($inputSchema);
+// → Gemini 版本：`oneOf` 被压成 `enum`、`$ref`/`$defs` 被剥掉、不支持的 `format` 被删。
+```
+
+跨厂商合规由 `tests/Tools/Schema/CrossProviderComplianceTest.php` 验证 —— 每种带标记的形状都过三种 normaliser，并断言每个输出都通过对应厂商的接受规则。
+
+### Session 分支 —— pi `/tree` fork *(v1.0.6)*
+
+pi 把 session 模型化为 append-only 树而不是单线。SuperAgent 现在镜像 `/tree`：
+
+```php
+use SuperAgent\Session\SessionManager;
+
+$newBranchId = $sessionManager->fork(
+    sourceSessionId: 's-current',
+    forkAtIndex: 12,
+    summaryFn: function(array $abandoned) use ($llm) {
+        return $llm->summarize($abandoned);   // 一行摘要存在源 session 上
+    },
+    displayName: 'try-event-sourcing-instead',
+);
+```
+
+`Conversation\BranchManager` 提供纯树代数（无 I/O、无 LLM）—— `leaves()`、`ancestry($id)`、`findCommonAncestor($a, $b)`、`collectBranch($leaf, $ancestor)`、`makeBranchSummaryEntry()`。`Conversation\Importers\PiImporter` 把已有的 pi session（`~/.pi/agent/sessions/`）回放到 SuperAgent 的 wire format。
+
+### Squad 共识门 —— N-of-M 并行投票 *(v1.0.6)*
+
+现有的 `reviewer_loop` 是串行单否决门（一个 reviewer 同意 → 通过）。`Squad\ConsensusGate`（借鉴 claude-octopus）是并行 N-of-M 门：M 个同行并行投票，≥N 同意才放行。
+
+```yaml
+- kind: consensus_gate
+  name: ship-decision
+  depends_on: [synthesize]
+  params:
+    n: 3
+    m: 4
+    voters:
+      - role: qa-bach
+      - role: security-schneier
+      - role: cto-vogels
+      - role: ceo-bezos
+  prompt: |
+    审核改动，用一行回答：
+    VERDICT: APPROVE | REJECT | ABSTAIN
+    后接一段理由。
+```
+
+Tally 返回 `{verdict, passed, counts, per_voter}`；下游步骤按 `passed` 分支。
+
+### Qwen 3.7 Max + Anthropic 协议直插 *(v1.0.6)*
+
+Qwen 3.7 Max（2026-05-21 发布）原生支持 **Anthropic API 协议** —— `/v1/messages` 在 wire 上与 Anthropic 字节兼容，所以 Claude Code 形态的客户端可以直接指到 DashScope，把 Qwen 当 Claude 来用。
+
+```php
+// Anthropic 形态请求直插 Qwen：
+$agent = new Agent([
+    'provider' => 'qwen-anthropic',
+    'api_key'  => env('DASHSCOPE_API_KEY'),
+    'model'    => 'qwen3.7-max',          // 1M ctx、$2.50 / $7.50 每 1M token
+]);
+
+// 或者继续走 OpenAI-compat 路径，但用新的默认模型：
+$agent = new Agent(['provider' => 'qwen']);   // → 默认 qwen3.7-max
+```
+
+> **TODO：**DashScope 的 Anthropic 协议端点 URL 英文文档暂未公布；默认 `dashscope.aliyuncs.com/anthropic-mode/v1` 是基于现有 OpenAI-compat 形态的合理猜测。请在阿里官方公布前用 `base_url` 覆盖。
+
+### Recipe 食谱本 *(v1.0.6)*
+
+针对高层子系统的、可复制粘贴运行的小食谱在 [`docs/cookbook/`](docs/cookbook/) 下：
+
+- [`01-debate-protocol.md`](docs/cookbook/01-debate-protocol.md) — proposer / critic / judge 结构化辩论
+- [`02-redteam-attack.md`](docs/cookbook/02-redteam-attack.md) — builder / attacker / reviewer 对抗模式
+- [`03-cost-autopilot.md`](docs/cookbook/03-cost-autopilot.md) — 预算驱动的模型分级（Opus → Sonnet → Haiku 级联）
+- [`04-cost-prediction.md`](docs/cookbook/04-cost-prediction.md) — KNN 前瞻式花费预测
+- [`05-adaptive-feedback.md`](docs/cookbook/05-adaptive-feedback.md) — 纠正被提升为自动应用的模式
 
 ### 幂等性
 

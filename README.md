@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.5-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.0.6-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Docs**: [Installation](INSTALL.md) · [安装](INSTALL_CN.md) · [Installation FR](INSTALL_FR.md) · [Advanced usage](docs/ADVANCED_USAGE.md) · [API docs](docs/)
@@ -930,6 +930,165 @@ Each fills a gap relative to a production coding agent; every piece is opt-in an
 | `LSP\` namespace                    | Real stdio JSON-RPC LSP client (was a `'simulated'` stub). 9 servers: phpactor/intelephense, gopls, rust-analyzer, pyright, typescript-language-server, clangd, bash-language-server, zls. `LSPTool` exposes `diagnostics`/`hover`/`definition`/`touch`. |
 | `ACP\` namespace                    | Agent Client Protocol v1 server. Editors that speak ACP (Zed, Neovim with Codecompanion, …) plug into SuperAgent directly. `(new Server($handler))->serve()` blocks on stdio.                                                  |
 | `Skills\SkillManager::discoverExternalSkills()` | Walks upward from cwd to worktree root loading `.claude/skills/**/SKILL.md` and `.agents/skills/**/SKILL.md` at every level; at root, also `skills/**/SKILL.md` / `skill/**/SKILL.md`. Files must literally be named `SKILL.md`. |
+
+### Chrome Trace Event timeline *(v1.0.6)*
+
+Every long-running orchestration (debate, red-team, error-recovery, cost-autopilot, parallel agents) now writes a lock-free ring buffer of `TraceEvent` records. Trigger sites (errors, snapshot tool calls, completed protocols) flush to a `.json` file you open in `chrome://tracing` or `ui.perfetto.dev`.
+
+```php
+use SuperAgent\Tracing\TraceCollector;
+
+$end = TraceCollector::getInstance()->span('llm.dispatch', 'llm', 'session:abc');
+$result = $provider->call(...);
+$end(['model' => $result->model, 'cost_usd' => $result->cost]);
+
+// At a trigger point — error, end-of-debate, agent self-snapshot, etc.
+$path = TraceCollector::getInstance()->dump(trigger: 'manual', reason: 'inspect after demo');
+// → /tmp/superagent-traces/trace_superagent_{session}_{ts}_manual.json
+```
+
+Wired-up emitters: `Debate\DebateOrchestrator` (`debate.start` / `debate.rounds` / `debate.round_N` / `debate.judge` / `debate.total` plus `redteam.*` / `ensemble.*`), `ErrorRecovery\ErrorRecoveryManager` (auto-dumps the last N events on unrecoverable / retries-exhausted), `CostAutopilot\CostAutopilot` (`budget.spend` counter + `budget.tier_change` instants), `Console\Output\ParallelAgentDisplay::exportPerfettoJson()` (whole-team snapshot). Env: `SUPERAGENT_TRACE_ENABLED=false` to disable, `SUPERAGENT_TRACE_PATH=…` to override.
+
+The agent itself can call `snapshot('about to git reset', tag: 'pre_destructive')` (new `SnapshotTool`) when something feels off — pure observability, `isReadOnly === true`.
+
+### Pi-aligned JSON Event Stream *(v1.0.6)*
+
+A canonical 18-type session-event taxonomy borrowed from [pi's JSON Event Stream Mode](https://pi.dev/docs/latest/json) so SuperAgent sessions can be replayed by any pi-compatible viewer.
+
+```php
+use SuperAgent\Tracing\PiEventStream;
+use SuperAgent\Tracing\PiEventStreamWriter;
+
+PiEventStream::subscribe(new PiEventStreamWriter('/path/to/session.events.jsonl'));
+
+PiEventStream::emit(PiEventStream::AGENT_START, ['sessionId' => 's-1']);
+PiEventStream::emit(PiEventStream::TURN_START, ['turnId' => 't-1', 'sessionId' => 's-1', 'model' => 'claude-opus-4-7']);
+// ...
+PiEventStream::emit(PiEventStream::AGENT_END, ['sessionId' => 's-1']);
+```
+
+Event types: `session` / `agent_start` / `agent_end` / `turn_start` / `turn_end` / `message_start` / `message_update` / `message_end` / `tool_execution_start` / `tool_execution_update` / `tool_execution_end` / `queue_update` / `compaction_start` / `compaction_end` / `auto_retry_start` / `auto_retry_end` / `model_change` / `thinking_level_change`. Legacy SuperAgent event names round-trip via `PiEventStream::translateLegacy()`.
+
+### Mid-turn steering + follow-up queue *(v1.0.6)*
+
+Pi-borrowed mid-turn correction without aborting + post-turn follow-up queueing. An operator (or host RPC handler) can nudge a running agent without losing tool state.
+
+```php
+// While agent is mid-turn, from a separate event handler:
+$agent->steer('Stop, the bug is in src/Auth/Session.php, not src/Auth/Login.php');
+// The next QueryEngine iteration drains the queue and prepends the steer as a synthetic user message.
+
+// Or queue a follow-up that fires AFTER the current turn ends:
+$agent->followUp('Once you finish, also run the tests in tests/Unit/Auth/');
+```
+
+Same surface on ACP: editors that speak the protocol send `session/steer` / `session/follow_up` JSON-RPC methods (constants `Protocol::METHOD_SESSION_STEER` / `METHOD_SESSION_FOLLOW_UP`). `Handler` contract gains `steer($params)` / `followUp($params)`; `DefaultHandler` ships drain helpers (`drainSteer($sessionId)` / `drainFollowUp($sessionId)`) for the host's `promptFn` to consume at safe checkpoints.
+
+### RTK structured-output compression *(v1.0.6)*
+
+`git diff` / `grep -rn` / `find` / `ls -R` / `tree` outputs dominate token usage in coding sessions — typically 30-50 % of input budget per turn, much of it cosmetic. `Tools\Compression\RtkPipeline` (borrowed from 9Router + claude-octopus) auto-compresses these in a lossy-safe way: paths, line numbers, diff hunks are preserved verbatim; cosmetic noise is dropped. Wired into `QueryEngine` — every non-error tool result goes through it.
+
+| Tool | Typical savings | What it preserves |
+|------|----------------|-------------------|
+| `git diff` | 40-65 % | `diff --git`, `--- a/`, `+++ b/`, `@@` hunks, every `+`/`-` line, mode markers |
+| `grep` / `rg` | 30-50 % | `file:line:match` canonical hits; compacts repeated paths to indent |
+| `find` | 25-40 % | Leaf filenames; collapses repeated directory prefixes |
+| `ls -R`, `tree` | 20-35 % | Structure markers (`├─` / `└─` / `│`); drops byte/size annotations |
+
+Opt out per-call via `options: ['disable_rtk_compression' => true]`. Stats available via `$pipeline->stats()` (`bytes_in` / `bytes_out` / `saved_bytes` / `ratio`).
+
+### Cross-provider tool-schema portability *(v1.0.6)*
+
+Anthropic, OpenAI, Gemini all accept slightly different subsets of JSON Schema (Gemini rejects `$ref` / `$defs` / top-level `oneOf`; OpenAI strict mode is stricter than non-strict; etc.). `Tools\Schema\Schema` lets you declare a schema once carrying intent markers; `ProviderNormalizer` rewrites it per provider.
+
+```php
+use SuperAgent\Tools\Schema\Schema;
+use SuperAgent\Tools\Schema\ProviderNormalizer;
+
+$inputSchema = Schema::object([
+    'mode' => Schema::stringEnum(['read', 'write', 'delete']),
+    'path' => Schema::string('Absolute path'),
+], required: ['mode', 'path']);
+
+// In your tool's inputSchema(), rewrite per provider before sending:
+$anthropic = ProviderNormalizer::forAnthropic($inputSchema);
+$openai    = ProviderNormalizer::forOpenAI($inputSchema);
+$gemini    = ProviderNormalizer::forGemini($inputSchema);
+// → Gemini variant has `oneOf` flattened to `enum`, `$ref`/`$defs` removed, unsupported `format` stripped.
+```
+
+Cross-provider compliance is verified by `tests/Tools/Schema/CrossProviderComplianceTest.php` — round-trips every tagged shape through all three normalisers and asserts each output passes the target provider's acceptance rules.
+
+### Session branching — pi `/tree` fork *(v1.0.6)*
+
+Pi models a session as an append-only tree, not a line. SuperAgent now mirrors `/tree`:
+
+```php
+use SuperAgent\Session\SessionManager;
+
+$newBranchId = $sessionManager->fork(
+    sourceSessionId: 's-current',
+    forkAtIndex: 12,
+    summaryFn: function(array $abandoned) use ($llm) {
+        return $llm->summarize($abandoned);   // one-line summary stored on the source
+    },
+    displayName: 'try-event-sourcing-instead',
+);
+```
+
+`Conversation\BranchManager` provides the pure tree algebra (no I/O, no LLM) — `leaves()`, `ancestry($id)`, `findCommonAncestor($a, $b)`, `collectBranch($leaf, $ancestor)`, `makeBranchSummaryEntry()`. `Conversation\Importers\PiImporter` replays existing pi sessions (`~/.pi/agent/sessions/`) into SuperAgent's wire format.
+
+### Squad consensus gates — N-of-M parallel voting *(v1.0.6)*
+
+The existing `reviewer_loop` is a serial, single-veto gate (one reviewer agrees → pass). `Squad\ConsensusGate` (borrowed from claude-octopus) is a parallel N-of-M gate: M peers vote in parallel, ≥N must approve.
+
+```yaml
+- kind: consensus_gate
+  name: ship-decision
+  depends_on: [synthesize]
+  params:
+    n: 3
+    m: 4
+    voters:
+      - role: qa-bach
+      - role: security-schneier
+      - role: cto-vogels
+      - role: ceo-bezos
+  prompt: |
+    Review the proposed change and respond with one line:
+    VERDICT: APPROVE | REJECT | ABSTAIN
+    followed by a single-paragraph justification.
+```
+
+Tally returns `{verdict, passed, counts, per_voter}`; downstream steps branch on `passed`.
+
+### Qwen 3.7 Max + Anthropic-protocol drop-in *(v1.0.6)*
+
+Qwen 3.7 Max (released 2026-05-21) ships **native Anthropic API protocol** support — the `/v1/messages` wire is byte-compatible with Anthropic's canonical shape, so Claude-Code-shaped clients can point at DashScope and use Qwen as a drop-in.
+
+```php
+// Drop-in Anthropic-shaped requests against Qwen:
+$agent = new Agent([
+    'provider' => 'qwen-anthropic',
+    'api_key'  => env('DASHSCOPE_API_KEY'),
+    'model'    => 'qwen3.7-max',          // 1M ctx, $2.50 / $7.50 per 1M
+]);
+
+// Or the OpenAI-compat path with the new default model:
+$agent = new Agent(['provider' => 'qwen']);   // → defaults to qwen3.7-max
+```
+
+> **TODO:** DashScope's exact Anthropic-protocol endpoint URL is not yet documented in English; the default `dashscope.aliyuncs.com/anthropic-mode/v1` is best-guess. Verify and override via `base_url` until Alibaba publishes it.
+
+### Recipe cookbook *(v1.0.6)*
+
+Focused, copy-pasteable recipes for the higher-level subsystems live under [`docs/cookbook/`](docs/cookbook/):
+
+- [`01-debate-protocol.md`](docs/cookbook/01-debate-protocol.md) — proposer / critic / judge structured debate
+- [`02-redteam-attack.md`](docs/cookbook/02-redteam-attack.md) — builder / attacker / reviewer adversarial pattern
+- [`03-cost-autopilot.md`](docs/cookbook/03-cost-autopilot.md) — budget-driven model tiering (Opus → Sonnet → Haiku cascade)
+- [`04-cost-prediction.md`](docs/cookbook/04-cost-prediction.md) — KNN-based proactive spend prediction
+- [`05-adaptive-feedback.md`](docs/cookbook/05-adaptive-feedback.md) — corrections promote into auto-applied patterns
 
 ### Idempotency
 

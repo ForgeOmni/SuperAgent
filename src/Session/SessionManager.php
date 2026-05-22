@@ -373,6 +373,155 @@ class SessionManager
         return $deleted;
     }
 
+    // ── Branching (Pi /tree) ──────────────────────────────────────
+
+    /**
+     * Pi-borrowed /tree fork. Creates a new session that branches off
+     * an existing session at message index $forkAtIndex (0-based).
+     *
+     * Mechanics:
+     *   1. Load the source session (must exist).
+     *   2. Slice messages [0..forkAtIndex] as the new branch's prefix.
+     *   3. Synthesise pi-style entries (id + parentId) so a
+     *      {@see \SuperAgent\Conversation\BranchManager} can walk the
+     *      tree later.
+     *   4. Record a `branched_from` pointer in the new session's meta.
+     *   5. Stamp a `branches[]` entry on the SOURCE session pointing at
+     *      the new branch (so listSessions can render the tree).
+     *
+     * Caller supplies a `$summaryFn` that, given the abandoned messages
+     * (messages after forkAtIndex on the source), returns the text of a
+     * BranchSummaryEntry. The summary lives on the source-session meta
+     * so a future operator can see what was abandoned without rerunning
+     * the LLM.
+     *
+     * Returns the new session id.
+     *
+     * @param string $sourceSessionId  Existing session to branch from
+     * @param int    $forkAtIndex      0-based; new branch keeps [0..forkAtIndex]
+     * @param ?callable(array): string $summaryFn  Receives the abandoned suffix
+     *                                              (after-fork messages); returns
+     *                                              the BranchSummaryEntry text.
+     *                                              null = skip summary.
+     * @param ?string $displayName     Human-readable label for the new branch
+     */
+    public function fork(
+        string $sourceSessionId,
+        int $forkAtIndex,
+        ?callable $summaryFn = null,
+        ?string $displayName = null,
+    ): string {
+        $source = $this->loadById($sourceSessionId);
+        if ($source === null) {
+            throw new \RuntimeException("Cannot fork: source session not found: {$sourceSessionId}");
+        }
+
+        $messages = $source['messages'] ?? [];
+        if (!is_array($messages)) {
+            $messages = [];
+        }
+        $forkAtIndex = max(0, min(count($messages), $forkAtIndex));
+        $keptPrefix = array_slice($messages, 0, $forkAtIndex);
+        $abandoned = array_slice($messages, $forkAtIndex);
+
+        // Assign per-entry id/parentId so BranchManager can navigate the
+        // tree. Existing flat snapshots don't have these, so we synthesise
+        // them deterministically from the array index for the new branch.
+        $entries = [];
+        $parentId = null;
+        foreach ($keptPrefix as $i => $msg) {
+            $eid = (is_array($msg) && isset($msg['_entry_id'])) ? (string) $msg['_entry_id'] : $this->shortId();
+            if (is_array($msg)) {
+                $msg['_entry_id'] = $eid;
+                $msg['_parent_entry_id'] = $parentId;
+            }
+            $entries[$i] = $msg;
+            $parentId = $eid;
+        }
+
+        $newId = $this->generateBranchId($sourceSessionId);
+        $cwd = $source['cwd'] ?? (getcwd() ?: '.');
+
+        // Compute abandoned-branch summary on the SOURCE session.
+        $abandonedSummary = null;
+        if ($summaryFn !== null && $abandoned !== []) {
+            try {
+                $abandonedSummary = (string) $summaryFn($abandoned);
+            } catch (\Throwable $e) {
+                $this->logger->warning('Branch summary callback failed', ['error' => $e->getMessage()]);
+            }
+        }
+
+        // Write the new branch session.
+        $this->save($newId, $entries, [
+            'cwd' => $cwd,
+            'model' => $source['model'] ?? null,
+            'system_prompt' => $source['system_prompt'] ?? null,
+            'branched_from' => [
+                'session_id' => $sourceSessionId,
+                'fork_at_index' => $forkAtIndex,
+                'fork_at_entry_id' => $parentId,
+                'display_name' => $displayName,
+            ],
+        ]);
+
+        // Stamp the source session's `branches[]` so the UI can render
+        // the tree. We rewrite the snapshot in place (read-modify-write).
+        $sourceBranches = $source['branches'] ?? [];
+        if (!is_array($sourceBranches)) $sourceBranches = [];
+        $sourceBranches[] = [
+            'branch_session_id' => $newId,
+            'fork_at_index' => $forkAtIndex,
+            'fork_at_entry_id' => $parentId,
+            'display_name' => $displayName,
+            'created_at' => date('c'),
+            'abandoned_summary' => $abandonedSummary,
+        ];
+        $sourceMeta = [
+            'cwd' => $cwd,
+            'model' => $source['model'] ?? null,
+            'system_prompt' => $source['system_prompt'] ?? null,
+            'created_at' => $source['created_at'] ?? date('c'),
+            'usage' => $source['usage'] ?? null,
+            'total_cost_usd' => $source['total_cost_usd'] ?? 0.0,
+            'summary' => $source['summary'] ?? null,
+        ];
+        // Persist branches by reusing save() then patching the file —
+        // simpler than carrying every meta key around.
+        $this->save($sourceSessionId, $messages, $sourceMeta);
+        $projectDir = $this->storage->getProjectDir($cwd);
+        $sourcePath = $this->storage->sessionFilePath($projectDir, $sourceSessionId);
+        $snapshot = $this->storage->readSnapshot($sourcePath);
+        if (is_array($snapshot)) {
+            $snapshot['branches'] = $sourceBranches;
+            $this->storage->atomicWrite($sourcePath, $snapshot);
+        }
+
+        return $newId;
+    }
+
+    /**
+     * Return the branch tree for a session: list of {branch_session_id,
+     * fork_at_index, fork_at_entry_id, display_name, abandoned_summary}
+     * for every fork rooted at this session.
+     */
+    public function getBranches(string $sessionId): array
+    {
+        $session = $this->loadById($sessionId);
+        $branches = $session['branches'] ?? [];
+        return is_array($branches) ? array_values($branches) : [];
+    }
+
+    private function shortId(): string
+    {
+        return substr(bin2hex(random_bytes(4)), 0, 8);
+    }
+
+    private function generateBranchId(string $sourceId): string
+    {
+        return $sourceId . '-b-' . $this->shortId();
+    }
+
     // ── Pruning (delegated) ──────────────────────────────────────
 
     /**

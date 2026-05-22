@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.5-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.0.6-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -897,6 +897,165 @@ Chacun comble un gap par rapport à un agent de coding de production ; tout est 
 | Espace de noms `LSP\`               | Vrai client LSP stdio JSON-RPC (était un stub `'simulated'`). 9 serveurs : phpactor/intelephense, gopls, rust-analyzer, pyright, typescript-language-server, clangd, bash-language-server, zls. `LSPTool` expose `diagnostics`/`hover`/`definition`/`touch`. |
 | Espace de noms `ACP\`               | Serveur Agent Client Protocol v1. Les éditeurs qui parlent ACP (Zed, Neovim avec Codecompanion, …) se branchent directement sur SuperAgent. `(new Server($handler))->serve()` bloque sur stdio.                            |
 | `Skills\SkillManager::discoverExternalSkills()` | Remonte de cwd à la racine du worktree en chargeant `.claude/skills/**/SKILL.md` et `.agents/skills/**/SKILL.md` à chaque niveau ; à la racine, aussi `skills/**/SKILL.md` / `skill/**/SKILL.md`. Le fichier doit être littéralement nommé `SKILL.md`. |
+
+### Timeline Chrome Trace Event *(v1.0.6)*
+
+Chaque orchestration longue (debate, red-team, error-recovery, cost-autopilot, agents parallèles) écrit maintenant dans un ring buffer lock-free de `TraceEvent`. Les sites de déclenchement (erreurs, snapshot, fin de protocole) flushent vers un fichier `.json` que vous ouvrez dans `chrome://tracing` ou `ui.perfetto.dev`.
+
+```php
+use SuperAgent\Tracing\TraceCollector;
+
+$end = TraceCollector::getInstance()->span('llm.dispatch', 'llm', 'session:abc');
+$result = $provider->call(...);
+$end(['model' => $result->model, 'cost_usd' => $result->cost]);
+
+// Sur un point de déclenchement — erreur, fin de debate, auto-snapshot d'un agent :
+$path = TraceCollector::getInstance()->dump(trigger: 'manual', reason: 'inspect after demo');
+// → /tmp/superagent-traces/trace_superagent_{session}_{ts}_manual.json
+```
+
+Émetteurs câblés : `Debate\DebateOrchestrator` (`debate.start` / `debate.rounds` / `debate.round_N` / `debate.judge` / `debate.total` plus `redteam.*` / `ensemble.*`), `ErrorRecovery\ErrorRecoveryManager` (auto-dump des derniers N événements sur erreur irrécupérable / retries épuisés), `CostAutopilot\CostAutopilot` (counter `budget.spend` + instants `budget.tier_change`), `Console\Output\ParallelAgentDisplay::exportPerfettoJson()` (snapshot de toute l'équipe). Env : `SUPERAGENT_TRACE_ENABLED=false` pour désactiver, `SUPERAGENT_TRACE_PATH=…` pour changer le répertoire.
+
+L'agent lui-même peut appeler `snapshot('about to git reset', tag: 'pre_destructive')` (nouvel outil `SnapshotTool`) quand quelque chose semble étrange — pure observabilité, `isReadOnly === true`.
+
+### JSON Event Stream aligné pi *(v1.0.6)*
+
+Taxonomie canonique de 18 types d'événements de session empruntée à [JSON Event Stream Mode de pi](https://pi.dev/docs/latest/json), pour que les sessions SuperAgent puissent être rejouées par n'importe quel viewer pi-compatible.
+
+```php
+use SuperAgent\Tracing\PiEventStream;
+use SuperAgent\Tracing\PiEventStreamWriter;
+
+PiEventStream::subscribe(new PiEventStreamWriter('/path/to/session.events.jsonl'));
+
+PiEventStream::emit(PiEventStream::AGENT_START, ['sessionId' => 's-1']);
+PiEventStream::emit(PiEventStream::TURN_START, ['turnId' => 't-1', 'sessionId' => 's-1', 'model' => 'claude-opus-4-7']);
+// ...
+PiEventStream::emit(PiEventStream::AGENT_END, ['sessionId' => 's-1']);
+```
+
+Types d'événements : `session` / `agent_start` / `agent_end` / `turn_start` / `turn_end` / `message_start` / `message_update` / `message_end` / `tool_execution_start` / `tool_execution_update` / `tool_execution_end` / `queue_update` / `compaction_start` / `compaction_end` / `auto_retry_start` / `auto_retry_end` / `model_change` / `thinking_level_change`. Les anciens noms SuperAgent sont mappés via `PiEventStream::translateLegacy()`.
+
+### Steer en cours de tour + queue de follow-up *(v1.0.6)*
+
+Correction en cours de tour (sans interrompre) + mise en file de follow-up post-tour, empruntées à pi. Un opérateur (ou un gestionnaire RPC côté host) peut rediriger un agent en cours sans perdre l'état des outils.
+
+```php
+// Pendant que l'agent est en mid-turn, depuis un autre event handler :
+$agent->steer('Stop, le bug est dans src/Auth/Session.php, pas src/Auth/Login.php');
+// La prochaine itération de QueryEngine draine la file et préfixe le steer comme un user message synthétique.
+
+// Ou mettre en file un follow-up qui démarre APRÈS la fin du tour courant :
+$agent->followUp('Une fois fini, lance aussi les tests dans tests/Unit/Auth/');
+```
+
+Même surface sur ACP : les éditeurs qui parlent le protocole envoient les méthodes JSON-RPC `session/steer` / `session/follow_up` (constantes `Protocol::METHOD_SESSION_STEER` / `METHOD_SESSION_FOLLOW_UP`). Le contrat `Handler` gagne `steer($params)` / `followUp($params)` ; `DefaultHandler` fournit `drainSteer($sessionId)` / `drainFollowUp($sessionId)` que le `promptFn` du host consomme à des checkpoints sûrs.
+
+### Compression de sortie structurée RTK *(v1.0.6)*
+
+Les sorties de `git diff` / `grep -rn` / `find` / `ls -R` / `tree` dominent l'usage de tokens dans les sessions de coding — typiquement 30-50 % du budget d'entrée par tour, dont beaucoup de bruit cosmétique. `Tools\Compression\RtkPipeline` (emprunté à 9Router + claude-octopus) les compresse de façon lossy-safe : chemins, numéros de ligne, hunks de diff sont préservés verbatim ; le bruit cosmétique est jeté. Câblé dans `QueryEngine` — chaque résultat d'outil non-erreur passe par lui.
+
+| Outil | Économie typique | Ce qui est préservé |
+|-------|------------------|---------------------|
+| `git diff` | 40-65 % | `diff --git`, `--- a/`, `+++ b/`, hunks `@@`, toutes les lignes `+`/`-`, markers de mode |
+| `grep` / `rg` | 30-50 % | Hits canoniques `file:line:match` ; chemins répétés compactés en indentation |
+| `find` | 25-40 % | Noms de fichiers feuilles ; préfixes de répertoire répétés collapse |
+| `ls -R`, `tree` | 20-35 % | Markers de structure (`├─` / `└─` / `│`) ; supprime annotations byte/size |
+
+Opt-out par appel : `options: ['disable_rtk_compression' => true]`. Statistiques : `$pipeline->stats()` (`bytes_in` / `bytes_out` / `saved_bytes` / `ratio`).
+
+### Portabilité du schéma d'outils inter-providers *(v1.0.6)*
+
+Anthropic, OpenAI, Gemini acceptent chacun un sous-ensemble légèrement différent de JSON Schema (Gemini refuse `$ref` / `$defs` / `oneOf` en top level ; le mode strict d'OpenAI est plus strict que le non-strict ; etc.). `Tools\Schema\Schema` permet de déclarer un schéma une seule fois en portant des marqueurs d'intention ; `ProviderNormalizer` le réécrit par provider.
+
+```php
+use SuperAgent\Tools\Schema\Schema;
+use SuperAgent\Tools\Schema\ProviderNormalizer;
+
+$inputSchema = Schema::object([
+    'mode' => Schema::stringEnum(['read', 'write', 'delete']),
+    'path' => Schema::string('Chemin absolu'),
+], required: ['mode', 'path']);
+
+// Dans inputSchema() de votre outil, réécrire par provider avant d'envoyer :
+$anthropic = ProviderNormalizer::forAnthropic($inputSchema);
+$openai    = ProviderNormalizer::forOpenAI($inputSchema);
+$gemini    = ProviderNormalizer::forGemini($inputSchema);
+// → variante Gemini : `oneOf` aplati en `enum`, `$ref`/`$defs` retirés, `format` non supportés strippés.
+```
+
+La conformité inter-providers est vérifiée par `tests/Tools/Schema/CrossProviderComplianceTest.php` — round-trip chaque forme taguée à travers les trois normaliseurs et asserte que chaque sortie passe les règles d'acceptation du provider cible.
+
+### Branchement de session — fork pi `/tree` *(v1.0.6)*
+
+pi modélise une session comme un arbre append-only, pas comme une ligne. SuperAgent reflète maintenant `/tree` :
+
+```php
+use SuperAgent\Session\SessionManager;
+
+$newBranchId = $sessionManager->fork(
+    sourceSessionId: 's-current',
+    forkAtIndex: 12,
+    summaryFn: function(array $abandoned) use ($llm) {
+        return $llm->summarize($abandoned);   // résumé d'une ligne stocké sur la source
+    },
+    displayName: 'try-event-sourcing-instead',
+);
+```
+
+`Conversation\BranchManager` fournit l'algèbre d'arbre pure (sans I/O, sans LLM) — `leaves()`, `ancestry($id)`, `findCommonAncestor($a, $b)`, `collectBranch($leaf, $ancestor)`, `makeBranchSummaryEntry()`. `Conversation\Importers\PiImporter` rejoue les sessions pi existantes (`~/.pi/agent/sessions/`) dans le wire format SuperAgent.
+
+### Squad consensus gates — vote parallèle N-of-M *(v1.0.6)*
+
+Le `reviewer_loop` existant est une porte série single-veto (un reviewer d'accord → pass). `Squad\ConsensusGate` (emprunté à claude-octopus) est une porte parallèle N-of-M : M pairs votent en parallèle, ≥N doivent approuver.
+
+```yaml
+- kind: consensus_gate
+  name: ship-decision
+  depends_on: [synthesize]
+  params:
+    n: 3
+    m: 4
+    voters:
+      - role: qa-bach
+      - role: security-schneier
+      - role: cto-vogels
+      - role: ceo-bezos
+  prompt: |
+    Examine le changement proposé et réponds avec une ligne :
+    VERDICT: APPROVE | REJECT | ABSTAIN
+    suivie d'une justification d'un paragraphe.
+```
+
+Le tally retourne `{verdict, passed, counts, per_voter}` ; les étapes downstream branchent sur `passed`.
+
+### Qwen 3.7 Max + drop-in protocole Anthropic *(v1.0.6)*
+
+Qwen 3.7 Max (sorti le 2026-05-21) ship un support **natif du protocole Anthropic API** — le wire `/v1/messages` est byte-compatible avec la forme canonique d'Anthropic, donc les clients shaped-Claude-Code peuvent pointer sur DashScope et utiliser Qwen comme un drop-in.
+
+```php
+// Requêtes shape-Anthropic directement contre Qwen :
+$agent = new Agent([
+    'provider' => 'qwen-anthropic',
+    'api_key'  => env('DASHSCOPE_API_KEY'),
+    'model'    => 'qwen3.7-max',          // 1M ctx, $2.50 / $7.50 par 1M tokens
+]);
+
+// Ou le chemin OpenAI-compat avec le nouveau modèle par défaut :
+$agent = new Agent(['provider' => 'qwen']);   // → défaut qwen3.7-max
+```
+
+> **TODO :** l'URL exacte du endpoint protocole Anthropic de DashScope n'est pas encore documentée en anglais ; le défaut `dashscope.aliyuncs.com/anthropic-mode/v1` est une supposition. Vérifier et override via `base_url` jusqu'à publication officielle par Alibaba.
+
+### Cookbook de recettes *(v1.0.6)*
+
+Recettes ciblées, copiables-collables pour les sous-systèmes de haut niveau dans [`docs/cookbook/`](docs/cookbook/) :
+
+- [`01-debate-protocol.md`](docs/cookbook/01-debate-protocol.md) — débat structuré proposer / critic / judge
+- [`02-redteam-attack.md`](docs/cookbook/02-redteam-attack.md) — pattern adversarial builder / attacker / reviewer
+- [`03-cost-autopilot.md`](docs/cookbook/03-cost-autopilot.md) — tiering de modèle piloté par budget (cascade Opus → Sonnet → Haiku)
+- [`04-cost-prediction.md`](docs/cookbook/04-cost-prediction.md) — prédiction proactive de dépense basée KNN
+- [`05-adaptive-feedback.md`](docs/cookbook/05-adaptive-feedback.md) — corrections promues en patterns auto-appliqués
 
 ### Idempotence
 

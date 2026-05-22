@@ -142,7 +142,11 @@ class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
 
     protected function defaultModel(): string
     {
-        return 'qwen3.6-max-preview';
+        // Bumped to 3.7-max (2026-05-21): 1M context, $2.50/$7.50 per 1M,
+        // native Anthropic API protocol on the side. For thinking-budget
+        // control opt into provider=qwen-native (3.6 is still the latest
+        // there). For Anthropic-protocol drop-in mode use provider=qwen-anthropic.
+        return 'qwen3.7-max';
     }
 
     /**
@@ -236,7 +240,10 @@ class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
         return str_starts_with($id, 'qwen-vl')
             || str_starts_with($id, 'qwen3-vl')
             || str_starts_with($id, 'qwen3.5-plus')
-            || str_starts_with($id, 'qwen3-omni');
+            || str_starts_with($id, 'qwen3-omni')
+            // qwen3.7-plus is the 3.7 multimodal variant (vision-capable).
+            // qwen3.7-max is text-only — explicitly NOT in this match.
+            || str_starts_with($id, 'qwen3.7-plus');
     }
 
     /**

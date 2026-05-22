@@ -11,7 +11,12 @@ class HookResult
      * @param bool $suppressOutput Whether to suppress tool output
      * @param string|null $stopReason Reason for stopping
      * @param string|null $systemMessage System message to inject
-     * @param array|null $updatedInput Modified tool input (replaces original)
+     * @param array|null $updatedInput Modified tool input (replaces original — for PreToolUse / UserPromptSubmit)
+     * @param array|null $updatedOutput Pi-borrowed: modified tool result (replaces the
+     *                                  tool's actual output before the model sees it,
+     *                                  for PostToolUse). Lets a hook redact secrets,
+     *                                  enforce schema, or transform raw output into a
+     *                                  model-friendly form.
      * @param array|null $additionalContext Extra context to inject
      * @param array|null $watchPaths Paths to watch for changes
      * @param string|null $errorMessage Error message
@@ -25,6 +30,7 @@ class HookResult
         public readonly ?string $stopReason = null,
         public readonly ?string $systemMessage = null,
         public readonly ?array $updatedInput = null,
+        public readonly ?array $updatedOutput = null,
         public readonly ?array $additionalContext = null,
         public readonly ?array $watchPaths = null,
         public readonly ?string $errorMessage = null,
@@ -125,6 +131,7 @@ class HookResult
         $stopReason = null;
         $systemMessages = [];
         $updatedInput = [];
+        $updatedOutput = [];
         $additionalContext = [];
         $watchPaths = [];
         $errorMessages = [];
@@ -148,6 +155,10 @@ class HookResult
 
             if ($result->updatedInput !== null) {
                 $updatedInput = array_merge($updatedInput, $result->updatedInput);
+            }
+
+            if ($result->updatedOutput !== null) {
+                $updatedOutput = array_merge($updatedOutput, $result->updatedOutput);
             }
 
             if ($result->additionalContext !== null) {
@@ -187,6 +198,7 @@ class HookResult
             stopReason: $stopReason,
             systemMessage: empty($systemMessages) ? null : implode("\n", $systemMessages),
             updatedInput: empty($updatedInput) ? null : $updatedInput,
+            updatedOutput: empty($updatedOutput) ? null : $updatedOutput,
             additionalContext: empty($additionalContext) ? null : $additionalContext,
             watchPaths: empty($watchPaths) ? null : array_unique($watchPaths),
             errorMessage: empty($errorMessages) ? null : implode("\n", $errorMessages),
@@ -195,7 +207,21 @@ class HookResult
             preventContinuation: $preventContinuation,
         );
     }
-    
+
+    /**
+     * Pi-borrowed: PostToolUse helper that rewrites the tool's output before
+     * the model sees it. Use for redaction, schema enforcement, format
+     * normalisation, etc.
+     */
+    public static function rewriteOutput(array $newOutput, ?string $reason = null): self
+    {
+        return new self(
+            continue: true,
+            updatedOutput: $newOutput,
+            systemMessage: $reason,
+        );
+    }
+
     public function toArray(): array
     {
         return array_filter([
@@ -204,6 +230,7 @@ class HookResult
             'stop_reason' => $this->stopReason,
             'system_message' => $this->systemMessage,
             'updated_input' => $this->updatedInput,
+            'updated_output' => $this->updatedOutput,
             'additional_context' => $this->additionalContext,
             'watch_paths' => $this->watchPaths,
             'error_message' => $this->errorMessage,

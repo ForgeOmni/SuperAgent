@@ -631,6 +631,102 @@ skill/<name>/SKILL.md           (project root only)
 
 Each SKILL.md is a Markdown file with YAML frontmatter (`name:`, `description:`) followed by the skill body. The walk stops at the worktree boundary, so a monorepo parent can't bleed skills into a sub-project.
 
+### Tracing & observability *(v1.0.6)*
+
+Tracing is enabled by default and writes Chrome Trace Event JSON files to `sys_get_temp_dir()/superagent-traces/`. Three env vars control it:
+
+```bash
+export SUPERAGENT_TRACE_ENABLED=true               # default: true
+export SUPERAGENT_TRACE_PATH=/var/log/sa-traces    # default: sys_get_temp_dir()/superagent-traces
+export SUPERAGENT_TRACE_RING_SIZE=2048             # default: 1024 events
+```
+
+Recommended viewers:
+
+- **`ui.perfetto.dev`** — preferred. Drag and drop the trace JSON file.
+- **`chrome://tracing`** — Chrome's built-in viewer (legacy but still works).
+- **`docs/cookbook/`** snippets reference the file format directly.
+
+For high-RPS gateways where the singleton ring buffer is too much overhead, set `SUPERAGENT_TRACE_ENABLED=false` or inject a disabled `TraceCollector` into the DI graph.
+
+The Pi-aligned `PiEventStream` is a separate listener-pattern emitter — wire it up by subscribing a `PiEventStreamWriter` in your bootstrap:
+
+```php
+use SuperAgent\Tracing\PiEventStream;
+use SuperAgent\Tracing\PiEventStreamWriter;
+
+PiEventStream::subscribe(new PiEventStreamWriter(
+    storage_path('sa-sessions/' . $sessionId . '.events.jsonl')
+));
+```
+
+### RTK structured-output compression *(v1.0.6)*
+
+Zero config — `Tools\Compression\RtkPipeline` is wired into `QueryEngine` and fires on every non-error tool result by default. Disable per-call when you need raw byte fidelity (e.g. you're feeding the output to `git apply` and need every context line):
+
+```php
+$result = $agent->run($prompt, ['disable_rtk_compression' => true]);
+```
+
+Hosts can also register additional compressors for custom tools:
+
+```php
+use SuperAgent\Tools\Compression\RtkPipeline;
+use SuperAgent\Tools\Compression\CompressorInterface;
+
+$pipeline = new RtkPipeline();
+$pipeline->register('my_custom_tool', new MyCompressor());
+```
+
+See [ADVANCED_USAGE §83](docs/ADVANCED_USAGE.md) for the full registry and per-tool savings.
+
+### Qwen 3.7 / Qwen-Anthropic *(v1.0.6)*
+
+The default Qwen model is now `qwen3.7-max` (1M context, $2.50/$7.50 per 1M tokens, native Anthropic protocol on the side). Three provider keys access Qwen:
+
+```php
+// OpenAI-compat endpoint (recommended for parity with the rest of the SDK)
+$agent = new Agent(['provider' => 'qwen', 'api_key' => env('DASHSCOPE_API_KEY')]);
+
+// DashScope native endpoint (use only if you need thinking_budget control — 3.6 family)
+$agent = new Agent(['provider' => 'qwen-native', 'api_key' => env('DASHSCOPE_API_KEY')]);
+
+// Anthropic-protocol-compatible endpoint (drop-in for Claude Code clients)
+$agent = new Agent(['provider' => 'qwen-anthropic', 'api_key' => env('DASHSCOPE_API_KEY')]);
+```
+
+> The `qwen-anthropic` endpoint URL has not been officially documented by Alibaba in English as of 2026-05-22. The default `https://dashscope.aliyuncs.com/anthropic-mode/v1` is a best-guess; override via `base_url` if it 404s. Check `~/.qwen/settings.json` after installing qwen-code v0.16+ for an explicit `anthropic-base-url` field.
+
+Qwen OAuth was discontinued 2026-04-15 — only API key auth is supported.
+
+### Pi session import *(v1.0.6)*
+
+Replay existing pi sessions (`~/.pi/agent/sessions/`) into SuperAgent:
+
+```php
+use SuperAgent\Conversation\Importers\PiImporter;
+
+$importer = new PiImporter();
+foreach ($importer->listSessions(50) as $row) {
+    echo "{$row['id']}  {$row['started_at']}  {$row['first_user_message']}\n";
+}
+
+$messages = $importer->load('/abs/path/to/2026-05-22_abc123.jsonl');
+// → SuperAgent\Messages\Message[] ready to seed an Agent's history
+```
+
+No setup needed — `~/.pi/agent/sessions` is the default root; override via constructor argument if the host uses a non-standard layout.
+
+### Supply-chain CI *(v1.0.6)*
+
+A new GitHub Actions workflow (`.github/workflows/supply-chain.yml`) enforces three rules on every push, PR, and Monday morning:
+
+1. `composer validate --strict`
+2. `composer audit --no-dev` (Symfony security advisories)
+3. No composer lifecycle scripts (`post-install-cmd`, `post-update-cmd`, …) — the install is run with `--no-scripts`.
+
+If you fork the SDK, this workflow runs out of the box; if you embed it via Composer, the lockdown is enforced on YOUR side at install time when you also pass `--no-scripts` (recommended for security).
+
 ---
 
 ## Verification

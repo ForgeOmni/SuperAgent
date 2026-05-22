@@ -62,7 +62,28 @@ class ConversationCompressor implements CompressionStrategy
         $splitPoint = $this->calculateSplitPoint($messages, $keepRecent);
         $messagesToCompress = array_slice($messages, 0, $splitPoint);
         $messagesToKeep = array_slice($messages, $splitPoint);
-        
+
+        // Pi-borrowed: split-turn handling. If even the kept window exceeds
+        // the budget (single oversized assistant turn), we have to cut
+        // mid-turn at an assistant message — generate two summaries (history
+        // + turn prefix) and merge them. See pi.dev/docs/latest/compaction
+        // §"Split turns".
+        $maxKeepTokens = (int) ($options['max_keep_tokens'] ?? 0);
+        $oversizedSplit = null;
+        if (
+            $maxKeepTokens > 0
+            && !empty($messagesToKeep)
+            && $this->tokenEstimator->estimateMessagesTokens(
+                array_map(fn($m) => $m->toArray(), $messagesToKeep)
+            ) > $maxKeepTokens
+        ) {
+            $oversizedSplit = $this->trySplitTurn($messagesToKeep, $maxKeepTokens);
+            if ($oversizedSplit !== null) {
+                $messagesToCompress = array_merge($messagesToCompress, $oversizedSplit['turnPrefix']);
+                $messagesToKeep = $oversizedSplit['turnSuffix'];
+            }
+        }
+
         if (empty($messagesToCompress)) {
             return new CompressionResult(
                 compressedMessages: [],
@@ -104,16 +125,28 @@ class ConversationCompressor implements CompressionStrategy
             ],
         );
         
+        // Pi-borrowed: track firstKeptEntryId so downstream consumers
+        // (session/JSONL exporters, branch diff viewers) can verify the
+        // boundary the LLM was asked to honor.
+        $firstKeptEntryId = !empty($messagesToKeep) ? ($messagesToKeep[0]->id ?? null) : null;
+
+        $boundaryMeta = [
+            'compact_type' => 'conversation_summary',
+            'split_point' => $splitPoint,
+            'first_kept_entry_id' => $firstKeptEntryId,
+        ];
+        if ($oversizedSplit !== null) {
+            $boundaryMeta['split_turn'] = true;
+            $boundaryMeta['split_turn_turn_id'] = $oversizedSplit['turnId'];
+        }
+
         // Create boundary message
         $boundaryMessage = Message::boundary(
             content: $this->createBoundaryContent(
                 count($messagesToCompress),
                 $tokensSaved
             ),
-            metadata: [
-                'compact_type' => 'conversation_summary',
-                'split_point' => $splitPoint,
-            ],
+            metadata: $boundaryMeta,
         );
         
         return new CompressionResult(
@@ -130,8 +163,65 @@ class ConversationCompressor implements CompressionStrategy
             metadata: [
                 'strategy' => 'conversation_summary',
                 'messages_compressed' => count($messagesToCompress),
+                'first_kept_entry_id' => $firstKeptEntryId,
+                'split_turn' => $oversizedSplit !== null,
             ],
         );
+    }
+
+    /**
+     * Pi-borrowed: when even the "kept" window exceeds the budget, the
+     * cut has to happen mid-turn (typically inside a long assistant
+     * message). We find the first assistant message in `$messagesToKeep`
+     * and split it on a paragraph boundary, returning the prefix portion
+     * (to be absorbed into the history summary) and the suffix (which
+     * stays in `$messagesToKeep`).
+     *
+     * Returns null when no split is possible (e.g. only one message and
+     * it's not splittable — caller falls back to single-summary path).
+     *
+     * @param Message[] $kept
+     * @return array{turnPrefix: Message[], turnSuffix: Message[], turnId: string}|null
+     */
+    private function trySplitTurn(array $kept, int $maxKeepTokens): ?array
+    {
+        if (count($kept) < 2) return null;
+
+        // Find first assistant message in $kept; only that turn is a safe
+        // split point (cutting a user message corrupts intent; cutting a
+        // tool_result corrupts the tool pair API invariant).
+        $cutIdx = null;
+        foreach ($kept as $i => $msg) {
+            if ($msg->role === MessageRole::Assistant && !$msg->isToolUse()) {
+                $cutIdx = $i;
+                break;
+            }
+        }
+        if ($cutIdx === null) return null;
+
+        // Everything before $cutIdx is small enough on its own to keep
+        // when we throw it into the compress bucket. Build the prefix as
+        // [first .. assistantTurn]; suffix is [assistantTurn+1 .. last].
+        $turnPrefix = array_slice($kept, 0, $cutIdx + 1);
+        $turnSuffix = array_slice($kept, $cutIdx + 1);
+
+        if (empty($turnSuffix)) return null;
+
+        // Verify the suffix actually fits now.
+        $suffixTokens = $this->tokenEstimator->estimateMessagesTokens(
+            array_map(fn($m) => $m->toArray(), $turnSuffix)
+        );
+        if ($suffixTokens > $maxKeepTokens) {
+            // Even the tail is too big — caller falls back to a more
+            // aggressive compactor (MicroCompressor) instead of split.
+            return null;
+        }
+
+        return [
+            'turnPrefix' => $turnPrefix,
+            'turnSuffix' => $turnSuffix,
+            'turnId' => $kept[$cutIdx]->id ?? '',
+        ];
     }
     
     /**

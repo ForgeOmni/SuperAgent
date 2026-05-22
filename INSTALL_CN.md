@@ -652,6 +652,102 @@ skill/<name>/SKILL.md           （仅项目根目录）
 
 每个 SKILL.md 是 Markdown 文件，含 YAML frontmatter（`name:`、`description:`）+ skill 正文。Walk 在 worktree 边界停止，避免 monorepo 父目录污染子项目。
 
+### Tracing 与可观测性 *(v1.0.6)*
+
+Tracing 默认开启，把 Chrome Trace Event JSON 文件写到 `sys_get_temp_dir()/superagent-traces/`。三个环境变量控制：
+
+```bash
+export SUPERAGENT_TRACE_ENABLED=true               # 默认 true
+export SUPERAGENT_TRACE_PATH=/var/log/sa-traces    # 默认 sys_get_temp_dir()/superagent-traces
+export SUPERAGENT_TRACE_RING_SIZE=2048             # 默认 1024 事件
+```
+
+推荐查看器：
+
+- **`ui.perfetto.dev`** —— 首选。拖入 trace JSON 文件。
+- **`chrome://tracing`** —— Chrome 自带的查看器（老牌但仍然可用）。
+- **`docs/cookbook/`** 里的片段直接引用文件格式。
+
+对高 RPS gateway 而言 ring buffer 也是一笔开销，可以 `SUPERAGENT_TRACE_ENABLED=false`，或者在 DI 容器里注入一个禁用版本的 `TraceCollector`。
+
+Pi 对齐的 `PiEventStream` 是单独的 listener 式发射器 —— 在 bootstrap 里订阅一个 `PiEventStreamWriter`：
+
+```php
+use SuperAgent\Tracing\PiEventStream;
+use SuperAgent\Tracing\PiEventStreamWriter;
+
+PiEventStream::subscribe(new PiEventStreamWriter(
+    storage_path('sa-sessions/' . $sessionId . '.events.jsonl')
+));
+```
+
+### RTK 结构化输出压缩 *(v1.0.6)*
+
+零配置 —— `Tools\Compression\RtkPipeline` 已接到 `QueryEngine`，默认对每个非错误工具结果生效。需要原始字节保真（比如要把输出喂给 `git apply` 而 git-apply 需要每一行 context）时按调用关闭：
+
+```php
+$result = $agent->run($prompt, ['disable_rtk_compression' => true]);
+```
+
+host 也可以为自定义工具注册额外压缩器：
+
+```php
+use SuperAgent\Tools\Compression\RtkPipeline;
+use SuperAgent\Tools\Compression\CompressorInterface;
+
+$pipeline = new RtkPipeline();
+$pipeline->register('my_custom_tool', new MyCompressor());
+```
+
+完整注册表和按工具节省比详见 [ADVANCED_USAGE §83](docs/ADVANCED_USAGE_CN.md)。
+
+### Qwen 3.7 / Qwen-Anthropic *(v1.0.6)*
+
+Qwen 默认模型现在是 `qwen3.7-max`（1M ctx、$2.50 / $7.50 每 1M token、原生 Anthropic 协议支持）。三种 provider key 可访问 Qwen：
+
+```php
+// OpenAI-compat 端点（建议默认走这个，与 SDK 其他部分一致）
+$agent = new Agent(['provider' => 'qwen', 'api_key' => env('DASHSCOPE_API_KEY')]);
+
+// DashScope native 端点（只有需要 thinking_budget 控制（3.6 系列）时用）
+$agent = new Agent(['provider' => 'qwen-native', 'api_key' => env('DASHSCOPE_API_KEY')]);
+
+// Anthropic 协议兼容端点（Claude Code 客户端直插）
+$agent = new Agent(['provider' => 'qwen-anthropic', 'api_key' => env('DASHSCOPE_API_KEY')]);
+```
+
+> 2026-05-22 阿里还没在英文文档里正式公布 `qwen-anthropic` 的端点 URL。默认 `https://dashscope.aliyuncs.com/anthropic-mode/v1` 是合理猜测；如果 404，请通过 `base_url` 覆盖。装了 qwen-code v0.16+ 后，可以在 `~/.qwen/settings.json` 里看是否有 `anthropic-base-url` 字段。
+
+Qwen OAuth 已于 2026-04-15 停用 —— 只支持 API key 认证。
+
+### Pi session 导入 *(v1.0.6)*
+
+把已有的 pi session（`~/.pi/agent/sessions/`）回放到 SuperAgent：
+
+```php
+use SuperAgent\Conversation\Importers\PiImporter;
+
+$importer = new PiImporter();
+foreach ($importer->listSessions(50) as $row) {
+    echo "{$row['id']}  {$row['started_at']}  {$row['first_user_message']}\n";
+}
+
+$messages = $importer->load('/abs/path/to/2026-05-22_abc123.jsonl');
+// → SuperAgent\Messages\Message[]，可以直接喂给一个 Agent 作为初始历史
+```
+
+无需额外配置 —— `~/.pi/agent/sessions` 是默认 root；如果 host 用了非标准路径，通过构造参数覆盖。
+
+### 供应链 CI *(v1.0.6)*
+
+新的 GitHub Actions workflow（`.github/workflows/supply-chain.yml`）在每次 push、PR、以及每周一早晨执行三条规则：
+
+1. `composer validate --strict`
+2. `composer audit --no-dev`（Symfony 安全公告）
+3. 不允许声明 composer 生命周期脚本（`post-install-cmd`、`post-update-cmd` 等等）—— 安装时用 `--no-scripts`。
+
+如果你 fork SDK，这个 workflow 开箱即用；如果你通过 Composer 嵌入它，建议你也在自己侧用 `--no-scripts` 来强制相同的安全策略。
+
 ---
 
 ## 验证
