@@ -17,33 +17,33 @@ class PhaseResult
 
     private AgentStatus $status;
     private ?string $error = null;
-    private float $startTime;
-    private ?float $endTime = null;
+    private int $startTime;
+    private ?int $endTime = null;
 
     public function __construct(
         public readonly string $phaseName,
     ) {
         $this->status = AgentStatus::PENDING;
-        $this->startTime = microtime(true);
+        $this->startTime = hrtime(true);
     }
 
     public function markRunning(): void
     {
         $this->status = AgentStatus::RUNNING;
-        $this->startTime = microtime(true);
+        $this->startTime = hrtime(true);
     }
 
     public function markCompleted(): void
     {
         $this->status = AgentStatus::COMPLETED;
-        $this->endTime = microtime(true);
+        $this->endTime = hrtime(true);
     }
 
     public function markFailed(string $error): void
     {
         $this->status = AgentStatus::FAILED;
         $this->error = $error;
-        $this->endTime = microtime(true);
+        $this->endTime = hrtime(true);
     }
 
     public function addAgentResult(string $agentName, AgentResult $result): void
@@ -81,10 +81,8 @@ class PhaseResult
 
     public function getDurationMs(): ?float
     {
-        if ($this->endTime === null) {
-            return (microtime(true) - $this->startTime) * 1000;
-        }
-        return ($this->endTime - $this->startTime) * 1000;
+        $end = $this->endTime ?? hrtime(true);
+        return ($end - $this->startTime) / 1_000_000;
     }
 
     public function getTotalCostUsd(): float
