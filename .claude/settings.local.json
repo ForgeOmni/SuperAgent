@@ -232,7 +232,9 @@
       "Bash(./vendor/bin/phpunit --testsuite Smoke)",
       "Bash(./vendor/bin/phpunit --testsuite Smoke --display-warnings)",
       "Bash(./vendor/bin/phpunit --testsuite Compat)",
-      "Bash(./vendor/bin/phpunit --testsuite Integration)"
+      "Bash(./vendor/bin/phpunit --testsuite Integration)",
+      "Bash(gh run *)",
+      "PowerShell(gh *)"
     ]
   }
 }
