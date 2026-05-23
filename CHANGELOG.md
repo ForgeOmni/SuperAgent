@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-05-23
+
+### 💻 Summary
+
+**Pure fix release — Windows cross-platform compatibility + CLI argument-parsing correctness + CI test reliability.** No new features, no schema changes, no breaking changes. A focused cleanup of issues exposed by real-world use after 1.0.6 shipped: the CLI was mis-routing ordinary conversation words as subcommands, several tool invocations on Windows broke on POSIX-only assumptions, and the worktree tests on CI runners failed silently because git identity wasn't configured. Every change is local, but each one sits squarely on an "out of the box" experience path.
+
+### Fixed — CLI argument parsing: only the first positional may be a subcommand (`src/CLI/SuperAgentApplication.php`)
+
+The old parser scanned every positional argument and treated any one that matched a known subcommand name (`run` / `eval` / `mcp` / `login` / …) as the command. This silently mis-routed ordinary prompts: `superagent "fix the login bug"` would see `login` mid-string, treat it as the `login` subcommand, and drop the rest of the prompt.
+
+Now only the first positional is checked: if it matches a known subcommand it's routed there, otherwise the whole positional run is passed through as a chat prompt. Reserved words like `run` or `eval` appearing in second-or-later positions no longer trigger mis-routing.
+
+### Fixed — `McpCommand` cross-platform PATH lookup (`src/CLI/Commands/McpCommand.php`)
+
+`mcp test <server>` used `command -v ... 2>/dev/null` to confirm the bound binary exists — that's a POSIX shell builtin and cmd.exe on Windows has no equivalent, so the command either returned an empty string or printed "'command' is not recognized as an internal or external command".
+
+Added a private `resolveBinaryPath()` for cross-platform PATH lookup:
+- POSIX: keeps the original `command -v` path.
+- Windows: `where.exe <name> 2>nul` (cmd's `>nul` is the equivalent of POSIX `>/dev/null`), returning the first line as the authoritative path.
+- Windows cmd-builtin whitelist (18 entries: `echo` / `dir` / `type` / `set` / `cd` / `cls` / `copy` / `del` / `md` / `mkdir` / `path` / `ren` / `ver` / …) — these aren't files on disk but are still valid stdio targets when paired with `cmd /c`. Returns a `cmd builtin: <name>` marker.
+
+### Fixed — `Renderer::detectTermWidth()` no longer calls `tput` on Windows
+
+`tput cols 2>/dev/null` translates through cmd as `tput cols 2 > /dev/null` — cmd interprets `/dev/null` as a literal output path and prints "The system cannot find the path specified."
+
+Fix: guard the `tput` branch with `DIRECTORY_SEPARATOR !== '\\'`. Windows falls straight through to the `COLUMNS` env-var fallback (PowerShell sets it, cmd doesn't), with 80 columns as the final default.
+
+### Fixed — `AgentProgressTracker::toArray()` exports `status` and `turnCount`
+
+The parallel-coordinator metadata envelope expects each agent to report `status` and `turnCount`, but the tracker only exported `toolUseCount` / `tokenCount` / etc. Downstream displays were rendering "unknown" status bars.
+
+Added `status` (passes through `$this->status` directly) and `turnCount` (uses `toolUseCount` as a proxy — the authoritative turn count lives on the `AgentRunner` result; this field is just a rough activity signal in the metadata envelope, and the comment in the code spells out the trade-off).
+
+### Fixed — `WorktreeManagerTest::createTempGitRepo()` writes a valid HEAD on CI
+
+CI runners (GitHub Actions, freshly provisioned dev machines) usually have no global `user.email` / `user.name`, so the test's `git commit --allow-empty -m "init"` failed silently and HEAD was never written. Every downstream `git worktree add ... HEAD` then failed with `fatal: invalid reference: HEAD`, taking out 5 worktree tests at once:
+
+- `testCreateAndRemoveWorktree`
+- `testCreateWorktreeResumesExisting`
+- `testCreateWorktreeWithSymlinks`
+- `testListWorktrees`
+- `testPruneKeepsValidMeta`
+
+Fix:
+- Pass `-c user.email=test@example.com -c user.name=Test` to `git commit` (per-invocation, no global config mutation).
+- Check exit codes on both `git init` and `git commit`, throwing `RuntimeException` with the real git output on failure so future breakage surfaces directly instead of disguised as "invalid reference: HEAD".
+
+### Fixed — Windows compatibility in several unit tests
+
+Following the runtime fixes above, hardcoded POSIX assumptions in a few tests were cleaned up too:
+- `BackendProtocolTest` / `PersistentTaskManagerTest` / `QwenProviderTest` / `WorktreeManagerTest`: `2>/dev/null` redirects, temp-directory permission bits, and shell exit-code semantics rewritten in a cross-platform way (Windows uses `2>&1` + array discard, POSIX keeps the original form).
+
+### Compatibility
+
+Zero breaking changes. All public APIs, config keys, file formats, and wire formats are binary-compatible with 1.0.6. The only addition is two extra fields (`status` / `turnCount`) on `AgentProgressTracker::toArray()` output — downstream consumers parse it loosely and aren't affected.
+
 ## [1.0.6] - 2026-05-22
 
 ### 💻 Summary
