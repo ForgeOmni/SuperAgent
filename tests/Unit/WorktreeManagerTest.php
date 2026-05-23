@@ -20,9 +20,16 @@ class WorktreeManagerTest extends TestCase
 
     protected function tearDown(): void
     {
-        // Clean up worktrees first (git worktree remove)
+        // Clean up worktrees first (git worktree prune). `2>/dev/null`
+        // is POSIX-only — on Windows cmd treats it as a literal output
+        // path and prints "The system cannot find the path specified."
+        // Use `2>&1` and discard via output array so it works on both.
         if ($this->tmpRepoDir !== null) {
-            exec(sprintf('cd %s && git worktree prune 2>/dev/null', escapeshellarg($this->tmpRepoDir)));
+            $stderrRedir = DIRECTORY_SEPARATOR === '\\' ? '2>&1' : '2>/dev/null';
+            exec(
+                sprintf('cd %s && git worktree prune %s', escapeshellarg($this->tmpRepoDir), $stderrRedir),
+                $_o,
+            );
         }
         $this->recursiveDelete($this->tmpBaseDir);
         if ($this->tmpRepoDir !== null) {
@@ -358,14 +365,18 @@ class WorktreeManagerTest extends TestCase
             \RecursiveIteratorIterator::CHILD_FIRST
         );
         foreach ($items as $item) {
-            if ($item->isLink()) {
-                unlink($item->getPathname());
-            } elseif ($item->isDir()) {
-                rmdir($item->getRealPath());
+            $path = $item->isLink() ? $item->getPathname() : $item->getRealPath();
+            // Git writes pack/object files read-only — Windows blocks
+            // unlink on those until the read-only bit is cleared. POSIX
+            // platforms also can't delete files in a non-writable parent,
+            // so chmod a permissive mask before removing.
+            @chmod($path, 0666);
+            if ($item->isLink() || !$item->isDir()) {
+                @unlink($path);
             } else {
-                unlink($item->getRealPath());
+                @rmdir($path);
             }
         }
-        rmdir($dir);
+        @rmdir($dir);
     }
 }

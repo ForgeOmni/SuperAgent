@@ -21,6 +21,12 @@ class PersistentTaskManagerTest extends TestCase
 
     protected function tearDown(): void
     {
+        // Trigger the manager's __destruct so any append-log file handles
+        // are closed before we try to delete the temp dir — Windows holds
+        // an exclusive lock on open files, so an outstanding handle would
+        // make rmdir fail with "Directory not empty".
+        unset($this->manager);
+
         $this->recursiveDelete($this->tmpDir);
 
         // Reset singleton

@@ -220,7 +220,19 @@
       "Bash(sed -n '1,20p' /Users/xiyang/PhpstormProjects/SuperAgent/README.md)",
       "Bash(sed -n '1,20p' /Users/xiyang/PhpstormProjects/SuperAgent/README_FR.md)",
       "Bash(sed -n '1,20p' /Users/xiyang/PhpstormProjects/SuperAgent/README_CN.md)",
-      "Bash(perl -i -pe ' *)"
+      "Bash(perl -i -pe ' *)",
+      "Bash(composer --version)",
+      "Read(//c/Users/mlizp/**)",
+      "Read(//c/ProgramData/ComposerSetup/bin/**)",
+      "Bash(./vendor/bin/phpunit --filter SuperAgentApplicationParseTest)",
+      "Bash(./vendor/bin/phpunit --filter McpCommandTest)",
+      "Bash(./vendor/bin/phpunit --filter WorktreeManagerTest --display-warnings)",
+      "Bash(./vendor/bin/phpunit --filter PersistentTaskManagerTest --display-warnings)",
+      "Bash(./vendor/bin/phpunit --filter BackendProtocolTest --display-warnings)",
+      "Bash(./vendor/bin/phpunit --testsuite Smoke)",
+      "Bash(./vendor/bin/phpunit --testsuite Smoke --display-warnings)",
+      "Bash(./vendor/bin/phpunit --testsuite Compat)",
+      "Bash(./vendor/bin/phpunit --testsuite Integration)"
     ]
   }
 }

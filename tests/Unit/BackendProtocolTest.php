@@ -301,8 +301,14 @@ class BackendProtocolTest extends TestCase
 
     public function testReadRequestWithTimeoutReturnsNullOnTimeout(): void
     {
-        // Use a socket pair which supports stream_select, unlike php://memory
-        $sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+        // Use a socket pair which supports stream_select, unlike php://memory.
+        // Windows doesn't implement AF_UNIX socket pairs — fall back to
+        // AF_INET there. The `@` swallows the "unsupported option" warning
+        // that PHP raises before returning false, which PHPUnit treats as
+        // a test failure under `failOnWarning="true"`.
+        $sockets = DIRECTORY_SEPARATOR === '\\'
+            ? @stream_socket_pair(STREAM_PF_INET, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP)
+            : @stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
         if ($sockets === false) {
             $this->markTestSkipped('stream_socket_pair not available');
         }

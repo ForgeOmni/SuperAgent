@@ -172,14 +172,20 @@ class SuperAgentApplication
                 // future transport modes (e.g. `acp`).
                 $options['output'] = (string) ($args[++$i] ?? '');
             } elseif (! str_starts_with($arg, '-')) {
-                $positional[] = $arg;
-                // Once we cross a known-subcommand positional, stop consuming
-                // flags globally — they belong to the subcommand. Without this,
-                // `eval run --models X` would silently drop `--models`.
-                if (in_array($arg, $knownSubcommands, true) && $options['command'] === null) {
+                // Only the FIRST positional may be a subcommand. Words
+                // appearing after an earlier positional are part of the
+                // chat prompt — e.g. `fix the login bug` must NOT treat
+                // `login` as the `login` subcommand. Without this guard,
+                // ordinary prompt text gets misrouted whenever it happens
+                // to include any reserved word.
+                if (empty($positional)
+                    && $options['command'] === null
+                    && in_array($arg, $knownSubcommands, true)
+                ) {
                     $options['command'] = $arg;
-                    array_pop($positional);
                     $subcommandRaw = [];
+                } else {
+                    $positional[] = $arg;
                 }
             }
 
