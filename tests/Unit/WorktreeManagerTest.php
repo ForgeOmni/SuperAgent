@@ -42,7 +42,25 @@ class WorktreeManagerTest extends TestCase
     {
         $dir = sys_get_temp_dir() . '/sa_wt_repo_' . uniqid();
         mkdir($dir, 0755, true);
-        exec(sprintf('cd %s && git init && git commit --allow-empty -m "init" 2>&1', escapeshellarg($dir)));
+        // CI runners (and freshly provisioned dev machines) often have no
+        // global user.email/user.name, so `git commit` fails and HEAD is
+        // never written — which then breaks `git worktree add HEAD`.
+        // Pass identity via -c so we don't mutate global config.
+        $identity = '-c user.email=test@example.com -c user.name=Test';
+        exec(sprintf('cd %s && git init -q', escapeshellarg($dir)), $_o, $initExit);
+        if ($initExit !== 0) {
+            throw new \RuntimeException("git init failed in {$dir}");
+        }
+        exec(
+            sprintf('cd %s && git %s commit --allow-empty -m "init" 2>&1', escapeshellarg($dir), $identity),
+            $commitOut,
+            $commitExit,
+        );
+        if ($commitExit !== 0) {
+            throw new \RuntimeException(
+                "git commit failed in {$dir}: " . implode("\n", $commitOut)
+            );
+        }
         $this->tmpRepoDir = $dir;
         return $dir;
     }
