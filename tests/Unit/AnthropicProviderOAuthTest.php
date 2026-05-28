@@ -76,7 +76,7 @@ class AnthropicProviderOAuthTest extends TestCase
         ]);
 
         $body = $this->buildBody($p);
-        $this->assertSame('claude-opus-4-5', $body['model']);
+        $this->assertSame('claude-opus-4-8', $body['model']);
     }
 
     public function test_legacy_model_not_rewritten_under_api_key(): void
@@ -106,7 +106,7 @@ class AnthropicProviderOAuthTest extends TestCase
             'access_token' => 't',
             'model' => 'claude-2.1',
         ]);
-        $this->assertSame('claude-opus-4-5', $this->buildBody($p)['model']);
+        $this->assertSame('claude-opus-4-8', $this->buildBody($p)['model']);
     }
 
     public function test_oauth_injects_identity_system_block_when_user_prompt_provided(): void

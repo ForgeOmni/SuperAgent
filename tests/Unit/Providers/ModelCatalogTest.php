@@ -55,9 +55,9 @@ class ModelCatalogTest extends TestCase
 
     public function test_resolve_alias_picks_newest_in_family(): void
     {
-        // "opus" alias should resolve to the newest Opus model (Opus 4.7 per bundled catalog)
-        $this->assertSame('claude-opus-4-7', ModelCatalog::resolveAlias('opus'));
-        $this->assertSame('claude-opus-4-7', ModelCatalog::resolveAlias('CLAUDE-OPUS'));
+        // "opus" alias should resolve to the newest Opus model (Opus 4.8 per bundled catalog)
+        $this->assertSame('claude-opus-4-8', ModelCatalog::resolveAlias('opus'));
+        $this->assertSame('claude-opus-4-8', ModelCatalog::resolveAlias('CLAUDE-OPUS'));
     }
 
     public function test_resolve_alias_returns_null_on_unknown(): void

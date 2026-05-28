@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Claude Opus 4.8 + dynamic workflows + Opus 4.8 harness commands
+
+- **`resources/models.json`** — catalog now ships `claude-opus-4-8` as the flagship Anthropic model (family `opus`; carries the `opus` / `claude-opus` / `claude-opus-4` aliases, so alias resolution and the `/model` picker now resolve to 4.8). Pricing matches the Opus tier ($15 / $75 per million). A `capabilities` block records the Opus 4.8 feature set (`thinking`, `interleaved_thinking`, `workflows`, `agent_orchestration`, `fast_mode`, `effort_control`, 1M `max_context`). OpenRouter (`anthropic/claude-opus-4-8`) and Bedrock (`anthropic.claude-opus-4-8-v1:0`) mappings added. 4.7 demoted to a plain entry. `_meta.updated` bumped to 2026-05-28.
+- **`CostCalculator`** — Opus 4.8 pricing rows added to the static fallback (native, OpenRouter, Bedrock ids) at $15 / $75 per million, alongside 4.6/4.7.
+- **`Providers\AnthropicProvider`** — the OAuth legacy-model rewrite now targets `claude-opus-4-8` (was `claude-opus-4-5`), so subscription tokens pinned to a legacy id land on the current flagship.
+- **`Tools\Builtin\WorkflowTool`** — extended from a static step-list store into an Opus 4.8-style **dynamic workflow** engine. Workflows now carry a `type` (`static` | `dynamic`), a `strategy` (`sequential`, `pipeline`, `parallel`, `fan_out`, `loop_until`, `self_paced`) and runtime `guards` (`max_iterations`, `budget_usd`, `until`). New `plan` action / `planWorkflow()` expands a workflow into its wave/iteration schedule offline; `toPipelineConfig()` bridges any workflow into a config the existing `Pipeline\PipelineEngine` accepts; `setPipelineRunner()` enables real execution. Static workflows are byte-for-byte backward compatible.
+- **`Harness\CommandRouter`** — three new REPL slash commands mirroring the Opus 4.8 harness:
+  - **`/workflows`** (`list` | `get` | `plan` | `run` | `delete` | `create`) — manage dynamic workflows in a session-scoped store. `run` takes `--run` / `--plan` so the execution mode is always **caller-selected**, never forced by the environment (a configured agent runner only sets the default).
+  - **`/ultraplan <task> [--run]`** — decomposes the task with `Squad\TaskDecomposer` (heuristic, offline; LLM-refinable) into a dynamic workflow, registers it, and prints the plan.
+  - **`/ultrareview [target] [--run]`** — builds a dynamic review workflow (parallel fan-out across correctness / security / performance / tests / maintainability, then a synthesis step) over the current diff.
+- **Tests** — `WorkflowToolDynamicTest` (planning, the PipelineEngine bridge for every strategy, nested parallel + synthesis, tool-step translation, caller-selectable run mode, live-runner execution, Opus 4.8 pricing) and `HarnessSlashCommandsTest` (command registration + `/workflows` / `/ultraplan` / `/ultrareview` behavior). `AnthropicProviderOAuthTest` updated for the new OAuth fallback.
+
 ## [1.0.5] - 2026-05-20
 
 ### 💻 Summary

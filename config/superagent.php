@@ -60,7 +60,7 @@ return [
             // 'easy'     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-flash'],
             // 'moderate' => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6'],
             // 'hard'     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-pro'],
-            // 'expert'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-7'],
+            // 'expert'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-8'],
         ],
     ],
 

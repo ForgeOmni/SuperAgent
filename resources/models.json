@@ -1,7 +1,7 @@
 {
   "_meta": {
     "schema_version": 2,
-    "updated": "2026-05-20",
+    "updated": "2026-05-28",
     "note": "Source of truth for model catalog + pricing. Per-million-token USD prices. Override at runtime via SUPERAGENT_MODELS_FILE env var or ModelCatalog::loadFromFile(). Each entry may set `family` (for alias resolution), `aliases`, `date` (YYYYMMDD; newest wins within a family), `input`/`output` pricing, and `description`."
   },
 
@@ -10,7 +10,8 @@
     "anthropic": {
       "env": "ANTHROPIC_API_KEY",
       "models": [
-        {"id": "claude-opus-4-7",          "family": "opus",   "date": "20260301", "input": 15.0,  "output": 75.0,  "aliases": ["opus", "claude-opus", "claude-opus-4", "claude-opus-4-7"], "description": "Opus 4.7 — top reasoning"},
+        {"id": "claude-opus-4-8",          "family": "opus",   "date": "20260528", "input": 15.0,  "output": 75.0,  "aliases": ["opus", "claude-opus", "claude-opus-4", "claude-opus-4-8"], "capabilities": {"streaming": true, "tools": true, "thinking": true, "interleaved_thinking": true, "multimodal": true, "workflows": true, "agent_orchestration": true, "fast_mode": true, "effort_control": true, "context_cache": "auto", "mcp": true, "max_context": 1000000}, "description": "Opus 4.8 — flagship reasoning, 1M context, multi-agent workflow orchestration + fast mode"},
+        {"id": "claude-opus-4-7",          "family": "opus",   "date": "20260301", "input": 15.0,  "output": 75.0,  "description": "Opus 4.7"},
         {"id": "claude-opus-4-6-20250514", "family": "opus",   "date": "20250514", "input": 15.0,  "output": 75.0,  "description": "Opus 4.6"},
         {"id": "claude-opus-4-5",          "family": "opus",   "date": "20251015", "input": 15.0,  "output": 75.0,  "description": "Opus 4.5"},
         {"id": "claude-opus-4-1",          "family": "opus",   "date": "20250801", "input": 15.0,  "output": 75.0,  "description": "Opus 4.1"},
@@ -79,6 +80,7 @@
     "openrouter": {
       "env": "OPENROUTER_API_KEY",
       "models": [
+        {"id": "anthropic/claude-opus-4-8",     "input": 15.0,  "output": 75.0},
         {"id": "anthropic/claude-opus-4-7",     "input": 15.0,  "output": 75.0},
         {"id": "anthropic/claude-sonnet-4-7",   "input": 3.0,   "output": 15.0},
         {"id": "anthropic/claude-haiku-4-5",    "input": 0.80,  "output": 4.0},
@@ -103,6 +105,7 @@
     "bedrock": {
       "env": "AWS_ACCESS_KEY_ID",
       "models": [
+        {"id": "anthropic.claude-opus-4-8-v1:0",                    "input": 15.0, "output": 75.0},
         {"id": "anthropic.claude-opus-4-7-v1:0",                    "input": 15.0, "output": 75.0},
         {"id": "anthropic.claude-sonnet-4-7-v1:0",                  "input": 3.0,  "output": 15.0},
         {"id": "anthropic.claude-haiku-4-5-20251001-v1:0",          "input": 0.80, "output": 4.0},

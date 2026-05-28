@@ -97,7 +97,7 @@ class AnthropicProvider implements LLMProvider, SupportsThinking
         // legacy model ids (e.g. claude-3-5-sonnet-20241022) that the API will
         // reject with a confusing 429 "rate_limit_error".
         if ($authMode === 'oauth' && $this->isLegacyModel($this->model)) {
-            $this->model = 'claude-opus-4-5';
+            $this->model = 'claude-opus-4-8';
         }
 
         $headers = [

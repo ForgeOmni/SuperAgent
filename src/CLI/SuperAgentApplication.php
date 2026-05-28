@@ -172,14 +172,18 @@ class SuperAgentApplication
                 // future transport modes (e.g. `acp`).
                 $options['output'] = (string) ($args[++$i] ?? '');
             } elseif (! str_starts_with($arg, '-')) {
-                $positional[] = $arg;
-                // Once we cross a known-subcommand positional, stop consuming
-                // flags globally — they belong to the subcommand. Without this,
-                // `eval run --models X` would silently drop `--models`.
-                if (in_array($arg, $knownSubcommands, true) && $options['command'] === null) {
+                // A subcommand is only recognized as the FIRST positional argument
+                // (after any leading global flags). A known word buried later in a
+                // plain prompt — e.g. `fix the login bug` — is just prompt text, not
+                // a command. Once a subcommand is crossed we stop consuming flags
+                // globally (they belong to the subcommand), so `eval run --models X`
+                // keeps `--models`.
+                if ($options['command'] === null && $positional === []
+                    && in_array($arg, $knownSubcommands, true)) {
                     $options['command'] = $arg;
-                    array_pop($positional);
                     $subcommandRaw = [];
+                } else {
+                    $positional[] = $arg;
                 }
             }
 
