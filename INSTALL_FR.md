@@ -441,6 +441,8 @@ superagent smart replay <id|--last>         # rejoue un plan sauvegardé avec d'
 
 REPL : dans le mode interactif `superagent`, `/smart <task>` lance la même orchestration en ligne.
 
+Le REPL interactif embarque aussi les commandes slash du harness Opus 4.8 — `/workflows`, `/ultraplan`, `/ultrareview`, et `/deep-research <question>` (recherche web en éventail → vérification → rapport sourcé, ajoutée en v1.0.9). Chacune construit un workflow dynamique au niveau de la session, inspectable avec `/workflows plan <id>` et exécutable avec `/workflows run <id> --run` ; référence complète dans [ADVANCED_USAGE §87](docs/ADVANCED_USAGE.md).
+
 Les run-logs vont dans `~/.superagent/smart_runs/<ISO>_<shortid>.json`. Pipeline complet + référence des flags dans [ADVANCED_USAGE §59](docs/ADVANCED_USAGE.md#59-superagent-smart--eval-score-driven-orchestration).
 
 *Depuis v0.9.9 (sous-commande CLI + garde-fous).*

@@ -11850,9 +11850,10 @@ Dans le REPL interactif (ou tout `Harness\CommandRouter`) :
 /workflows create <json>                     créer depuis {"name","type","strategy","guards","steps":[...]}
 /ultraplan <task> [--run]                    décompose une tâche (TaskDecomposer) en workflow dynamique exécutable
 /ultrareview [target] [--run]                construit un workflow de revue multi-dimensions parallèle sur le diff
+/deep-research <question> [--run]            recherche web en éventail → vérification → rapport sourcé  (v1.0.9)
 ```
 
-`/ultraplan` et `/ultrareview` *génèrent* tous deux des workflows dynamiques dans le store de session — inspectez-les avec `/workflows plan <id>` et lancez-les avec `/workflows run <id> --run`. `--run` / `--plan` priment sur le mode par défaut, qu'un agent runner soit configuré ou non.
+`/ultraplan`, `/ultrareview` et `/deep-research` (ajoutée en v1.0.9) *génèrent* tous des workflows dynamiques dans le store de session — inspectez-les avec `/workflows plan <id>` et lancez-les avec `/workflows run <id> --run`. `--run` / `--plan` priment sur le mode par défaut, qu'un agent runner soit configuré ou non. `/deep-research <question>` déploie des recherches web sur quatre angles (`background` / `current` / `evidence` / `skeptic`), exécute une vague de vérification adverse, puis synthétise un rapport sourcé (réponse · preuves · questions ouvertes · confiance).
 
 ## 88. Provider xAI Grok (v1.0.8)
 

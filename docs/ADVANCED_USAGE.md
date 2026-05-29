@@ -10731,9 +10731,10 @@ Inside the interactive REPL (or any `Harness\CommandRouter`):
 /workflows create <json>                     create from {"name","type","strategy","guards","steps":[...]}
 /ultraplan <task> [--run]                    decompose a task (TaskDecomposer) into a runnable dynamic workflow
 /ultrareview [target] [--run]                build a parallel multi-dimension review workflow over the diff
+/deep-research <question> [--run]            fan-out web searches → verify → cited report  (v1.0.9)
 ```
 
-`/ultraplan` and `/ultrareview` both *generate* dynamic workflows in the session-scoped store, so you can inspect them with `/workflows plan <id>` and run them with `/workflows run <id> --run`. `--run` / `--plan` override the default mode regardless of whether an agent runner is configured.
+`/ultraplan`, `/ultrareview` and `/deep-research` (added v1.0.9) all *generate* dynamic workflows in the session-scoped store, so you can inspect them with `/workflows plan <id>` and run them with `/workflows run <id> --run`. `--run` / `--plan` override the default mode regardless of whether an agent runner is configured. `/deep-research <question>` fans out web searches across four angles (`background` / `current` / `evidence` / `skeptic`), runs an adversarial verification wave, then synthesizes one cited report (answer · evidence · open questions · confidence).
 
 ## 88. xAI Grok provider (v1.0.8)
 

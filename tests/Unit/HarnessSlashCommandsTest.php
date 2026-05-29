@@ -18,6 +18,7 @@ class HarnessSlashCommandsTest extends TestCase
         $this->assertTrue($r->has('workflows'));
         $this->assertTrue($r->has('ultraplan'));
         $this->assertTrue($r->has('ultrareview'));
+        $this->assertTrue($r->has('deep-research'));
     }
 
     public function test_ultraplan_creates_dynamic_workflow_visible_to_workflows(): void
@@ -45,6 +46,28 @@ class HarnessSlashCommandsTest extends TestCase
         $this->assertStringContainsString('Wave 1 (parallel)', $out);
         $this->assertStringContainsString('synthesize', $out);
         $this->assertStringContainsString('dynamic workflow', $out);
+    }
+
+    public function test_deep_research_builds_fanout_verify_synthesize(): void
+    {
+        $r = new CommandRouter();
+        $out = $r->dispatch('/deep-research What is the state of solid-state batteries?', [])->output;
+        $this->assertStringContainsString('Deep-research', $out);
+        $this->assertStringContainsString('Wave 1 (parallel)', $out);
+        $this->assertStringContainsString('verify', $out);
+        $this->assertStringContainsString('synthesize', $out);
+        $this->assertStringContainsString('dynamic workflow', $out);
+
+        // Visible to /workflows as a dynamic/sequential workflow.
+        $list = $r->dispatch('/workflows', [])->output;
+        $this->assertStringContainsString('deep-research:', $list);
+        $this->assertStringContainsString('dynamic/sequential', $list);
+    }
+
+    public function test_deep_research_requires_a_question(): void
+    {
+        $r = new CommandRouter();
+        $this->assertStringContainsString('Usage: /deep-research', $r->dispatch('/deep-research', [])->output);
     }
 
     public function test_workflows_help_lists_dynamic_strategies(): void

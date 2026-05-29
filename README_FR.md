@@ -1479,6 +1479,7 @@ superagent smart replay <id|--last>         # rejoue un plan sauvegardé avec d'
   /workflows               lister/exécuter des workflows dynamiques (get|plan|run|delete|create ; --run|--plan)
   /ultraplan <task>        planifier en profondeur une tâche en workflow dynamique exécutable
   /ultrareview [target]    revue multi-dimensions du diff en workflow dynamique
+  /deep-research <q>       recherche web en éventail → vérification → rapport sourcé en workflow dynamique
   /clear                   vider la conversation
   /quit                    quitter
 ```

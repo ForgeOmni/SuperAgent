@@ -9,13 +9,13 @@ namespace SuperAgent\Harness;
  *
  * Built-in commands: /help, /status, /tasks, /compact, /continue,
  * /session, /clear, /model, /cost, /smart, /workflows, /ultraplan,
- * /ultrareview, /quit
+ * /ultrareview, /deep-research, /quit
  *
  * Custom commands can be registered via `register()`.
  *
- * `/workflows`, `/ultraplan` and `/ultrareview` mirror the Opus 4.8 harness
- * commands. They build/run **dynamic workflows** through a session-scoped
- * {@see \SuperAgent\Tools\Builtin\WorkflowTool}. Both a plan (dry-run, offline)
+ * `/workflows`, `/ultraplan`, `/ultrareview` and `/deep-research` mirror the
+ * Opus 4.8 harness commands. They build/run **dynamic workflows** through a
+ * session-scoped {@see \SuperAgent\Tools\Builtin\WorkflowTool}. Both a plan (dry-run, offline)
  * and a live (PipelineEngine-backed) mode are always selectable by the caller
  * via `--run` / `--plan` — the configured environment sets the default, never
  * the only option. Inject an agent runner with
@@ -278,6 +278,10 @@ class CommandRouter
         $this->register('ultrareview', 'Multi-dimension review of the current diff as a dynamic workflow (Opus 4.8 ultrareview)', function (string $args, array $ctx): string {
             return $this->handleUltrareview($args, $ctx);
         });
+
+        $this->register('deep-research', 'Fan-out web research → verify → cited report as a dynamic workflow (Opus 4.8 deep-research)', function (string $args, array $ctx): string {
+            return $this->handleDeepResearch($args, $ctx);
+        });
     }
 
     // ── /workflows, /ultraplan, /ultrareview ──────────────────────
@@ -527,6 +531,93 @@ class CommandRouter
 
         $lines[] = '';
         $lines[] = "Saved as dynamic workflow #{$wfId}. Inspect: /workflows plan {$wfId}  ·  run: /workflows run {$wfId} --run";
+
+        if ($execute === true) {
+            $lines[] = '';
+            $run = $tool->execute(['action' => 'run', 'workflow_id' => $wfId, 'parameters' => ['execute' => true]]);
+            $lines[] = $this->formatWorkflowResult($run);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * /deep-research <question> [--run|--plan]
+     *
+     * Mirrors the Opus 4.8 deep-research harness as a dynamic workflow: a
+     * parallel fan-out of web searches across distinct angles, an adversarial
+     * verification pass that cross-checks the gathered claims, then a synthesis
+     * step that produces one cited report.
+     */
+    private function handleDeepResearch(string $args, array $ctx): string
+    {
+        [$question, $execute] = $this->parseModeFlags($args);
+        $question = trim($question);
+        if ($question === '') {
+            return "Usage: /deep-research <question> [--run|--plan]\n"
+                . 'Fans out web searches across angles, reads the sources, adversarially verifies the claims, and synthesizes one cited report.';
+        }
+
+        // Angles fanned out concurrently in wave 1; each researcher searches the
+        // web and reads its own sources for that lens.
+        $angles = [
+            'background' => 'foundational background, key definitions, and context',
+            'current'    => 'the most recent developments, data, and reporting',
+            'evidence'   => 'primary sources, studies, and hard numbers',
+            'skeptic'    => 'counterarguments, criticism, and competing interpretations',
+        ];
+
+        $searchSteps = [];
+        foreach ($angles as $key => $focus) {
+            $searchSteps[] = [
+                'name' => "search-{$key}",
+                'agent' => 'researcher',
+                'prompt' => "Research the question: \"{$question}\". Search the web for {$focus}. "
+                    . 'Read the most relevant sources and report concrete findings, each with its source URL and publication date.',
+            ];
+        }
+
+        $steps = [
+            ['name' => 'search', 'parallel' => $searchSteps],
+            [
+                'name' => 'verify',
+                'agent' => 'researcher',
+                'prompt' => "Adversarially verify the key claims gathered about \"{$question}\". "
+                    . 'Cross-check each claim against independent sources; flag anything unsupported, outdated, or contradicted, and keep only what survives.',
+                'depends_on' => ['search'],
+            ],
+            [
+                'name' => 'synthesize',
+                'agent' => 'researcher',
+                'prompt' => "Synthesize the verified findings on \"{$question}\" into one cited report: "
+                    . 'a direct answer up front, supporting evidence with inline source citations, remaining open questions, and an overall confidence level.',
+                'depends_on' => ['verify'],
+            ],
+        ];
+
+        $tool = $this->getWorkflowTool();
+        $created = $tool->execute([
+            'action' => 'create',
+            'name' => 'deep-research: ' . $this->snippet($question, 44),
+            'description' => 'Deep research on: ' . $question,
+            'type' => \SuperAgent\Tools\Builtin\WorkflowTool::TYPE_DYNAMIC,
+            'strategy' => 'sequential',
+            'steps' => $steps,
+        ]);
+        if ($created->isError) {
+            return 'Deep-research could not build a workflow: ' . $created->contentAsString();
+        }
+        $wfId = (int) (($created->content['workflow_id'] ?? 0));
+
+        $lines = [
+            'Deep-research — ' . count($angles) . ' search angles on: ' . $this->snippet($question, 60),
+            '',
+            '  Wave 1 (parallel): ' . implode(' · ', array_keys($angles)),
+            '  Wave 2: verify → adversarially cross-check the gathered claims',
+            '  Wave 3: synthesize → one cited report (answer · evidence · open questions · confidence)',
+            '',
+            "Saved as dynamic workflow #{$wfId}. Inspect: /workflows plan {$wfId}  ·  run: /workflows run {$wfId} --run",
+        ];
 
         if ($execute === true) {
             $lines[] = '';

@@ -1512,6 +1512,7 @@ superagent smart replay <id|--last>         # re-execute a saved plan with new r
   /workflows               list/run dynamic workflows (get|plan|run|delete|create; --run|--plan)
   /ultraplan <task>        deep-plan a task into a runnable dynamic workflow
   /ultrareview [target]    multi-dimension review of the diff as a dynamic workflow
+  /deep-research <q>       fan-out web research → verify → cited report as a dynamic workflow
   /clear                   clear conversation
   /quit                    exit
 ```

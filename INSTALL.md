@@ -441,6 +441,8 @@ superagent smart replay <id|--last>         # re-execute a saved plan with new r
 
 REPL: inside `superagent` interactive mode, `/smart <task>` runs the same orchestration inline.
 
+The interactive REPL also carries the Opus 4.8 harness slash commands — `/workflows`, `/ultraplan`, `/ultrareview`, and `/deep-research <question>` (fan-out web research → verify → cited report, added v1.0.9). Each builds a session-scoped dynamic workflow you can inspect with `/workflows plan <id>` and run with `/workflows run <id> --run`; full reference in [ADVANCED_USAGE §87](docs/ADVANCED_USAGE.md).
+
 Run logs persist to `~/.superagent/smart_runs/<ISO>_<shortid>.json`. The full pipeline + flag reference is in [ADVANCED_USAGE §59](docs/ADVANCED_USAGE.md#59-superagent-smart--eval-score-driven-orchestration).
 
 *Since v0.9.9 (CLI subcommand + guardrails).*

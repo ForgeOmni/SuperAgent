@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-05-28
+
+### 💻 Summary
+
+**`/deep-research` joins the Opus 4.8 harness commands — a fourth dynamic-workflow generator alongside `/workflows` · `/ultraplan` · `/ultrareview`.** A harness + docs capability release — additive, no breaking changes, no migration steps. `/deep-research <question>` builds a dynamic research workflow that mirrors the Opus 4.8 deep-research loop: a parallel fan-out of web searches across four angles, an adversarial verification wave, then a cited-report synthesis. The run mode stays caller-selectable (`--plan` default / `--run` via `PipelineEngine`), just like the other three. Full Unit suite green.
+
+### Added — `/deep-research` Opus 4.8 harness command
+
+- **`Harness\CommandRouter`** — **`/deep-research <question> [--run|--plan]`**, a fourth Opus 4.8 harness command alongside `/workflows` · `/ultraplan` · `/ultrareview`. Builds a dynamic research workflow that mirrors the Opus 4.8 deep-research harness: a parallel fan-out of web searches across four angles (`background` / `current` / `evidence` / `skeptic`, each a `researcher` agent that searches and reads its own sources), an adversarial **verify** wave that cross-checks the gathered claims against independent sources, then a **synthesize** wave producing one cited report (answer · evidence · open questions · confidence). Registered in the same session-scoped `WorkflowTool` store as the other three, so it is visible to `/workflows`; the run mode stays caller-selectable (`--plan` default, `--run` executes via a wired `PipelineEngine`). Tests added to `HarnessSlashCommandsTest`.
+- **Docs** — README command tables (EN / 中文 / FR), the `INSTALL` REPL sections (EN / 中文 / FR), and `docs/ADVANCED_USAGE` §87 (EN / 中文 / FR) now document `/deep-research`.
+
 ## [1.0.8] - 2026-05-28
 
 ### 💻 Summary

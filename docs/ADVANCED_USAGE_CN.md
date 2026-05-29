@@ -11298,9 +11298,10 @@ $wf->execute(['action' => 'run', 'workflow_id' => 1, 'parameters' => ['execute' 
 /workflows create <json>                     从 {"name","type","strategy","guards","steps":[...]} 创建
 /ultraplan <task> [--run]                    用 TaskDecomposer 把任务拆解成可运行的动态工作流
 /ultrareview [target] [--run]                对 diff 构建并行多维度评审工作流
+/deep-research <question> [--run]            扇出式联网搜索 → 核验 → 带引用的报告（v1.0.9）
 ```
 
-`/ultraplan` 和 `/ultrareview` 都会在会话级存储里**生成**动态工作流，可用 `/workflows plan <id>` 查看、`/workflows run <id> --run` 运行。`--run` / `--plan` 覆盖默认模式，与是否配置了 agent runner 无关。
+`/ultraplan`、`/ultrareview` 和 `/deep-research`（v1.0.9 新增）都会在会话级存储里**生成**动态工作流，可用 `/workflows plan <id>` 查看、`/workflows run <id> --run` 运行。`--run` / `--plan` 覆盖默认模式，与是否配置了 agent runner 无关。`/deep-research <question>` 从四个角度（`background` / `current` / `evidence` / `skeptic`）扇出联网搜索，跑一轮对抗式核验，再综合成一份带引用的报告（答案 · 证据 · 待解问题 · 置信度）。
 
 ## 88. xAI Grok provider (v1.0.8)
 
