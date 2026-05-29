@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-05-28
+
+### 💻 Summary
+
+**Claude Opus 4.8 lands as the flagship Anthropic model, the harness gains Opus 4.8-style dynamic workflows with `/workflows` · `/ultraplan` · `/ultrareview`, and xAI Grok joins as a new provider.** A capability release — additive, no breaking changes, no migration steps. `claude-opus-4-8` takes the `opus` alias and Opus pricing; `WorkflowTool` grows from a static step list into dynamic workflow strategies (`sequential` / `pipeline` / `parallel` / `fan_out` / `loop_until` / `self_paced`) with offline plan-expansion and a live `PipelineEngine` bridge — and the run mode (`--plan` / `--run`) is always caller-selectable. `/ultraplan` and `/ultrareview` generate runnable dynamic workflows. Grok (`grok-4.3` flagship, verified against docs.x.ai) is wired over xAI's OpenAI-compatible endpoint. Full Unit suite green (3095 tests).
+
 ### Added — Claude Opus 4.8 + dynamic workflows + Opus 4.8 harness commands
 
 - **`resources/models.json`** — catalog now ships `claude-opus-4-8` as the flagship Anthropic model (family `opus`; carries the `opus` / `claude-opus` / `claude-opus-4` aliases, so alias resolution and the `/model` picker now resolve to 4.8). Pricing matches the Opus tier ($15 / $75 per million). A `capabilities` block records the Opus 4.8 feature set (`thinking`, `interleaved_thinking`, `workflows`, `agent_orchestration`, `fast_mode`, `effort_control`, 1M `max_context`). OpenRouter (`anthropic/claude-opus-4-8`) and Bedrock (`anthropic.claude-opus-4-8-v1:0`) mappings added. 4.7 demoted to a plain entry. `_meta.updated` bumped to 2026-05-28.

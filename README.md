@@ -3,12 +3,12 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.6-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.0.8-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Docs**: [Installation](INSTALL.md) · [安装](INSTALL_CN.md) · [Installation FR](INSTALL_FR.md) · [Advanced usage](docs/ADVANCED_USAGE.md) · [API docs](docs/)
 
-An AI agent SDK for PHP — run the full agentic loop (LLM turn → tool call → tool result → next turn) in-process, with thirteen providers, real-time streaming, multi-agent orchestration, and a machine-readable wire protocol. Usable as a standalone CLI or as a Laravel library.
+An AI agent SDK for PHP — run the full agentic loop (LLM turn → tool call → tool result → next turn) in-process, with fourteen providers, real-time streaming, multi-agent orchestration, and a machine-readable wire protocol. Usable as a standalone CLI or as a Laravel library.
 
 ```bash
 superagent "fix the login bug in src/Auth/"
@@ -95,7 +95,7 @@ superagent "inspect composer.json and tell me what PHP version this project targ
 
 ## Providers & Authentication
 
-Thirteen registry-backed providers, with region-aware base URLs and multiple auth modes per provider. All implement the same `LLMProvider` contract, so swapping one for another is one line.
+Fourteen registry-backed providers, with region-aware base URLs and multiple auth modes per provider. All implement the same `LLMProvider` contract, so swapping one for another is one line.
 
 | Registry key | Provider | Notes |
 |---|---|---|
@@ -110,13 +110,14 @@ Thirteen registry-backed providers, with region-aware base URLs and multiple aut
 | `glm` | BigModel GLM | API key; regions `intl` / `cn` |
 | `minimax` | MiniMax | API key; regions `intl` / `cn` |
 | `deepseek` | DeepSeek V4 | API key; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(since v0.9.6, multi-upstream v0.9.8)* |
+| `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.3` *(since v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Local Ollama daemon | No auth — localhost:11434 by default |
 | `lmstudio` | Local LM Studio server | Placeholder auth — localhost:1234 by default *(since v0.9.1)* |
 
 Auth options, by priority:
 
-1. **API key from environment** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
+1. **API key from environment** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
 2. **Stored OAuth credentials** at `~/.superagent/credentials/<name>.json`. Device-code flow — run `superagent auth login <name>`:
    - `claude-code` — reuses an existing Claude Code login
    - `codex` — reuses a Codex CLI login
@@ -1508,6 +1509,9 @@ superagent smart replay <id|--last>         # re-execute a saved plan with new r
   /compact                 force context compaction
   /session save|load|list|delete
   /smart <task>            eval-score-driven plan+route+merge (see `superagent smart`)
+  /workflows               list/run dynamic workflows (get|plan|run|delete|create; --run|--plan)
+  /ultraplan <task>        deep-plan a task into a runnable dynamic workflow
+  /ultrareview [target]    multi-dimension review of the diff as a dynamic workflow
   /clear                   clear conversation
   /quit                    exit
 ```

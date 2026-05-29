@@ -11784,3 +11784,88 @@ Le constructeur force `1 ≤ n ≤ m` et `count($voters) === m`. Off-by-one ou l
 
 `tests/Squad/ConsensusGateTest.php` — seuils de quorum (3-of-4, 4-of-4, 1-of-4), parsing de verdict (sentinel trouvé, mot-clé lenient, abstain par défaut), validation du constructeur, arithmétique du tally, ordre de la map per-voter.
 
+## 87. Workflows dynamiques + `/workflows`, `/ultraplan`, `/ultrareview` (v1.0.8)
+
+> Workflows dynamiques façon Opus 4.8 : définissez un workflow comme une *stratégie* + des *garde-fous* à l'exécution plutôt qu'une liste de pas figée, dépliez-le en son planning de vagues/itérations hors-ligne, et exécutez-le réellement via le `PipelineEngine` existant.
+
+### WorkflowTool — statique vs dynamique
+
+`SuperAgent\Tools\Builtin\WorkflowTool` supporte deux formes via le champ `type` :
+
+- **`static`** — la liste de pas figée et ordonnée d'origine (inchangée, totalement rétrocompatible).
+- **`dynamic`** — une `strategy` plus des `guards` qui décident la forme à l'exécution :
+
+| Stratégie | Comportement |
+|---|---|
+| `sequential` | pas dans l'ordre |
+| `pipeline` | la sortie de chaque pas alimente le suivant (`depends_on` / `input_from` chaînés) |
+| `parallel` / `fan_out` | tous les pas en parallèle dans une seule vague |
+| `loop_until` | le corps se répète jusqu'à ce que `until` tienne, plafonné par `max_iterations` |
+| `self_paced` | le modèle choisit l'action suivante à chaque itération, borné par `max_iterations` / `budget_usd` / `until` |
+
+Garde-fous : `max_iterations` (int), `budget_usd` (float), `until` (chaîne de condition).
+
+```php
+use SuperAgent\Tools\Builtin\WorkflowTool;
+
+$wf = new WorkflowTool();
+$wf->execute([
+    'action'   => 'create',
+    'name'     => 'crawl',
+    'type'     => 'dynamic',
+    'strategy' => 'loop_until',
+    'guards'   => ['max_iterations' => 5, 'until' => 'queue empty'],
+    'steps'    => [
+        ['agent' => 'general', 'prompt' => 'Récupère la prochaine URL et extrais les liens'],
+    ],
+]);
+
+// Dépliage hors-ligne du plan — sans effet de bord, sans appel LLM :
+$plan = $wf->planWorkflow(1);
+```
+
+### Plan vs exécution — toujours au choix de l'appelant
+
+Le mode d'exécution est **choisi par l'appelant**, jamais imposé par l'environnement :
+
+- `run` avec `parameters.execute = false` → dépliage du plan (dry-run).
+- `run` avec `parameters.execute = true` → exécution réelle via `PipelineEngine`.
+- Sans agent runner injecté, un `run` dynamique renvoie le plan et le signale.
+
+`toPipelineConfig(int $id)` traduit n'importe quel workflow en une config acceptée par `Pipeline\PipelineConfig::fromArray()` ; injectez l'exécuteur avec `setPipelineRunner(callable $agentRunner)` pour l'exécuter réellement :
+
+```php
+$wf->setPipelineRunner(fn ($step, $ctx) => $backend->run($step, $ctx));
+$wf->execute(['action' => 'run', 'workflow_id' => 1, 'parameters' => ['execute' => true]]);
+```
+
+### Commandes REPL
+
+Dans le REPL interactif (ou tout `Harness\CommandRouter`) :
+
+```
+/workflows                                   lister les workflows
+/workflows get|plan|delete <id>              inspecter / déplier / supprimer
+/workflows run <id> [--run|--plan] [json]    exécuter (plan par défaut ; --run exécute via PipelineEngine)
+/workflows create <json>                     créer depuis {"name","type","strategy","guards","steps":[...]}
+/ultraplan <task> [--run]                    décompose une tâche (TaskDecomposer) en workflow dynamique exécutable
+/ultrareview [target] [--run]                construit un workflow de revue multi-dimensions parallèle sur le diff
+```
+
+`/ultraplan` et `/ultrareview` *génèrent* tous deux des workflows dynamiques dans le store de session — inspectez-les avec `/workflows plan <id>` et lancez-les avec `/workflows run <id> --run`. `--run` / `--plan` priment sur le mode par défaut, qu'un agent runner soit configuré ou non.
+
+## 88. Provider xAI Grok (v1.0.8)
+
+Grok est un provider compatible OpenAI sur `https://api.x.ai/v1` (vérifié sur docs.x.ai). Auth via `XAI_API_KEY` (ou `GROK_API_KEY`).
+
+```php
+$agent = new SuperAgent\Agent([
+    'provider' => 'grok',
+    'model'    => 'grok-4.3',   // défaut ; modèle principal recommandé par xAI
+]);
+```
+
+Catalogue (`resources/models.json`) : `grok-4.3` ($1.25/$2.50, 1M ctx ; alias `grok` → `grok-4.3`), les SKU `grok-4.20-*` reasoning / non-reasoning / multi-agent, `grok-build-0.1`, `grok-4`, `grok-4-fast` (2M ctx), `grok-code-fast-1`, `grok-3`, `grok-3-mini`. `grok-3-mini` accepte un cran `reasoning_effort` (`low` / `high`) ; les modèles phares raisonnent nativement et l'ignorent. Tests : `tests/Unit/Providers/GrokProviderTest.php`.
+
+> **Cursor Composer n'est volontairement pas un provider** — Cursor n'expose aucune API publique officielle compatible OpenAI pour Composer (il est intégré à l'abonnement IDE ; seuls des proxies communautaires font le pont). Le dialecte wire entrant `Conversation\Encoder\CursorEncoder` est sans rapport.
+

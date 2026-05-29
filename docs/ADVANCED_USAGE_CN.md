@@ -11232,3 +11232,88 @@ $result = $gate->tally($responses);
 
 `tests/Squad/ConsensusGateTest.php` —— quorum 阈值（3-of-4、4-of-4、1-of-4）、verdict 解析（哨兵命中、宽容关键词、默认 abstain）、构造器校验、tally 算术、per-voter map 顺序。
 
+## 87. 动态工作流 + `/workflows`、`/ultraplan`、`/ultrareview` (v1.0.8)
+
+> Opus 4.8 风格的动态工作流：把工作流定义为「策略 + 运行时护栏」而非固定步骤列表，可离线展开成 wave/迭代调度，也可通过既有的 `PipelineEngine` 真实执行。
+
+### WorkflowTool —— 静态 vs 动态
+
+`SuperAgent\Tools\Builtin\WorkflowTool` 通过 `type` 字段支持两种形态：
+
+- **`static`** —— 原有的固定有序步骤列表（行为不变，完全向后兼容）。
+- **`dynamic`** —— 用 `strategy` + `guards` 在运行时决定形态：
+
+| 策略 | 行为 |
+|---|---|
+| `sequential` | 按顺序执行 |
+| `pipeline` | 每步输出喂给下一步（链式 `depends_on` / `input_from`）|
+| `parallel` / `fan_out` | 所有步骤在一波内并发 |
+| `loop_until` | 循环体重复直到 `until` 成立，受 `max_iterations` 上限约束 |
+| `self_paced` | 模型每轮自选下一动作，受 `max_iterations` / `budget_usd` / `until` 约束 |
+
+护栏：`max_iterations`（int）、`budget_usd`（float）、`until`（条件字符串）。
+
+```php
+use SuperAgent\Tools\Builtin\WorkflowTool;
+
+$wf = new WorkflowTool();
+$wf->execute([
+    'action'   => 'create',
+    'name'     => 'crawl',
+    'type'     => 'dynamic',
+    'strategy' => 'loop_until',
+    'guards'   => ['max_iterations' => 5, 'until' => 'queue empty'],
+    'steps'    => [
+        ['agent' => 'general', 'prompt' => '抓取下一个 URL 并提取链接'],
+    ],
+]);
+
+// 离线展开计划 —— 无副作用、不调用 LLM：
+$plan = $wf->planWorkflow(1);
+```
+
+### 计划 vs 执行 —— 模式始终由调用方指定
+
+运行模式**由调用方选择**，不被环境锁死：
+
+- `run` 且 `parameters.execute = false` → 仅展开计划（dry-run）。
+- `run` 且 `parameters.execute = true` → 通过 `PipelineEngine` 真实执行。
+- 未注入 agent runner 时，动态 `run` 返回计划并明确说明。
+
+`toPipelineConfig(int $id)` 把任意工作流翻译成 `Pipeline\PipelineConfig::fromArray()` 可接受的配置；用 `setPipelineRunner(callable $agentRunner)` 注入执行器即可真实运行：
+
+```php
+$wf->setPipelineRunner(fn ($step, $ctx) => $backend->run($step, $ctx));
+$wf->execute(['action' => 'run', 'workflow_id' => 1, 'parameters' => ['execute' => true]]);
+```
+
+### REPL 命令
+
+在交互式 REPL（或任意 `Harness\CommandRouter`）里：
+
+```
+/workflows                                   列出工作流
+/workflows get|plan|delete <id>              查看 / 展开 / 删除
+/workflows run <id> [--run|--plan] [json]    运行（默认仅计划；--run 通过 PipelineEngine 执行）
+/workflows create <json>                     从 {"name","type","strategy","guards","steps":[...]} 创建
+/ultraplan <task> [--run]                    用 TaskDecomposer 把任务拆解成可运行的动态工作流
+/ultrareview [target] [--run]                对 diff 构建并行多维度评审工作流
+```
+
+`/ultraplan` 和 `/ultrareview` 都会在会话级存储里**生成**动态工作流，可用 `/workflows plan <id>` 查看、`/workflows run <id> --run` 运行。`--run` / `--plan` 覆盖默认模式，与是否配置了 agent runner 无关。
+
+## 88. xAI Grok provider (v1.0.8)
+
+Grok 是 OpenAI 兼容的 provider，端点 `https://api.x.ai/v1`（已对照 docs.x.ai 核实）。鉴权用 `XAI_API_KEY`（或 `GROK_API_KEY`）。
+
+```php
+$agent = new SuperAgent\Agent([
+    'provider' => 'grok',
+    'model'    => 'grok-4.3',   // 默认；xAI 官方推荐主力模型
+]);
+```
+
+目录（`resources/models.json`）：`grok-4.3`（$1.25/$2.50，1M 上下文；`grok` 别名 → `grok-4.3`）、`grok-4.20-*` reasoning / non-reasoning / multi-agent 系列、`grok-build-0.1`、`grok-4`、`grok-4-fast`（2M 上下文）、`grok-code-fast-1`、`grok-3`、`grok-3-mini`。`grok-3-mini` 支持 `reasoning_effort` 档位（`low` / `high`）；旗舰模型原生推理、会忽略该参数。测试：`tests/Unit/Providers/GrokProviderTest.php`。
+
+> **Cursor Composer 有意不作为 provider** —— Cursor 没有官方公开的 OpenAI 兼容 API（Composer 绑定在 IDE 订阅里，只有社区代理能桥接）。入站的 `Conversation\Encoder\CursorEncoder` 线格式与此无关。
+

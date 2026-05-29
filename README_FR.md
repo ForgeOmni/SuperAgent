@@ -3,12 +3,12 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.6-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.0.8-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
 
-SDK d'agent IA pour PHP — exécutez la boucle agentique complète (tour LLM → appel d'outil → résultat → tour suivant) en processus, avec treize providers, streaming temps réel, orchestration multi-agents et un protocole wire lisible par machine. Utilisable en CLI autonome ou comme dépendance Laravel.
+SDK d'agent IA pour PHP — exécutez la boucle agentique complète (tour LLM → appel d'outil → résultat → tour suivant) en processus, avec quatorze providers, streaming temps réel, orchestration multi-agents et un protocole wire lisible par machine. Utilisable en CLI autonome ou comme dépendance Laravel.
 
 ```bash
 superagent "corrige le bug de connexion dans src/Auth/"
@@ -95,7 +95,7 @@ superagent "inspecte composer.json et dis-moi quelle version PHP ce projet cible
 
 ## Providers et authentification
 
-Treize providers pilotés par un registre, avec URL de base par région et plusieurs modes d'authentification. Tous implémentent le même contrat `LLMProvider` — échanger un provider pour un autre est une seule ligne.
+Quatorze providers pilotés par un registre, avec URL de base par région et plusieurs modes d'authentification. Tous implémentent le même contrat `LLMProvider` — échanger un provider pour un autre est une seule ligne.
 
 | Clé de registre | Provider | Notes |
 |---|---|---|
@@ -110,13 +110,14 @@ Treize providers pilotés par un registre, avec URL de base par région et plusi
 | `glm` | BigModel GLM | Clé API ; régions `intl` / `cn` |
 | `minimax` | MiniMax | Clé API ; régions `intl` / `cn` |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
+| `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.3` *(depuis v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Ollama local | Aucune auth — localhost:11434 par défaut |
 | `lmstudio` | Serveur LM Studio local | Auth placeholder — localhost:1234 par défaut *(depuis v0.9.1)* |
 
 Modes d'authentification, par priorité :
 
-1. **Clé API par variable d'environnement** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
+1. **Clé API par variable d'environnement** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `KIMI_API_KEY`, `QWEN_API_KEY`, `GLM_API_KEY`, `MINIMAX_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`.
 2. **Credentials OAuth stockés** à `~/.superagent/credentials/<name>.json`. Flux device-code — `superagent auth login <name>` :
    - `claude-code` — réutilise une connexion Claude Code existante
    - `codex` — réutilise une connexion Codex CLI
@@ -1475,6 +1476,9 @@ superagent smart replay <id|--last>         # rejoue un plan sauvegardé avec d'
   /compact                 compaction manuelle du contexte
   /session save|load|list|delete
   /smart <task>            plan+routage+fusion par score (cf. `superagent smart`)
+  /workflows               lister/exécuter des workflows dynamiques (get|plan|run|delete|create ; --run|--plan)
+  /ultraplan <task>        planifier en profondeur une tâche en workflow dynamique exécutable
+  /ultrareview [target]    revue multi-dimensions du diff en workflow dynamique
   /clear                   vider la conversation
   /quit                    quitter
 ```
