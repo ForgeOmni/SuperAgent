@@ -122,6 +122,13 @@ class AgentProgressTracker
         return [
             'agentId' => $this->agentId,
             'agentName' => $this->agentName,
+            'status' => $this->status,
+            // We don't track turn count directly here — tool uses are
+            // the closest proxy and the coordinator uses this as a
+            // rough activity signal in the metadata envelope. Callers
+            // that need an authoritative turn count read it from the
+            // AgentRunner result.
+            'turnCount' => $this->toolUseCount,
             'toolUseCount' => $this->toolUseCount,
             'tokenCount' => $this->getTotalTokens(),
             'inputTokens' => $this->latestInputTokens,

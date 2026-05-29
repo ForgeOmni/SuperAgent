@@ -240,13 +240,16 @@ class McpCommand
                 return 1;
             }
             // Just check the binary is resolvable — spawning the server
-            // in a test context would leave a zombie; `which` is enough.
-            $out = @shell_exec('command -v ' . escapeshellarg($command) . ' 2>/dev/null');
-            if (!is_string($out) || trim($out) === '') {
+            // in a test context would leave a zombie; a PATH lookup is
+            // enough. `command -v` is POSIX-only; on Windows we use
+            // `where.exe` plus a cmd-builtin fallback (e.g. `echo` is
+            // a cmd internal command and never appears on disk).
+            $resolved = $this->resolveBinaryPath($command);
+            if ($resolved === null) {
                 $renderer->error("Command '{$command}' not found in PATH.");
                 return 1;
             }
-            $renderer->success("Command '{$command}' found: " . trim($out));
+            $renderer->success("Command '{$command}' found: " . $resolved);
             return 0;
         }
 
@@ -266,6 +269,47 @@ class McpCommand
         }
         $renderer->success("OK — reachable at {$url}");
         return 0;
+    }
+
+    /**
+     * Cross-platform PATH lookup. Returns the absolute path of the
+     * resolved binary, or a synthetic marker for shell builtins on
+     * Windows (where `echo`, `dir`, etc. are not standalone files).
+     * Returns null when nothing resolves.
+     */
+    private function resolveBinaryPath(string $command): ?string
+    {
+        $isWindows = DIRECTORY_SEPARATOR === '\\';
+        if ($isWindows) {
+            // Suppress the bare "The system cannot find the path specified."
+            // that `where` prints to stderr when nothing matches. `2>nul`
+            // is the cmd equivalent of `2>/dev/null`.
+            $out = @shell_exec('where ' . escapeshellarg($command) . ' 2>nul');
+            if (is_string($out) && trim($out) !== '') {
+                // `where` may return multiple lines — first one is what
+                // the shell would actually invoke.
+                $first = strtok(trim($out), "\r\n");
+                return $first === false ? trim($out) : $first;
+            }
+            // cmd.exe builtins (echo, dir, type, set, …) never exist on
+            // disk but are still valid stdio targets when paired with
+            // `cmd /c`. Match the conservative list documented in
+            // `help` so we don't accept arbitrary unknown strings.
+            $builtins = [
+                'echo', 'dir', 'type', 'set', 'cd', 'cls', 'copy',
+                'del', 'erase', 'md', 'mkdir', 'move', 'path', 'rd',
+                'rmdir', 'ren', 'rename', 'ver',
+            ];
+            if (in_array(strtolower($command), $builtins, true)) {
+                return 'cmd builtin: ' . $command;
+            }
+            return null;
+        }
+        $out = @shell_exec('command -v ' . escapeshellarg($command) . ' 2>/dev/null');
+        if (!is_string($out) || trim($out) === '') {
+            return null;
+        }
+        return trim($out);
     }
 
     private function list(Renderer $renderer): int

@@ -15,14 +15,14 @@ class CollaborationResult
     private array $phaseResults = [];
 
     private AgentStatus $status = AgentStatus::PENDING;
-    private float $startTime;
-    private ?float $endTime = null;
+    private int $startTime;
+    private ?int $endTime = null;
     /** @var string[] Phases that were skipped due to conditions */
     private array $skippedPhases = [];
 
     public function __construct()
     {
-        $this->startTime = microtime(true);
+        $this->startTime = hrtime(true);
     }
 
     public function addPhaseResult(PhaseResult $result): void
@@ -38,19 +38,19 @@ class CollaborationResult
     public function markRunning(): void
     {
         $this->status = AgentStatus::RUNNING;
-        $this->startTime = microtime(true);
+        $this->startTime = hrtime(true);
     }
 
     public function markCompleted(): void
     {
         $this->status = AgentStatus::COMPLETED;
-        $this->endTime = microtime(true);
+        $this->endTime = hrtime(true);
     }
 
     public function markFailed(): void
     {
         $this->status = AgentStatus::FAILED;
-        $this->endTime = microtime(true);
+        $this->endTime = hrtime(true);
     }
 
     public function isSuccessful(): bool
@@ -84,8 +84,8 @@ class CollaborationResult
 
     public function getDurationMs(): float
     {
-        $end = $this->endTime ?? microtime(true);
-        return ($end - $this->startTime) * 1000;
+        $end = $this->endTime ?? hrtime(true);
+        return ($end - $this->startTime) / 1_000_000;
     }
 
     public function getTotalCostUsd(): float

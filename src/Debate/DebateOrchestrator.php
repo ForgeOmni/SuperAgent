@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Debate;
 
+use SuperAgent\Tracing\TraceCollector;
+
 final class DebateOrchestrator
 {
     /**
@@ -25,15 +27,54 @@ final class DebateOrchestrator
     public function debate(DebateConfig $config, string $topic): DebateResult
     {
         $startTime = microtime(true);
+        $startMicros = (int) ($startTime * 1_000_000);
+        $tracer = TraceCollector::getInstance();
+        $tid = $this->traceTid($topic);
+
+        $tracer->emitInstant(
+            name: 'debate.start',
+            category: 'debate',
+            tid: $tid,
+            args: [
+                'proposer_model' => $config->proposerModel,
+                'critic_model'   => $config->criticModel,
+                'judge_model'    => $config->judgeModel,
+                'topic_preview'  => mb_substr($topic, 0, 120),
+            ],
+        );
+
         $protocol = new DebateProtocol($this->agentRunner);
 
-        // Run debate rounds
+        // Run debate rounds — emit a per-round duration span.
+        $roundsStart = (int) (microtime(true) * 1_000_000);
         $rounds = $protocol->runDebateRounds($config, $topic);
+        $tracer->emitDuration(
+            name: 'debate.rounds',
+            category: 'debate',
+            tid: $tid,
+            startMicros: $roundsStart,
+            durationMicros: (int) ((microtime(true) * 1_000_000)) - $roundsStart,
+            args: ['round_count' => count($rounds)],
+        );
+
+        foreach ($rounds as $r) {
+            $tracer->emitInstant(
+                name: 'debate.round_' . $r->roundNumber,
+                category: 'debate',
+                tid: $tid,
+                args: [
+                    'round'      => $r->roundNumber,
+                    'round_cost' => $r->roundCost,
+                    'has_rebuttal' => $r->proposerRebuttal !== null,
+                ],
+            );
+        }
 
         $roundsCost = array_sum(array_map(fn(DebateRound $r) => $r->roundCost, $rounds));
         $remainingBudget = max(0.5, $config->maxBudget - $roundsCost);
 
-        // Judge the debate
+        // Judge the debate — span the judgment call separately.
+        $judgeStart = (int) (microtime(true) * 1_000_000);
         $judgment = $protocol->runJudgment(
             $config->judgeModel,
             $config->judgeSystemPrompt,
@@ -42,9 +83,34 @@ final class DebateOrchestrator
             $config->judgingCriteria,
             $remainingBudget,
         );
+        $tracer->emitDuration(
+            name: 'debate.judge',
+            category: 'debate',
+            tid: $tid,
+            startMicros: $judgeStart,
+            durationMicros: (int) ((microtime(true) * 1_000_000)) - $judgeStart,
+            args: [
+                'model' => $config->judgeModel,
+                'cost'  => $judgment['cost'] ?? 0.0,
+                'turns' => $judgment['turns'] ?? 1,
+            ],
+        );
 
         $totalCost = $roundsCost + ($judgment['cost'] ?? 0.0);
         $totalDuration = (microtime(true) - $startTime) * 1000;
+
+        $tracer->emitDuration(
+            name: 'debate.total',
+            category: 'debate',
+            tid: $tid,
+            startMicros: $startMicros,
+            durationMicros: (int) ($totalDuration * 1000),
+            args: [
+                'total_cost'  => $totalCost,
+                'rounds_cost' => $roundsCost,
+                'round_count' => count($rounds),
+            ],
+        );
         $totalTurns = array_sum(array_map(fn(DebateRound $r) => 2 + ($r->proposerRebuttal !== null ? 1 : 0), $rounds)) + ($judgment['turns'] ?? 1);
 
         return new DebateResult(
@@ -70,11 +136,37 @@ final class DebateOrchestrator
     public function redTeam(RedTeamConfig $config, string $task): DebateResult
     {
         $startTime = microtime(true);
+        $startMicros = (int) ($startTime * 1_000_000);
+        $tracer = TraceCollector::getInstance();
+        $tid = $this->traceTid($task);
+
+        $tracer->emitInstant(
+            name: 'redteam.start',
+            category: 'debate',
+            tid: $tid,
+            args: [
+                'builder_model'  => $config->builderModel,
+                'attacker_model' => $config->attackerModel,
+                'reviewer_model' => $config->reviewerModel,
+                'rounds_planned' => $config->rounds,
+            ],
+        );
+
         $protocol = new DebateProtocol($this->agentRunner);
 
+        $roundsStart = (int) (microtime(true) * 1_000_000);
         $result = $protocol->runRedTeamRounds($config, $task);
         $rounds = $result['rounds'];
         $roundsCost = $result['total_cost'];
+
+        $tracer->emitDuration(
+            name: 'redteam.rounds',
+            category: 'debate',
+            tid: $tid,
+            startMicros: $roundsStart,
+            durationMicros: (int) ((microtime(true) * 1_000_000)) - $roundsStart,
+            args: ['round_count' => count($rounds), 'rounds_cost' => $roundsCost],
+        );
 
         // Final review/synthesis
         $remainingBudget = max(0.5, $config->maxBudget - $roundsCost);
@@ -92,6 +184,20 @@ final class DebateOrchestrator
 
         $totalCost = $roundsCost + ($reviewResult['cost'] ?? 0.0);
         $totalDuration = (microtime(true) - $startTime) * 1000;
+
+        $tracer->emitDuration(
+            name: 'redteam.total',
+            category: 'debate',
+            tid: $tid,
+            startMicros: $startMicros,
+            durationMicros: (int) ($totalDuration * 1000),
+            args: [
+                'total_cost'   => $totalCost,
+                'rounds_cost'  => $roundsCost,
+                'review_cost'  => $reviewResult['cost'] ?? 0.0,
+                'round_count'  => count($rounds),
+            ],
+        );
 
         return new DebateResult(
             type: 'red_team',
@@ -116,6 +222,20 @@ final class DebateOrchestrator
     public function ensemble(EnsembleConfig $config, string $task): DebateResult
     {
         $startTime = microtime(true);
+        $startMicros = (int) ($startTime * 1_000_000);
+        $tracer = TraceCollector::getInstance();
+        $tid = $this->traceTid($task);
+
+        $tracer->emitInstant(
+            name: 'ensemble.start',
+            category: 'debate',
+            tid: $tid,
+            args: [
+                'agents'   => $config->agents,
+                'merger'   => $config->mergerModel,
+            ],
+        );
+
         $protocol = new DebateProtocol($this->agentRunner);
         $budgetPerAgent = ($config->maxBudget * 0.7) / max(1, $config->agents);
 
@@ -185,6 +305,15 @@ final class DebateOrchestrator
             agentContributions: $agentContributions,
             totalTurns: $totalTurns + ($mergeResult['turns'] ?? 1),
         );
+    }
+
+    /**
+     * Stable lane label for trace events from a debate session.
+     * Hash the topic so multi-session debates separate on the viewer.
+     */
+    private function traceTid(string $topic): string
+    {
+        return 'debate:' . substr(md5($topic), 0, 12);
     }
 
     private function extractRecommendation(string $content): string

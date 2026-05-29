@@ -328,8 +328,12 @@ class Renderer
 
     private function detectTermWidth(): int
     {
-        // Try tput
-        if (function_exists('shell_exec')) {
+        // tput is POSIX-only — calling it through cmd.exe on Windows
+        // makes the shell complain about `/dev/null` not existing
+        // (cmd treats it as a literal output path). The COLUMNS env
+        // fallback covers Windows; PowerShell sets it for us, cmd
+        // does not but 80 cols is a fine default there.
+        if (DIRECTORY_SEPARATOR !== '\\' && function_exists('shell_exec')) {
             $cols = (int) @shell_exec('tput cols 2>/dev/null');
             if ($cols > 0) {
                 return $cols;

@@ -40,6 +40,9 @@ final class Protocol
     public const METHOD_SESSION_PROMPT = 'session/prompt';
     public const METHOD_SESSION_CANCEL = 'session/cancel';
     public const METHOD_SESSION_UPDATE = 'session/update'; // notification (agent→client)
+    // Pi-borrowed extensions (pi.dev/docs/latest/rpc):
+    public const METHOD_SESSION_STEER = 'session/steer';        // mid-turn correction without abort
+    public const METHOD_SESSION_FOLLOW_UP = 'session/follow_up'; // queue prompt for after current turn
     public const METHOD_FS_READ = 'fs/read_text_file';
     public const METHOD_FS_WRITE = 'fs/write_text_file';
     public const METHOD_PERMISSION_REQUEST = 'permission/request';

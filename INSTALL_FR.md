@@ -652,6 +652,102 @@ skill/<name>/SKILL.md           (racine projet uniquement)
 
 Chaque SKILL.md est un fichier Markdown avec frontmatter YAML (`name:`, `description:`) suivi du corps. Le walk s'arrête à la frontière du worktree — un parent monorepo ne peut pas polluer un sous-projet.
 
+### Tracing & observabilité *(v1.0.6)*
+
+Le tracing est activé par défaut et écrit des fichiers Chrome Trace Event JSON dans `sys_get_temp_dir()/superagent-traces/`. Trois variables d'env le contrôlent :
+
+```bash
+export SUPERAGENT_TRACE_ENABLED=true               # défaut : true
+export SUPERAGENT_TRACE_PATH=/var/log/sa-traces    # défaut : sys_get_temp_dir()/superagent-traces
+export SUPERAGENT_TRACE_RING_SIZE=2048             # défaut : 1024 événements
+```
+
+Viewers recommandés :
+
+- **`ui.perfetto.dev`** — préféré. Drag & drop le fichier trace JSON.
+- **`chrome://tracing`** — viewer intégré de Chrome (legacy mais fonctionne).
+- Les snippets de **`docs/cookbook/`** référencent directement le format de fichier.
+
+Pour les gateways haut-RPS où le ring buffer singleton est de trop, mettre `SUPERAGENT_TRACE_ENABLED=false` ou injecter un `TraceCollector` désactivé dans le graphe DI.
+
+Le `PiEventStream` aligné pi est un émetteur listener séparé — câblez-le en souscrivant un `PiEventStreamWriter` dans votre bootstrap :
+
+```php
+use SuperAgent\Tracing\PiEventStream;
+use SuperAgent\Tracing\PiEventStreamWriter;
+
+PiEventStream::subscribe(new PiEventStreamWriter(
+    storage_path('sa-sessions/' . $sessionId . '.events.jsonl')
+));
+```
+
+### Compression de sortie structurée RTK *(v1.0.6)*
+
+Zéro config — `Tools\Compression\RtkPipeline` est câblé dans `QueryEngine` et tire sur chaque résultat d'outil non-erreur par défaut. Désactiver par appel quand vous avez besoin de fidélité byte-à-byte (ex. vous nourrissez la sortie à `git apply` qui a besoin de chaque ligne de contexte) :
+
+```php
+$result = $agent->run($prompt, ['disable_rtk_compression' => true]);
+```
+
+Les hosts peuvent aussi enregistrer des compresseurs supplémentaires pour des outils custom :
+
+```php
+use SuperAgent\Tools\Compression\RtkPipeline;
+use SuperAgent\Tools\Compression\CompressorInterface;
+
+$pipeline = new RtkPipeline();
+$pipeline->register('my_custom_tool', new MyCompressor());
+```
+
+Voir [ADVANCED_USAGE §83](docs/ADVANCED_USAGE_FR.md) pour le registre complet et les économies par outil.
+
+### Qwen 3.7 / Qwen-Anthropic *(v1.0.6)*
+
+Le modèle Qwen par défaut est maintenant `qwen3.7-max` (1M ctx, $2.50 / $7.50 par 1M tokens, support natif du protocole Anthropic). Trois clés provider accèdent à Qwen :
+
+```php
+// Endpoint OpenAI-compat (recommandé pour la parité avec le reste du SDK)
+$agent = new Agent(['provider' => 'qwen', 'api_key' => env('DASHSCOPE_API_KEY')]);
+
+// Endpoint DashScope natif (à utiliser uniquement si vous avez besoin du contrôle thinking_budget — famille 3.6)
+$agent = new Agent(['provider' => 'qwen-native', 'api_key' => env('DASHSCOPE_API_KEY')]);
+
+// Endpoint compatible protocole Anthropic (drop-in pour clients Claude Code)
+$agent = new Agent(['provider' => 'qwen-anthropic', 'api_key' => env('DASHSCOPE_API_KEY')]);
+```
+
+> L'URL du endpoint `qwen-anthropic` n'est pas officiellement documentée par Alibaba en anglais au 2026-05-22. Le défaut `https://dashscope.aliyuncs.com/anthropic-mode/v1` est une supposition ; override via `base_url` s'il renvoie 404. Vérifier `~/.qwen/settings.json` après avoir installé qwen-code v0.16+ pour un champ `anthropic-base-url` explicite.
+
+OAuth Qwen a été EOL le 2026-04-15 — seul l'auth par clé API est supporté.
+
+### Import de session pi *(v1.0.6)*
+
+Rejouer des sessions pi existantes (`~/.pi/agent/sessions/`) dans SuperAgent :
+
+```php
+use SuperAgent\Conversation\Importers\PiImporter;
+
+$importer = new PiImporter();
+foreach ($importer->listSessions(50) as $row) {
+    echo "{$row['id']}  {$row['started_at']}  {$row['first_user_message']}\n";
+}
+
+$messages = $importer->load('/abs/path/to/2026-05-22_abc123.jsonl');
+// → SuperAgent\Messages\Message[] prêts à amorcer l'historique d'un Agent
+```
+
+Aucun setup nécessaire — `~/.pi/agent/sessions` est la racine par défaut ; override via argument constructeur si le host utilise un layout non-standard.
+
+### CI chaîne d'approvisionnement *(v1.0.6)*
+
+Un nouveau workflow GitHub Actions (`.github/workflows/supply-chain.yml`) applique trois règles à chaque push, PR et lundi matin :
+
+1. `composer validate --strict`
+2. `composer audit --no-dev` (avis de sécurité Symfony)
+3. Aucun script lifecycle Composer (`post-install-cmd`, `post-update-cmd`, …) — l'installation tourne avec `--no-scripts`.
+
+Si vous forkez le SDK, ce workflow fonctionne out of the box ; si vous l'embarquez via Composer, le lockdown est appliqué de VOTRE côté à l'installation quand vous passez aussi `--no-scripts` (recommandé pour la sécurité).
+
 ---
 
 ## Vérification

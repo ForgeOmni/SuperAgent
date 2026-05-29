@@ -6,6 +6,7 @@ namespace SuperAgent\CostAutopilot;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use SuperAgent\Tracing\TraceCollector;
 
 /**
  * Intelligent cost control autopilot for AI agent sessions.
@@ -68,8 +69,30 @@ class CostAutopilot
      */
     public function setCurrentModel(string $model): void
     {
+        $previous = $this->currentModel;
         $this->currentModel = $model;
         $this->currentTierIndex = $this->findTierIndex($model);
+
+        // Wave 5 / SA-6 — emit a trace event so the timeline shows tier flips
+        // explicitly (otherwise budget decisions appear as silent model swaps
+        // and the operator has to correlate by hand). Cheap: one ring entry,
+        // best-effort guarded.
+        if ($previous !== $model && $previous !== '') {
+            try {
+                TraceCollector::getInstance()->emitInstant(
+                    name: 'budget.tier_change',
+                    category: 'budget',
+                    tid: 'autopilot:default',
+                    args: [
+                        'from'  => $previous,
+                        'to'    => $model,
+                        'index' => $this->currentTierIndex,
+                    ],
+                );
+            } catch (\Throwable) {
+                // tracing must never block business logic
+            }
+        }
     }
 
     /**
@@ -106,6 +129,22 @@ class CostAutopilot
     public function evaluate(float $sessionCostUsd): AutopilotDecision
     {
         $effectiveBudget = $this->getEffectiveBudget();
+
+        // Trace counter — lets the viewer chart cost burn over time.
+        try {
+            TraceCollector::getInstance()->emitCounter(
+                name: 'budget.spend',
+                category: 'budget',
+                tid: 'autopilot:default',
+                values: [
+                    'session_cost_usd' => $sessionCostUsd,
+                    'budget_usd'       => $effectiveBudget,
+                    'pct'              => $effectiveBudget > 0 ? ($sessionCostUsd / $effectiveBudget * 100) : 0,
+                ],
+            );
+        } catch (\Throwable) {
+            // ignore
+        }
 
         if ($effectiveBudget <= 0) {
             return AutopilotDecision::noop(0, $sessionCostUsd);

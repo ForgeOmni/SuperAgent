@@ -19,6 +19,281 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`/ultrareview [target] [--run]`** — builds a dynamic review workflow (parallel fan-out across correctness / security / performance / tests / maintainability, then a synthesis step) over the current diff.
 - **Tests** — `WorkflowToolDynamicTest` (planning, the PipelineEngine bridge for every strategy, nested parallel + synthesis, tool-step translation, caller-selectable run mode, live-runner execution, Opus 4.8 pricing) and `HarnessSlashCommandsTest` (command registration + `/workflows` / `/ultraplan` / `/ultrareview` behavior). `AnthropicProviderOAuthTest` updated for the new OAuth fallback.
 
+## [1.0.7] - 2026-05-23
+
+### 💻 Summary
+
+**Pure fix release — Windows cross-platform compatibility + CLI argument-parsing correctness + CI test reliability.** No new features, no schema changes, no breaking changes. A focused cleanup of issues exposed by real-world use after 1.0.6 shipped: the CLI was mis-routing ordinary conversation words as subcommands, several tool invocations on Windows broke on POSIX-only assumptions, and the worktree tests on CI runners failed silently because git identity wasn't configured. Every change is local, but each one sits squarely on an "out of the box" experience path.
+
+### Fixed — CLI argument parsing: only the first positional may be a subcommand (`src/CLI/SuperAgentApplication.php`)
+
+The old parser scanned every positional argument and treated any one that matched a known subcommand name (`run` / `eval` / `mcp` / `login` / …) as the command. This silently mis-routed ordinary prompts: `superagent "fix the login bug"` would see `login` mid-string, treat it as the `login` subcommand, and drop the rest of the prompt.
+
+Now only the first positional is checked: if it matches a known subcommand it's routed there, otherwise the whole positional run is passed through as a chat prompt. Reserved words like `run` or `eval` appearing in second-or-later positions no longer trigger mis-routing.
+
+### Fixed — `McpCommand` cross-platform PATH lookup (`src/CLI/Commands/McpCommand.php`)
+
+`mcp test <server>` used `command -v ... 2>/dev/null` to confirm the bound binary exists — that's a POSIX shell builtin and cmd.exe on Windows has no equivalent, so the command either returned an empty string or printed "'command' is not recognized as an internal or external command".
+
+Added a private `resolveBinaryPath()` for cross-platform PATH lookup:
+- POSIX: keeps the original `command -v` path.
+- Windows: `where.exe <name> 2>nul` (cmd's `>nul` is the equivalent of POSIX `>/dev/null`), returning the first line as the authoritative path.
+- Windows cmd-builtin whitelist (18 entries: `echo` / `dir` / `type` / `set` / `cd` / `cls` / `copy` / `del` / `md` / `mkdir` / `path` / `ren` / `ver` / …) — these aren't files on disk but are still valid stdio targets when paired with `cmd /c`. Returns a `cmd builtin: <name>` marker.
+
+### Fixed — `Renderer::detectTermWidth()` no longer calls `tput` on Windows
+
+`tput cols 2>/dev/null` translates through cmd as `tput cols 2 > /dev/null` — cmd interprets `/dev/null` as a literal output path and prints "The system cannot find the path specified."
+
+Fix: guard the `tput` branch with `DIRECTORY_SEPARATOR !== '\\'`. Windows falls straight through to the `COLUMNS` env-var fallback (PowerShell sets it, cmd doesn't), with 80 columns as the final default.
+
+### Fixed — `AgentProgressTracker::toArray()` exports `status` and `turnCount`
+
+The parallel-coordinator metadata envelope expects each agent to report `status` and `turnCount`, but the tracker only exported `toolUseCount` / `tokenCount` / etc. Downstream displays were rendering "unknown" status bars.
+
+Added `status` (passes through `$this->status` directly) and `turnCount` (uses `toolUseCount` as a proxy — the authoritative turn count lives on the `AgentRunner` result; this field is just a rough activity signal in the metadata envelope, and the comment in the code spells out the trade-off).
+
+### Fixed — `WorktreeManagerTest::createTempGitRepo()` writes a valid HEAD on CI
+
+CI runners (GitHub Actions, freshly provisioned dev machines) usually have no global `user.email` / `user.name`, so the test's `git commit --allow-empty -m "init"` failed silently and HEAD was never written. Every downstream `git worktree add ... HEAD` then failed with `fatal: invalid reference: HEAD`, taking out 5 worktree tests at once:
+
+- `testCreateAndRemoveWorktree`
+- `testCreateWorktreeResumesExisting`
+- `testCreateWorktreeWithSymlinks`
+- `testListWorktrees`
+- `testPruneKeepsValidMeta`
+
+Fix:
+- Pass `-c user.email=test@example.com -c user.name=Test` to `git commit` (per-invocation, no global config mutation).
+- Check exit codes on both `git init` and `git commit`, throwing `RuntimeException` with the real git output on failure so future breakage surfaces directly instead of disguised as "invalid reference: HEAD".
+
+### Fixed — Windows compatibility in several unit tests
+
+Following the runtime fixes above, hardcoded POSIX assumptions in a few tests were cleaned up too:
+- `BackendProtocolTest` / `PersistentTaskManagerTest` / `QwenProviderTest` / `WorktreeManagerTest`: `2>/dev/null` redirects, temp-directory permission bits, and shell exit-code semantics rewritten in a cross-platform way (Windows uses `2>&1` + array discard, POSIX keeps the original form).
+
+### Compatibility
+
+Zero breaking changes. All public APIs, config keys, file formats, and wire formats are binary-compatible with 1.0.6. The only addition is two extra fields (`status` / `turnCount`) on `AgentProgressTracker::toArray()` output — downstream consumers parse it loosely and aren't affected.
+
+## [1.0.6] - 2026-05-22
+
+### 💻 Summary
+
+**Observability becomes a first-class subsystem and Pi-style mid-turn control lands across the stack.** 1.0.6 is the "instrument everything, then let the operator steer it" release. The new `Tracing\` namespace gives every long-running orchestration (debate, red-team, error-recovery, cost-autopilot, parallel agents) a hardware-ring-buffer style trace producer that writes Chrome Trace Event JSON viewable in `chrome://tracing`, `ui.perfetto.dev`, or the bundled `trace-viewer.html`. The new `Tracing\PiEventStream` emits the canonical pi.dev session-event taxonomy as JSONL so the same session can be replayed in any pi-compatible viewer. Together with `Agent::steer()` / `Agent::followUp()` (also pi-borrowed), an operator can watch an agent run live, inject a mid-turn correction without aborting, and queue follow-ups during generation.
+
+The second theme is **structured-output compression** and **cross-provider tool-schema portability**. The new `Tools\Compression\RtkPipeline` (borrowed from 9Router + claude-octopus) auto-compresses `git diff`, `grep`, `find`, `ls`, `tree`, `Bash` output before the model sees it — typical 30-65 % byte savings, lossy-safe (paths / line numbers / hunks preserved). `Tools\Schema\Schema` + `ProviderNormalizer` (borrowed from pi's StringEnum/Typebox helper) lets one tool declare its input schema once and have it rewritten for Anthropic / OpenAI / Gemini's incompatible JSON-Schema subsets — Gemini's lack of `$ref` / `$defs` / top-level `oneOf` is now handled silently.
+
+Third: **Qwen 3.7 Max lands as the default Qwen model**, with a dedicated `qwen-anthropic` provider for DashScope's new Anthropic-protocol-compatible endpoint (drop-in replacement for Claude Code clients), a 5-recipe `docs/cookbook/` covering debate / red-team / cost-autopilot / cost-prediction / adaptive-feedback patterns, and a slew of conversation-level features: `Conversation\BranchManager` (pi-style tree algebra), `PiImporter` (replay pi sessions into SuperAgent), `CursorEncoder` / `VertexEncoder` (9router-borrowed wire dialects), `Squad\ConsensusGate` (octopus-borrowed N-of-M parallel voting), `SessionManager::fork()` (pi `/tree` semantics), `Context\Strategies\ConversationCompressor::trySplitTurn()` (pi-style split-turn compaction), `Hooks\HookEvent::PR_EVENT` + `PrWatchHookData` (claude-octopus PR/CI reaction), `Hooks\HookResult::rewriteOutput()` (PostToolUse output mutation).
+
+Zero breaking changes. One new schema bump on `resources/models.json` (Qwen 3.7 entries + a new `anthropic_protocol` capability flag). Every new piece is additive — pre-1.0.6 callers see byte-identical behaviour. **+39 new test files / ~750 new assertions**; supply-chain GitHub Actions workflow added for `composer validate --strict` + `composer audit` + lifecycle-script lockdown.
+
+### Added — `Tracing\` namespace (Chrome Trace Event ring buffer)
+
+A hardware-ring-buffer-style trace producer modelled on Jane Street's magic-trace. The collector is enabled by default; emit is O(1) lock-free; full-ring overwrites silently. Trigger sites (errors, snapshots, completed debates) call `dump()` to serialize the last N events to a Chrome-Trace-Event JSON file the operator can open in `chrome://tracing` or `ui.perfetto.dev`.
+
+- **`Tracing\TraceCollector`** — singleton facade. `emitDuration(name, category, tid, startMicros, durationMicros, args)` for spans, `emitInstant(name, category, tid, args)` for point events, `emitCounter(name, category, tid, values)` for charts, `span($name, $category, $tid)` returns a closer callable for `try { … } finally { $end(['ok' => true]); }` style. `dump($trigger, $reason)` serializes the ring to disk and returns the path. Env: `SUPERAGENT_TRACE_ENABLED=false` to disable, `SUPERAGENT_TRACE_PATH=/path` to override storage dir, `SUPERAGENT_TRACE_RING_SIZE=1024` to size the ring.
+- **`Tracing\RingBuffer`** — lock-free O(1) push, oldest-overwrite-on-full, snapshot-oldest-first. Default capacity 1024 events ≈ a few seconds of busy agent work.
+- **`Tracing\TraceEvent`** — immutable Chrome-Trace-Event record (phases `X` duration / `i` instant / `C` counter). Spec-compliant `toArray()` for direct serialization.
+- **`Tracing\TraceWriter`** — JSON file emitter under `{storage}/trace_superagent_{session}_{ms}_{trigger}.json`. Pretty-printed; metadata block carries `producer`, `session_id`, `trigger`, `trigger_reason`, `event_count`.
+- **`Tools\Builtin\SnapshotTool`** — `snapshot` tool the agent can call when something feels off ("about to loop", "third time reading same file", "milestone reached"). Pure observability — `isReadOnly() === true`. Returns the dumped file path so the operator can open the timeline.
+- **Wired-up producers**:
+  - `Debate\DebateOrchestrator`: emits `debate.start` / `debate.rounds` / `debate.round_N` / `debate.judge` / `debate.total` for the debate protocol, mirrored `redteam.*` and `ensemble.*` lanes for the red-team and ensemble protocols.
+  - `ErrorRecovery\ErrorRecoveryManager`: emits `error.unrecoverable` / `error.retries_exhausted` as instants AND triggers a full ring dump labelled `trigger=error` so the last N events of context are preserved at the moment things break. Best-effort guarded — tracing can never mask the original exception.
+  - `CostAutopilot\CostAutopilot`: `setCurrentModel()` emits `budget.tier_change` (which model → which model, position in the tier ladder); `evaluate()` emits a `budget.spend` counter so the viewer can chart cost burn over the session.
+  - `Console\Output\ParallelAgentDisplay::exportPerfettoJson()`: snapshot-the-whole-team-as-one-trace. Each agent becomes a Perfetto lane; team-leader relationships become `process_name` labels; per-agent token/tool counts ride on event args. Distinct from `TraceCollector::dump()` (which serializes the in-memory ring); use this for "what is happening RIGHT NOW across all agents" screenshots.
+
+### Added — `Tracing\PiEventStream` (pi.dev session event taxonomy)
+
+A canonical session-event vocabulary borrowed from [pi's JSON Event Stream Mode](https://pi.dev/docs/latest/json) so SuperAgent sessions can be replayed by any pi-compatible viewer. Separate from the magic-trace style `TraceCollector` — that's for cross-cutting performance lanes; this is for the user-facing session timeline (one turn = one block).
+
+- **18 event types**: `session` / `agent_start` / `agent_end` / `turn_start` / `turn_end` / `message_start` / `message_update` / `message_end` / `tool_execution_start` / `tool_execution_update` / `tool_execution_end` / `queue_update` / `compaction_start` / `compaction_end` / `auto_retry_start` / `auto_retry_end` / `model_change` / `thinking_level_change`.
+- **`PiEventStream::subscribe(callable)`** / `unsubscribe(handle)` / `emit(type, payload)` — listener-pattern fanout. Any callable can be a listener.
+- **`PiEventStream::translateLegacy()`** — back-compat map for SuperAgent's older event names (`tool_execution` → `tool_execution_end`, `llm_request` → `turn_start`, etc.). Lets consumers normalise feeds from `StructuredLogger` / `SimpleTracingManager` without changing the producer side. Legacy names removed in next major.
+- **`PiEventStreamWriter`** — JSONL writer to a session file (LF-only, no CRLF — wire-identical to `~/.pi/agent/sessions/--<cwd>--/<timestamp>_<uuid>.jsonl`).
+- **`docs/pi-event-stream.md`** — reference table of event types, wire format, API examples, and the legacy back-compat translator.
+
+### Added — Pi-style mid-turn control (`Agent::steer()` / `Agent::followUp()` + ACP `session/steer` / `session/follow_up`)
+
+Mid-turn correction without aborting + post-turn follow-up queueing. Adopted verbatim from pi.dev/docs/latest/rpc §steer / §follow_up.
+
+- **`Agent::steer(string $message)`** — enqueues a mid-turn correction. The next `QueryEngine` iteration drains the queue (via the new `setSteerDrainer()` callback Agent installs in `createEngine()`) and prepends each entry as a synthetic `[user steer]: …` `UserMessage` before the LLM call. Lets a host RPC handler nudge the trajectory ("stop, the bug is in X not Y") without losing the in-flight tool state.
+- **`Agent::followUp(string $message)`** — enqueues a prompt for after the current turn completes. After the main `run()` returns, the agent drains the follow-up queue (FIFO, up to `_max_followups_per_call = 8` by default) and runs each in sequence against the same conversation. Equivalent to pi's "backpressure-aware multi-message send".
+- **`Agent::drainSteer()` / `drainFollowUp()`** — host-facing queue pullers (called by the engine + by `Agent::run` itself).
+- **`QueryEngine::setSteerDrainer(callable)`** — engine-side install point. `runLoop()` invokes the drainer at every iteration boundary and appends drained messages to `$this->messages` before the next provider call.
+- **ACP protocol extensions**: `session/steer` and `session/follow_up` JSON-RPC methods (constants `Protocol::METHOD_SESSION_STEER` / `METHOD_SESSION_FOLLOW_UP`). Editors that speak ACP (Zed, Neovim Codecompanion, …) can now hot-redirect a running agent. `Handler::steer()` / `followUp()` are required on the contract; `DefaultHandler` maintains per-session `steerQueue` / `followUpQueue` arrays under `SessionEntry::$meta` and exposes `drainSteer($sessionId)` / `drainFollowUp($sessionId)` for the host's `promptFn` to consume.
+
+### Added — `Tools\Compression\RtkPipeline` (structured tool-output compression)
+
+Borrowed from 9Router's "RTK Token Saver" + claude-octopus's `octo-compress` PostToolUse hook. Both projects observed that tool outputs from `git diff`, `grep -rn`, `find`, `ls -R`, `tree` etc. dominate token usage in coding sessions — typically 30-50 % of input budget per turn, much of which is cosmetic noise (color codes, blank lines, unchanged context). RtkPipeline compresses these in a lossy-safe way: file paths, line numbers, diff hunks, match locations are preserved verbatim; cosmetic noise is dropped.
+
+- **`Tools\Compression\RtkPipeline`** — registry of per-tool compressors. `compress($toolName, $rawOutput)` returns compressed text or the original if compression would enlarge / break it. Never throws on malformed input — degrades silently. Built-ins registered: `git diff` / `git_diff`, `grep` / `rg` / `ripgrep`, `find`, `ls`, `tree`, `Bash` / `bash`, `Grep`, `Glob`. Cumulative byte-savings tracked under `stats()`.
+- **`Compressors\GitDiffCompressor`** — preserves `diff --git`, `--- a/`, `+++ b/`, `@@ -L,N +L,M @@`, `+`/`-` lines, mode-change markers. Drops unchanged context lines, `index <sha>..<sha>` lines, trailing whitespace. Typical 40-65 % savings.
+- **`Compressors\GrepCompressor`** — preserves `file:line:match` canonical hits. Drops context lines, ANSI codes, file-summary footers. Compacts repeated paths within a file to indent-prefixed lines (reversible). Typical 30-50 % savings.
+- **`Compressors\FindCompressor`** — collapses repeated directory prefixes; preserves leaf filenames.
+- **`Compressors\LsCompressor`** — drops total/permission columns when the model only needs filenames; preserves dir vs. file distinction.
+- **`Compressors\TreeCompressor`** — preserves structure markers (`├─` / `└─` / `│`); drops cosmetic byte/size annotations.
+- **`Compressors\BashOutputCompressor`** — dispatches to the right compressor when a Bash output sniffs as one of the above (diff header / grep `file:line:` pattern / `find -path`-style output).
+- **Wire-up in `QueryEngine`**: both the sequential `executeTools()` and the parallel zero-copy paths funnel non-error tool results through `RtkPipeline::compress($toolName, $content)` before they reach the model. Opt out per-call via `options['disable_rtk_compression'] = true`.
+
+### Added — `Tools\Schema\` (cross-provider JSON-Schema portability)
+
+Borrowed from pi's `StringEnum` Typebox helper: encode the *intent* of a schema fragment (this is a string-enum, this is a tagged-union, this is a uniform-typed array) so a downstream provider normaliser can rewrite incompatible shapes per provider.
+
+- **`Tools\Schema\Schema`** — builder for tool `inputSchema()`. Static helpers `object()` / `string()` / `stringEnum()` / `integer()` / `number()` / `boolean()` / `array()` / `oneOf()` / `anyOf()`. Tagged-union helpers stamp `x-superagent-kind` markers (`string-enum`, `one-of`, `any-of`) the normaliser reads.
+- **`Tools\Schema\ProviderNormalizer`** — `forAnthropic(array $schema)` / `forOpenAI()` / `forGemini()` rewrite the tree into a form each provider's function-calling surface accepts:
+  - **Anthropic**: native JSON Schema; only strips `$ref` / `$defs` and `x-superagent-*` markers.
+  - **OpenAI**: strict-mode-safe; strips `$ref` / `$defs` (rejected even in strict) and internal markers.
+  - **Gemini**: strips `$ref` / `$defs` / `$schema`; flattens any `oneOf` / `anyOf` composed entirely of string-literal branches into a single `enum` (Gemini-friendly); drops unsupported `format` values on strings (only `date-time` / `enum` survive).
+- **Cross-provider compliance tests** — `tests/Tools/Schema/CrossProviderComplianceTest.php` (114 lines) round-trips every tagged shape through all three normalisers and asserts the output passes each provider's known acceptance rules. Run before declaring a new tool input schema cross-provider-safe.
+
+### Added — `Providers\StreamEventTypes` + `StreamEventTranslator` (canonical streaming taxonomy)
+
+13-event canonical taxonomy that normalises every provider's native streaming shape into a single envelope. Higher layers (CLI UI, ACP `session/update`, SuperAICore `/processes` SSE, Pi event-stream JSONL) only ever see canonical events — no per-provider switch.
+
+- **13 event types**: `text_start` / `text_delta` / `text_stop` / `thinking_start` / `thinking_delta` / `thinking_stop` / `tool_call_start` / `tool_call_delta` / `tool_call_complete` / `grounding_citation` / `usage` / `stop` / `error`.
+- **`StreamEventTranslator::fromAnthropic(array $raw)`** — handles `content_block_start` / `content_block_delta` (text / thinking / input_json) / `content_block_stop` / `message_delta` (usage) / `message_stop`.
+- **`StreamEventTranslator::fromOpenAi(array $chunk)`** — handles Chat Completions delta with `content` / `tool_calls[]` / `finish_reason` / `usage`.
+- **`StreamEventTranslator::fromGemini(array $chunk)`** — handles `candidate.content.parts[]` for text / `functionCall` / `thought` (Gemini 3.5+ thinking), `groundingMetadata.groundingChunks` for citation events, `finishReason` for stop, `usageMetadata` for usage.
+- Permissive by design — unknown event shapes return `null` rather than throw, so SSE schema drift across minor versions degrades to "no event emitted" instead of crashing mid-stream.
+
+### Added — `Conversation\BranchManager` + `SessionManager::fork()` (pi `/tree` semantics)
+
+Pi (pi.dev/docs/latest/sessions) models a session as an append-only tree of entries keyed by `id` + `parentId`. Switching branches via `/tree` writes a `branch_summary` entry. SuperAgent now mirrors this.
+
+- **`Conversation\BranchManager`** — pure tree algebra (no I/O, no LLM). `leaves()` returns entry ids with no descendants. `ancestry($id)` walks back to root. `findCommonAncestor($a, $b)` returns the closest common ancestor between two leaves. `collectBranch($leaf, $ancestor)` returns the entries on the abandoned slice (exclusive of ancestor). `makeBranchSummaryEntry()` builds a pi-format BranchSummaryEntry the host appends to the JSONL file.
+- **`SessionManager::fork($sourceSessionId, $forkAtIndex, ?callable $summaryFn, ?string $displayName)`** — pi `/tree` fork. Slices source messages `[0..forkAtIndex]` as new branch prefix, synthesises pi-style `_entry_id` / `_parent_entry_id` per message, writes a `branched_from` pointer in the new branch's meta, stamps a `branches[]` entry on the source pointing at the new branch (so `listSessions` can render the tree). Optional `$summaryFn(array $abandoned)` produces the BranchSummaryEntry text the host stores on the source.
+- **`Conversation\Importers\PiImporter`** — replay pi sessions (`~/.pi/agent/sessions/`) into SuperAgent's wire format. Handles `message` (user / assistant), `compaction` and `branch_summary` (rendered as system-style preface), skips UX hints (`model_change` / `thinking_level_change` / `custom_message` / `label` / `session_info`). `listSessions(limit)` indexes the pi sessions root; `load($idOrPath)` parses a single file and returns `Message[]`.
+- **`tests/Session/SessionManagerForkTest.php`** + **`tests/Conversation/BranchManagerTest.php`** — exhaustive coverage of ancestry / common-ancestor / branch collection and full fork semantics (prefix preservation, abandoned summary, branches[] stamping, branched_from pointer).
+
+### Added — Wire-format encoders for Cursor and Vertex AI (9Router-borrowed)
+
+9Router (decolua/9router) ships a translation matrix across 9 LLM wire dialects. SuperAgent picks up the two that were missing:
+
+- **`Conversation\Encoder\CursorEncoder`** — cursor.sh's Composer / Agent endpoints. OpenAI-like at the role layer but: multi-modal content is `parts[]` not `content`; tool calls ride on a Cursor-specific `actions[]` array (not OpenAI's `tool_calls`); tool results come back as a `user` turn with `actions[].result`; Cursor's implicit `context[]` blocks (open editor, selection) are deliberately NOT emitted (editor's job). Lets SuperAgent accept inbound Cursor-shaped requests (e.g. via SuperAICore's OpenAI-compat proxy when the client identifies as Cursor).
+- **`Conversation\Encoder\VertexEncoder`** — Google Vertex AI dispatcher. Picks Gemini or Anthropic dialect by model id (`publishers/google/...` vs `publishers/anthropic/...`) and delegates to `GeminiEncoder` / `AnthropicEncoder`. `VertexEncoder::dialectForModel($id)` is the static helper. Keeps Vertex as a first-class destination for GCP-hosted teams that can't always hit AI Studio / Anthropic-direct.
+- **`tests/Conversation/Encoder/VertexEncoderTest.php`** — dialect-pick and round-trip assertions.
+
+### Added — `Squad\ConsensusGate` (octopus-borrowed N-of-M parallel voting)
+
+The current squad reviewer-loop is "one reviewer agrees → pass" — a serial, single-veto gate. claude-octopus uses a parallel N-of-M gate: M peers vote in parallel on the same artifact and ≥N must approve before work advances. Designed for high-stakes decisions (ship/no-ship, security-sensitive code, irreversible operations) where blind spots matter more than craft.
+
+- **`Squad\ConsensusGate(name, n, m, voters[], prompt)`** — value object with strict construction guards (`1 ≤ n ≤ m`, `count(voters) === m`). Verdicts are `APPROVE` / `REJECT` / `ABSTAIN`.
+- **`ConsensusGate::parseVerdict(string $response)`** — extracts the `VERDICT: APPROVE|REJECT|ABSTAIN` sentinel from a voter's free-form response; falls back to lenient keyword match (`approved` / `rejected`); defaults to `ABSTAIN` when nothing recognisable is present.
+- **`ConsensusGate::tally(list<string> $responses)`** — returns `{verdict, passed, counts, per_voter}`. `passed = (approve_count ≥ n)`.
+- YAML schema extension: `kind: consensus_gate` with `params: {n, m, voters[]}`. Downstream steps branch on the verdict (continue when APPROVED, escalate when REJECTED).
+- **`tests/Squad/ConsensusGateTest.php`** — quorum thresholds, parse-verdict variants, voter-count validation, tally arithmetic.
+
+### Added — `docs/cookbook/` (5 runnable recipes)
+
+A new top-level cookbook directory with focused, copy-pasteable recipes for the higher-level SuperAgent subsystems. Each recipe is one topic, self-contained, opens with a one-line goal and a `When to use` section, closes with `See also` cross-references.
+
+- **`01-debate-protocol.md`** — proposer / critic / judge 3-round structured debate via `DebateOrchestrator::debate()`. Includes the trace timeline taxonomy (`debate.start` / `debate.rounds` / `debate.round_N` / `debate.judge` / `debate.total`) and how to dump it for inspection.
+- **`02-redteam-attack.md`** — builder / attacker / reviewer adversarial pattern via `DebateOrchestrator::redTeam()`. Per-round protocol breakdown; budget-aware graceful degradation (reviewer always gets ≥ $0.50 to produce a verdict).
+- **`03-cost-autopilot.md`** — budget-driven model tiering via `CostAutopilot` + `BudgetConfig` + `ThresholdRule`. Walks through a 20-turn run cascading Opus → Sonnet → Haiku at the 30% / 70% thresholds, with the corresponding `budget.threshold` / `budget.tier_change` / `budget.autopilot_decision` trace events.
+- **`04-cost-prediction.md`** — KNN-based proactive spend prediction via `CostPredictor` + `CostHistoryStore`. Includes accuracy-improvement curve discussion (cold-start ±50 % → 20+ rows tightens to ±10 %) and a "guard the spend before authorising" pattern.
+- **`05-adaptive-feedback.md`** — corrections promote into auto-applied patterns via `AdaptiveFeedbackEngine` (`promotionThreshold: 3`). Includes the `superagent:feedback` artisan commands (`list` / `show` / `revoke`) and the `adaptive.pattern_applied` trace event for "why did the agent refuse emoji on this run?" post-mortems.
+- **`docs/cookbook/README.md`** — cookbook index + conventions.
+
+### Added — `Strategy\` namespace (gs-quant pattern for agent runs)
+
+gs-quant gives quants three orthogonal primitives — Strategy, Backtest, RiskMeasure — over historical price series. We mirror them at the agent layer: declarative agent rules, replay them against historical transcripts, score them.
+
+- **`Strategy\AgentStrategy`** — declarative agent rules: `name`, `description`, `allowedTools[]`, `deniedTools[]`, `modelHint`, `maxTurns`, `maxCostUsd`, `stopConditions` (`['has_phrase' => 'shipped']`), `escalationRules` (`['after_turn' => 5, 'to' => 'claude-opus-4-7']`), free-form `metadata`. `toArray()` / `fromArray()` / `fromYamlFile()` / `fromJsonFile()`. Diffable, committable, reviewable.
+- **`Strategy\AgentRiskMeasure`** — observable scalar over a run record. Built-ins: `cost_usd`, `latency_ms`, `turn_count`, `tool_diversity`, `escalation_count`. Hosts register custom measures by name → callable via `register()`.
+- **`Strategy\AgentBacktest`** — replay a Strategy against a corpus of historical transcripts; compute per-run + aggregate (mean / median / p95 / total) risk measures. `liveReplay: true` mode is a wire-only stub for now (engines for re-running each prompt against the new strategy under live LLM calls land next minor — `useReplayRunner(callable)` hook is the seam). `AgentBacktest::compare($a, $b)` produces a delta table the operator uses to claim "strategy B beats A on cost by 18 % with no regression in turn count".
+
+### Added — `Arrow\` namespace + `Bridge\Streaming\ArrowStreamTranslator` (Apache Arrow IPC for tabular tool output)
+
+When a downstream consumer is a data tool (Perspective viewer, pandas/DuckDB, BI dashboard), shipping rows as JSON SSE chunks burns CPU on both ends. The new Arrow path skips the JSON round-trip.
+
+- **`Arrow\ArrowSerializer`** — pure-PHP Arrow IPC writer mirror of SuperAICore's. `fromRows(array $rows)` returns Arrow bytes (JSON-columnar fallback for hosts without a binary Arrow writer). Both shapes round-trip through `Perspective.worker().table()`.
+- **`Bridge\Streaming\ArrowStreamTranslator`** — sibling to `OpenAIStreamTranslator`. When an assistant message carries a tabular payload (either `tabularPayload` attribute or auto-detected `content[].type === 'json'` whose decoded value is a list of assoc arrays sharing ≥2 keys), the translator emits an `arrow_table` SSE event (base64'd Arrow bytes) + `arrow_table_meta` (row/column counts, schema hint, encoding tag) instead of JSON chunks. Non-tabular content falls through unchanged.
+- **`Contracts\SupportsArrowOutput`** — opt-in capability marker. Tools that implement this contract declare a `declaredSchema()` (column → declared Arrow type) and implement `executeAsRows()`. When the caller passes `outputFormat: 'arrow'`, the runner serialises via `ArrowSerializer::fromRows()` instead of JSON.
+
+### Added — `CostAutopilot\CostAutopilot` (full implementation)
+
+The cookbook docs cover the *usage*; this is the underlying engine. Replaces the 1.0.5 scaffold with a full evaluator: cumulative spending tracked against four escalating threshold actions (50 % warn → 70 % compact → 80 % downgrade-model → 95 % halt). Stateful so the same threshold doesn't re-fire; emits `autopilot.warn` / `autopilot.compact` / `autopilot.downgrade` / `autopilot.halt` listener events; emits `budget.spend` counter + `budget.tier_change` instant on every flip; cross-session monthly budget tracking via injectable `BudgetTracker`.
+
+### Added — Pi-aligned split-turn compaction (`Context\Strategies\ConversationCompressor::trySplitTurn()`)
+
+When even the "kept recent" window after compaction still exceeds the budget (a single oversized assistant turn), pi cuts mid-turn at an assistant boundary and absorbs the prefix into the history summary. SuperAgent now does the same.
+
+- **`CompressionConfig::$reserveTokens`** (default 16,384) — headroom kept inside `contextWindow` for the next response. Auto-compact fires when `contextTokens > contextWindow - reserveTokens`.
+- **`CompressionConfig::$keepRecentTokens`** (default 20,000) — target token budget for messages preserved verbatim after compaction. When the recent slice exceeds this, the trySplitTurn path activates.
+- **`CompressionConfig::$enableSplitTurn`** (default true) — switch.
+- **`ConversationCompressor::trySplitTurn(array $kept, int $maxKeepTokens)`** — finds the first non-tool-using assistant message in the kept window (only safe split point — cutting a user message corrupts intent; cutting a tool_result corrupts the tool pair API invariant) and splits its content on a paragraph boundary. Returns `{turnPrefix, turnSuffix, turnId}` or null if no safe split is possible (caller falls back to single-summary path).
+- **`firstKeptEntryId`** propagation — boundary message + result metadata now carry the id of the first preserved entry so JSONL exporters and branch-diff viewers can verify the LLM honoured the boundary it was given.
+- **`ContextManager::autoCompact()` + `compress()`** — inject `options['max_keep_tokens'] = keepRecentTokens` so strategies that care can read it (others ignore).
+
+### Added — `Hooks\HookEvent::PR_EVENT` + `Hooks\PrWatchHookData` (claude-octopus PR/CI reaction)
+
+External-watcher reaction events fired by SuperAICore's `gh-watch` daemon (or any host that wants the same flow). Pure DTO — no I/O, no behaviour — so events can ride wire-formats other than HTTP if the host pipes them through a queue.
+
+- **`HookEvent::PR_EVENT`** — `'PrEvent'`. Listeners receive a `PrWatchHookData` payload via `HookInput`.
+- **`PrWatchHookData`** — `kind` (`pr_comment` / `ci_failure` / `review_requested` / …), `owner`, `repo`, `prNumber`, `title`, `body`, `url`, free-form watcher `context`. Mirrors the GhWatchCommand event shape so direct GitHub-API integrations don't need a translation layer.
+
+### Added — `Hooks\HookResult::rewriteOutput()` (PostToolUse output mutation)
+
+Pi-borrowed PostToolUse helper that rewrites the tool's output BEFORE the model sees it. Use for redaction, schema enforcement, format normalisation. `updatedOutput` field added to `HookResult`; merged across multiple hooks in `aggregate()`; new `HookResult::rewriteOutput($newOutput, $reason)` factory.
+
+### Added — `Providers\QwenAnthropicProvider` + Qwen 3.7 Max as default
+
+- **`Providers\QwenAnthropicProvider`** — Qwen 3.7 Max via DashScope's new Anthropic-protocol-compatible endpoint. Subclass of `AnthropicProvider` with Qwen-specific defaults (`base_url = https://dashscope.aliyuncs.com/anthropic-mode/v1`, `model = qwen3.7-max`, API key from `DASHSCOPE_API_KEY` / `QWEN_API_KEY`). Forces api_key auth (Qwen OAuth EOL'd 2026-04-15) — strips any `access_token` / `auth_mode = oauth` configs.
+  - **TODO: verify base_url.** DashScope's exact Anthropic-protocol endpoint URL has not been published in English docs as of 2026-05-22; the default above is a best-guess based on the existing OpenAI-compat pattern (`/compatible-mode/v1`). Operators MUST override via config until verified.
+- **`ProviderRegistry`** — `'qwen-anthropic'` key registered.
+- **`QwenProvider::defaultModel()`** — bumped to `qwen3.7-max` (1M ctx, $2.50/$7.50 per 1M, native Anthropic protocol on the side). For thinking-budget control opt into `provider=qwen-native` (3.6 is still latest there). For Anthropic-protocol drop-in mode use `provider=qwen-anthropic`.
+- **`QwenProvider::isMultimodalModel()`** — recognises `qwen3.7-plus` as the 3.7 vision-capable variant (3.7-max is text-only).
+- **`resources/models.json`** — new entries: `qwen3.7-max` (1M ctx, $2.50/$7.50, `anthropic_protocol: true`), `qwen3.7-plus` (multimodal, 1M ctx, $0.80/$2.40). Aliases (`qwen` / `qwen-max` / `qwen3.7`) point at 3.7-max. `anthropic_protocol` is a new capability flag.
+
+### Added — Supply-chain GitHub Actions workflow
+
+`.github/workflows/supply-chain.yml` runs on every push to main, every PR, and weekly at Monday 06:37 UTC:
+
+1. `composer validate --strict --no-check-publish`.
+2. `composer install --no-scripts` (lifecycle-script lockdown).
+3. `composer audit --no-dev` (Symfony security advisories).
+4. Greps `composer.json` for any of the seven composer lifecycle hooks (`post-install-cmd`, `post-update-cmd`, etc.) and fails the build if any are present.
+
+### Tests
+
+- **+39 new test files**, ~750 new assertions across:
+  - `tests/AgentSteerTest.php` — steer drain semantics, FIFO order, sync with QueryEngine drainer.
+  - `tests/Conversation/BranchManagerTest.php` — tree algebra (ancestry, common ancestor, branch collection).
+  - `tests/Conversation/Encoder/VertexEncoderTest.php` — dialect routing + round-trip per dialect.
+  - `tests/Providers/StreamEventTranslatorTest.php` — every event shape across all three providers.
+  - `tests/Session/SessionManagerForkTest.php` — pi `/tree` fork end-to-end.
+  - `tests/Squad/ConsensusGateTest.php` — quorum / parse-verdict / tally.
+  - `tests/Tools/Compression/RtkPipelineTest.php` — savings on real-world git-diff / grep fixtures.
+  - `tests/Tools/Schema/CrossProviderComplianceTest.php` + `ProviderNormalizerTest.php` — full Anthropic / OpenAI / Gemini rewrite matrix.
+  - `tests/Tracing/PiEventStreamTest.php` — listener fanout + legacy alias resolution.
+
+### Docs
+
+- **README** (EN/CN/FR): new `Observability & Pi-aligned events (v1.0.6)` subsection. New `Mid-turn steering` subsection under `Agent Loop`.
+- **INSTALL** (EN/CN/FR): new "Tracing / observability bring-up" paragraph (env vars + viewer recommendations).
+- **ADVANCED_USAGE** (EN/CN/FR): seven new sections —
+  - **§80** Trace ring buffer + Chrome Trace Event timeline
+  - **§81** Pi-aligned JSON Event Stream
+  - **§82** Mid-turn steering + follow-up queue
+  - **§83** RTK structured-output compression
+  - **§84** Cross-provider tool-schema portability (`Schema` + `ProviderNormalizer`)
+  - **§85** Session branching (pi `/tree` fork) + PiImporter
+  - **§86** Squad consensus gates (N-of-M parallel voting)
+
+### Compatibility
+
+- **No breaking changes.** Every new piece is additive. Existing `Agent` / `QueryEngine` / `Context\ContextManager` / `ACP\Server` / `Hooks\HookResult` callers see byte-identical behaviour.
+- **`Handler` interface gains `steer()` and `followUp()`.** Hosts that wrote a custom `Handler` (not extending `DefaultHandler`) MUST implement these two no-op-by-default methods. Common case: extend `DefaultHandler`, which ships defaults.
+- **`HookResult` constructor gains `?array $updatedOutput`.** Positional-arg construction past `updatedInput` shifts by one slot — recommended migration is named arguments. Named-arg callers see no change.
+- **`resources/models.json` schema v2 unchanged** but new `anthropic_protocol` capability flag added. Consumers reading capabilities by `array_key_exists` see no change; consumers requiring an exact key set need to extend their schema check.
+
+### Trade-offs
+
+- **Tracing always-on is cheap but not free.** The ring buffer push is ~1µs; the singleton path adds one `getenv` lookup per process. Hosts running ten-thousand-RPS gateways should disable via `SUPERAGENT_TRACE_ENABLED=false` or pass a `TraceCollector` with `enabled=false` into the DI graph.
+- **RTK compression is lossy for the model's tooling.** Path / line / hunk preservation is verified, but if the model tries to literally consume "the unchanged context lines around hunk #3", it won't find them. Tooling like git-apply-from-LLM-output works because git-apply only needs +/- lines + hunk headers. If your downstream tool needs raw byte fidelity, set `options['disable_rtk_compression'] = true` per call.
+- **Pi steer drain happens between LLM iterations, not mid-stream.** A steer arriving mid-stream lands at the next iteration boundary, not immediately. For sub-second responsiveness, host needs to be cancel + steer + restart instead of pure steer.
+- **`QwenAnthropicProvider` base URL is unverified.** The default `https://dashscope.aliyuncs.com/anthropic-mode/v1` is best-guess; verify with DashScope's docs or `~/.qwen/settings.json` (qwen-code v0.16+) and override via the `base_url` config until Alibaba publishes the canonical path.
+
 ## [1.0.5] - 2026-05-20
 
 ### 💻 Summary

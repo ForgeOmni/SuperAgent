@@ -6,6 +6,7 @@ use SuperAgent\Contracts\LLMProvider;
 use SuperAgent\Exceptions\RecoverableException;
 use SuperAgent\Exceptions\UnrecoverableException;
 use SuperAgent\Telemetry\EventDispatcher;
+use SuperAgent\Tracing\TraceCollector;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -84,6 +85,32 @@ class ErrorRecoveryManager
                     $this->logger->error('Unrecoverable error encountered', [
                         'error' => $e->getMessage(),
                     ]);
+
+                    // magic-trace black box dump — unrecoverable errors are
+                    // exactly the moments where the operator most needs the
+                    // last N events of context. Best-effort; never blocks
+                    // the rethrow if tracing is disabled or unconfigured.
+                    try {
+                        $tracer = TraceCollector::getInstance();
+                        $tracer->emitInstant(
+                            name: 'error.unrecoverable',
+                            category: 'error',
+                            tid: $this->tracerLane($context),
+                            args: [
+                                'class'   => get_class($e),
+                                'message' => mb_substr($e->getMessage(), 0, 500),
+                                'attempt' => $attempts,
+                            ],
+                        );
+                        $tracer->dump(
+                            trigger: 'error',
+                            reason: 'unrecoverable: ' . mb_substr($e->getMessage(), 0, 200),
+                        );
+                    } catch (\Throwable $traceErr) {
+                        // Tracing must never mask the original exception.
+                        $this->logger->debug('Trace dump failed: ' . $traceErr->getMessage());
+                    }
+
                     throw new UnrecoverableException(
                         "Unrecoverable error: " . $e->getMessage(),
                         0,
@@ -350,7 +377,30 @@ class ErrorRecoveryManager
             'last_error' => $lastException?->getMessage(),
             'retry_history' => $this->retryHistory[$this->getContextKey($context)] ?? [],
         ]);
-        
+
+        // magic-trace black box dump — retry exhaustion is the other
+        // "we're stuck for sure" boundary. Same best-effort guard as the
+        // unrecoverable-error path: never block the rethrow.
+        try {
+            $tracer = TraceCollector::getInstance();
+            $tracer->emitInstant(
+                name: 'error.retries_exhausted',
+                category: 'error',
+                tid: $this->tracerLane($context),
+                args: [
+                    'last_error' => $lastException ? get_class($lastException) : null,
+                    'message'    => $lastException ? mb_substr($lastException->getMessage(), 0, 500) : null,
+                    'attempts'   => count($this->retryHistory[$this->getContextKey($context)] ?? []),
+                ],
+            );
+            $tracer->dump(
+                trigger: 'error',
+                reason: 'retries exhausted: ' . ($lastException ? mb_substr($lastException->getMessage(), 0, 200) : 'unknown'),
+            );
+        } catch (\Throwable $traceErr) {
+            $this->logger->debug('Trace dump failed: ' . $traceErr->getMessage());
+        }
+
         // Save checkpoint for manual recovery
         if ($this->config['save_on_failure']) {
             $this->saveFailureCheckpoint($context, $lastException);
@@ -366,6 +416,23 @@ class ErrorRecoveryManager
         }
     }
     
+    /**
+     * Resolve a stable trace lane label from the error-recovery context.
+     * Prefers an explicit session_id, falls back to agent label or 'default'.
+     */
+    private function tracerLane(array $context): string
+    {
+        $sessionId = $context['session_id'] ?? null;
+        if (is_string($sessionId) && $sessionId !== '') {
+            return 'session:' . $sessionId;
+        }
+        $agentLabel = $context['agent_label'] ?? $context['operation'] ?? null;
+        if (is_string($agentLabel) && $agentLabel !== '') {
+            return 'agent:' . $agentLabel;
+        }
+        return 'session:default';
+    }
+
     /**
      * Save failure checkpoint for manual recovery
      */

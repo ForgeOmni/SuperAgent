@@ -43,7 +43,12 @@ enum HookEvent: string
     // File system hooks
     case CWD_CHANGED = 'CwdChanged';
     case FILE_CHANGED = 'FileChanged';
-    
+
+    // claude-octopus-borrowed: PR / CI reaction events fired by an
+    // external watcher (typically SuperAICore's gh-watch daemon).
+    // Listeners receive a PrWatchHookData payload via HookInput.
+    case PR_EVENT = 'PrEvent';
+
     public function getDescription(): string
     {
         return match ($this) {
@@ -69,6 +74,7 @@ enum HookEvent: string
             self::SUBAGENT_STOP => 'Fired when a sub-agent stops',
             self::CWD_CHANGED => 'Fired when current directory changes',
             self::FILE_CHANGED => 'Fired when watched files change',
+            self::PR_EVENT => 'Fired when an external watcher reports a PR comment or CI failure',
         };
     }
 }

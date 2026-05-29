@@ -10626,3 +10626,609 @@ $loaded = $mgr->discoverExternalSkills(
 ```
 
 Walk 在 worktree 边界停止 —— monorepo 父目录不会意外注入 skill 到子项目。最多扫 30 级（防御上限；对任何实际项目都绰绰有余）。
+
+## 80. Trace ring buffer + Chrome Trace Event 时间线 (v1.0.6)
+
+借鉴 Jane Street 的 `magic-trace`。Collector 默认开启；每个长跑编排（debate、red-team、错误恢复、cost autopilot、并行 agent）都向进程内 ring buffer 推事件，O(1) lock-free。触发点把 ring 落盘成 Chrome-Trace-Event JSON，可在 `chrome://tracing`、`ui.perfetto.dev`、或捆绑的 `trace-viewer.html` 中打开。
+
+### 架构
+
+| 组件 | 职责 |
+|---|---|
+| `Tracing\TraceCollector` | 单例 facade。`emitDuration` / `emitInstant` / `emitCounter` / `span` / `dump`。 |
+| `Tracing\RingBuffer` | 无锁 O(1) push。满了覆盖最老。默认容量 1024。 |
+| `Tracing\TraceEvent` | 不可变 Chrome-Trace-Event 记录。Phase `X`（duration）/ `i`（instant）/ `C`（counter）。 |
+| `Tracing\TraceWriter` | JSON 文件发射器，写到 `{storage}/trace_superagent_{session}_{ts}_{trigger}.json`。 |
+| `Tools\Builtin\SnapshotTool` | agent 自己的快照工具。纯观测；`isReadOnly === true`。 |
+
+### 配置
+
+```bash
+SUPERAGENT_TRACE_ENABLED=true                     # 默认 true
+SUPERAGENT_TRACE_PATH=/var/log/sa-traces          # 默认 sys_get_temp_dir()/superagent-traces
+SUPERAGENT_TRACE_RING_SIZE=2048                   # 默认 1024
+```
+
+代码覆盖：
+
+```php
+use SuperAgent\Tracing\{TraceCollector, RingBuffer, TraceWriter};
+
+TraceCollector::setInstance(new TraceCollector(
+    ring: new RingBuffer(4096),
+    enabled: true,
+    sessionId: 'job-' . $jobId,
+    writer: new TraceWriter('/var/log/sa-traces', 'mygateway'),
+));
+```
+
+### 发射事件
+
+三种风格：
+
+```php
+use SuperAgent\Tracing\TraceCollector;
+$t = TraceCollector::getInstance();
+
+// 1. Span —— 显式起点 + 时长
+$t->emitDuration(
+    name: 'planner.search',
+    category: 'planning',
+    tid: 'session:abc',
+    startMicros: $startUs,
+    durationMicros: (int)((microtime(true) - $start) * 1_000_000),
+    args: ['candidates' => 7, 'depth' => 3],
+);
+
+// 2. 用 closer callable 的 Span —— 配合 try/finally 很顺手
+$end = $t->span('llm.dispatch', 'llm', 'session:abc');
+try {
+    $resp = $provider->call(...);
+} finally {
+    $end(['model' => $resp?->model, 'cost_usd' => $resp?->cost ?? 0]);
+}
+
+// 3. Instant —— 点事件
+$t->emitInstant('user.steer', 'control', 'session:abc', args: ['text' => mb_substr($s, 0, 80)]);
+
+// 4. Counter —— 时间轴上的可绘制标量
+$t->emitCounter('budget.spend', 'budget', 'autopilot', values: [
+    'session_cost_usd' => 0.42,
+    'budget_usd'       => 5.00,
+    'pct'              => 8.4,
+]);
+```
+
+### 内置生产者
+
+| 生产者 | 发射事件 | 触发 / 形态 |
+|---|---|---|
+| `Debate\DebateOrchestrator::debate()` | `debate.start` (i)、`debate.rounds` (X)、`debate.round_N` (i)、`debate.judge` (X)、`debate.total` (X) | 一个 topic 一个 lane。 |
+| `Debate\DebateOrchestrator::redTeam()` | `redteam.start` / `redteam.rounds` / `redteam.total` | 镜像布局。 |
+| `Debate\DebateOrchestrator::ensemble()` | `ensemble.start` (i) + 每个 agent 一片叶 | 一个 topic 一个 lane。 |
+| `ErrorRecovery\ErrorRecoveryManager` | `error.unrecoverable` / `error.retries_exhausted` (i) + 自动 `dump()` | 在异常路径上；尽力而为，不会遮原异常。 |
+| `CostAutopilot\CostAutopilot::evaluate()` | `budget.spend` (C) | 每次 evaluate。 |
+| `CostAutopilot\CostAutopilot::setCurrentModel()` | `budget.tier_change` (i) | 模型切换时。 |
+| `Console\Output\ParallelAgentDisplay::exportPerfettoJson()` | 把每个活跃 agent 作为一次性合成 trace 写出 | 快照，非流。 |
+
+### Agent 自快照
+
+agent 工具注册表现在带 `snapshot`，LLM 觉得"此刻值得记一下"时可以调用：
+
+```
+{
+  "name": "snapshot",
+  "input": {
+    "reason": "about to git reset --hard, capturing state first",
+    "tag": "pre_destructive"
+  }
+}
+```
+
+返回 dump 后的 trace 文件路径，操作员可以立刻打开时间线。`isReadOnly === true` —— 任何权限模式下都安全。
+
+### 触发原因
+
+`TraceCollector::dump($trigger, $reason, $extraMetadata)` 产生文件名 `trace_<producer>_<session>_<ts>_<trigger>.json`。常用 trigger：
+
+- `manual` —— `php -r '... ->dump("manual", "post-debate inspection");'`
+- `error` —— `ErrorRecoveryManager` 在不可恢复 / 重试耗尽时触发
+- `snapshot` —— SnapshotTool 路径
+- `cron` —— 周期后台 dump
+- `signal` —— signal handler dump（如 SIGUSR1）
+
+### 性能
+
+每次 emit 的代价是一次数组 push + ring 旋转取模 —— 商用 x86 上约 1 µs。单例查找每进程一次 `getenv`。> 1 万 RPS gateway 用 env 或 DI 关掉；正常用法直接开着。
+
+---
+
+## 81. Pi 对齐的 JSON Event Stream (v1.0.6)
+
+不同于 §80（用于横切性能 lane），`Tracing\PiEventStream` 发射借鉴自 [pi.dev/docs/latest/json](https://pi.dev/docs/latest/json) 的规范 session 事件词汇。一套规范分类法跨多后端，意味着 SuperAICore 的 `/processes`、pi viewer、第三方日志收集器看到的是同一种形状，与哪个 provider 产生这一回合无关。
+
+### 事件类型
+
+| `type` | 何时发射 | 关键字段 |
+|---|---|---|
+| `session` | session 文件首行 | `version`、`id`、`cwd`、`parentSession?` |
+| `agent_start` / `agent_end` | 整个 session 边界 | `sessionId` |
+| `turn_start` / `turn_end` | 一次 user→assistant 交互 | `turnId`、`sessionId`、`model` |
+| `message_start` / `message_update` / `message_end` | 流式消息推进 | `messageId`、`role`、`text_delta?`、`thinking_delta?` |
+| `tool_execution_start` / `tool_execution_update` / `tool_execution_end` | 工具调用生命周期 | `toolCallId`、`name`、`arguments`、`partial_result?`、`result?`、`error?` |
+| `queue_update` | steer / follow-up 队列变化 | `pending: string[]` |
+| `compaction_start` / `compaction_end` | 手动或自动 compaction | `tokensBefore`、`firstKeptEntryId?`、`summary?` |
+| `auto_retry_start` / `auto_retry_end` | provider / 网络重试 | `attempt`、`reason?`、`backoffMs?` |
+| `model_change` | session 内模型切换 | `provider`、`modelId` |
+| `thinking_level_change` | session 内 thinking 预算切换 | `thinkingLevel` |
+
+### Wire 格式
+
+JSONL，仅 LF 行尾。每个事件：
+
+```json
+{"type":"turn_start","timestamp":"2026-05-22T10:01:00Z","sessionId":"s-1","turnId":"t-1","model":"claude-opus-4-7"}
+```
+
+### 订阅
+
+```php
+use SuperAgent\Tracing\PiEventStream;
+use SuperAgent\Tracing\PiEventStreamWriter;
+
+// 把 JSONL 写到 session 文件
+$handle = PiEventStream::subscribe(new PiEventStreamWriter('/var/sa/session.events.jsonl'));
+
+// 自定义 listener（如转发到 Redis Stream）
+$handle2 = PiEventStream::subscribe(function (array $event): void {
+    $redis->xadd('sa-events', '*', $event);
+});
+
+// ...
+PiEventStream::unsubscribe($handle);
+PiEventStream::reset();
+```
+
+### 发射
+
+```php
+PiEventStream::emit(PiEventStream::AGENT_START, ['sessionId' => $sid]);
+PiEventStream::emit(PiEventStream::TURN_START, ['turnId' => $tid, 'sessionId' => $sid, 'model' => $model]);
+PiEventStream::emit(PiEventStream::TOOL_EXECUTION_START, [
+    'toolCallId' => $callId,
+    'name'       => 'edit',
+    'arguments'  => $args,
+]);
+PiEventStream::emit(PiEventStream::TOOL_EXECUTION_END, [
+    'toolCallId' => $callId,
+    'result'     => $result,
+]);
+PiEventStream::emit(PiEventStream::TURN_END, ['turnId' => $tid, 'sessionId' => $sid]);
+PiEventStream::emit(PiEventStream::AGENT_END, ['sessionId' => $sid]);
+```
+
+### 老名字兼容
+
+SuperAgent 旧 `StructuredLogger` 仍然发 `tool_execution` / `llm_request` / `llm_response` 之类名字。通过翻译器规范化：
+
+```php
+PiEventStream::translateLegacy('tool_execution'); // → 'tool_execution_end'
+PiEventStream::translateLegacy('llm_request');    // → 'turn_start'
+PiEventStream::translateLegacy('llm_message');    // → 'message_update'
+```
+
+下一个大版本删除老名字；新的调用点应该直接发 Pi 对齐事件。
+
+---
+
+## 82. 回合内 steering + follow-up 队列 (v1.0.6)
+
+两个借鉴 pi 的原语，解决对称的两个问题：在不打断的情况下纠正一个正在跑的 agent；当前 turn 结束之后排队的 prompt。
+
+### `Agent::steer()` —— 回合内纠偏
+
+```php
+// 长跑 agent run 中：
+$agent->run('Find the auth bug and fix it', ...);
+
+// 从另一个 event handler（RPC、信号、webhook）在 run 还在跑时：
+$agent->steer('停一下，回归在 Session.php 不在 Login.php');
+```
+
+`QueryEngine::runLoop()` 在 LLM 迭代之间 drain 队列，把每条记录前置成 `[user steer]: <text>` 形式的合成 user message。模型在下一个思考轮前就看到这个重定向。
+
+机制：
+
+1. `Agent::steer($msg)` 追加到 `$this->options['_steer_queue']`。
+2. `Agent::createEngine()` 通过 `$engine->setSteerDrainer(fn() => $this->drainSteer())` 安装 drainer callback。
+3. `QueryEngine::runLoop()` 在每次迭代顶部调 drainer；drain 出来的条目作为 `UserMessage` 加到 `$this->messages` 上，下一次 provider 调用之前。
+
+区别：
+
+- **vs. cancel**：cancel 终结；steer 继续，但目标被重定向。
+- **vs. 新 prompt**：新 prompt 启动一个全新 turn；steer 修改正在飞的 turn。
+- **粒度**：steer 在下一次迭代边界生效，不是 mid-stream。需要秒内响应就 cancel + steer + 重启。
+
+### `Agent::followUp()` —— turn 结束后排队
+
+```php
+$agent->run('重构 src/Auth/* 用新 session middleware');
+$agent->followUp('搞完之后也更新 tests/Unit/Auth/');
+$agent->followUp('再跑 vendor/bin/phpstan analyze');
+```
+
+`Agent::run()` 在主 run 跑完之后 drain follow-up 队列（FIFO），每条都用同一个 Agent 跑（这样 message history 自然累积）。上限：每次外层 `run()` 调用 `_max_followups_per_call = 8`，防止失控循环。
+
+### ACP 协议扩展
+
+说 Agent Client Protocol 的编辑器通过 JSON-RPC 发新方法：
+
+```json
+// session/steer 通知
+{"jsonrpc":"2.0","method":"session/steer","params":{"sessionId":"s-1","prompt":[{"type":"text","text":"…"}]}}
+
+// session/follow_up 通知
+{"jsonrpc":"2.0","method":"session/follow_up","params":{"sessionId":"s-1","prompt":[…]}}
+```
+
+`Handler` 契约：
+
+```php
+public function steer(array $params): void;
+public function followUp(array $params): void;
+```
+
+`DefaultHandler` 在 `SessionEntry::$meta` 下维护每个 session 的 `steerQueue` 和 `followUpQueue` 数组。host 的 `promptFn` 闭包在安全 checkpoint 消费它们：
+
+```php
+$handler = new DefaultHandler($sessions, function (array $params) use ($handler) {
+    $sessionId = $params['sessionId'];
+
+    // 每次迭代 drain steer：
+    foreach ($handler->drainSteer($sessionId) as $steer) {
+        // 把 $steer['prompt'] 前置为合成 user message
+    }
+
+    // 下一次 prompt 循环顶部 drain follow-up：
+    foreach ($handler->drainFollowUp($sessionId) as $followUp) {
+        // 处理或排队
+    }
+
+    // ... 跑 agent ...
+});
+```
+
+### 测试
+
+`tests/AgentSteerTest.php` —— FIFO 顺序、drain 后清空、与 QueryEngine drainer callback 同步、follow-up 上限。
+
+---
+
+## 83. RTK 结构化输出压缩 (v1.0.6)
+
+`git diff`、`grep -rn`、`find`、`ls -R`、`tree` 等工具输出在 coding session 里支配 token 用量 —— 通常占每 turn 输入预算的 30-50 %，里面大多是重复路径、ANSI 颜色码、空行、未变化的上下文。`Tools\Compression\RtkPipeline`（借鉴 9Router 的 RTK Token Saver + claude-octopus 的 `octo-compress` PostToolUse hook）在模型看到之前自动压缩它们。
+
+### 接线
+
+```php
+// QueryEngine 自动接线：
+$result = $agent->run('Find every TODO in src/');
+// → grep 输出在模型下一回合看到之前透明地被 RTK 压缩。
+
+// 按调用关闭：
+$result = $agent->run('生成一个可以 git apply 的 patch', [
+    'disable_rtk_compression' => true,
+]);
+```
+
+### 内置压缩器
+
+| 工具 key | 压缩器类 | 保留 | 丢弃 |
+|---|---|---|---|
+| `git diff`、`git_diff` | `GitDiffCompressor` | `diff --git`、`--- a/`、`+++ b/`、`@@ -L,N +L,M @@`、`+`/`-` 行、mode marker | 未变化的 context 行、`index <sha>..<sha>` 行、行末空白 |
+| `grep`、`rg`、`ripgrep`、`Grep` | `GrepCompressor` | `file:line:match` 规范命中 | context 行、ANSI 码、"X matches in Y files" 尾巴 |
+| `find`、`Glob` | `FindCompressor` | 叶子文件名 | 重复的目录前缀 |
+| `ls` | `LsCompressor` | 文件名；目录 vs 文件的区分 | 不需要时去掉 total / 权限列 |
+| `tree` | `TreeCompressor` | `├─` / `└─` / `│` 结构符 | byte / size 注解 |
+| `Bash`、`bash` | `BashOutputCompressor` | 根据输出嗅探派发到正确的压缩器 | （委托） |
+
+启发式派发对未识别工具名启动 —— 输出看起来像 diff（`^diff --git` 头）、grep（`^file:line:` 模式）、或 find（`^./path` 行）时触发。
+
+### 典型节省（真实 fixture）
+
+| 工具 | 输入大小 | 输出大小 | 节省 |
+|---|---|---|---|
+| `git diff`（50 个改动文件，3 行 context） | 84 KB | 32 KB | 62 % |
+| `rg -n TODO` 穿 `src/` | 41 KB | 22 KB | 46 % |
+| `find . -name '*.php'` | 12 KB | 7.8 KB | 35 % |
+| `tree -L 4` 看 `src/` | 18 KB | 14 KB | 22 % |
+
+绝不放大 —— 压缩结果 ≥ 原始时，原始胜出。
+
+### 自定义压缩器
+
+```php
+use SuperAgent\Tools\Compression\{RtkPipeline, CompressorInterface};
+
+final class JsonResultCompressor implements CompressorInterface
+{
+    public function compress(string $output): ?string
+    {
+        $decoded = json_decode($output, true);
+        if (!is_array($decoded)) return null;
+        // 丢噪音字段，留有意义字段
+        unset($decoded['_meta'], $decoded['_debug']);
+        return json_encode($decoded, JSON_UNESCAPED_SLASHES);
+    }
+}
+
+$pipeline = new RtkPipeline();
+$pipeline->register('myapi.search', new JsonResultCompressor());
+```
+
+### 统计
+
+```php
+$stats = $pipeline->stats();
+// → ['bytes_in' => 184_400, 'bytes_out' => 78_120, 'saved_bytes' => 106_280, 'ratio' => 0.576]
+```
+
+### 测试
+
+`tests/Tools/Compression/RtkPipelineTest.php` —— 每个内置压缩器都有 fixture，断言保留结构 marker + 丢弃装饰性噪音。
+
+---
+
+## 84. 跨厂商工具 schema 可移植性 (v1.0.6)
+
+Anthropic、OpenAI、Gemini 各自接受 JSON Schema 在工具输入声明里的子集都略有不同。不做规范化的话，用 `oneOf` 或 `$ref` 的工具在 Anthropic 能跑、Gemini 挂；用 `format: ipv4` 的在 OpenAI 能跑、Gemini 挂。`Tools\Schema\Schema` + `ProviderNormalizer`（借鉴 pi 的 StringEnum / Typebox helper）让你只声明一次，按目标 provider 改写。
+
+### 编写
+
+```php
+use SuperAgent\Tools\Schema\Schema;
+
+class FileEditorTool extends Tool
+{
+    public function inputSchema(): array
+    {
+        return Schema::object(
+            properties: [
+                'action' => Schema::stringEnum(['read', 'write', 'append', 'delete']),
+                'path'   => Schema::string('文件绝对路径'),
+                'content'=> Schema::string('新内容（action 为 write 或 append 时必填）'),
+                'mode'   => Schema::oneOf([
+                    ['type' => 'string', 'const' => 'overwrite'],
+                    ['type' => 'string', 'const' => 'patch'],
+                    Schema::object(['custom_pattern' => Schema::string()]),
+                ]),
+            ],
+            required: ['action', 'path'],
+        );
+    }
+}
+```
+
+`stringEnum`、`oneOf`、`anyOf` 会盖上 `x-superagent-kind` 标记（`string-enum`、`one-of`、`any-of`），normaliser 读它们做判断。
+
+### 改写
+
+```php
+use SuperAgent\Tools\Schema\ProviderNormalizer;
+
+$schema = $tool->inputSchema();
+$forAnthropic = ProviderNormalizer::forAnthropic($schema);
+$forOpenAI    = ProviderNormalizer::forOpenAI($schema);
+$forGemini    = ProviderNormalizer::forGemini($schema);
+```
+
+| Normaliser | 效果 |
+|---|---|
+| `forAnthropic` | 剥 `$ref` / `$defs` / `$schema` / `definitions` / `x-superagent-*` 标记。其他原样。 |
+| `forOpenAI` | 同 Anthropic。（严格模式下 `oneOf` / `anyOf` 被接受。） |
+| `forGemini` | 剥 ref + 扩展；**把字符串字面量的 `oneOf`/`anyOf` 压成 `enum`**；丢不支持的 `format`（只有 `date-time` 和 `enum` 保留）。 |
+
+### 压缩示例
+
+输入 schema（`oneOf` 三个字符串字面量分支）：
+
+```php
+Schema::oneOf([
+    ['type' => 'string', 'const' => 'fast'],
+    ['type' => 'string', 'const' => 'balanced'],
+    ['type' => 'string', 'const' => 'thorough'],
+])
+```
+
+`ProviderNormalizer::forGemini()` 之后：
+
+```json
+{"type":"string","enum":["fast","balanced","thorough"]}
+```
+
+纯 JSON Schema；每个 provider 都接受。
+
+### 合规测试
+
+`tests/Tools/Schema/CrossProviderComplianceTest.php` 把一组带标签的形状过三遍 normaliser，断言：
+
+- `forAnthropic` 输出在任意深度都不含 `$ref` / `$defs` / `x-superagent-*` key。
+- `forOpenAI` 输出在任意深度都不含 `$ref` / `$defs`。
+- `forGemini` 输出在任意深度都不含 `$ref` / `$defs` / `oneOf` / `anyOf`；不含不支持的 `format`。
+
+声明新工具输入 schema 跨厂商安全之前先跑一遍。
+
+---
+
+## 85. Session 分支 —— pi `/tree` fork + PiImporter (v1.0.6)
+
+pi.dev 把 session 模型化为 append-only 树，节点用 `id` + `parentId` 串起来。通过 `/tree` 切分支会写一个 `branch_summary` 条目。SuperAgent 现在镜像了这套语义。
+
+### `Conversation\BranchManager` —— 纯树代数
+
+```php
+use SuperAgent\Conversation\BranchManager;
+
+$entries = $sessionStorage->loadEntries($sessionId);
+$bm = new BranchManager($entries);
+
+$leaves   = $bm->leaves();                                  // 无子孙的 id
+$chain    = $bm->ancestry('entry-leaf-1');                  // root → leaf 的 id 链
+$ancestor = $bm->findCommonAncestor('entry-a', 'entry-b');  // 最近公共祖先 id
+
+$abandoned   = $bm->collectBranch('entry-old-leaf', $ancestor);     // 被抛弃的条目
+$summaryText = $summaryFn($abandoned);                              // 你的闭包
+$entry       = $bm->makeBranchSummaryEntry(
+    fromLeafId:  'entry-old-leaf',
+    summary:     $summaryText,
+    newParentId: 'entry-ancestor',
+);
+
+$sessionStorage->appendEntry($sessionId, $entry);
+```
+
+纯值层 —— 无 I/O、无 LLM。host 提供一个 `summaryFn`（LLM 调用、hash、人工摘要，随便）把被抛弃的切片变成一块文本。
+
+### `SessionManager::fork()` —— 高层 fork 操作
+
+```php
+use SuperAgent\Session\SessionManager;
+
+$newId = $sessionManager->fork(
+    sourceSessionId: 's-original',
+    forkAtIndex: 12,                          // 0-based；新分支保留 [0..12]
+    summaryFn: function (array $abandoned) use ($flash) {
+        // 把丢掉的尾部摘要一下，源 session 留下上下文
+        return $flash->summarize(array_slice($abandoned, -8));
+    },
+    displayName: 'try-event-sourcing-instead',
+);
+
+// $newId 是一个新 session：
+//   - 以 s-original 的前 13 条 message 开始
+//   - 每条留下来的 message 上盖了 _entry_id / _parent_entry_id
+//   - 带 branched_from = {session_id, fork_at_index, fork_at_entry_id, display_name}
+//
+// s-original 现在带 branches[]：
+//   {branch_session_id: $newId, fork_at_index: 12, abandoned_summary: '…', display_name: '…', created_at: …}
+```
+
+源 session 的 `listSessions()` 返回 `branches[]` 字段，UI 用它来画树。
+
+### `Conversation\Importers\PiImporter` —— 回放 pi session
+
+```php
+use SuperAgent\Conversation\Importers\PiImporter;
+
+$importer = new PiImporter();    // root 默认 ~/.pi/agent/sessions
+
+$rows = $importer->listSessions(50);
+// → [
+//   ['id' => '2026-05-22_abc', 'started_at' => '…', 'message_count' => 47,
+//    'first_user_message' => 'Find the auth bug…', 'path' => '/abs/...'],
+//   ...
+// ]
+
+$messages = $importer->load('/abs/path/to/2026-05-22_abc123.jsonl');
+// → SuperAgent\Messages\Message[]，可直接喂给 Agent 作为历史
+```
+
+处理 `message`（user / assistant）、`compaction`（渲染为 system 风格前置）、`branch_summary`（渲染为 system 风格前置）。跳过 UX 提示（`model_change` / `thinking_level_change` / `custom` / `custom_message` / `label` / `session_info`）。
+
+### 测试
+
+- `tests/Conversation/BranchManagerTest.php` —— ancestry、common ancestor、branch collection、branch summary 形状。
+- `tests/Session/SessionManagerForkTest.php` —— 完整 fork 端到端（prefix 保留、abandoned summary、源上盖 branches[]、新上盖 branched_from、listSessions 可见性）。
+
+---
+
+## 86. Squad 共识门 —— N-of-M 并行投票 (v1.0.6)
+
+现有 `reviewer_loop` 是串行单否决门（一个 reviewer 同意 → 通过）。`Squad\ConsensusGate`（借鉴 claude-octopus）是并行 N-of-M 门：M 个同行对同一 artifact 各自投票，≥N 同意才放行。专为高风险决策设计（ship / no-ship、安全敏感代码、不可逆操作）—— 盲点比某个人的工艺水平更重要。
+
+### 什么时候用哪个
+
+| 场景 | 用 |
+|---|---|
+| 工艺批评（写作、有信任 reviewer 的 code review、prose 打磨） | `reviewer_loop`（串行、单否决） |
+| Ship / no-ship 决策、安全审计、不可逆操作 | `ConsensusGate`（并行、quorum） |
+| 多个不相关视角比任何一个的深度更重要 | `ConsensusGate` |
+| 某一个特定 reviewer 的判断就是门 | `reviewer_loop` |
+
+### YAML schema
+
+```yaml
+- kind: consensus_gate
+  name: ship-decision
+  depends_on: [synthesize]
+  params:
+    n: 3
+    m: 4
+    voters:
+      - role: qa-bach
+        provider: anthropic
+        model: claude-sonnet-4-6
+      - role: security-schneier
+        provider: openai-responses
+        model: gpt-5
+      - role: cto-vogels
+        provider: gemini
+        model: gemini-3.5-pro
+      - role: ceo-bezos
+        provider: anthropic
+        model: claude-opus-4-7
+  prompt: |
+    审核改动。严格用一行回答：
+    VERDICT: APPROVE | REJECT | ABSTAIN
+    后接一段理由。
+```
+
+### Tally
+
+```php
+use SuperAgent\Squad\ConsensusGate;
+
+$gate = new ConsensusGate(
+    name: 'ship-decision',
+    n: 3,
+    m: 4,
+    voters: [
+        ['role' => 'qa'],
+        ['role' => 'security'],
+        ['role' => 'cto'],
+        ['role' => 'ceo'],
+    ],
+);
+
+$responses = [
+    "VERDICT: APPROVE\n\nCI 无回归；安全审查 clean。",
+    "VERDICT: APPROVE\n\n威胁模型覆盖了新攻击面。",
+    "VERDICT: REJECT\n\n迁移可回滚但需要维护窗口。",
+    "VERDICT: APPROVE\n\n与平台路线图一致。",
+];
+
+$result = $gate->tally($responses);
+// → [
+//   'verdict'  => 'APPROVE',
+//   'passed'   => true,
+//   'counts'   => ['APPROVE' => 3, 'REJECT' => 1, 'ABSTAIN' => 0],
+//   'per_voter'=> [0 => 'APPROVE', 1 => 'APPROVE', 2 => 'REJECT', 3 => 'APPROVE'],
+// ]
+```
+
+### 投票解析
+
+`ConsensusGate::parseVerdict($response)` 宽容处理：
+
+1. 找 `\bVERDICT:\s*(APPROVE|REJECT|ABSTAIN)\b`（大小写不敏感）。
+2. 退回关键词匹配（`approved` 而没 `rejected` → APPROVE；任何位置出现 `rejected` → REJECT）。
+3. 都不匹配时默认 `ABSTAIN` —— 不会悄悄归错票。
+
+### 构造守卫
+
+构造函数强制 `1 ≤ n ≤ m` 且 `count($voters) === m`。差一个或部分 voter 列表会在加载时报错，不会等到 tally 时少一票。
+
+### 测试
+
+`tests/Squad/ConsensusGateTest.php` —— quorum 阈值（3-of-4、4-of-4、1-of-4）、verdict 解析（哨兵命中、宽容关键词、默认 abstain）、构造器校验、tally 算术、per-voter map 顺序。
+

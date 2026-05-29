@@ -29,6 +29,7 @@ use SuperAgent\ErrorRecovery\ErrorClassifier;
 use SuperAgent\Traits\ErrorRecoveryTrait;
 use SuperAgent\Optimization\ToolResultCompactor;
 use SuperAgent\Optimization\ToolSchemaFilter;
+use SuperAgent\Tools\Compression\RtkPipeline;
 use SuperAgent\Optimization\ModelRouter;
 use SuperAgent\Optimization\ResponsePrefill;
 use SuperAgent\Optimization\PromptCachePinning;
@@ -96,6 +97,24 @@ class QueryEngine
     protected ?AdaptiveMaxTokens $adaptiveMaxTokens = null;
     protected ?SpeculativePrefetch $speculativePrefetch = null;
     protected ?LocalToolZeroCopy $zeroCopy = null;
+
+    /**
+     * Pi-borrowed steer drainer. When set (Agent installs this in
+     * createEngine()), runLoop() invokes it before each LLM call to pull
+     * any mid-turn corrections queued via Agent::steer(). Each returned
+     * entry is appended as a synthetic user message so the model adjusts
+     * course without aborting. See pi.dev/docs/latest/rpc §steer.
+     *
+     * @var (callable(): list<array{message:string,at:float}>)|null
+     */
+    protected $steerDrainer = null;
+
+    /**
+     * 9Router RTK / claude-octopus octo-compress — structured tool output
+     * compression. Lazily initialised the first time a tool result is
+     * processed. Opt out by setting options['disable_rtk_compression'] = true.
+     */
+    protected ?RtkPipeline $rtkPipeline = null;
 
     public function __construct(
         protected readonly LLMProvider $provider,
@@ -179,6 +198,18 @@ class QueryEngine
     public function setMessages(array $messages): void
     {
         $this->messages = $messages;
+    }
+
+    /**
+     * Install the steer-drain callback. Called by Agent::createEngine() so
+     * the engine can poll the agent's mid-turn correction queue between
+     * iterations of runLoop(). The callback returns and clears the queue
+     * in FIFO order; each entry's `message` becomes a synthetic user
+     * message prepended to the next LLM call.
+     */
+    public function setSteerDrainer(callable $drainer): void
+    {
+        $this->steerDrainer = $drainer;
     }
 
     public function getTotalCostUsd(): float
@@ -273,6 +304,21 @@ class QueryEngine
         while ($this->turnCount < $this->maxTurns) {
             $this->turnCount++;
             $this->guardrailsCollector?->recordTurn();
+
+            // Pi-borrowed: drain mid-turn steer corrections (set via
+            // Agent::steer()) and prepend them as synthetic user messages
+            // before the next LLM call. Pi calls this the "soft-redirect"
+            // pattern — keep the turn alive but nudge the trajectory.
+            if ($this->steerDrainer !== null) {
+                $steers = ($this->steerDrainer)();
+                if (is_array($steers) && $steers !== []) {
+                    foreach ($steers as $steer) {
+                        $msg = (string) ($steer['message'] ?? '');
+                        if ($msg === '') continue;
+                        $this->messages[] = new UserMessage('[user steer]: ' . $msg);
+                    }
+                }
+            }
 
             // USD budget check
             if ($this->maxBudgetUsd > 0 && $this->totalCostUsd >= $this->maxBudgetUsd) {
@@ -589,6 +635,18 @@ class QueryEngine
                 $content = $result->contentAsString();
                 $isError = $result->isError;
 
+                // --- Step 6.5: RTK structured-output compression ---
+                // 9Router-borrowed: shrink git-diff / grep / find / ls / tree
+                // output before the model sees it. Lossy-safe — preserves
+                // paths, line numbers, diff hunks; drops cosmetic noise.
+                // Disable per-call via $options['disable_rtk_compression'].
+                if (!$isError && empty($this->options['disable_rtk_compression'])) {
+                    if ($this->rtkPipeline === null) {
+                        $this->rtkPipeline = new RtkPipeline();
+                    }
+                    $content = $this->rtkPipeline->compress($toolName, $content);
+                }
+
                 // --- Step 7: PostToolUse hooks ---
                 $postResult = $this->runPostToolUseHooks($toolName, $toolUseId, $toolInput, $content, $isError);
 
@@ -689,6 +747,14 @@ class QueryEngine
 
             $content = $result->contentAsString();
             $isError = $result->isError;
+
+            // RTK compression — same as the sequential path (executeTools).
+            if (!$isError && empty($this->options['disable_rtk_compression'])) {
+                if ($this->rtkPipeline === null) {
+                    $this->rtkPipeline = new RtkPipeline();
+                }
+                $content = $this->rtkPipeline->compress($toolName, $content);
+            }
 
             // Zero-copy: cache result for subsequent tools
             if ($this->zeroCopy?->isEnabled()) {

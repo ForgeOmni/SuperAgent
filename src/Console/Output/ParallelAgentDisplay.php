@@ -6,6 +6,9 @@ namespace SuperAgent\Console\Output;
 
 use Symfony\Component\Console\Output\OutputInterface;
 use SuperAgent\Swarm\ParallelAgentCoordinator;
+use SuperAgent\Tracing\TraceCollector;
+use SuperAgent\Tracing\TraceEvent;
+use SuperAgent\Tracing\TraceWriter;
 
 /**
  * Displays parallel agent execution progress similar to Claude Code's TeammateSpinnerTree.
@@ -40,6 +43,101 @@ class ParallelAgentDisplay
         $this->useColors = $useColors && $output->isDecorated();
     }
     
+    /**
+     * Export the current parallel-agent state to a Chrome Trace Event JSON
+     * file viewable in chrome://tracing, ui.perfetto.dev, or the bundled
+     * trace-viewer.html (SuperTeam `.claude/design-system/templates/`).
+     *
+     * Wave 5 / SA-3. Each agent becomes a lane on the timeline; team-leader
+     * relationships become process_name labels; per-agent token/tool counts
+     * land on the event args so the viewer's detail pane shows them.
+     *
+     * Distinct from `TraceCollector::dump()` which serializes the in-memory
+     * ring buffer of individual events; this method snapshots the current
+     * coordinator state as ONE composite trace (good for "what is happening
+     * RIGHT NOW across all agents" screenshots).
+     *
+     * Returns the absolute path of the written file.
+     */
+    public function exportPerfettoJson(?string $outputPath = null): string
+    {
+        $display = $this->coordinator->getHierarchicalDisplay();
+        $progress = $this->coordinator->getConsolidatedProgress();
+        $now = (int) (microtime(true) * 1_000_000);
+
+        $events = [];
+        foreach ($display as $group) {
+            $tid = $group['type'] === 'team' ? ('team:' . ($group['name'] ?? 'unknown')) : 'standalone';
+
+            // Team-level summary event so the viewer shows team grouping.
+            if ($group['type'] === 'team') {
+                $events[] = (TraceEvent::instant(
+                    name: 'team.snapshot',
+                    category: 'agent',
+                    pid: 'superagent',
+                    tid: $tid,
+                    tsMicros: $now,
+                    args: [
+                        'leader_id' => $group['leaderId'] ?? null,
+                        'member_count' => count($group['members'] ?? []),
+                    ],
+                ))->toArray();
+            }
+
+            $members = $group['members'] ?? $group['agents'] ?? [];
+            foreach ($members as $m) {
+                $events[] = (TraceEvent::instant(
+                    name: 'agent.' . ($m['status'] ?? 'unknown'),
+                    category: 'agent',
+                    pid: 'superagent',
+                    tid: 'agent:' . ($m['agentId'] ?? $m['name'] ?? 'anon'),
+                    tsMicros: $now,
+                    args: [
+                        'name'             => $m['name'] ?? null,
+                        'status'           => $m['status'] ?? null,
+                        'current_activity' => $m['currentActivity'] ?? null,
+                        'token_count'      => $m['tokenCount'] ?? 0,
+                        'tool_use_count'   => $m['toolUseCount'] ?? 0,
+                        'team'             => $tid,
+                    ],
+                ))->toArray();
+            }
+        }
+
+        $payload = [
+            'displayTimeUnit' => 'ms',
+            'metadata' => [
+                'producer'         => 'superagent',
+                'producer_version' => 'parallel-agent-snapshot',
+                'session_id'       => 'parallel-snapshot-' . date('YmdHis'),
+                'dumped_at'        => date('c'),
+                'trigger'          => 'manual',
+                'trigger_reason'   => 'ParallelAgentDisplay::exportPerfettoJson',
+                'event_count'      => count($events),
+                'total_agents'     => $progress['totalAgents'] ?? null,
+                'total_tokens'     => $progress['totalTokens'] ?? null,
+                'total_tool_uses'  => $progress['totalToolUses'] ?? null,
+            ],
+            'traceEvents' => $events,
+        ];
+
+        if ($outputPath === null) {
+            $dir = getenv('SUPERAGENT_TRACE_PATH')
+                ?: (sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'superagent-traces');
+            if (!is_dir($dir)) @mkdir($dir, 0755, true);
+            $outputPath = $dir . DIRECTORY_SEPARATOR
+                . 'trace_superagent_parallel-snapshot_' . (int) (microtime(true) * 1000) . '_manual.json';
+        }
+
+        file_put_contents(
+            $outputPath,
+            json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            LOCK_EX,
+        );
+
+        return $outputPath;
+    }
+
     /**
      * Display the current state of all running agents.
      */

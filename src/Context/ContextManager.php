@@ -174,16 +174,26 @@ class ContextManager
             }
         }
         
+        // Pi-aligned split-turn budget: when the kept window itself
+        // exceeds keepRecentTokens (a single oversized assistant turn),
+        // ConversationCompressor::trySplitTurn() will cut mid-turn at an
+        // assistant boundary and absorb the prefix into the history
+        // summary. Pass the budget through so strategies that don't
+        // care can ignore it.
+        if ($this->config->enableSplitTurn && !isset($options['max_keep_tokens'])) {
+            $options['max_keep_tokens'] = $this->config->keepRecentTokens;
+        }
+
         // Try each strategy in order
         foreach ($this->strategies as $strategy) {
             if (!$strategy->canCompress($this->messages)) {
                 continue;
             }
-            
+
             $this->logger->debug('Trying compression strategy', [
                 'strategy' => $strategy->getName(),
             ]);
-            
+
             try {
                 $result = $strategy->compress($this->messages, $options);
                 
@@ -257,6 +267,12 @@ class ContextManager
      */
     public function compress(array $options = []): CompressionResult
     {
+        // Same split-turn budget injection as autoCompact() so manual
+        // /compact invocations honor the same Pi-aligned rules.
+        if ($this->config->enableSplitTurn && !isset($options['max_keep_tokens'])) {
+            $options['max_keep_tokens'] = $this->config->keepRecentTokens;
+        }
+
         $strategy = $options['strategy'] ?? null;
         
         if ($strategy !== null) {

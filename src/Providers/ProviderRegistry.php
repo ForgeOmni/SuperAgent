@@ -30,6 +30,9 @@ class ProviderRegistry
         'qwen' => QwenProvider::class,
         // Legacy DashScope native endpoint — opt-in. See QwenNativeProvider.
         'qwen-native' => QwenNativeProvider::class,
+        // Qwen 3.7 Max via Anthropic-protocol-compatible endpoint
+        // (drop-in for Claude). See QwenAnthropicProvider.
+        'qwen-anthropic' => QwenAnthropicProvider::class,
         'glm' => GlmProvider::class,
         'minimax' => MiniMaxProvider::class,
         'deepseek' => DeepSeekProvider::class,

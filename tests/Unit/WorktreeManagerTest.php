@@ -20,9 +20,16 @@ class WorktreeManagerTest extends TestCase
 
     protected function tearDown(): void
     {
-        // Clean up worktrees first (git worktree remove)
+        // Clean up worktrees first (git worktree prune). `2>/dev/null`
+        // is POSIX-only — on Windows cmd treats it as a literal output
+        // path and prints "The system cannot find the path specified."
+        // Use `2>&1` and discard via output array so it works on both.
         if ($this->tmpRepoDir !== null) {
-            exec(sprintf('cd %s && git worktree prune 2>/dev/null', escapeshellarg($this->tmpRepoDir)));
+            $stderrRedir = DIRECTORY_SEPARATOR === '\\' ? '2>&1' : '2>/dev/null';
+            exec(
+                sprintf('cd %s && git worktree prune %s', escapeshellarg($this->tmpRepoDir), $stderrRedir),
+                $_o,
+            );
         }
         $this->recursiveDelete($this->tmpBaseDir);
         if ($this->tmpRepoDir !== null) {
@@ -35,7 +42,25 @@ class WorktreeManagerTest extends TestCase
     {
         $dir = sys_get_temp_dir() . '/sa_wt_repo_' . uniqid();
         mkdir($dir, 0755, true);
-        exec(sprintf('cd %s && git init && git commit --allow-empty -m "init" 2>&1', escapeshellarg($dir)));
+        // CI runners (and freshly provisioned dev machines) often have no
+        // global user.email/user.name, so `git commit` fails and HEAD is
+        // never written — which then breaks `git worktree add HEAD`.
+        // Pass identity via -c so we don't mutate global config.
+        $identity = '-c user.email=test@example.com -c user.name=Test';
+        exec(sprintf('cd %s && git init -q', escapeshellarg($dir)), $_o, $initExit);
+        if ($initExit !== 0) {
+            throw new \RuntimeException("git init failed in {$dir}");
+        }
+        exec(
+            sprintf('cd %s && git %s commit --allow-empty -m "init" 2>&1', escapeshellarg($dir), $identity),
+            $commitOut,
+            $commitExit,
+        );
+        if ($commitExit !== 0) {
+            throw new \RuntimeException(
+                "git commit failed in {$dir}: " . implode("\n", $commitOut)
+            );
+        }
         $this->tmpRepoDir = $dir;
         return $dir;
     }
@@ -358,14 +383,18 @@ class WorktreeManagerTest extends TestCase
             \RecursiveIteratorIterator::CHILD_FIRST
         );
         foreach ($items as $item) {
-            if ($item->isLink()) {
-                unlink($item->getPathname());
-            } elseif ($item->isDir()) {
-                rmdir($item->getRealPath());
+            $path = $item->isLink() ? $item->getPathname() : $item->getRealPath();
+            // Git writes pack/object files read-only — Windows blocks
+            // unlink on those until the read-only bit is cleared. POSIX
+            // platforms also can't delete files in a non-writable parent,
+            // so chmod a permissive mask before removing.
+            @chmod($path, 0666);
+            if ($item->isLink() || !$item->isDir()) {
+                @unlink($path);
             } else {
-                unlink($item->getRealPath());
+                @rmdir($path);
             }
         }
-        rmdir($dir);
+        @rmdir($dir);
     }
 }

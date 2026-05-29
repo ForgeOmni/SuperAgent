@@ -10058,3 +10058,608 @@ $loaded = $mgr->discoverExternalSkills(
 
 The walk stops at the worktree boundary so monorepo parents don't accidentally inject skills into a sub-project. Up to 30 levels are scanned (defensive cap; ample for any real project).
 
+## 80. Trace ring buffer + Chrome Trace Event timeline (v1.0.6)
+
+Modelled on Jane Street's `magic-trace`. The collector is enabled by default; every long-running orchestration (debate, red-team, error recovery, cost autopilot, parallel agents) emits events to an in-process ring buffer with O(1) lock-free push. Trigger sites dump the ring to a Chrome-Trace-Event JSON file that opens in `chrome://tracing`, `ui.perfetto.dev`, or the bundled `trace-viewer.html`.
+
+### Architecture
+
+| Component | Responsibility |
+|---|---|
+| `Tracing\TraceCollector` | Singleton facade. `emitDuration` / `emitInstant` / `emitCounter` / `span` / `dump`. |
+| `Tracing\RingBuffer` | Lock-free O(1) push. Oldest-overwrite-on-full. Default capacity 1024. |
+| `Tracing\TraceEvent` | Immutable Chrome-Trace-Event record. Phases `X` (duration), `i` (instant), `C` (counter). |
+| `Tracing\TraceWriter` | JSON file emitter under `{storage}/trace_superagent_{session}_{ts}_{trigger}.json`. |
+| `Tools\Builtin\SnapshotTool` | The agent's own self-snapshot tool. Pure observability; `isReadOnly === true`. |
+
+### Configuration
+
+```bash
+SUPERAGENT_TRACE_ENABLED=true                     # default true
+SUPERAGENT_TRACE_PATH=/var/log/sa-traces          # default sys_get_temp_dir()/superagent-traces
+SUPERAGENT_TRACE_RING_SIZE=2048                   # default 1024
+```
+
+Programmatic override:
+
+```php
+use SuperAgent\Tracing\{TraceCollector, RingBuffer, TraceWriter};
+
+TraceCollector::setInstance(new TraceCollector(
+    ring: new RingBuffer(4096),
+    enabled: true,
+    sessionId: 'job-' . $jobId,
+    writer: new TraceWriter('/var/log/sa-traces', 'mygateway'),
+));
+```
+
+### Emitting events
+
+Three flavors:
+
+```php
+use SuperAgent\Tracing\TraceCollector;
+$t = TraceCollector::getInstance();
+
+// 1. Span — explicit start + duration
+$t->emitDuration(
+    name: 'planner.search',
+    category: 'planning',
+    tid: 'session:abc',
+    startMicros: $startUs,
+    durationMicros: (int)((microtime(true) - $start) * 1_000_000),
+    args: ['candidates' => 7, 'depth' => 3],
+);
+
+// 2. Span via closer callable — pairs nicely with try/finally
+$end = $t->span('llm.dispatch', 'llm', 'session:abc');
+try {
+    $resp = $provider->call(...);
+} finally {
+    $end(['model' => $resp?->model, 'cost_usd' => $resp?->cost ?? 0]);
+}
+
+// 3. Instant — point event
+$t->emitInstant('user.steer', 'control', 'session:abc', args: ['text' => mb_substr($s, 0, 80)]);
+
+// 4. Counter — chartable scalar over time
+$t->emitCounter('budget.spend', 'budget', 'autopilot', values: [
+    'session_cost_usd' => 0.42,
+    'budget_usd'       => 5.00,
+    'pct'              => 8.4,
+]);
+```
+
+### Built-in producers
+
+| Producer | Events emitted | Trigger / shape |
+|---|---|---|
+| `Debate\DebateOrchestrator::debate()` | `debate.start` (i), `debate.rounds` (X), `debate.round_N` (i), `debate.judge` (X), `debate.total` (X) | One lane per topic hash. |
+| `Debate\DebateOrchestrator::redTeam()` | `redteam.start` / `redteam.rounds` / `redteam.total` | Mirrored layout. |
+| `Debate\DebateOrchestrator::ensemble()` | `ensemble.start` (i) + per-agent leaves | Lane per topic. |
+| `ErrorRecovery\ErrorRecoveryManager` | `error.unrecoverable` / `error.retries_exhausted` (i) + AUTO `dump()` | On exception path; best-effort guarded. |
+| `CostAutopilot\CostAutopilot::evaluate()` | `budget.spend` (C) | Every evaluate. |
+| `CostAutopilot\CostAutopilot::setCurrentModel()` | `budget.tier_change` (i) | On model flip. |
+| `Console\Output\ParallelAgentDisplay::exportPerfettoJson()` | One-shot composite trace of every active agent | Snapshot, not stream. |
+
+### Agent self-snapshot
+
+The agent's tool registry now ships a `snapshot` tool the LLM can call when something feels interesting:
+
+```
+{
+  "name": "snapshot",
+  "input": {
+    "reason": "about to git reset --hard, capturing state first",
+    "tag": "pre_destructive"
+  }
+}
+```
+
+Returns the file path of the dumped trace so the operator can immediately open the timeline. `isReadOnly === true` — safe in any permission mode.
+
+### Trigger reasons
+
+`TraceCollector::dump($trigger, $reason, $extraMetadata)` produces filename `trace_<producer>_<session>_<ts>_<trigger>.json`. Conventional triggers:
+
+- `manual` — `php -r '... ->dump("manual", "post-debate inspection");'`
+- `error` — fired by `ErrorRecoveryManager` on unrecoverable / retries-exhausted
+- `snapshot` — the SnapshotTool path
+- `cron` — periodic background dump
+- `signal` — signal-handler dump (e.g. on SIGUSR1)
+
+### Performance
+
+Per-emit cost is one array push + the ring rotation modulo — ~1 µs on commodity x86. The singleton lookup is one `getenv` per process. For >10k RPS gateways, disable via env or DI; for normal usage, leave it on.
+
+---
+
+## 81. Pi-aligned JSON Event Stream (v1.0.6)
+
+Distinct from §80 (which is for cross-cutting performance lanes), `Tracing\PiEventStream` emits the canonical session-event vocabulary borrowed from [pi.dev/docs/latest/json](https://pi.dev/docs/latest/json). One canonical taxonomy across backends means SuperAICore's `/processes`, pi viewers, and third-party log shippers consume one shape regardless of which provider produced the turn.
+
+### Event types
+
+| `type` | Emitted when | Key fields |
+|---|---|---|
+| `session` | First line of a session file | `version`, `id`, `cwd`, `parentSession?` |
+| `agent_start` / `agent_end` | Whole session boundary | `sessionId` |
+| `turn_start` / `turn_end` | One user→assistant interaction | `turnId`, `sessionId`, `model` |
+| `message_start` / `message_update` / `message_end` | Streaming message progression | `messageId`, `role`, `text_delta?`, `thinking_delta?` |
+| `tool_execution_start` / `tool_execution_update` / `tool_execution_end` | Tool invocation lifecycle | `toolCallId`, `name`, `arguments`, `partial_result?`, `result?`, `error?` |
+| `queue_update` | Steering / follow-up queue change | `pending: string[]` |
+| `compaction_start` / `compaction_end` | Manual or auto compaction | `tokensBefore`, `firstKeptEntryId?`, `summary?` |
+| `auto_retry_start` / `auto_retry_end` | Provider/network retry | `attempt`, `reason?`, `backoffMs?` |
+| `model_change` | Mid-session model swap | `provider`, `modelId` |
+| `thinking_level_change` | Mid-session thinking-budget swap | `thinkingLevel` |
+
+### Wire format
+
+JSONL, LF-only line terminators. Each event:
+
+```json
+{"type":"turn_start","timestamp":"2026-05-22T10:01:00Z","sessionId":"s-1","turnId":"t-1","model":"claude-opus-4-7"}
+```
+
+### Subscribing
+
+```php
+use SuperAgent\Tracing\PiEventStream;
+use SuperAgent\Tracing\PiEventStreamWriter;
+
+// Writes JSONL to a session file
+$handle = PiEventStream::subscribe(new PiEventStreamWriter('/var/sa/session.events.jsonl'));
+
+// Custom listener (e.g. forward to a Redis stream)
+$handle2 = PiEventStream::subscribe(function (array $event): void {
+    $redis->xadd('sa-events', '*', $event);
+});
+
+// ...
+PiEventStream::unsubscribe($handle);
+PiEventStream::reset();
+```
+
+### Emitting
+
+```php
+PiEventStream::emit(PiEventStream::AGENT_START, ['sessionId' => $sid]);
+PiEventStream::emit(PiEventStream::TURN_START, ['turnId' => $tid, 'sessionId' => $sid, 'model' => $model]);
+PiEventStream::emit(PiEventStream::TOOL_EXECUTION_START, [
+    'toolCallId' => $callId,
+    'name'       => 'edit',
+    'arguments'  => $args,
+]);
+PiEventStream::emit(PiEventStream::TOOL_EXECUTION_END, [
+    'toolCallId' => $callId,
+    'result'     => $result,
+]);
+PiEventStream::emit(PiEventStream::TURN_END, ['turnId' => $tid, 'sessionId' => $sid]);
+PiEventStream::emit(PiEventStream::AGENT_END, ['sessionId' => $sid]);
+```
+
+### Legacy back-compat
+
+SuperAgent's older `StructuredLogger` still emits names like `tool_execution` / `llm_request` / `llm_response`. Normalise via the translator:
+
+```php
+PiEventStream::translateLegacy('tool_execution'); // → 'tool_execution_end'
+PiEventStream::translateLegacy('llm_request');    // → 'turn_start'
+PiEventStream::translateLegacy('llm_message');    // → 'message_update'
+```
+
+Legacy names will be removed in the next major release; new call sites SHOULD emit Pi-aligned events directly.
+
+---
+
+## 82. Mid-turn steering + follow-up queue (v1.0.6)
+
+Two pi-borrowed primitives that solve symmetric problems: nudge a running agent without aborting, and queue prompts for after the current turn ends.
+
+### `Agent::steer()` — mid-turn correction
+
+```php
+// In a long-running agent run:
+$agent->run('Find the auth bug and fix it', ...);
+
+// From a separate event handler (RPC, signal, webhook) while the run is in flight:
+$agent->steer('Stop digging in Login.php — the regression is in Session.php');
+```
+
+The `QueryEngine::runLoop()` drains the queue between LLM iterations and prepends each entry as a synthetic user message of the form `[user steer]: <text>`. The model sees the redirection before its next thought turn.
+
+Mechanics:
+
+1. `Agent::steer($msg)` appends to `$this->options['_steer_queue']`.
+2. `Agent::createEngine()` installs a drainer callback via `$engine->setSteerDrainer(fn() => $this->drainSteer())`.
+3. `QueryEngine::runLoop()` calls the drainer at the top of every iteration; drained entries become `UserMessage` objects on `$this->messages` before the next provider call.
+
+Differences:
+
+- **vs. cancel**: cancel terminates; steer continues with a redirected goal.
+- **vs. new prompt**: a new prompt starts a fresh turn; steer modifies the in-flight turn.
+- **Granularity**: steer arrives at the next iteration boundary, not mid-stream. If you need sub-second response, cancel + steer + restart.
+
+### `Agent::followUp()` — post-turn queue
+
+```php
+$agent->run('Refactor src/Auth/* to use new session middleware');
+$agent->followUp('Once done, also update tests/Unit/Auth/');
+$agent->followUp('And run vendor/bin/phpstan analyze');
+```
+
+`Agent::run()` drains the follow-up queue (FIFO) after the main run completes and runs each item against the same Agent (so message history accumulates naturally). Cap: `_max_followups_per_call = 8` per outer `run()` call to prevent runaway loops.
+
+### ACP protocol extensions
+
+Editors that speak the Agent Client Protocol send the new methods over JSON-RPC:
+
+```json
+// session/steer notification
+{"jsonrpc":"2.0","method":"session/steer","params":{"sessionId":"s-1","prompt":[{"type":"text","text":"…"}]}}
+
+// session/follow_up notification
+{"jsonrpc":"2.0","method":"session/follow_up","params":{"sessionId":"s-1","prompt":[…]}}
+```
+
+`Handler` contract:
+
+```php
+public function steer(array $params): void;
+public function followUp(array $params): void;
+```
+
+`DefaultHandler` maintains per-session `steerQueue` and `followUpQueue` arrays under `SessionEntry::$meta`. The host's `promptFn` closure consumes them at safe checkpoints:
+
+```php
+$handler = new DefaultHandler($sessions, function (array $params) use ($handler) {
+    $sessionId = $params['sessionId'];
+
+    // Drain steer at every iteration:
+    foreach ($handler->drainSteer($sessionId) as $steer) {
+        // prepend $steer['prompt'] as synthetic user message
+    }
+
+    // Drain follow-ups at the next prompt cycle's top:
+    foreach ($handler->drainFollowUp($sessionId) as $followUp) {
+        // process or enqueue
+    }
+
+    // ... run the agent ...
+});
+```
+
+### Tests
+
+`tests/AgentSteerTest.php` — FIFO order, drain-clears-queue, sync with QueryEngine drainer callback, cap on follow-ups.
+
+---
+
+## 83. RTK structured-output compression (v1.0.6)
+
+Tool outputs from `git diff`, `grep -rn`, `find`, `ls -R`, `tree` etc. dominate token usage in coding sessions — typically 30-50 % of input budget per turn, and much of that is repeated paths, ANSI color codes, blank lines, unchanged context. `Tools\Compression\RtkPipeline` (borrowed from 9Router's RTK Token Saver + claude-octopus's `octo-compress` PostToolUse hook) auto-compresses these before the model sees them.
+
+### Wire-up
+
+```php
+// QueryEngine wires it automatically:
+$result = $agent->run('Find every TODO in src/');
+// → grep output is RTK-compressed transparently before the model sees the next turn.
+
+// Disable per-call:
+$result = $agent->run('Generate a patch to apply with git apply', [
+    'disable_rtk_compression' => true,
+]);
+```
+
+### Built-in compressors
+
+| Tool key | Compressor class | Preserves | Drops |
+|---|---|---|---|
+| `git diff`, `git_diff` | `GitDiffCompressor` | `diff --git`, `--- a/`, `+++ b/`, `@@ -L,N +L,M @@`, `+`/`-` lines, mode markers | Unchanged context lines, `index <sha>..<sha>` lines, trailing ws |
+| `grep`, `rg`, `ripgrep`, `Grep` | `GrepCompressor` | `file:line:match` canonical hits | Context lines, ANSI codes, "X matches in Y files" footers |
+| `find`, `Glob` | `FindCompressor` | Leaf filenames | Repeated directory prefixes |
+| `ls` | `LsCompressor` | Filenames; dir vs file distinction | Total/permission columns when not needed |
+| `tree` | `TreeCompressor` | `├─` / `└─` / `│` structure markers | Byte/size annotations |
+| `Bash`, `bash` | `BashOutputCompressor` | Dispatches to the right compressor based on output sniff | (delegates) |
+
+Heuristic dispatch fires for unknown tool names whose output looks like a diff (`^diff --git` header), grep (`^file:line:` pattern), or find (`^./path` lines).
+
+### Typical savings (real-world fixtures)
+
+| Tool | Input size | Output size | Savings |
+|---|---|---|---|
+| `git diff` (50 changed files, 3-line context) | 84 KB | 32 KB | 62 % |
+| `rg -n TODO` across `src/` | 41 KB | 22 KB | 46 % |
+| `find . -name '*.php'` | 12 KB | 7.8 KB | 35 % |
+| `tree -L 4` on `src/` | 18 KB | 14 KB | 22 % |
+
+Never enlarges — if the compressed form ≥ original, the original wins.
+
+### Custom compressors
+
+```php
+use SuperAgent\Tools\Compression\{RtkPipeline, CompressorInterface};
+
+final class JsonResultCompressor implements CompressorInterface
+{
+    public function compress(string $output): ?string
+    {
+        $decoded = json_decode($output, true);
+        if (!is_array($decoded)) return null;
+        // Drop noisy fields, keep meaningful ones
+        unset($decoded['_meta'], $decoded['_debug']);
+        return json_encode($decoded, JSON_UNESCAPED_SLASHES);
+    }
+}
+
+$pipeline = new RtkPipeline();
+$pipeline->register('myapi.search', new JsonResultCompressor());
+```
+
+### Stats
+
+```php
+$stats = $pipeline->stats();
+// → ['bytes_in' => 184_400, 'bytes_out' => 78_120, 'saved_bytes' => 106_280, 'ratio' => 0.576]
+```
+
+### Tests
+
+`tests/Tools/Compression/RtkPipelineTest.php` — fixtures for each built-in compressor with assertions on preserved structural markers + drop of cosmetic noise.
+
+---
+
+## 84. Cross-provider tool-schema portability (v1.0.6)
+
+Anthropic, OpenAI, and Gemini each accept slightly different subsets of JSON Schema in their tool-input declarations. Without normalisation, a tool that uses `oneOf` or `$ref` works on Anthropic but breaks on Gemini; one that uses `format: ipv4` works on OpenAI but breaks on Gemini. `Tools\Schema\Schema` + `ProviderNormalizer` (borrowed from pi's StringEnum/Typebox helper) let you declare a schema once and rewrite it per target provider.
+
+### Authoring
+
+```php
+use SuperAgent\Tools\Schema\Schema;
+
+class FileEditorTool extends Tool
+{
+    public function inputSchema(): array
+    {
+        return Schema::object(
+            properties: [
+                'action' => Schema::stringEnum(['read', 'write', 'append', 'delete']),
+                'path'   => Schema::string('Absolute path to the file'),
+                'content'=> Schema::string('New content (required when action is write or append)'),
+                'mode'   => Schema::oneOf([
+                    ['type' => 'string', 'const' => 'overwrite'],
+                    ['type' => 'string', 'const' => 'patch'],
+                    Schema::object(['custom_pattern' => Schema::string()]),
+                ]),
+            ],
+            required: ['action', 'path'],
+        );
+    }
+}
+```
+
+`stringEnum`, `oneOf`, `anyOf` stamp `x-superagent-kind` markers (`string-enum`, `one-of`, `any-of`) that the normaliser reads.
+
+### Rewriting
+
+```php
+use SuperAgent\Tools\Schema\ProviderNormalizer;
+
+$schema = $tool->inputSchema();
+$forAnthropic = ProviderNormalizer::forAnthropic($schema);
+$forOpenAI    = ProviderNormalizer::forOpenAI($schema);
+$forGemini    = ProviderNormalizer::forGemini($schema);
+```
+
+| Normaliser | Effects |
+|---|---|
+| `forAnthropic` | Strips `$ref` / `$defs` / `$schema` / `definitions` / `x-superagent-*` markers. Otherwise pass-through. |
+| `forOpenAI` | Same as Anthropic. (`oneOf` / `anyOf` are accepted in strict mode.) |
+| `forGemini` | Strips refs + extensions; **flattens `oneOf`/`anyOf` of string literals into `enum`**; drops unsupported `format` values (only `date-time` and `enum` survive). |
+
+### Flatten example
+
+Input schema (with a `oneOf` of three string-literal branches):
+
+```php
+Schema::oneOf([
+    ['type' => 'string', 'const' => 'fast'],
+    ['type' => 'string', 'const' => 'balanced'],
+    ['type' => 'string', 'const' => 'thorough'],
+])
+```
+
+After `ProviderNormalizer::forGemini()`:
+
+```json
+{"type":"string","enum":["fast","balanced","thorough"]}
+```
+
+Pure JSON Schema; accepted by every provider.
+
+### Compliance testing
+
+`tests/Tools/Schema/CrossProviderComplianceTest.php` round-trips a battery of tagged shapes through all three normalisers and asserts:
+
+- `forAnthropic` output contains no `$ref` / `$defs` / `x-superagent-*` keys.
+- `forOpenAI` output contains no `$ref` / `$defs`.
+- `forGemini` output contains no `$ref` / `$defs` / `oneOf` / `anyOf` at any depth; no unsupported `format` values.
+
+Run before declaring a new tool input schema cross-provider-safe.
+
+---
+
+## 85. Session branching — pi `/tree` fork + PiImporter (v1.0.6)
+
+pi.dev models a session as an append-only tree of entries keyed by `id` + `parentId`. Switching branches via `/tree` writes a `branch_summary` entry. SuperAgent now mirrors the semantics.
+
+### `Conversation\BranchManager` — pure tree algebra
+
+```php
+use SuperAgent\Conversation\BranchManager;
+
+$entries = $sessionStorage->loadEntries($sessionId);
+$bm = new BranchManager($entries);
+
+$leaves   = $bm->leaves();                                  // ids with no descendants
+$chain    = $bm->ancestry('entry-leaf-1');                  // root → leaf id list
+$ancestor = $bm->findCommonAncestor('entry-a', 'entry-b');  // closest common entry id
+
+$abandoned   = $bm->collectBranch('entry-old-leaf', $ancestor);     // entries dropped
+$summaryText = $summaryFn($abandoned);                              // your closure
+$entry       = $bm->makeBranchSummaryEntry(
+    fromLeafId:  'entry-old-leaf',
+    summary:     $summaryText,
+    newParentId: 'entry-ancestor',
+);
+
+$sessionStorage->appendEntry($sessionId, $entry);
+```
+
+Pure value-level — no I/O, no LLM. The host supplies a `summaryFn` (LLM call, hash, manual summary, whatever) that turns the abandoned slice into one block of text.
+
+### `SessionManager::fork()` — high-level fork operation
+
+```php
+use SuperAgent\Session\SessionManager;
+
+$newId = $sessionManager->fork(
+    sourceSessionId: 's-original',
+    forkAtIndex: 12,                          // 0-based; new branch keeps [0..12]
+    summaryFn: function (array $abandoned) use ($flash) {
+        // Summarise the discarded suffix so the source session retains context
+        return $flash->summarize(array_slice($abandoned, -8));
+    },
+    displayName: 'try-event-sourcing-instead',
+);
+
+// $newId is a new session that:
+//   - Starts with the first 13 messages of s-original
+//   - Has _entry_id / _parent_entry_id stamped on each retained message
+//   - Carries branched_from = {session_id, fork_at_index, fork_at_entry_id, display_name}
+//
+// s-original now carries branches[] containing:
+//   {branch_session_id: $newId, fork_at_index: 12, abandoned_summary: '…', display_name: '…', created_at: …}
+```
+
+`listSessions()` on the source returns a `branches[]` field the UI uses to render the tree.
+
+### `Conversation\Importers\PiImporter` — replay pi sessions
+
+```php
+use SuperAgent\Conversation\Importers\PiImporter;
+
+$importer = new PiImporter();    // root defaults to ~/.pi/agent/sessions
+
+$rows = $importer->listSessions(50);
+// → [
+//   ['id' => '2026-05-22_abc', 'started_at' => '…', 'message_count' => 47,
+//    'first_user_message' => 'Find the auth bug…', 'path' => '/abs/...'],
+//   ...
+// ]
+
+$messages = $importer->load('/abs/path/to/2026-05-22_abc123.jsonl');
+// → SuperAgent\Messages\Message[] ready to seed an Agent's history
+```
+
+Handles `message` (user/assistant), `compaction` (rendered as a system-style preface), `branch_summary` (rendered as a system-style preface). Skips UX hints (`model_change` / `thinking_level_change` / `custom` / `custom_message` / `label` / `session_info`).
+
+### Tests
+
+- `tests/Conversation/BranchManagerTest.php` — ancestry, common ancestor, branch collection, branch summary shape.
+- `tests/Session/SessionManagerForkTest.php` — full fork end-to-end (prefix preservation, abandoned summary, branches[] stamping on source, branched_from pointer on new, listSessions visibility).
+
+---
+
+## 86. Squad consensus gates — N-of-M parallel voting (v1.0.6)
+
+The existing `reviewer_loop` is a serial, single-veto gate (one reviewer agrees → pass). `Squad\ConsensusGate` (borrowed from claude-octopus) is a parallel N-of-M gate: M peers each vote on the same artifact and ≥N must approve before work advances. Designed for high-stakes decisions (ship/no-ship, security-sensitive code, irreversible operations) where blind spots matter more than craft.
+
+### When to use which
+
+| Scenario | Use |
+|---|---|
+| Craft critique (writing, code review with one trusted reviewer, prose polish) | `reviewer_loop` (serial, single-veto) |
+| Ship / no-ship decisions, security audits, irreversible ops | `ConsensusGate` (parallel, quorum) |
+| Multiple uncorrelated perspectives matter more than depth on any one | `ConsensusGate` |
+| One specific reviewer's judgement is the gate | `reviewer_loop` |
+
+### YAML schema
+
+```yaml
+- kind: consensus_gate
+  name: ship-decision
+  depends_on: [synthesize]
+  params:
+    n: 3
+    m: 4
+    voters:
+      - role: qa-bach
+        provider: anthropic
+        model: claude-sonnet-4-6
+      - role: security-schneier
+        provider: openai-responses
+        model: gpt-5
+      - role: cto-vogels
+        provider: gemini
+        model: gemini-3.5-pro
+      - role: ceo-bezos
+        provider: anthropic
+        model: claude-opus-4-7
+  prompt: |
+    Review the proposed change. Respond with EXACTLY ONE line:
+    VERDICT: APPROVE | REJECT | ABSTAIN
+    followed by a single-paragraph justification.
+```
+
+### Tally
+
+```php
+use SuperAgent\Squad\ConsensusGate;
+
+$gate = new ConsensusGate(
+    name: 'ship-decision',
+    n: 3,
+    m: 4,
+    voters: [
+        ['role' => 'qa'],
+        ['role' => 'security'],
+        ['role' => 'cto'],
+        ['role' => 'ceo'],
+    ],
+);
+
+$responses = [
+    "VERDICT: APPROVE\n\nNo regressions in CI; security review clean.",
+    "VERDICT: APPROVE\n\nThreat model accounts for the new attack surface.",
+    "VERDICT: REJECT\n\nMigration is reversible but requires a maintenance window.",
+    "VERDICT: APPROVE\n\nAligns with the platform roadmap.",
+];
+
+$result = $gate->tally($responses);
+// → [
+//   'verdict'  => 'APPROVE',
+//   'passed'   => true,
+//   'counts'   => ['APPROVE' => 3, 'REJECT' => 1, 'ABSTAIN' => 0],
+//   'per_voter'=> [0 => 'APPROVE', 1 => 'APPROVE', 2 => 'REJECT', 3 => 'APPROVE'],
+// ]
+```
+
+### Verdict parsing
+
+`ConsensusGate::parseVerdict($response)` is permissive:
+
+1. Looks for `\bVERDICT:\s*(APPROVE|REJECT|ABSTAIN)\b` (case-insensitive).
+2. Falls back to keyword match (`approved` w/o `rejected` → APPROVE; `rejected` anywhere → REJECT).
+3. Defaults to `ABSTAIN` when nothing matches — never silently mis-attributes a vote.
+
+### Construction guards
+
+The constructor enforces `1 ≤ n ≤ m` and `count($voters) === m`. Off-by-one or partial voter lists fail loudly at load time, not at tally time when a vote is missing.
+
+### Tests
+
+`tests/Squad/ConsensusGateTest.php` — quorum thresholds (3-of-4, 4-of-4, 1-of-4), verdict parsing (sentinel found, lenient keyword, abstain default), constructor validation, tally arithmetic, per-voter map ordering.
+

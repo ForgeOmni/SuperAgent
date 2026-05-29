@@ -132,6 +132,12 @@ final class Server
             case Protocol::METHOD_SESSION_CANCEL:
                 $this->handler->cancel($params);
                 return [];
+            case Protocol::METHOD_SESSION_STEER:
+                $this->handler->steer($params);
+                return [];
+            case Protocol::METHOD_SESSION_FOLLOW_UP:
+                $this->handler->followUp($params);
+                return [];
             default:
                 throw new AcpException("Method not found: {$method}", Protocol::ERR_METHOD_NOT_FOUND);
         }

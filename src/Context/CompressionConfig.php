@@ -14,6 +14,19 @@ class CompressionConfig
     private const DEFAULT_MIN_MESSAGES = 5;
     private const DEFAULT_KEEP_RECENT = 10;
     private const DEFAULT_MAX_RETRIES = 3;
+
+    /**
+     * Pi-aligned token budgets (pi.dev/docs/latest/compaction).
+     * - reserveTokens: headroom kept inside contextWindow when deciding
+     *   whether to auto-compact. Auto fires when
+     *   `contextTokens > contextWindow - reserveTokens`.
+     * - keepRecentTokens: target token budget for messages preserved
+     *   verbatim after compaction. When the recent slice exceeds this
+     *   even after dropping older history, the ConversationCompressor
+     *   trySplitTurn() path activates and cuts mid-turn.
+     */
+    private const DEFAULT_RESERVE_TOKENS     = 16_384;
+    private const DEFAULT_KEEP_RECENT_TOKENS = 20_000;
     
     /**
      * Compactable tool names
@@ -41,6 +54,10 @@ class CompressionConfig
         public readonly bool $enableAutoCompact = true,
         public readonly bool $enableCacheEditing = false,
         public readonly ?string $summaryModel = null,
+        // Pi-aligned token budgets (see constants above).
+        public readonly int $reserveTokens = self::DEFAULT_RESERVE_TOKENS,
+        public readonly int $keepRecentTokens = self::DEFAULT_KEEP_RECENT_TOKENS,
+        public readonly bool $enableSplitTurn = true,
     ) {}
     
     /**
@@ -65,6 +82,9 @@ class CompressionConfig
             enableAutoCompact: $config['enable_auto_compact'] ?? $exp::enabled('compaction_reminders'),
             enableCacheEditing: $config['enable_cache_editing'] ?? false,
             summaryModel: $config['summary_model'] ?? null,
+            reserveTokens: $config['reserve_tokens'] ?? self::DEFAULT_RESERVE_TOKENS,
+            keepRecentTokens: $config['keep_recent_tokens'] ?? self::DEFAULT_KEEP_RECENT_TOKENS,
+            enableSplitTurn: $config['enable_split_turn'] ?? true,
         );
     }
     
@@ -85,6 +105,9 @@ class CompressionConfig
             enableAutoCompact: $overrides['enableAutoCompact'] ?? $this->enableAutoCompact,
             enableCacheEditing: $overrides['enableCacheEditing'] ?? $this->enableCacheEditing,
             summaryModel: $overrides['summaryModel'] ?? $this->summaryModel,
+            reserveTokens: $overrides['reserveTokens'] ?? $this->reserveTokens,
+            keepRecentTokens: $overrides['keepRecentTokens'] ?? $this->keepRecentTokens,
+            enableSplitTurn: $overrides['enableSplitTurn'] ?? $this->enableSplitTurn,
         );
     }
     
