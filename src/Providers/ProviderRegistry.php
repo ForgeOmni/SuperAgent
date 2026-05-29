@@ -36,6 +36,8 @@ class ProviderRegistry
         'glm' => GlmProvider::class,
         'minimax' => MiniMaxProvider::class,
         'deepseek' => DeepSeekProvider::class,
+        // xAI Grok — OpenAI-compatible at api.x.ai.
+        'grok' => GrokProvider::class,
     ];
 
     /**
@@ -155,6 +157,12 @@ class ProviderRegistry
         ],
         'deepseek' => [
             'model' => 'deepseek-v4-flash',
+            'region' => 'default',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
+        'grok' => [
+            'model' => 'grok-4.3',
             'region' => 'default',
             'max_tokens' => 8192,
             'max_retries' => 3,
@@ -464,7 +472,7 @@ class ProviderRegistry
             'bedrock' => ['access_key', 'secret_key'],
             'ollama' => [], // No required keys for Ollama
             'gemini' => ['api_key'],
-            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax', 'deepseek' => ['api_key'],
+            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax', 'deepseek', 'grok' => ['api_key'],
             default => [],
         };
 
@@ -561,6 +569,10 @@ class ProviderRegistry
                 'api_key' => $_ENV['DEEPSEEK_API_KEY'] ?? getenv('DEEPSEEK_API_KEY'),
                 'region' => $_ENV['DEEPSEEK_REGION'] ?? getenv('DEEPSEEK_REGION') ?: 'default',
             ],
+            'grok' => [
+                'api_key' => $_ENV['XAI_API_KEY'] ?? getenv('XAI_API_KEY')
+                    ?: ($_ENV['GROK_API_KEY'] ?? getenv('GROK_API_KEY')),
+            ],
             default => throw new ProviderException("Unknown provider: {$name}", $name),
         };
 
@@ -596,6 +608,7 @@ class ProviderRegistry
                 'glm'       => ['api_key' => $_ENV['GLM_API_KEY'] ?? getenv('GLM_API_KEY') ?: null],
                 'minimax'   => ['api_key' => $_ENV['MINIMAX_API_KEY'] ?? getenv('MINIMAX_API_KEY') ?: null],
                 'deepseek'  => ['api_key' => $_ENV['DEEPSEEK_API_KEY'] ?? getenv('DEEPSEEK_API_KEY') ?: null],
+                'grok'      => ['api_key' => $_ENV['XAI_API_KEY'] ?? getenv('XAI_API_KEY') ?: ($_ENV['GROK_API_KEY'] ?? getenv('GROK_API_KEY')) ?: null],
                 'gemini'    => ['api_key' => $_ENV['GEMINI_API_KEY'] ?? getenv('GEMINI_API_KEY') ?: null],
                 'openrouter'=> ['api_key' => $_ENV['OPENROUTER_API_KEY'] ?? getenv('OPENROUTER_API_KEY') ?: null],
                 default     => [],
@@ -734,6 +747,10 @@ class ProviderRegistry
             $available[] = 'deepseek';
         }
 
+        if (getenv('XAI_API_KEY') || getenv('GROK_API_KEY')) {
+            $available[] = 'grok';
+        }
+
         // Check if Ollama is running
         if (self::isOllamaAvailable()) {
             $available[] = 'ollama';
@@ -849,6 +866,14 @@ class ProviderRegistry
                 'structured_output' => true,
                 'thinking' => true,
                 'regions' => ['default', 'beta'],
+            ],
+            'grok' => [
+                'streaming' => true,
+                'tools' => true,
+                'vision' => true,
+                'max_context' => 1_000_000,
+                'structured_output' => true,
+                'thinking' => true,
             ],
             default => [],
         };

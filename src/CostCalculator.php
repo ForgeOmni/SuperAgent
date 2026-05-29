@@ -28,7 +28,19 @@ class CostCalculator
         'claude-3-opus-20240229' => ['input' => 15.0, 'output' => 75.0],
         'claude-3-sonnet-20240229' => ['input' => 3.0, 'output' => 15.0],
         'claude-3-haiku-20240307' => ['input' => 0.25, 'output' => 1.25],
-        
+
+        // xAI Grok
+        'grok-4.3'                     => ['input' => 1.25, 'output' => 2.50],
+        'grok-4.20-0309-reasoning'     => ['input' => 1.25, 'output' => 2.50],
+        'grok-4.20-0309-non-reasoning' => ['input' => 1.25, 'output' => 2.50],
+        'grok-4.20-multi-agent-0309'   => ['input' => 1.25, 'output' => 2.50],
+        'grok-build-0.1'               => ['input' => 1.00, 'output' => 2.00],
+        'grok-4'                       => ['input' => 3.0, 'output' => 15.0],
+        'grok-4-fast'                  => ['input' => 0.20, 'output' => 0.50],
+        'grok-code-fast-1'             => ['input' => 0.20, 'output' => 1.50],
+        'grok-3'                       => ['input' => 3.0, 'output' => 15.0],
+        'grok-3-mini'                  => ['input' => 0.30, 'output' => 0.50],
+
         // OpenAI GPT models
         'gpt-4o' => ['input' => 2.50, 'output' => 10.0],
         'gpt-4o-2024-11-20' => ['input' => 2.50, 'output' => 10.0],

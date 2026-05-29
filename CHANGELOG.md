@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`/ultrareview [target] [--run]`** — builds a dynamic review workflow (parallel fan-out across correctness / security / performance / tests / maintainability, then a synthesis step) over the current diff.
 - **Tests** — `WorkflowToolDynamicTest` (planning, the PipelineEngine bridge for every strategy, nested parallel + synthesis, tool-step translation, caller-selectable run mode, live-runner execution, Opus 4.8 pricing) and `HarnessSlashCommandsTest` (command registration + `/workflows` / `/ultraplan` / `/ultrareview` behavior). `AnthropicProviderOAuthTest` updated for the new OAuth fallback.
 
+### Added — xAI Grok provider
+
+- **`Providers\GrokProvider`** — xAI Grok over the OpenAI-compatible endpoint at `https://api.x.ai/v1` (base URL verified against docs.x.ai). Auth via `XAI_API_KEY` (or `GROK_API_KEY`). Default model `grok-4.3` (xAI's recommended primary). Implements `SupportsReasoningEffort`, gated so the `reasoning_effort` dial is only sent for `grok-3-mini` (the flagship models reason natively and reject the param).
+- **`Providers\ProviderRegistry`** — `grok` registered across all six maps: class registry, default configs, required-key validation, `createFromEnv()`, `discover()`, `healthCheck()`, and `getCapabilities()`.
+- **`resources/models.json`** — `grok` block with the current lineup: `grok-4.3` ($1.25/$2.50, 1M ctx; `grok` alias → `grok-4.3`), the `grok-4.20-*` reasoning / non-reasoning / multi-agent SKUs, `grok-build-0.1`, plus `grok-4`, `grok-4-fast` (2M ctx), `grok-code-fast-1`, `grok-3`, `grok-3-mini`. **`CostCalculator`** carries matching fallback pricing — verified against docs.x.ai (May 2026).
+- Reuses the base OpenAI tool schema (`formatTools()`), so MCP / Skills / Agents tool-calling works unchanged. Tests: `GrokProviderTest`.
+
+> **Cursor Composer was evaluated and intentionally not added.** Cursor does not expose Composer (composer-2.5) as an official public OpenAI-compatible API — it is bundled into the Cursor IDE subscription (only community proxies bridge it). The inbound `Conversation\Encoder\CursorEncoder` wire dialect from an earlier release is unaffected.
+
 ## [1.0.7] - 2026-05-23
 
 ### 💻 Summary

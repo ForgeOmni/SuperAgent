@@ -218,6 +218,24 @@
         {"id": "deepseek-chat",     "family": "deepseek-v3", "date": "20241226", "input": 0.27, "output": 1.10, "deprecated_until": "2026-07-24", "replaced_by": "deepseek-v4-flash", "description": "DeepSeek V3 chat — DEPRECATED, retires 2026-07-24, currently routes to deepseek-v4-flash"},
         {"id": "deepseek-reasoner", "family": "deepseek-r1", "date": "20250120", "input": 0.55, "output": 2.20, "deprecated_until": "2026-07-24", "replaced_by": "deepseek-v4-pro", "description": "DeepSeek R1 reasoner — DEPRECATED, retires 2026-07-24; replaced by V4 thinking mode"}
       ]
+    },
+
+    "grok": {
+      "env": "XAI_API_KEY",
+      "regions": ["default"],
+      "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "mcp": true},
+      "models": [
+        {"id": "grok-4.3",                     "family": "grok",       "date": "20260520", "input": 1.25, "output": 2.50, "aliases": ["grok", "grok-4.3"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "mcp": true, "max_context": 1000000}, "description": "Grok 4.3 — xAI flagship reasoning + coding (recommended default)"},
+        {"id": "grok-4.20-0309-reasoning",     "family": "grok-4.20",  "date": "20260309", "input": 1.25, "output": 2.50, "aliases": ["grok-4.20"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "max_context": 1000000}, "description": "Grok 4.20 reasoning"},
+        {"id": "grok-4.20-0309-non-reasoning", "family": "grok-4.20",  "date": "20260309", "input": 1.25, "output": 2.50, "capabilities": {"streaming": true, "tools": true, "vision": true, "max_context": 1000000}, "description": "Grok 4.20 non-reasoning"},
+        {"id": "grok-4.20-multi-agent-0309",   "family": "grok-4.20",  "date": "20260309", "input": 1.25, "output": 2.50, "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "max_context": 1000000}, "description": "Grok 4.20 multi-agent"},
+        {"id": "grok-build-0.1",               "family": "grok-build", "date": "20260401", "input": 1.00, "output": 2.00, "aliases": ["grok-build"], "capabilities": {"streaming": true, "tools": true, "max_context": 256000}, "description": "Grok Build 0.1 — agentic build/coding"},
+        {"id": "grok-4",                       "family": "grok-4",     "date": "20250709", "input": 3.0,  "output": 15.0, "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "max_context": 256000}, "description": "Grok 4 (previous flagship)"},
+        {"id": "grok-4-fast",                  "family": "grok-4-fast","date": "20260215", "input": 0.20, "output": 0.50, "aliases": ["grok-fast"], "capabilities": {"streaming": true, "tools": true, "vision": true, "max_context": 2000000}, "description": "Grok 4 Fast — cheap 2M-context tier"},
+        {"id": "grok-code-fast-1",             "family": "grok-code",  "date": "20250825", "input": 0.20, "output": 1.50, "aliases": ["grok-code"], "capabilities": {"streaming": true, "tools": true, "max_context": 256000}, "description": "Grok Code Fast — agentic coding"},
+        {"id": "grok-3",                       "family": "grok-3",     "date": "20250217", "input": 3.0,  "output": 15.0, "description": "Grok 3 (legacy)"},
+        {"id": "grok-3-mini",                  "family": "grok-3-mini","date": "20250217", "input": 0.30, "output": 0.50, "capabilities": {"streaming": true, "tools": true, "thinking": true, "max_context": 131072}, "description": "Grok 3 mini — reasoning_effort dial (legacy)"}
+      ]
     }
   }
 }
