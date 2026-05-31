@@ -14,6 +14,13 @@ use SuperAgent\Tools\Providers\Kimi\KimiSwarmTool;
 
 class KimiSwarmToolTest extends TestCase
 {
+    protected function tearDown(): void
+    {
+        // Always clear the opt-in gate between tests.
+        putenv('SUPERAGENT_KIMI_SWARM_ENABLED');
+        parent::tearDown();
+    }
+
     public function test_rejects_empty_prompt(): void
     {
         $tool = new KimiSwarmTool(new KimiProvider(['api_key' => 'k']));
@@ -21,8 +28,24 @@ class KimiSwarmToolTest extends TestCase
         $this->assertTrue($tool->execute(['prompt' => '  '])->isError);
     }
 
+    public function test_disabled_by_default_without_optin(): void
+    {
+        // No SUPERAGENT_KIMI_SWARM_ENABLED → actionable error, no HTTP call.
+        $history = [];
+        $tool = $this->withMock([
+            new Response(200, [], json_encode(['id' => 'swarm_1'])),
+        ], $history);
+
+        $result = $tool->execute(['prompt' => 'task', 'wait' => false]);
+
+        $this->assertTrue($result->isError);
+        $this->assertStringContainsString('SUPERAGENT_KIMI_SWARM_ENABLED', (string) $result->content);
+        $this->assertCount(0, $history, 'gate must short-circuit before any HTTP call');
+    }
+
     public function test_submitted_mode_skips_polling(): void
     {
+        putenv('SUPERAGENT_KIMI_SWARM_ENABLED=1');
         $history = [];
         $tool = $this->withMock([
             new Response(200, [], json_encode(['id' => 'swarm_1'])),
@@ -38,6 +61,7 @@ class KimiSwarmToolTest extends TestCase
 
     public function test_wait_mode_polls_and_fetches(): void
     {
+        putenv('SUPERAGENT_KIMI_SWARM_ENABLED=1');
         $history = [];
         $tool = $this->withMock([
             new Response(200, [], json_encode(['id' => 'swarm_1'])),        // submit

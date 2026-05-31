@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-05-31
+
+### 💻 Summary
+
+**Kimi (Moonshot) support hardened against the official `kimi-code` client — and the wire-level fixes generalized to every OpenAI-compatible provider.** Additive, no breaking changes, no migration steps. Five concrete gaps found by diffing SuperAgent's Kimi path against MoonshotAI's `kimi-code` (`packages/kosong`, `packages/oauth`): (1) tool JSON Schemas are now normalized for Moonshot's strict validator — local `$ref`/`$defs` are inlined and typeless property schemas (the common enum-only MCP shape) get a `type` — so MCP / Skill / Agent tools stop being rejected; (2) streaming requests opt into `stream_options.include_usage`, without which OpenAI-compatible servers return **no** usage block at all (no token/cost/cache accounting); (3) Kimi reasoning requests send `max_completion_tokens` instead of `max_tokens`, so the hidden `reasoning_content` channel can't consume the whole budget and return an empty answer; (4) Kimi round-trips its `reasoning_content` across multi-turn history (mirrors the DeepSeek path, now shared); (5) per-model capabilities are read from the `/models` response. Plus: the speculative Agent-Swarm REST tool is gated off by default — `kimi-code` ships no swarm endpoint, its parallelism comes from local subagents. Fixes 2 and the schema-deref half of fix 1 are implemented in the shared base, so DeepSeek / GLM / Qwen / Grok / OpenRouter / OpenAI all benefit. Full Unit suite green (3117 tests, 8 skipped) and Compat green (28 tests); the Smoke suite exercises live-API paths and needs provider credits.
+
+### Added — `Format\JsonSchemaNormalizer` (shared, reusable)
+
+- **`Format\JsonSchemaNormalizer`** (new) — a provider-compatibility shim ported from `kimi-code`'s `kimi-schema.ts`. `deref()` inlines every local `$ref` (`#/$defs/…`, `#/definitions/…`, `#`) with circular-reference detection and JSON-Schema-2020-12 sibling-keyword merging, then drops emptied definition buckets. `fillMissingTypes()` gives every nested property schema an explicit `type` via enum/const value inference → structural-keyword inference → a `string` fallback (never throws — a normalizer must not break a request). `normalizeForKimi()` runs both. The root schema is treated as a container and left untouched. Tests: `Format\JsonSchemaNormalizerTest`.
+
+### Added — Kimi (Moonshot) provider fixes
+
+- **`Providers\KimiProvider`** —
+  - `convertTools()` now runs each tool's `inputSchema()` through `JsonSchemaNormalizer::normalizeForKimi()`. Moonshot's validator rejects `$ref`/`$defs` and any nested property schema missing a `type` (enum-only MCP properties are the canonical trigger); MCP / Skill / Agent tools now survive it. `$`-prefixed server builtins (`builtin_function`) are unchanged.
+  - `completionTokenParam()` → `max_completion_tokens`. Kimi reasoning models share the completion budget with the hidden `reasoning_content` channel; a small `max_tokens` yields an HTTP 200 with empty `content`. Matches `kimi-code`, which always sends the newer field.
+  - `formatMessages()` re-attaches the model's prior `reasoning_content` from `thinking` blocks so a think → tool-call → think sequence stays coherent across turns (mirrors the DeepSeek V4 / R-series path).
+  - `customizeRequestBody()` honours an explicit `reasoning_effort: off` / `thinking: false` by sending `thinking: {type: "disabled"}` — the only way to force a reasoning-capable model out of thinking mode.
+  - Tests added to `Providers\KimiProviderTest`.
+
+### Added — generalized to every OpenAI-compatible provider (`Providers\ChatCompletionsProvider`)
+
+- **`streamUsageOptions()`** — streaming requests now send `stream_options: {include_usage: true}`. Per the OpenAI spec (which Moonshot and the rest follow), without it a streamed response carries no usage block — silently zeroing token counts, cached-token accounting and cost tracking for every streaming call. Overridable per-provider (return `null` to opt out).
+- **`completionTokenParam()`** — overridable seam for the completion-token field name (`max_tokens` by default; Kimi overrides). 
+- **`normalizeToolSchema()`** — overridable hook in the base `convertTools()` (identity by default), so any strict backend can opt into `JsonSchemaNormalizer` without re-implementing tool serialization.
+- **Streaming `usage` parse** now accepts `choices[0].usage` in addition to top-level `usage` (Moonshot places it there), so cost/cache accounting survives either wire location.
+- **`extractReasoning()`** — the `thinking`-block → `reasoning_content` concatenation is lifted into the base and shared. Tests added to `Providers\ChatCompletionsSseParserTest`.
+
+### Added — per-model capability discovery (`Providers\ModelCatalogRefresher`)
+
+- `normalize()` now derives a capability map from the `/models` response instead of stashing the flags only under `_raw`: Moonshot's `supports_reasoning` / `supports_image_in` / `supports_video_in` / `supports_tool_use` and OpenRouter's `supported_parameters` map into the catalog's `['thinking'|'vision'|'video'|'tools'|'structured_output' => true]` shape, letting `CapabilityRouter` route on real per-model signal. Only attached when the source actually declares capabilities, so the provider-level fallback in `ModelCatalog::capabilitiesFor()` still applies otherwise. Tests added to `Providers\ModelCatalogRefresherTest`.
+
+### Changed
+
+- **`Providers\DeepSeekProvider`** — drops its private `extractReasoning()` and inherits the shared base helper (identical logic, no behavior change).
+- **`Tools\Providers\Kimi\KimiSwarmTool`** — the Agent-Swarm tool is now **opt-in**, gated behind `SUPERAGENT_KIMI_SWARM_ENABLED`. `kimi-code` ships no swarm REST endpoint (its parallelism comes from local `coder` / `explore` / `plan` subagents), so by default the tool returns an actionable error instead of calling a non-existent endpoint. The provider-level `submitSwarm()` / `poll()` / `fetch()` / `cancel()` plumbing and its wire-contract tests are retained for when Moonshot publishes the spec. Over-claiming copy ("300 sub-agents / 4000 steps") corrected. Tests updated in `Tools\Providers\Kimi\KimiSwarmToolTest`.
+
 ## [1.0.9] - 2026-05-28
 
 ### 💻 Summary

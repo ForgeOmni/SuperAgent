@@ -249,15 +249,74 @@ class ModelCatalogRefresher
                 }
             }
 
-            // Per-provider extras. OpenRouter carries a rich `pricing`
-            // object and a `supported_parameters` list we can use to
-            // derive capabilities; keep them under `_raw` for now and
-            // let the catalog map them on ingest.
+            // Capability flags. Moonshot's `/models` returns
+            // `supports_reasoning|image_in|video_in|tool_use`; OpenRouter
+            // exposes a `supported_parameters` list. Map either into the
+            // catalog's capability shape (`['thinking'=>true, ...]`) so the
+            // CapabilityRouter can route on real per-model signal instead of
+            // a blanket per-provider default. Only attached when the source
+            // actually declares capabilities — otherwise the provider-level
+            // fallback in ModelCatalog::capabilitiesFor() still applies.
+            $caps = self::deriveCapabilities($entry);
+            if ($caps !== []) {
+                $row['capabilities'] = $caps;
+            }
+
+            // Per-provider extras kept verbatim for forward-compat (pricing,
+            // fields we don't map yet).
             $row['_raw'] = $entry;
 
             $out[] = $row;
         }
         return $out;
+    }
+
+    /**
+     * Derive a capability map from a raw model entry. Returns [] when the
+     * entry carries no recognizable capability signal.
+     *
+     * @param array<string, mixed> $entry
+     * @return array<string, bool>
+     */
+    private static function deriveCapabilities(array $entry): array
+    {
+        $caps = [];
+
+        // Moonshot AI Open Platform shape.
+        $moonshot = [
+            'supports_reasoning' => 'thinking',
+            'supports_image_in'  => 'vision',
+            'supports_video_in'  => 'video',
+            'supports_tool_use'  => 'tools',
+        ];
+        foreach ($moonshot as $src => $cap) {
+            if (array_key_exists($src, $entry) && (bool) $entry[$src]) {
+                $caps[$cap] = true;
+            }
+        }
+
+        // OpenRouter shape: a flat list of supported request parameters.
+        if (isset($entry['supported_parameters']) && is_array($entry['supported_parameters'])) {
+            $params = array_map(
+                static fn ($p) => is_string($p) ? strtolower($p) : '',
+                $entry['supported_parameters'],
+            );
+            $map = [
+                'tools'           => 'tools',
+                'tool_choice'     => 'tools',
+                'reasoning'       => 'thinking',
+                'include_reasoning' => 'thinking',
+                'response_format' => 'structured_output',
+                'structured_outputs' => 'structured_output',
+            ];
+            foreach ($map as $param => $cap) {
+                if (in_array($param, $params, true)) {
+                    $caps[$cap] = true;
+                }
+            }
+        }
+
+        return $caps;
     }
 
     private static function writeCache(string $provider, array $models): void

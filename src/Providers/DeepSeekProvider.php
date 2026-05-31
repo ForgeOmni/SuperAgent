@@ -274,22 +274,6 @@ class DeepSeekProvider extends ChatCompletionsProvider implements SupportsThinki
     }
 
     /**
-     * Walk an AssistantMessage's content blocks and concatenate every
-     * `thinking` block into a single string. Returns '' when there
-     * is no reasoning to replay.
-     */
-    private function extractReasoning(AssistantMessage $m): string
-    {
-        $parts = [];
-        foreach ($m->content as $b) {
-            if ($b->type === 'thinking' && $b->thinking !== null && $b->thinking !== '') {
-                $parts[] = $b->thinking;
-            }
-        }
-        return implode('', $parts);
-    }
-
-    /**
      * Force a non-empty `reasoning_content` onto every assistant
      * message in the request that carries `tool_calls`. Mirrors
      * DeepSeek-TUI's `sanitize_thinking_mode_messages` pass — last

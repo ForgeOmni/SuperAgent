@@ -11318,3 +11318,54 @@ $agent = new SuperAgent\Agent([
 
 > **Cursor Composer 有意不作为 provider** —— Cursor 没有官方公开的 OpenAI 兼容 API（Composer 绑定在 IDE 订阅里，只有社区代理能桥接）。入站的 `Conversation\Encoder\CursorEncoder` 线格式与此无关。
 
+## 89. Kimi（Moonshot）兼容性加固 (v1.0.10)
+
+通过将 SuperAgent 的 Kimi 路径与 MoonshotAI 官方 [`kimi-code`](https://github.com/MoonshotAI/kimi-code) 客户端（`packages/kosong/src/providers/kimi.ts`、`kimi-schema.ts`、`packages/oauth`）对照得出。五处 wire 级修复 —— 其中两处已通用到所有 OpenAI 兼容 provider —— 外加一处对 Agent Swarm 的"诚实"修正。
+
+### 工具 schema 规范化（`Format\JsonSchemaNormalizer`）
+
+Moonshot 的工具校验器会拒绝两种极常见的形状：本地 `$ref` / `$defs`（大多数 codegen 与 MCP schema 都会生成）和缺少 `type` 的嵌套属性 schema（例如 enum-only 的 MCP 属性）。`KimiProvider::convertTools()` 现在把每个工具的 `inputSchema()` 过一遍 `JsonSchemaNormalizer::normalizeForKimi()`：
+
+```php
+use SuperAgent\Format\JsonSchemaNormalizer;
+
+// deref() 内联 #/$defs、#/definitions 和 # 指针（防循环、兄弟关键字优先），
+// 然后丢弃清空后的 bucket：
+$flat = JsonSchemaNormalizer::deref($schema);
+
+// fillMissingTypes() 为无 type 的属性 schema 补类型：enum/const 值推断 →
+// 结构关键字推断 → 'string' 兜底（绝不抛异常）：
+$typed = JsonSchemaNormalizer::fillMissingTypes($schema);
+
+// normalizeForKimi() = 依次执行两者。根 schema 视作容器、保持不动，只补全嵌套属性 schema。
+$wire = JsonSchemaNormalizer::normalizeForKimi($schema);
+```
+
+这与 opt-in 的 `Tools\Schema\ProviderNormalizer`（§84）不同：后者重写你手工声明的带标记 schema，前者在 Kimi 线路上自动运行。`deref` 这一步还作为可覆写的 `ChatCompletionsProvider::normalizeToolSchema()` 钩子（默认恒等）暴露，便于 Gemini 的 OpenAPI 子集、OpenAI strict 模式等其它严格后端复用同样的内联。
+
+### 通用到所有 OpenAI 兼容 provider（`ChatCompletionsProvider`）
+
+- **`stream_options: {include_usage: true}`** 现在随每个流式请求发送（`streamUsageOptions()`，可覆写，返回 `null` 即关闭）。按 OpenAI 规范（Moonshot 等都遵循），不带它则流式响应**不含** usage 块，静默把每次流式调用的 token 计数、缓存统计与成本追踪清零。
+- **流式 `usage` 解析**现在除顶层 `usage` 外，也接受 `choices[0].usage`（Moonshot 放在那里）。
+- **`completionTokenParam()`** 是补全 token 字段名的可覆写接缝。`KimiProvider` 覆写为 `max_completion_tokens`：reasoning 模型与隐藏的 `reasoning_content` 通道共享该预算，小的 `max_tokens` 会产生 `content` 为空的 HTTP `200`。
+- **`extractReasoning()`**（把 `thinking` 块拼成 `reasoning_content`）上提到基类共享；`DeepSeekProvider` 现在继承它。
+
+### 推理回传 + thinking 开关（`KimiProvider`）
+
+`formatMessages()` 重新附上模型上一轮的 `reasoning_content`（镜像 DeepSeek V4 / R 系列的重放）。`customizeRequestBody()` 在显式传入 `reasoning_effort: off`（或 `thinking: false`）时发送 `thinking: {type: "disabled"}` —— 这是把支持推理的模型强制退出思考模式的唯一方式。
+
+### 按模型发现能力（`ModelCatalogRefresher`）
+
+`normalize()` 把 Moonshot 的 `supports_reasoning` / `supports_image_in` / `supports_video_in` / `supports_tool_use` 与 OpenRouter 的 `supported_parameters` 从 `/models` 响应映射进 catalog 的 `['thinking'|'vision'|'video'|'tools'|'structured_output' => true]` 形状，让 `CapabilityRouter` 基于真实的按模型信号路由。仅当源数据声明了能力时才附加；否则仍走 `ModelCatalog::capabilitiesFor()` 的 provider 级兜底。
+
+### Agent Swarm 改为按需开启
+
+`kimi-code` **没有** swarm REST 端点 —— 其并行来自本地 `coder` / `explore` / `plan` 子 agent。因此 `KimiSwarmTool` 由 `SUPERAGENT_KIMI_SWARM_ENABLED` 门控；不设它时工具返回可操作的报错，而不是去调一个不存在的端点。provider 级的 `submitSwarm()` / `poll()` / `fetch()` / `cancel()` 管线及其 wire 契约测试予以保留，待 Moonshot 公布规范。
+
+```bash
+# 默认关闭；仅在指向预览/私有端点时开启：
+export SUPERAGENT_KIMI_SWARM_ENABLED=1
+```
+
+测试：`tests/Unit/Format/JsonSchemaNormalizerTest.php`、`tests/Unit/Providers/KimiProviderTest.php`、`tests/Unit/Providers/ChatCompletionsSseParserTest.php`、`tests/Unit/Providers/ModelCatalogRefresherTest.php`、`tests/Unit/Tools/Providers/Kimi/KimiSwarmToolTest.php`。
+

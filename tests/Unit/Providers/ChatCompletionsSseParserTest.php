@@ -238,6 +238,31 @@ class ChatCompletionsSseParserTest extends TestCase
         $this->assertSame(['delta' => 'world', 'full' => 'hello world'], $events[2]);
     }
 
+    public function test_usage_from_choices_level_is_parsed(): void
+    {
+        // Moonshot places the usage block under choices[0].usage rather than
+        // (or in addition to) the top-level field. The parser must find it.
+        $sse = $this->sseOf([
+            $this->chunk(['delta' => ['content' => 'hi']]),
+            $this->chunk([
+                'finish_reason' => 'stop',
+                'usage' => [
+                    'prompt_tokens' => 100,
+                    'completion_tokens' => 20,
+                    'prompt_tokens_details' => ['cached_tokens' => 40],
+                ],
+            ]),
+            'data: [DONE]',
+        ]);
+
+        $msg = $this->runParser($sse);
+
+        $this->assertNotNull($msg->usage, 'choices[0].usage must be parsed');
+        $this->assertSame(60, $msg->usage->inputTokens, 'gross 100 minus 40 cached');
+        $this->assertSame(20, $msg->usage->outputTokens);
+        $this->assertSame(40, $msg->usage->cacheReadInputTokens);
+    }
+
     // ── helpers ───────────────────────────────────────────────────
 
     /**

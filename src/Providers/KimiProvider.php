@@ -6,7 +6,11 @@ namespace SuperAgent\Providers;
 
 use SuperAgent\Auth\DeviceIdentity;
 use SuperAgent\Auth\KimiCodeCredentials;
+use SuperAgent\Conversation\Encoder\OpenAIChatEncoder;
 use SuperAgent\Exceptions\ProviderException;
+use SuperAgent\Format\JsonSchemaNormalizer;
+use SuperAgent\Messages\AssistantMessage;
+use SuperAgent\Messages\Message;
 use SuperAgent\Providers\Capabilities\SupportsPromptCacheKey;
 use SuperAgent\Providers\Capabilities\SupportsSwarm;
 use SuperAgent\Providers\Capabilities\SupportsThinking;
@@ -271,11 +275,83 @@ class KimiProvider extends ChatCompletionsProvider implements SupportsPromptCach
                 'function' => [
                     'name' => $name,
                     'description' => $tool->description(),
-                    'parameters' => $tool->inputSchema(),
+                    // Moonshot's tool validator rejects `$ref`/`$defs` and
+                    // any nested property schema missing a `type` (a very
+                    // common MCP shape — enum-only properties). Inline refs
+                    // and fill types so MCP/Skill/Agent tools survive the
+                    // validator. See JsonSchemaNormalizer.
+                    'parameters' => JsonSchemaNormalizer::normalizeForKimi($tool->inputSchema()),
                 ],
             ];
         }
         return $out;
+    }
+
+    /**
+     * Kimi reasoning models share the completion budget with the hidden
+     * `reasoning_content` channel; a small `max_tokens` can yield a 200 with
+     * empty `content`. Moonshot's own client always sends the newer field,
+     * so we do too (it wins over `max_tokens` server-side regardless).
+     */
+    protected function completionTokenParam(): string
+    {
+        return 'max_completion_tokens';
+    }
+
+    /**
+     * Round-trip the model's reasoning back to Moonshot as
+     * `reasoning_content`. The base OpenAIChatEncoder drops `thinking`
+     * blocks (correct for OpenAI proper); Kimi keeps its chain-of-thought
+     * coherent across a think → tool-call → think sequence when prior
+     * reasoning is replayed. Mirrors the DeepSeek V4 / R-series path and
+     * Moonshot kimi-code's own message conversion.
+     *
+     * @param Message[] $messages
+     * @return list<array<string, mixed>>
+     */
+    public function formatMessages(array $messages): array
+    {
+        $encoder = new OpenAIChatEncoder();
+        $out = [];
+        foreach ($messages as $m) {
+            $entries = $encoder->encode([$m]);
+            if ($m instanceof AssistantMessage && $entries !== []) {
+                $reasoning = $this->extractReasoning($m);
+                if ($reasoning !== '') {
+                    // The encoder emits exactly one entry per AssistantMessage.
+                    $entries[0]['reasoning_content'] = $reasoning;
+                }
+            }
+            foreach ($entries as $e) {
+                $out[] = $e;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Explicitly turn thinking OFF on a reasoning-capable model. The
+     * capability dispatch only ever asks for thinking-ON
+     * (thinkingRequestFragment), so the only way to force the model out of
+     * reasoning mode is to send `thinking: {type: "disabled"}` ourselves.
+     * Honour an explicit `reasoning_effort: off|none|disabled` or
+     * `thinking: false` option; otherwise leave the body untouched so the
+     * model keeps its default.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $options
+     */
+    protected function customizeRequestBody(array &$body, array $options): void
+    {
+        $effort = $options['reasoning_effort'] ?? null;
+        $effortOff = is_string($effort)
+            && in_array(strtolower(trim($effort)), ['off', 'none', 'disabled', 'false'], true);
+        $thinkingOff = array_key_exists('thinking', $options) && $options['thinking'] === false;
+
+        if ($effortOff || $thinkingOff) {
+            $body['thinking'] = ['type' => 'disabled'];
+            unset($body['reasoning_effort']);
+        }
     }
 
     /**

@@ -131,6 +131,12 @@ export NOVITA_API_KEY=...
 
 # Plafond de récursion sub-agent (v0.9.8). Par défaut 5 ; à monter pour les workflows profonds.
 export SUPERAGENT_MAX_AGENT_DEPTH=5
+
+# Kimi Agent Swarm (v1.0.10) est EXPÉRIMENTAL et désactivé par défaut — Moonshot
+# n'a pas publié de spec REST publique pour le Swarm, donc l'outil `kimi_swarm`
+# renvoie une erreur sauf si vous l'activez (à ne pointer que vers un endpoint
+# de préversion/privé).
+export SUPERAGENT_KIMI_SWARM_ENABLED=1
 ```
 
 En-têtes de scoping optionnels (depuis v0.9.1 — déclarez-les une fois sur l'agent, ils s'omettent si l'env n'est pas défini) :

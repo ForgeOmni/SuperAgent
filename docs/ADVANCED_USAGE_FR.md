@@ -11870,3 +11870,55 @@ Catalogue (`resources/models.json`) : `grok-4.3` ($1.25/$2.50, 1M ctx ; alias `g
 
 > **Cursor Composer n'est volontairement pas un provider** — Cursor n'expose aucune API publique officielle compatible OpenAI pour Composer (il est intégré à l'abonnement IDE ; seuls des proxies communautaires font le pont). Le dialecte wire entrant `Conversation\Encoder\CursorEncoder` est sans rapport.
 
+## 89. Durcissement de la compatibilité Kimi (Moonshot) (v1.0.10)
+
+Trouvé en comparant le chemin Kimi de SuperAgent au client officiel [`kimi-code`](https://github.com/MoonshotAI/kimi-code) de MoonshotAI (`packages/kosong/src/providers/kimi.ts`, `kimi-schema.ts`, `packages/oauth`). Cinq correctifs au niveau du wire — dont deux généralisés à tout provider compatible OpenAI — plus un correctif d'honnêteté sur l'Agent Swarm.
+
+### Normalisation du schéma d'outils (`Format\JsonSchemaNormalizer`)
+
+Le validateur d'outils de Moonshot rejette deux formes extrêmement courantes : les `$ref` / `$defs` locaux (émis par la plupart des schémas codegen et MCP) et les schémas de propriété imbriqués sans `type` (p. ex. les propriétés MCP enum-only). `KimiProvider::convertTools()` passe désormais l'`inputSchema()` de chaque outil par `JsonSchemaNormalizer::normalizeForKimi()` :
+
+```php
+use SuperAgent\Format\JsonSchemaNormalizer;
+
+// deref() inline les pointeurs #/$defs, #/definitions et # (anti-cycle, les
+// mots-clés frères l'emportent), puis supprime les buckets vidés :
+$flat = JsonSchemaNormalizer::deref($schema);
+
+// fillMissingTypes() complète les schémas de propriété sans type : inférence
+// par valeur enum/const → par mots-clés structurels → repli 'string' (ne lève jamais) :
+$typed = JsonSchemaNormalizer::fillMissingTypes($schema);
+
+// normalizeForKimi() = les deux, dans l'ordre. Le schéma racine est un conteneur
+// et reste intact ; seuls les schémas de propriété imbriqués sont complétés.
+$wire = JsonSchemaNormalizer::normalizeForKimi($schema);
+```
+
+C'est distinct du `Tools\Schema\ProviderNormalizer` opt-in (§84) : celui-ci réécrit un schéma tagué que vous avez rédigé, celui-là s'exécute automatiquement sur le wire Kimi. La passe `deref` est aussi exposée comme hook surchargeable `ChatCompletionsProvider::normalizeToolSchema()` (identité par défaut), pour que d'autres backends stricts — le sous-ensemble OpenAPI de Gemini, le mode strict d'OpenAI — réutilisent le même inlining.
+
+### Généralisé à tout provider compatible OpenAI (`ChatCompletionsProvider`)
+
+- **`stream_options: {include_usage: true}`** est désormais envoyé à chaque requête en streaming (`streamUsageOptions()`, surchargeable, renvoyer `null` pour désactiver). Selon la spec OpenAI — que Moonshot et les autres suivent — une réponse en streaming ne contient **aucun** bloc usage sans lui, mettant silencieusement à zéro le comptage des tokens, des tokens en cache et le suivi des coûts à chaque appel.
+- **Le parsing de `usage` en streaming** accepte `choices[0].usage` en plus du `usage` de premier niveau (Moonshot le place là).
+- **`completionTokenParam()`** est un point d'extension surchargeable pour le nom du champ de tokens de complétion. `KimiProvider` le surcharge en `max_completion_tokens` : les modèles de raisonnement partagent ce budget avec le canal caché `reasoning_content`, et un petit `max_tokens` produit un HTTP `200` au `content` vide.
+- **`extractReasoning()`** (la concaténation des blocs `thinking` en `reasoning_content`) est remontée dans la base et mutualisée ; `DeepSeekProvider` en hérite désormais.
+
+### Round-trip du raisonnement + bascule thinking (`KimiProvider`)
+
+`formatMessages()` rattache le `reasoning_content` précédent du modèle (miroir du replay DeepSeek V4 / série R). `customizeRequestBody()` honore un `reasoning_effort: off` explicite (ou `thinking: false`) en envoyant `thinking: {type: "disabled"}` — le seul moyen de forcer un modèle capable de raisonner à sortir du mode réflexion.
+
+### Découverte des capacités par modèle (`ModelCatalogRefresher`)
+
+`normalize()` mappe les `supports_reasoning` / `supports_image_in` / `supports_video_in` / `supports_tool_use` de Moonshot et les `supported_parameters` d'OpenRouter depuis la réponse `/models` vers la forme catalogue `['thinking'|'vision'|'video'|'tools'|'structured_output' => true]`, pour que `CapabilityRouter` route sur un signal réel par modèle. Attaché uniquement quand la source déclare des capacités ; sinon le repli au niveau provider de `ModelCatalog::capabilitiesFor()` s'applique toujours.
+
+### L'Agent Swarm est opt-in
+
+`kimi-code` ne fournit **aucun** endpoint REST de swarm — son parallélisme vient de sous-agents locaux `coder` / `explore` / `plan`. `KimiSwarmTool` est donc verrouillé derrière `SUPERAGENT_KIMI_SWARM_ENABLED` ; sans lui, l'outil renvoie une erreur explicite au lieu d'appeler un endpoint inexistant. La plomberie au niveau provider `submitSwarm()` / `poll()` / `fetch()` / `cancel()` et ses tests de contrat wire sont conservés pour le jour où Moonshot publiera la spec.
+
+```bash
+# Désactivé par défaut ; à activer uniquement vers un endpoint de préversion/privé :
+export SUPERAGENT_KIMI_SWARM_ENABLED=1
+```
+
+Tests : `tests/Unit/Format/JsonSchemaNormalizerTest.php`, `tests/Unit/Providers/KimiProviderTest.php`, `tests/Unit/Providers/ChatCompletionsSseParserTest.php`, `tests/Unit/Providers/ModelCatalogRefresherTest.php`, `tests/Unit/Tools/Providers/Kimi/KimiSwarmToolTest.php`.
+

@@ -986,6 +986,19 @@ $gemini    = ProviderNormalizer::forGemini($inputSchema);
 
 跨厂商合规由 `tests/Tools/Schema/CrossProviderComplianceTest.php` 验证 —— 每种带标记的形状都过三种 normaliser，并断言每个输出都通过对应厂商的接受规则。
 
+### Kimi（Moonshot）兼容性加固 *(v1.0.10)*
+
+通过将 SuperAgent 的 Kimi 路径与 MoonshotAI 官方 [`kimi-code`](https://github.com/MoonshotAI/kimi-code) 客户端（`packages/kosong`、`packages/oauth`）逐项对照得出。与上面那个需手动调用的 `ProviderNormalizer` 不同，以下改动在发送时自动生效：
+
+- **每次请求都为 Moonshot 校验器规范化工具 schema。** `Format\JsonSchemaNormalizer` 内联本地 `$ref` / `$defs`，并给缺少 `type` 的属性补上类型 —— 即 Moonshot 会拒绝的、常见的 enum-only MCP 形状 —— 让 MCP / Skill / Agent 工具完整抵达 Kimi。其中内联 `$ref` 的一步还作为 `ChatCompletionsProvider::normalizeToolSchema()` 钩子暴露，任何严格后端都可按需启用。
+- **流式请求开启 usage。** 现在每个流式 chat-completions 请求都发送 `stream_options: {include_usage: true}`。不带它，遵循 OpenAI 规范的服务端（含 Kimi）将**完全不返回** usage 块 —— 静默把 token / 成本 / 缓存统计清零。所有 OpenAI 兼容 provider 都受益。
+- **`max_completion_tokens`。** Kimi reasoning 模型的补全预算与隐藏的 `reasoning_content` 通道共享；现在把上限放到 `max_completion_tokens`，避免小值把答案饿成空的 `200`。
+- **`reasoning_content` 多轮回传。** Kimi 把上一轮推理在多轮历史中重放（与 DeepSeek 路径共享），让"思考 → 工具调用 → 再思考"保持连贯。
+- **按模型发现能力。** `ModelCatalogRefresher` 把 Moonshot 的 `supports_reasoning` / `image_in` / `video_in` / `tool_use`（以及 OpenRouter 的 `supported_parameters`）从 `/models` 映射进 `CapabilityRouter` 的能力表。
+- **Agent Swarm 改为按需开启。** 除非设置 `SUPERAGENT_KIMI_SWARM_ENABLED`，否则 `kimi_swarm` 返回可操作的报错 —— `kimi-code` 根本没有 swarm REST 端点（其并行靠本地 `coder` / `explore` / `plan` 子 agent）。REST 管线及其 wire 契约测试予以保留，待 Moonshot 公布规范。
+
+测试：`tests/Unit/Format/JsonSchemaNormalizerTest.php`、`tests/Unit/Providers/KimiProviderTest.php`、`tests/Unit/Providers/ChatCompletionsSseParserTest.php`。
+
 ### Session 分支 —— pi `/tree` fork *(v1.0.6)*
 
 pi 把 session 模型化为 append-only 树而不是单线。SuperAgent 现在镜像 `/tree`：

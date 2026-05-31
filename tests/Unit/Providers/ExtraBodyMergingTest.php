@@ -54,7 +54,7 @@ class ExtraBodyMergingTest extends TestCase
         // No unexpected keys leaked in; the body should only have the
         // standard chat-completions envelope.
         $this->assertSame(
-            ['model', 'messages', 'max_tokens', 'stream', 'temperature'],
+            ['model', 'messages', 'max_tokens', 'stream', 'temperature', 'stream_options'],
             array_keys($body),
         );
     }
@@ -126,7 +126,7 @@ class ExtraBodyMergingTest extends TestCase
 
         $this->assertArrayNotHasKey('extra_body', $body);
         $this->assertSame(
-            ['model', 'messages', 'max_tokens', 'stream', 'temperature'],
+            ['model', 'messages', 'max_tokens', 'stream', 'temperature', 'stream_options'],
             array_keys($body),
         );
     }
@@ -137,7 +137,7 @@ class ExtraBodyMergingTest extends TestCase
         $body = $this->invokeBuildRequestBody($p, ['extra_body' => []]);
 
         $this->assertSame(
-            ['model', 'messages', 'max_tokens', 'stream', 'temperature'],
+            ['model', 'messages', 'max_tokens', 'stream', 'temperature', 'stream_options'],
             array_keys($body),
         );
     }

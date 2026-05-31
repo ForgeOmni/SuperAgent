@@ -90,6 +90,51 @@ class ModelCatalogRefresherTest extends TestCase
         $this->assertArrayHasKey('_raw', $out[0]);
     }
 
+    public function test_normalize_maps_moonshot_capability_flags(): void
+    {
+        $raw = ['data' => [[
+            'id' => 'kimi-k2-6',
+            'context_length' => 262_144,
+            'supports_reasoning' => true,
+            'supports_image_in' => true,
+            'supports_video_in' => false,
+            'supports_tool_use' => true,
+        ]]];
+        $out = ModelCatalogRefresher::normalize('kimi', $raw);
+
+        $this->assertSame(
+            ['thinking' => true, 'vision' => true, 'tools' => true],
+            $out[0]['capabilities'],
+            'supports_* flags map into the catalog capability shape; false flags are omitted',
+        );
+    }
+
+    public function test_normalize_maps_openrouter_supported_parameters(): void
+    {
+        $raw = ['data' => [[
+            'id' => 'some/model',
+            'supported_parameters' => ['tools', 'reasoning', 'response_format'],
+        ]]];
+        $out = ModelCatalogRefresher::normalize('openrouter', $raw);
+
+        $this->assertSame(
+            ['tools' => true, 'thinking' => true, 'structured_output' => true],
+            $out[0]['capabilities'],
+        );
+    }
+
+    public function test_normalize_omits_capabilities_when_no_signal(): void
+    {
+        $raw = ['data' => [['id' => 'plain-model', 'context_length' => 8192]]];
+        $out = ModelCatalogRefresher::normalize('openai', $raw);
+
+        $this->assertArrayNotHasKey(
+            'capabilities',
+            $out[0],
+            'no capability signal → leave the provider-level fallback to apply',
+        );
+    }
+
     public function test_normalize_handles_missing_data_field(): void
     {
         $out = ModelCatalogRefresher::normalize('openai', []);

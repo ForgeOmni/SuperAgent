@@ -987,6 +987,19 @@ $gemini    = ProviderNormalizer::forGemini($inputSchema);
 
 La conformité inter-providers est vérifiée par `tests/Tools/Schema/CrossProviderComplianceTest.php` — round-trip chaque forme taguée à travers les trois normaliseurs et asserte que chaque sortie passe les règles d'acceptation du provider cible.
 
+### Durcissement de la compatibilité Kimi (Moonshot) *(v1.0.10)*
+
+Validé en comparant le chemin Kimi de SuperAgent au client officiel [`kimi-code`](https://github.com/MoonshotAI/kimi-code) de MoonshotAI (`packages/kosong`, `packages/oauth`). Contrairement au `ProviderNormalizer` opt-in ci-dessus (que vous invoquez à la rédaction d'un schéma), ces correctifs s'appliquent automatiquement sur le wire :
+
+- **Les schémas d'outils sont normalisés pour le validateur de Moonshot à chaque requête.** `Format\JsonSchemaNormalizer` inline les `$ref` / `$defs` locaux et ajoute un `type` aux schémas de propriété sans type — la forme MCP enum-only courante que Moonshot rejette — pour que les outils MCP / Skill / Agent parviennent intacts à Kimi. La passe d'inlining des `$ref` est aussi exposée comme hook `ChatCompletionsProvider::normalizeToolSchema()`, que tout backend strict peut activer.
+- **Les requêtes en streaming activent l'usage.** `stream_options: {include_usage: true}` est désormais envoyé à chaque requête chat-completions en streaming. Sans lui, les serveurs conformes à la spec OpenAI (Kimi compris) ne renvoient **aucun** bloc usage — mettant silencieusement à zéro le comptage des tokens / coûts / tokens en cache. Bénéficie à tout provider compatible OpenAI.
+- **`max_completion_tokens`.** Les modèles de raisonnement Kimi partagent le budget de complétion avec le canal caché `reasoning_content` ; le plafond passe désormais par `max_completion_tokens` pour qu'une petite valeur n'affame pas la réponse en un `200` vide.
+- **Round-trip de `reasoning_content`.** Kimi rejoue son raisonnement précédent à travers l'historique multi-tours (mutualisé avec le chemin DeepSeek), gardant cohérente une séquence réflexion → appel d'outil → réflexion.
+- **Découverte des capacités par modèle.** `ModelCatalogRefresher` mappe les `supports_reasoning` / `image_in` / `video_in` / `tool_use` de Moonshot (et les `supported_parameters` d'OpenRouter) depuis `/models` vers la carte de capacités du `CapabilityRouter`.
+- **Agent Swarm est opt-in.** `kimi_swarm` renvoie une erreur explicite sauf si `SUPERAGENT_KIMI_SWARM_ENABLED` est défini — `kimi-code` ne fournit aucun endpoint REST de swarm (son parallélisme vient de sous-agents locaux `coder` / `explore` / `plan`). La plomberie REST et ses tests de contrat wire sont conservés pour le jour où Moonshot publiera la spec.
+
+Tests : `tests/Unit/Format/JsonSchemaNormalizerTest.php`, `tests/Unit/Providers/KimiProviderTest.php`, `tests/Unit/Providers/ChatCompletionsSseParserTest.php`.
+
 ### Branchement de session — fork pi `/tree` *(v1.0.6)*
 
 pi modélise une session comme un arbre append-only, pas comme une ligne. SuperAgent reflète maintenant `/tree` :

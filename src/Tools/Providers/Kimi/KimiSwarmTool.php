@@ -10,22 +10,27 @@ use SuperAgent\Tools\Providers\ProviderToolBase;
 use SuperAgent\Tools\ToolResult;
 
 /**
- * Dispatch a Kimi K2.6 Agent Swarm job as a regular SuperAgent Tool.
+ * Dispatch a Kimi Agent Swarm job as a regular SuperAgent Tool.
  *
- * Any main brain (Claude, GPT, Gemini, Qwen, …) can call this tool to
- * hand a complex task off to Kimi's 300-sub-agent / 4 000-step coordinator
- * and get back the assembled deliverable — the defining Phase 7 feature.
+ * EXPERIMENTAL / OPT-IN. Moonshot has *announced* Agent Swarm but has not
+ * published a public Swarm REST spec, and the official kimi-code client
+ * ships no swarm endpoint — its parallelism comes from local `coder` /
+ * `explore` / `plan` subagents instead. To avoid silently calling a
+ * non-existent endpoint, this tool is disabled unless the operator opts in
+ * by setting `SUPERAGENT_KIMI_SWARM_ENABLED` (point it at a preview/private
+ * endpoint). For local multi-agent orchestration today, prefer SuperAgent's
+ * own Squad / Swarm / Coordinator.
  *
- * Usage modes:
+ * Usage modes (when enabled):
  *   - `wait = true`  (default): sync-wait on the job via `AsyncCapable`
  *     and return the final deliverable in the tool result.
  *   - `wait = false`: return a job handle immediately so the agent loop
  *     can interleave other work and poll externally later.
  *
- * Schema caveat: the swarm REST endpoints this tool hits are provisional
- * — see `KimiProvider::submitSwarm()` for the REST surface that needs
- * validating once Moonshot publishes the official spec. The Tool API
- * (name, inputSchema, return shape) is stable regardless.
+ * The REST surface this tool hits is provisional — see
+ * `KimiProvider::submitSwarm()`. The Tool API (name, inputSchema, return
+ * shape) is stable regardless, so wiring the real spec in later is a point
+ * change.
  */
 class KimiSwarmTool extends ProviderToolBase
 {
@@ -36,11 +41,12 @@ class KimiSwarmTool extends ProviderToolBase
 
     public function description(): string
     {
-        return 'Submit a complex task to Kimi K2.6 Agent Swarm — 300 '
-            . 'sub-agents over up to 4 000 coordinated steps — and return '
-            . 'the assembled deliverable. Good fit for tasks a single LLM '
-            . 'call cannot handle (multi-file refactors, research + write, '
-            . 'deck + doc generation).';
+        return 'Submit a complex task to Kimi Agent Swarm and return the '
+            . 'assembled deliverable. EXPERIMENTAL: Moonshot has not published '
+            . 'the public Swarm REST spec, so this is disabled unless '
+            . 'SUPERAGENT_KIMI_SWARM_ENABLED is set (against a preview/private '
+            . 'endpoint). For local multi-agent orchestration, prefer '
+            . "SuperAgent's Squad/Swarm.";
     }
 
     public function inputSchema(): array
@@ -107,6 +113,17 @@ class KimiSwarmTool extends ProviderToolBase
                 return ToolResult::error('prompt is required');
             }
 
+            if (! self::swarmEnabled()) {
+                return ToolResult::error(
+                    'Kimi Agent Swarm is not generally available: Moonshot has '
+                    . 'not published the public Swarm REST spec, so this tool is '
+                    . 'disabled by default to avoid calling a non-existent '
+                    . 'endpoint. Set SUPERAGENT_KIMI_SWARM_ENABLED=1 to opt in '
+                    . 'against a preview/private endpoint, or use SuperAgent\'s '
+                    . 'local Squad/Swarm orchestration instead.',
+                );
+            }
+
             if (! $this->provider instanceof SupportsSwarm) {
                 return ToolResult::error(
                     sprintf(
@@ -150,5 +167,20 @@ class KimiSwarmTool extends ProviderToolBase
                 'deliverable' => $deliverable,
             ]);
         });
+    }
+
+    /**
+     * Opt-in gate. Off by default because Moonshot's public Swarm REST spec
+     * is unpublished and the production endpoint does not exist; enabling it
+     * is an explicit operator choice (e.g. a private/preview endpoint).
+     */
+    private static function swarmEnabled(): bool
+    {
+        $v = getenv('SUPERAGENT_KIMI_SWARM_ENABLED');
+        if ($v === false) {
+            return false;
+        }
+        $v = strtolower(trim($v));
+        return $v !== '' && $v !== '0' && $v !== 'false' && $v !== 'no';
     }
 }

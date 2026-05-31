@@ -131,6 +131,11 @@ export NOVITA_API_KEY=...
 
 # 子 agent 递归深度上限 (v0.9.8)。默认 5；深度工作流可以调高。
 export SUPERAGENT_MAX_AGENT_DEPTH=5
+
+# Kimi Agent Swarm (v1.0.10) 为实验特性，默认关闭 —— Moonshot 尚未公布公开的
+# Swarm REST 规范，因此除非显式开启（且仅指向预览/私有端点），`kimi_swarm`
+# 工具会直接报错。
+export SUPERAGENT_KIMI_SWARM_ENABLED=1
 ```
 
 可选的 scope header（v0.9.1 起 —— 在 agent 上声明一次，env 未设置时自动省略）：

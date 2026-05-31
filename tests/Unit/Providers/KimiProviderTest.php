@@ -113,6 +113,102 @@ class KimiProviderTest extends TestCase
         $this->assertSame('proxy.example.com', $this->host($p));
     }
 
+    public function test_request_uses_max_completion_tokens_not_max_tokens(): void
+    {
+        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $body = $this->buildBody($p, ['max_tokens' => 1234]);
+
+        $this->assertSame(1234, $body['max_completion_tokens']);
+        $this->assertArrayNotHasKey(
+            'max_tokens',
+            $body,
+            'Kimi reasoning models share the budget with reasoning_content — '
+            . 'the cap must ride on max_completion_tokens.',
+        );
+    }
+
+    public function test_streaming_request_opts_into_usage(): void
+    {
+        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $body = $this->buildBody($p, []);
+
+        $this->assertTrue($body['stream']);
+        $this->assertSame(['include_usage' => true], $body['stream_options']);
+    }
+
+    public function test_thinking_can_be_explicitly_disabled(): void
+    {
+        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $body = $this->buildBody($p, ['reasoning_effort' => 'off']);
+
+        $this->assertSame(['type' => 'disabled'], $body['thinking']);
+        $this->assertArrayNotHasKey('reasoning_effort', $body);
+    }
+
+    public function test_tool_schema_is_normalized_for_moonshot(): void
+    {
+        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $tool = new class extends \SuperAgent\Tools\Tool {
+            public function name(): string { return 'demo'; }
+            public function description(): string { return 'demo tool'; }
+            public function inputSchema(): array
+            {
+                return [
+                    'type' => 'object',
+                    'properties' => [
+                        // enum-only property (no type) — Moonshot rejects this
+                        'mode' => ['enum' => ['fast', 'slow']],
+                        // $ref into $defs — Moonshot's validator won't follow it
+                        'pet' => ['$ref' => '#/$defs/Pet'],
+                    ],
+                    '$defs' => [
+                        'Pet' => ['type' => 'object', 'properties' => ['name' => ['type' => 'string']]],
+                    ],
+                ];
+            }
+            public function execute(array $input): \SuperAgent\Tools\ToolResult
+            {
+                return \SuperAgent\Tools\ToolResult::success('ok');
+            }
+            public function isReadOnly(): bool { return true; }
+        };
+
+        $params = $p->formatTools([$tool])[0]['function']['parameters'];
+
+        $this->assertSame('string', $params['properties']['mode']['type'], 'enum-only property got a type');
+        $this->assertArrayNotHasKey('$defs', $params, '$defs inlined and removed');
+        $this->assertSame('object', $params['properties']['pet']['type'], '$ref inlined');
+        $this->assertSame('string', $params['properties']['pet']['properties']['name']['type']);
+    }
+
+    public function test_reasoning_content_round_trips_in_formatMessages(): void
+    {
+        $p = new KimiProvider(['api_key' => 'sk-x']);
+        $msg = new \SuperAgent\Messages\AssistantMessage();
+        $msg->content = [
+            \SuperAgent\Messages\ContentBlock::thinking('let me think'),
+            \SuperAgent\Messages\ContentBlock::text('the answer'),
+        ];
+
+        $wire = $p->formatMessages([$msg]);
+
+        $this->assertCount(1, $wire);
+        $this->assertSame('assistant', $wire[0]['role']);
+        $this->assertSame('the answer', $wire[0]['content']);
+        $this->assertSame('let me think', $wire[0]['reasoning_content']);
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    private function buildBody(KimiProvider $provider, array $options): array
+    {
+        $m = new \ReflectionMethod($provider, 'buildRequestBody');
+        $m->setAccessible(true);
+        return $m->invoke($provider, [], [], 'system', $options);
+    }
+
     private function host(object $provider): string
     {
         $client = $this->extractClient($provider);

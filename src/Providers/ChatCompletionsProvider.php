@@ -362,10 +362,26 @@ abstract class ChatCompletionsProvider implements LLMProvider
         $body = [
             'model' => $options['model'] ?? $this->model,
             'messages' => $out,
-            'max_tokens' => (int) ($options['max_tokens'] ?? $this->maxTokens),
+            // Most OpenAI-compat backends accept `max_tokens`, but reasoning
+            // models share that budget with the hidden `reasoning_content`
+            // channel and reject — or silently truncate to empty — a small
+            // cap. Providers whose models prefer the newer field override
+            // completionTokenParam() to emit `max_completion_tokens` instead.
+            $this->completionTokenParam() => (int) ($options['max_tokens'] ?? $this->maxTokens),
             'stream' => true,
             'temperature' => (float) ($options['temperature'] ?? 0.7),
         ];
+
+        // OpenAI's streaming spec only emits a usage block when the request
+        // opts in via `stream_options.include_usage`. Without it, streaming
+        // responses carry NO usage at all — no token counts, no cached-token
+        // accounting, no cost tracking. Inject it for every streaming request
+        // (the body always streams here); a backend that chokes on the field
+        // can disable it by returning null from streamUsageOptions().
+        $streamUsage = $this->streamUsageOptions();
+        if ($body['stream'] === true && $streamUsage !== null) {
+            $body['stream_options'] = $streamUsage;
+        }
 
         if (! empty($tools)) {
             $body['tools'] = $this->convertTools($tools);
@@ -468,12 +484,67 @@ abstract class ChatCompletionsProvider implements LLMProvider
                     'function' => [
                         'name' => $tool->name(),
                         'description' => $tool->description(),
-                        'parameters' => $tool->inputSchema(),
+                        'parameters' => $this->normalizeToolSchema($tool->inputSchema()),
                     ],
                 ];
             }
         }
         return $out;
+    }
+
+    /**
+     * Request-body field carrying the completion-token cap. Defaults to
+     * the legacy `max_tokens`; reasoning-model providers override this to
+     * `max_completion_tokens` so the cap doesn't get consumed by the hidden
+     * reasoning channel (which yields a 200 with empty `content`).
+     */
+    protected function completionTokenParam(): string
+    {
+        return 'max_tokens';
+    }
+
+    /**
+     * `stream_options` payload sent on streaming requests. Defaults to
+     * opting into the usage block so token accounting works at all. Return
+     * null to omit (for a backend that rejects the field).
+     *
+     * @return array<string, mixed>|null
+     */
+    protected function streamUsageOptions(): ?array
+    {
+        return ['include_usage' => true];
+    }
+
+    /**
+     * Last-chance hook to rewrite a tool's JSON Schema for the target
+     * provider's validator. The base wire is permissive, so this is the
+     * identity by default; strict backends (Kimi, Gemini) override it to
+     * inline `$ref`s and fill missing `type`s via JsonSchemaNormalizer.
+     *
+     * @param array<string, mixed> $schema
+     * @return array<string, mixed>
+     */
+    protected function normalizeToolSchema(array $schema): array
+    {
+        return $schema;
+    }
+
+    /**
+     * Concatenate every `thinking` block on an assistant message into one
+     * string. Vendors whose chat-completions wire round-trips the model's
+     * reasoning back as `reasoning_content` (Kimi, DeepSeek V4 / R-series)
+     * call this from their formatMessages() override; returns '' when there
+     * is nothing to replay.
+     */
+    protected function extractReasoning(AssistantMessage $message): string
+    {
+        $parts = [];
+        foreach ($message->content as $block) {
+            if ($block->type === 'thinking' && $block->thinking !== null && $block->thinking !== '') {
+                $parts[] = $block->thinking;
+            }
+        }
+        return implode('', $parts);
     }
 
     protected function parseSSEStream($stream, ?StreamingHandler $handler = null): Generator
@@ -596,7 +667,13 @@ abstract class ChatCompletionsProvider implements LLMProvider
                     }
                 }
 
-                if (isset($json['usage'])) {
+                // Moonshot and some other compat servers place the usage
+                // block under `choices[0].usage` in addition to — or instead
+                // of — the top-level `usage` field. Accept either location so
+                // streaming cost/cache accounting works regardless.
+                $usageBlock = $json['usage']
+                    ?? ($json['choices'][0]['usage'] ?? null);
+                if (is_array($usageBlock)) {
                     // Cached tokens on the OpenAI wire surface in three
                     // shapes across vendors:
                     //   - `usage.prompt_tokens_details.cached_tokens` —
@@ -610,9 +687,9 @@ abstract class ChatCompletionsProvider implements LLMProvider
                     //     populated, so checking last keeps the signal).
                     // We accept any of the three; first non-zero wins.
                     $cachedRead = (int) (
-                        $json['usage']['prompt_tokens_details']['cached_tokens']
-                        ?? $json['usage']['cached_tokens']
-                        ?? $json['usage']['prompt_cache_hit_tokens']
+                        $usageBlock['prompt_tokens_details']['cached_tokens']
+                        ?? $usageBlock['cached_tokens']
+                        ?? $usageBlock['prompt_cache_hit_tokens']
                         ?? 0
                     );
                     // OpenAI-compat semantics: `prompt_tokens` is the GROSS
@@ -623,13 +700,13 @@ abstract class ChatCompletionsProvider implements LLMProvider
                     // bill cached tokens at ~110% (full + 10%). Anthropic's
                     // wire splits the two natively so this rebalance is
                     // OpenAI-side only.
-                    $promptTotal = (int) ($json['usage']['prompt_tokens'] ?? 0);
+                    $promptTotal = (int) ($usageBlock['prompt_tokens'] ?? 0);
                     $inputUncached = $cachedRead > 0
                         ? max(0, $promptTotal - $cachedRead)
                         : $promptTotal;
                     $usage = new Usage(
                         $inputUncached,
-                        (int) ($json['usage']['completion_tokens'] ?? 0),
+                        (int) ($usageBlock['completion_tokens'] ?? 0),
                         cacheReadInputTokens: $cachedRead > 0 ? $cachedRead : null,
                     );
                 }
