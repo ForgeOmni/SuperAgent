@@ -1,0 +1,45 @@
+# NOTE: Domain flow — best-effort prompts. EDUCATIONAL analysis only, NOT
+# investment advice. Tune personas/prompts and pin per-role providers/models
+# (e.g. a reasoning model for technicals) to taste.
+name: stock-trio
+description: Fundamental, technical, and sentiment analysts weigh in on a ticker; a chair synthesizes a balanced view.
+phases:
+  - title: Analyze
+  - title: Synthesize
+
+schemas:
+  view:
+    type: object
+    required: [stance, rationale, risks]
+    properties:
+      stance: {type: string, enum: [bullish, neutral, bearish]}
+      rationale: {type: string}
+      risks:
+        type: array
+        minItems: 1
+        items: {type: string}
+
+steps:
+  - name: panel
+    phase: Analyze
+    strategy: parallel
+    agents:
+      - role: fundamental-analyst
+        prompt: "Fundamental view on {{args.ticker}}. Context:\n{{args.context}}"
+      - role: technical-analyst
+        prompt: "Technical view on {{args.ticker}}. Context:\n{{args.context}}"
+      - role: sentiment-analyst
+        prompt: "Sentiment/news view on {{args.ticker}}. Context:\n{{args.context}}"
+
+  - name: view
+    phase: Synthesize
+    role: portfolio-chair
+    prompt: |
+      Synthesize the three analyst views on {{args.ticker}} into one balanced
+      stance with explicit risks. Educational only — not investment advice.
+
+      Views:
+      {{steps.panel.output}}
+    schema: view
+
+return: view

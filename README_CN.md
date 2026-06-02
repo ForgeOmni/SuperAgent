@@ -1541,6 +1541,49 @@ queue 集成、job 派发、`ai_usage_logs` schema 见 `docs/LARAVEL.md`。
 
 ---
 
+## SmartFlow —— 跨模型动态流程 *(v1.1.0)*
+
+Claude Code `Workflow` 引擎的 PHP 移植版，且做成**跨模型 / 跨 API**：同一套原语 ——
+`agent()`、`parallel()`、`pipeline()`、`gate()`、`budget`、`schema`/`SKIP` ——
+可驱动全部 15 个 provider。*一套原语，五个不同的大脑。*
+
+```bash
+superagent flow list                                            # 11 套内置 flow
+superagent flow run dev-from-scratch --args goal="todo CLI" --rehearse   # $0.00 演练
+superagent flow run product-trio --args idea="习惯追踪器"        # 真实跨模型运行
+superagent flow run research-trio --args question="…" --resume <run-id>  # 复用缓存前缀
+```
+
+除了内置引擎，它还多了：**三层结构化输出安全网**（native → submitted → extracted，
+全失败时返回 `SKIP` 哨兵而非崩溃）、可复用的**角色 / persona**、带 fallback/relay
+的**验收 gate**、用于**零 token 断点续跑**的**调用账本 + 签名**、**真·进程池并行**，
+以及一个 **`MULTI_AI_FAKE_PROVIDER=1` 零成本演练**模式（所有内置 flow 都保证演练通过）。
+
+```php
+use SuperAgent\SmartFlow\{FlowEngine, FlowDefinition, FlowOptions, Flow};
+
+$def = FlowDefinition::make('review', '审一段 diff', function (Flow $flow) {
+    $reviews = $flow->parallel([
+        $flow->call('审正确性：' . $flow->args['diff'], ['role' => 'reviewer']),
+        $flow->call('审安全性：' . $flow->args['diff'], ['role' => 'reviewer', 'provider' => 'openai']),
+    ]);
+    $verdict = $flow->agent('汇总：' . json_encode($reviews), [
+        'role' => 'chair',
+        'schema' => ['type' => 'object', 'required' => ['decision'],
+                     'properties' => ['decision' => ['type' => 'string', 'enum' => ['approve', 'request_changes']]]],
+    ]);
+    return $verdict;   // 校验通过的数组；schema 失败则为 $flow->SKIP
+});
+
+$result = (new FlowEngine())->run($def, ['diff' => $diff], new FlowOptions(rehearse: true));
+```
+
+静态 flow 也可在 `resources/flows/*.yaml` 里声明式编写（策略：`solo` / `parallel` /
+`pipeline` / `gate`，模板支持 `{{args.x}}` / `{{steps.name.output}}`）。完整指南见
+**`docs/smartflow.md`**。
+
+---
+
 ## Host 集成
 
 嵌入 SuperAgent 的 framework —— 通常是把 provider 凭据加密存在数据库里、每个请求起一个 agent 的多租户平台 —— 用 `ProviderRegistry::createForHost()` 而不是 `create()`。Host 传规范化后的 shape，SDK 通过 per-provider adapter 分发到对应的构造函数。

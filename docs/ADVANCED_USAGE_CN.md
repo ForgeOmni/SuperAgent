@@ -11369,3 +11369,108 @@ export SUPERAGENT_KIMI_SWARM_ENABLED=1
 
 测试：`tests/Unit/Format/JsonSchemaNormalizerTest.php`、`tests/Unit/Providers/KimiProviderTest.php`、`tests/Unit/Providers/ChatCompletionsSseParserTest.php`、`tests/Unit/Providers/ModelCatalogRefresherTest.php`、`tests/Unit/Tools/Providers/Kimi/KimiSwarmToolTest.php`。
 
+## 90. SmartFlow —— 跨模型动态流程 (v1.1.0)
+
+`src/SmartFlow/` 是 Claude Code 内置 `Workflow` 引擎的 PHP 移植版，做成**跨模型 / 跨 API**。同一套原语 —— `agent()`、`parallel()`、`pipeline()`、`gate()`、`budget`、`schema`/`SKIP` —— 可驱动全部 15 个 provider。纯增量：旧的 `Tools\Builtin\WorkflowTool` 未改动，agent 主循环也不变。
+
+### 引擎 + 原语
+
+flow body 是 `callable(Flow $flow): mixed`。`FlowEngine::run($flowOrClosure, $args, $opts)` 把 `PersonaRegistry`、`FlowAgentRunner`（或 `ProcessPool`）、`CallLedger`、`Budget` 装进一个 `Flow` 上下文，跑完 body 返回 `FlowResult`。
+
+```php
+use SuperAgent\SmartFlow\{FlowEngine, FlowDefinition, FlowOptions, Flow};
+
+$def = FlowDefinition::make('dev', '从目标构建', function (Flow $flow) {
+    $flow->phase('Plan');
+    $plan = $flow->agent('规划：' . $flow->args['goal'], [
+        'role'   => 'planner',
+        'schema' => ['type' => 'object', 'required' => ['steps'],
+                     'properties' => ['steps' => ['type' => 'array', 'items' => ['type' => 'string']]]],
+    ]);
+
+    $reviews = $flow->parallel([                              // 并发（进程池）
+        $flow->call('审正确性', ['role' => 'reviewer']),
+        $flow->call('审安全性', ['role' => 'reviewer', 'provider' => 'openai']),
+    ]);
+
+    $drafts = $flow->pipeline(['intro', 'body'],              // 逐项、逐阶段
+        fn ($prev, $item) => $flow->call("写 {$item}", ['role' => 'writer']));
+
+    $gate = $flow->gate('nonempty', fn () => $plan !== $flow->SKIP, [
+        'fallback' => fn () => '需人工补充计划',
+    ]);
+
+    return compact('plan', 'reviews', 'drafts', 'gate');
+});
+
+$result = (new FlowEngine())->run($def, ['goal' => '一个 todo CLI'], new FlowOptions(rehearse: true));
+```
+
+| 原语 | 行为 |
+|------|------|
+| `agent($prompt, $opts)` | 一次跨模型调用；带 `schema` 返回校验后的数组，否则字符串，再否则 `$flow->SKIP` |
+| `call($prompt, $opts)` | 给 `parallel()`/`pipeline()` 用的**延迟** `AgentCall` |
+| `parallel([...])` | 屏障；延迟调用并发派发 |
+| `pipeline($items, ...$stages)` | 每项过每阶段；同阶段的调用并发 |
+| `gate($name, $check, $opts)` | 验收关卡；`fallback`/`relay`/`required` |
+| `council($claim, $lenses)` | 多视角评审 + 多数票 |
+| `log()`、`phase()`、`$flow->budget`、`$flow->args`、`$flow->SKIP`、`$flow->keep($arr)` | 状态 + 辅助 |
+
+### 三层结构化输出安全网
+
+`StructuredOutputLadder::resolve($text, $schema, $nativeRequested)` 用三种方式恢复符合 schema 的值，并报告命中的层级（账本 `layers` 可见）：
+
+1. **native** —— provider 被要求出 JSON（`ResponseFormat::jsonSchema()->toOpenAIFormat()`），整条回复直接解析。
+2. **submitted** —— 模型把 JSON 放进 ```` ```json ```` 围栏。
+3. **extracted** —— 兜底正则抓出第一个 `{...}`/`[...]`。
+
+校验由零依赖的 `SchemaValidator` 完成（required/type/enum/min·max/长度/pattern/items/嵌套）。全失败时 `agent()` 返回 `Skip` 单例（`$flow->SKIP`）；用 `$flow->keep($values)` 从批量结果里剔除 null + SKIP。
+
+### 角色 / persona
+
+`PersonaRegistry` 内置 7 个（`planner`/`builder`/`reviewer`/`researcher`/`writer`/`critic`/`chair`），外加 `resources/flows/personas/personas.yaml`（`pm`、`designer`、`engineer`、`editor`、`translator`、`fundamental-analyst` 等）。可经 `config('superagent.smartflow.personas')` 覆盖。给 persona 指定 `provider`/`model` 即可让 flow 真正跨模型。
+
+### 预算、gate、账本 + 续跑
+
+- **Budget**：`--budget-usd` / `config superagent.smartflow.budget.*` / flow 的 `defaults`。耗尽后下一次调用抛 `BudgetExceededException`，flow 干净失败。
+- **Gate**（`Gate`/`GateResult`）：记入账本；`required` gate 失败且无 fallback 时抛 `GateFailedException`。
+- **账本 + 续跑**：每次运行在 `~/.superagent/flows/` 写一个 JSONL `CallLedger`。`FlowSignature::forCall()` 基于*声明*的调用（label + 归一化 prompt + schema + role + 指定的 provider/model）做内容寻址。`--resume <runId>` 从缓存复用最长未变前缀（零 token），从首个不一致处重跑 —— 与 `Squad\SquadResumeManager` 同一机制。
+
+### 真并行（进程池）
+
+`ProcessPool::runBatch()` 把一批 `AgentCall` 作为并发 `bin/flow-agent-runner.php` 子进程派发（`proc_open` + `stream_select`，Windows 轮询兜底，并发上限 = `--concurrency` / `config superagent.smartflow.concurrency`）。单次调用、演练、无 `proc_open` 环境退化为顺序。提交顺序保持；崩溃/超时 worker 产出失败结果（→ SKIP/null）。
+
+### 零成本演练
+
+`FakeProvider`（注册名 `fake`，`src/Providers/FakeProvider.php`）返回确定性、符合 schema 的桩（`SchemaStub`），零 token / 零成本。用 `MULTI_AI_FAKE_PROVIDER=1` 或 `flow run --rehearse` 激活。所有内置 flow 都保证演练通过 —— 可离线跑通整套编排。
+
+### 用 YAML 编写静态 flow
+
+`YamlFlowLoader` 把 `resources/flows/*.yaml` 编译到同一引擎。步骤策略：`solo`（默认）、`parallel`（`agents:`）、`pipeline`（`over:` + `stages:`）、`gate`（`check:`）。模板：`{{args.x}}`、`{{steps.name.output}}`、点路径、pipeline 阶段里的 `{{item}}`。`FlowRegistry` 发现内置 + `./flows` + `./.superagent/flows`。
+
+```yaml
+name: my-flow
+steps:
+  - {name: plan, role: planner, prompt: "规划：{{args.goal}}", schema: plan}
+  - name: reviews
+    strategy: parallel
+    agents:
+      - {role: reviewer, prompt: "评审：\n{{steps.plan.output}}"}
+  - {name: accept, strategy: gate, check: "nonempty:{{steps.plan.output}}", required: true}
+return: plan
+```
+
+### CLI + 11 套内置 flow
+
+```bash
+superagent flow list                                        # 11 套 flow
+superagent flow run dev-from-scratch --args goal="todo" --rehearse
+superagent flow run research-trio --args question="…" --resume <run-id>
+```
+
+内置 flow：`dev-from-scratch`、`product-trio`、`research-trio`、`code-review-council`、`doc-writer`、`translate-localize`、`mp-article`、`video-creator`、`stock-trio`、`stock-monthly-style`、`stock-veggie`。领域类（`stock-*`、`mp-article`、`video-creator`）为尽力而为 prompt、文件内已标注；stock 类仅供教育。
+
+配置在 `config/superagent.php → 'smartflow'`；环境变量为 `MULTI_AI_FAKE_PROVIDER` 与 `SUPERAGENT_FLOW_*`。完整指南见 [docs/smartflow.md](smartflow.md)。
+
+测试：`tests/Unit/SmartFlow/StructuredOutputLadderTest.php`、`FlowEngineTest.php`、`ResumeTest.php`、`ProcessPoolTest.php`、`YamlFlowLoaderTest.php`、`FlowsRehearsalTest.php`。
+

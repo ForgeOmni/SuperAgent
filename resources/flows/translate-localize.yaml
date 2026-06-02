@@ -1,0 +1,43 @@
+name: translate-localize
+description: Translate text to a target language, then localize it for the target locale, then QA.
+phases:
+  - title: Translate
+  - title: Localize
+  - title: QA
+
+steps:
+  - name: translate
+    phase: Translate
+    role: translator
+    prompt: |
+      Translate the following into {{args.target_language}}. Output only the
+      translation, preserving tone and register.
+
+      Source:
+      {{args.text}}
+
+  - name: localize
+    phase: Localize
+    role: localizer
+    prompt: |
+      Localize this {{args.target_language}} translation for the locale
+      "{{args.locale}}": idioms, units, currency, dates, and cultural references.
+      Output only the localized text.
+
+      Translation:
+      {{steps.translate.output}}
+
+  - name: qa
+    phase: QA
+    role: critic
+    prompt: |
+      QA the localized text against the source for meaning drift, omissions, or
+      awkwardness. List issues; if clean, say so.
+
+      Source:
+      {{args.text}}
+
+      Localized:
+      {{steps.localize.output}}
+
+return: localize

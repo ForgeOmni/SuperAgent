@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-02
+
+### 💻 Summary
+
+**SmartFlow lands: a cross-model / cross-API dynamic-flow engine — the multi-ai port of Claude Code's built-in `Workflow`.** One set of primitives (`agent()` / `parallel()` / `pipeline()` / `gate()` / `budget` / `schema`/`SKIP`) drives any of the 15 registered providers, so the same flow can route its planner to one model and its reviewers to another. Additive and non-breaking — the existing `WorkflowTool` is untouched and nothing in the agent loop changes. On top of the engine: a **3-layer structured-output safety net** (native `response_format` → model-submitted ```` ```json ```` → regex-extracted, with a `SKIP` sentinel instead of a crash), reusable **roles/personas**, **gates** with fallback/relay acceptance, a **content-addressed call-ledger** that makes runs **resumable without re-spending tokens**, **true process-pool parallelism** (`proc_open` + `stream_select`, Windows fallback), **11 ready-to-run static flows** authored in YAML, and a **`MULTI_AI_FAKE_PROVIDER=1` zero-cost rehearsal mode** that every shipped flow is guaranteed to pass. New CLI `superagent flow`, new module `src/SmartFlow/`, new docs `docs/smartflow.md` + an Advanced-Usage chapter. Minor version bump (1.0.x → 1.1.0) for the sizeable additive surface. Full Unit suite green (3143 tests).
+
+### ✨ SmartFlow — cross-model / cross-API dynamic flows
+
+**A PHP port of the Claude Code `Workflow` engine, made cross-model and cross-API.** Additive, no breaking changes — `WorkflowTool` is untouched. The same primitives (`agent()`, `parallel()`, `pipeline()`, `gate()`, `budget`, `schema`/`SKIP`) drive any of the 15 registered providers. New module `src/SmartFlow/` + CLI command `superagent flow`.
+
+- **Primitives & engine** — `Flow` exposes `agent()` (one cross-model call), `call()` (deferred), `parallel()` (barrier, concurrent), `pipeline()` (per-item/per-stage), `gate()` (acceptance + fallback/relay), `council()` (perspective-diverse vote), `budget`, `log()`/`phase()`. `FlowEngine::run($flowOrClosure, $args, $opts)` is the entry point.
+- **3-layer structured-output safety net** — `StructuredOutputLadder` recovers schema-valid output via **native** (`response_format`/`json_schema`) → **submitted** (fenced ```` ```json ````) → **extracted** (regex sniff), validated by a dependency-free `SchemaValidator`; on total failure returns a `SKIP` sentinel instead of crashing.
+- **Roles/personas** — `PersonaRegistry` with 7 built-ins + `resources/flows/personas/personas.yaml` (pm/designer/engineer/editor/translator/analysts/…); override via `config('superagent.smartflow.personas')`. Pin a provider/model per persona to make a flow truly cross-model.
+- **Call-ledger + resume** — every run writes a JSONL ledger under `~/.superagent/flows/`; `--resume <runId>` replays the longest **unchanged prefix** from cache (zero tokens) via content-addressed `FlowSignature`, rerunning only from the first changed call (mirrors `SquadResumeManager`).
+- **True parallelism** — `ProcessPool` runs `parallel()`/`pipeline()` agent batches as concurrent `bin/flow-agent-runner.php` subprocesses (`proc_open` + `stream_select`, Windows polling fallback, concurrency cap), degrading to in-process when `proc_open` is unavailable.
+- **Zero-cost rehearsal** — new first-class `FakeProvider` (registry key `fake`) returns deterministic schema-conforming stubs at zero token cost; activated by `MULTI_AI_FAKE_PROVIDER=1` or `flow run --rehearse`. Every shipped flow is guaranteed to rehearse green.
+- **11 static flows** (`resources/flows/*.yaml`, authored declaratively, compiled by `YamlFlowLoader` to the same engine): `dev-from-scratch`, `product-trio`, `research-trio`, `code-review-council`, `doc-writer`, `translate-localize`, `mp-article`, `video-creator`, `stock-trio`, `stock-monthly-style`, `stock-veggie`. Domain flows ship best-effort prompts flagged for tuning; stock flows are educational-only.
+- **CLI** — `superagent flow list | show <name> | plan <name> | run <name> [--args k=v | --json {…}] [--rehearse] [--resume <id>] [--concurrency n] [--budget-usd x] [--out-json]`.
+- **Config** — new `smartflow` block in `config/superagent.php` (`enabled`, `concurrency`, `ledger_dir`, `flows_dir`, `budget.usd/tokens`, `personas`) + `SUPERAGENT_FLOW_*` / `MULTI_AI_FAKE_PROVIDER` env. Docs: `docs/smartflow.md`. Tests: `tests/Unit/SmartFlow/*` (26 tests, all green).
+
 ## [1.0.10] - 2026-05-31
 
 ### 💻 Summary

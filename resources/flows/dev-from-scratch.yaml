@@ -1,0 +1,75 @@
+name: dev-from-scratch
+description: Turn a one-line goal into a plan, an implementation, parallel reviews, and an accepted result.
+phases:
+  - title: Plan
+  - title: Build
+  - title: Review
+  - title: Accept
+defaults: {}
+
+schemas:
+  plan:
+    type: object
+    required: [summary, steps]
+    properties:
+      summary: {type: string}
+      steps:
+        type: array
+        minItems: 1
+        items: {type: string}
+
+steps:
+  - name: plan
+    phase: Plan
+    role: planner
+    prompt: |
+      Goal: {{args.goal}}
+
+      Produce a short build plan: a one-line summary and an ordered list of
+      concrete implementation steps.
+    schema: plan
+
+  - name: build
+    phase: Build
+    role: builder
+    prompt: |
+      Implement the following plan for the goal "{{args.goal}}".
+      Produce the actual artifact (code/files/config), not a description.
+
+      Plan:
+      {{steps.plan.output}}
+
+  - name: reviews
+    phase: Review
+    strategy: parallel
+    agents:
+      - role: reviewer
+        prompt: |
+          Review this implementation for CORRECTNESS and edge cases.
+          {{steps.build.output}}
+      - role: reviewer
+        prompt: |
+          Review this implementation for SIMPLICITY and maintainability.
+          {{steps.build.output}}
+
+  - name: revise
+    phase: Accept
+    role: builder
+    prompt: |
+      Revise the implementation to address the review feedback. Output the final
+      artifact only.
+
+      Implementation:
+      {{steps.build.output}}
+
+      Reviews:
+      {{steps.reviews.output}}
+
+  - name: accept
+    phase: Accept
+    strategy: gate
+    check: "nonempty:{{steps.revise.output}}"
+    required: true
+    fail_reason: "Final implementation is empty."
+
+return: revise

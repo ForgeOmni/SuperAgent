@@ -1,0 +1,72 @@
+# NOTE: Domain flow — best-effort prompts. Tune the personas/prompts to your
+# publication's voice and audience. 公众号 (WeChat Official Account) article writer.
+name: mp-article
+description: Write a WeChat Official Account (公众号) article — angle, outline, draft, polish, titles.
+phases:
+  - title: Angle
+  - title: Outline
+  - title: Draft
+  - title: Polish
+
+schemas:
+  titles:
+    type: object
+    required: [titles]
+    properties:
+      titles:
+        type: array
+        minItems: 3
+        items: {type: string}
+
+steps:
+  - name: angle
+    phase: Angle
+    role: editor
+    prompt: |
+      Topic: {{args.topic}}
+      Audience: {{args.audience}}
+
+      Propose a sharp angle and a hook for a 公众号 article — what makes a reader
+      stop scrolling and tap in. 3 sentences.
+
+  - name: outline
+    phase: Outline
+    role: writer
+    prompt: |
+      Outline a 公众号 article on "{{args.topic}}" for {{args.audience}} using this
+      angle:
+      {{steps.angle.output}}
+
+      Structure: hook → 3-4 sections → takeaway/call to action.
+
+  - name: draft
+    phase: Draft
+    role: writer
+    prompt: |
+      Write the full 公众号 article following the outline. Conversational,
+      scannable, with short paragraphs and subheads. Language: {{args.language}}.
+
+      Outline:
+      {{steps.outline.output}}
+
+  - name: polish
+    phase: Polish
+    role: seo-editor
+    prompt: |
+      Polish this article for a 公众号 feed: tighten the opening, improve flow and
+      subheads, keep it substantive. Output the final article only.
+
+      Draft:
+      {{steps.draft.output}}
+
+  - name: titles
+    phase: Polish
+    role: seo-editor
+    prompt: |
+      Propose catchy, non-clickbait 公众号 titles for this article.
+
+      Article:
+      {{steps.polish.output}}
+    schema: titles
+
+return: polish

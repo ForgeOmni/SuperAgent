@@ -10803,3 +10803,118 @@ export SUPERAGENT_KIMI_SWARM_ENABLED=1
 
 Tests: `tests/Unit/Format/JsonSchemaNormalizerTest.php`, `tests/Unit/Providers/KimiProviderTest.php`, `tests/Unit/Providers/ChatCompletionsSseParserTest.php`, `tests/Unit/Providers/ModelCatalogRefresherTest.php`, `tests/Unit/Tools/Providers/Kimi/KimiSwarmToolTest.php`.
 
+## 90. SmartFlow — cross-model dynamic flows (v1.1.0)
+
+`src/SmartFlow/` is a PHP port of Claude Code's built-in `Workflow` engine, made **cross-model / cross-API**. The same primitives — `agent()`, `parallel()`, `pipeline()`, `gate()`, `budget`, `schema`/`SKIP` — drive any of the 15 registered providers. It is additive: the legacy `Tools\Builtin\WorkflowTool` is untouched, and nothing in the agent loop changes.
+
+### Engine + primitives
+
+A flow body is `callable(Flow $flow): mixed`. `FlowEngine::run($flowOrClosure, $args, $opts)` wires a `PersonaRegistry`, a `FlowAgentRunner` (or `ProcessPool`), a `CallLedger`, and a `Budget` into a `Flow` context, runs the body, and returns a `FlowResult`.
+
+```php
+use SuperAgent\SmartFlow\{FlowEngine, FlowDefinition, FlowOptions, Flow};
+
+$def = FlowDefinition::make('dev', 'Build from a goal', function (Flow $flow) {
+    $flow->phase('Plan');
+    $plan = $flow->agent('Plan: ' . $flow->args['goal'], [
+        'role'   => 'planner',
+        'schema' => ['type' => 'object', 'required' => ['steps'],
+                     'properties' => ['steps' => ['type' => 'array', 'items' => ['type' => 'string']]]],
+    ]);
+
+    $flow->phase('Review');
+    $reviews = $flow->parallel([                              // concurrent (process pool)
+        $flow->call('Review for correctness',  ['role' => 'reviewer']),
+        $flow->call('Review for security',     ['role' => 'reviewer', 'provider' => 'openai']),
+    ]);
+
+    $drafts = $flow->pipeline(['intro', 'body'],              // per-item, per-stage
+        fn ($prev, $item) => $flow->call("Write the {$item}", ['role' => 'writer']));
+
+    $vote = $flow->council('The plan is sound.', ['correctness', 'feasibility']);
+
+    $gate = $flow->gate('nonempty', fn () => $plan !== $flow->SKIP, [
+        'fallback' => fn () => 'manual plan required',
+        'required' => false,
+    ]);
+
+    return compact('plan', 'reviews', 'drafts', 'vote', 'gate');
+});
+
+$result = (new FlowEngine())->run($def, ['goal' => 'a todo CLI'], new FlowOptions(rehearse: true));
+```
+
+| Primitive | Behaviour |
+|-----------|-----------|
+| `agent($prompt, $opts)` | one cross-model call; with `schema` returns a validated array, else a string, else `$flow->SKIP` |
+| `call($prompt, $opts)` | a **deferred** `AgentCall` for `parallel()`/`pipeline()` |
+| `parallel([...])` | barrier; deferred calls dispatch concurrently |
+| `pipeline($items, ...$stages)` | each item through each stage; calls in a stage run concurrently |
+| `gate($name, $check, $opts)` | acceptance checkpoint; `fallback`/`relay`/`required` |
+| `council($claim, $lenses)` | judge through N lenses, majority vote |
+| `log()`, `phase()`, `$flow->budget`, `$flow->args`, `$flow->SKIP`, `$flow->keep($arr)` | state + helpers |
+
+### Three-layer structured-output safety net
+
+`StructuredOutputLadder::resolve($text, $schema, $nativeRequested)` recovers a schema-valid value three ways and reports which rung won (visible in the ledger `layers`):
+
+1. **native** — provider asked for JSON (`ResponseFormat::jsonSchema()->toOpenAIFormat()`), whole reply parses.
+2. **submitted** — model fenced its JSON in a ```` ```json ```` block.
+3. **extracted** — last-ditch regex sniff of the first `{...}`/`[...]`.
+
+Validation is a dependency-free `SchemaValidator` (required/type/enum/min·max/length/pattern/items/nested). On total failure `agent()` returns the `Skip` singleton (`$flow->SKIP`); strip nulls + SKIP from a batch with `$flow->keep($values)`.
+
+### Roles / personas
+
+`PersonaRegistry` ships 7 built-ins (`planner`/`builder`/`reviewer`/`researcher`/`writer`/`critic`/`chair`) plus `resources/flows/personas/personas.yaml` (`pm`, `designer`, `engineer`, `editor`, `translator`, `fundamental-analyst`, …). Override via `config('superagent.smartflow.personas')`. Pin a `provider`/`model` per persona to make a flow genuinely cross-model:
+
+```php
+'personas' => [
+    'technical-analyst' => ['system' => '…', 'provider' => 'deepseek', 'model' => 'deepseek-v4-pro'],
+],
+```
+
+### Budget, gates, ledger + resume
+
+- **Budget** (`Budget`): `--budget-usd` / `config superagent.smartflow.budget.*` / a flow's `defaults`. Once exhausted the next call throws `BudgetExceededException` and the flow fails cleanly.
+- **Gates** (`Gate`/`GateResult`): recorded to the ledger; a `required` gate that fails with no fallback throws `GateFailedException`.
+- **Ledger + resume**: every run writes a JSONL `CallLedger` under `~/.superagent/flows/`. `FlowSignature::forCall()` is content-addressed from the *declared* call (label + normalized prompt + schema + role + pinned provider/model). `--resume <runId>` replays the longest unchanged prefix from cache (zero tokens) and reruns from the first divergent call — same mechanism as `Squad\SquadResumeManager`.
+
+### True parallelism (process pool)
+
+`ProcessPool::runBatch()` dispatches a batch of `AgentCall`s as concurrent `bin/flow-agent-runner.php` subprocesses (`proc_open` + `stream_select`, Windows polling fallback, concurrency cap = `--concurrency` / `config superagent.smartflow.concurrency`). Single calls, rehearsals, and `proc_open`-less environments degrade to in-process. Submission order is preserved; a crashed/timed-out worker yields a failed result (→ SKIP/null).
+
+### Zero-cost rehearsal
+
+`FakeProvider` (registry key `fake`, `src/Providers/FakeProvider.php`) returns deterministic, schema-conforming stubs (`SchemaStub`) at zero tokens / zero cost. Activate with `MULTI_AI_FAKE_PROVIDER=1` or `flow run --rehearse`. Every shipped flow is guaranteed to rehearse green — exercise the full orchestration offline.
+
+### Authoring static flows in YAML
+
+`YamlFlowLoader` compiles `resources/flows/*.yaml` to the same engine. Step strategies: `solo` (default), `parallel` (`agents:`), `pipeline` (`over:` + `stages:`), `gate` (`check:`). Templating: `{{args.x}}`, `{{steps.name.output}}`, dotted paths, and `{{item}}` in pipeline stages. `FlowRegistry` discovers built-ins + `./flows` + `./.superagent/flows`.
+
+```yaml
+name: my-flow
+steps:
+  - {name: plan, role: planner, prompt: "Plan: {{args.goal}}", schema: plan}
+  - name: reviews
+    strategy: parallel
+    agents:
+      - {role: reviewer, prompt: "Review:\n{{steps.plan.output}}"}
+  - {name: accept, strategy: gate, check: "nonempty:{{steps.plan.output}}", required: true}
+return: plan
+```
+
+### CLI + the 11 built-in flows
+
+```bash
+superagent flow list                                        # 11 flows
+superagent flow run dev-from-scratch --args goal="todo" --rehearse
+superagent flow run research-trio --args question="…" --resume <run-id>
+```
+
+Shipped flows: `dev-from-scratch`, `product-trio`, `research-trio`, `code-review-council`, `doc-writer`, `translate-localize`, `mp-article`, `video-creator`, `stock-trio`, `stock-monthly-style`, `stock-veggie`. Domain flows (`stock-*`, `mp-article`, `video-creator`) carry best-effort prompts flagged in-file; stock flows are educational-only.
+
+Config lives under `config/superagent.php → 'smartflow'`; env mirrors are `MULTI_AI_FAKE_PROVIDER` and `SUPERAGENT_FLOW_*`. Full guide: [docs/smartflow.md](smartflow.md).
+
+Tests: `tests/Unit/SmartFlow/StructuredOutputLadderTest.php`, `FlowEngineTest.php`, `ResumeTest.php`, `ProcessPoolTest.php`, `YamlFlowLoaderTest.php`, `FlowsRehearsalTest.php`.
+

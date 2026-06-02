@@ -136,6 +136,12 @@ export SUPERAGENT_MAX_AGENT_DEPTH=5
 # Swarm REST 规范，因此除非显式开启（且仅指向预览/私有端点），`kimi_swarm`
 # 工具会直接报错。
 export SUPERAGENT_KIMI_SWARM_ENABLED=1
+
+# SmartFlow（v1.1.0）—— 跨模型动态流程，全部可选。
+export MULTI_AI_FAKE_PROVIDER=1         # 全局强制零成本演练
+export SUPERAGENT_FLOW_CONCURRENCY=4    # 并行 worker 上限（进程池）
+export SUPERAGENT_FLOW_DIR=...          # 调用账本目录（默认 ~/.superagent/flows）
+export SUPERAGENT_FLOW_BUDGET_USD=2.0   # 单次运行 USD 硬上限（不设 = 无上限）
 ```
 
 可选的 scope header（v0.9.1 起 —— 在 agent 上声明一次，env 未设置时自动省略）：
@@ -493,6 +499,26 @@ superagent auto "<task>" --max-cost 2.50
 完整说明（分解规则、并行组、resume 语义、checkpoint 文件格式）见 [ADVANCED_USAGE §60](docs/ADVANCED_USAGE.md#60-squad-mode--adaptive-cross-model-squad)。
 
 *v0.9.9 起。*
+
+### SmartFlow —— 跨模型动态流程 *(v1.1.0)*
+
+Claude Code `Workflow` 引擎的跨模型移植版。除了常规 provider key 外无需额外配置；flow 会用你已配置的任意 provider 运行。建议先用零 token 成本端到端演练：
+
+```bash
+# 列出 11 套内置 flow。
+superagent flow list
+
+# 用确定性 fake provider 演练 —— $0.00，无需任何 key。
+superagent flow run dev-from-scratch --args goal="一个 todo CLI" --rehearse
+
+# 真实运行（跨模型：在 flow / persona 里给每个 role 指定 provider）。
+superagent flow run research-trio --args question="..."
+
+# 断点续跑：从调用账本复用未变前缀，只重跑变更部分。
+superagent flow run research-trio --args question="..." --resume <run-id>
+```
+
+调用账本写在 `~/.superagent/flows/`（可用 `SUPERAGENT_FLOW_DIR` 覆盖）。把自己的 flow 以 YAML 放到 `./flows` 或 `./.superagent/flows` 即可被发现。完整指南见 [docs/smartflow.md](docs/smartflow.md) 与 [ADVANCED_USAGE §90](docs/ADVANCED_USAGE.md#90-smartflow--cross-model-dynamic-flows-v110)。
 
 ### YAML 团队库 *(v1.0.1)*
 

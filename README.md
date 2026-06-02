@@ -1575,6 +1575,51 @@ See `docs/LARAVEL.md` for queue integration, job dispatching, and the `ai_usage_
 
 ---
 
+## SmartFlow — cross-model dynamic flows *(v1.1.0)*
+
+A PHP port of the Claude Code `Workflow` engine, made **cross-model / cross-API**:
+the same primitives — `agent()`, `parallel()`, `pipeline()`, `gate()`, `budget`,
+`schema`/`SKIP` — drive any of the 15 providers. *One set of primitives, many brains.*
+
+```bash
+superagent flow list                                            # 11 built-in flows
+superagent flow run dev-from-scratch --args goal="todo CLI" --rehearse   # $0.00 dry run
+superagent flow run product-trio --args idea="habit tracker"    # real, cross-model
+superagent flow run research-trio --args question="…" --resume <run-id>  # cached prefix
+```
+
+Beyond the built-in engine it adds a **3-layer structured-output safety net**
+(native → submitted → extracted, falling back to a `SKIP` sentinel), reusable
+**roles/personas**, **gates** with fallback/relay, a **call-ledger + signature**
+for **token-free checkpoint resume**, **true process-pool parallelism**, and a
+**`MULTI_AI_FAKE_PROVIDER=1` zero-cost rehearsal** mode (every shipped flow is
+guaranteed to rehearse green).
+
+```php
+use SuperAgent\SmartFlow\{FlowEngine, FlowDefinition, FlowOptions, Flow};
+
+$def = FlowDefinition::make('review', 'Review a diff', function (Flow $flow) {
+    $reviews = $flow->parallel([
+        $flow->call('Review for correctness: ' . $flow->args['diff'], ['role' => 'reviewer']),
+        $flow->call('Review for security: '    . $flow->args['diff'], ['role' => 'reviewer', 'provider' => 'openai']),
+    ]);
+    $verdict = $flow->agent('Consolidate: ' . json_encode($reviews), [
+        'role' => 'chair',
+        'schema' => ['type' => 'object', 'required' => ['decision'],
+                     'properties' => ['decision' => ['type' => 'string', 'enum' => ['approve', 'request_changes']]]],
+    ]);
+    return $verdict;   // validated array, or $flow->SKIP on schema failure
+});
+
+$result = (new FlowEngine())->run($def, ['diff' => $diff], new FlowOptions(rehearse: true));
+```
+
+Static flows are also authored declaratively in `resources/flows/*.yaml`
+(strategies: `solo` / `parallel` / `pipeline` / `gate`, with `{{args.x}}` /
+`{{steps.name.output}}` templating). Full guide: **`docs/smartflow.md`**.
+
+---
+
 ## Host Integrations
 
 Frameworks that embed SuperAgent — typically multi-tenant platforms that store encrypted provider credentials in a database row and spin up an agent per request — use `ProviderRegistry::createForHost()` instead of `create()`. The host passes a normalised shape and the SDK dispatches to the right constructor via per-provider adapters.

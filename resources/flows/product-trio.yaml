@@ -1,0 +1,60 @@
+name: product-trio
+description: A PM, a designer, and an engineer turn an idea into an aligned one-page product brief.
+phases:
+  - title: Frame
+  - title: Trio
+  - title: Synthesize
+
+schemas:
+  brief:
+    type: object
+    required: [problem, user, scope, risks]
+    properties:
+      problem: {type: string}
+      user: {type: string}
+      scope:
+        type: array
+        minItems: 1
+        items: {type: string}
+      non_goals:
+        type: array
+        items: {type: string}
+      risks:
+        type: array
+        items: {type: string}
+
+steps:
+  - name: frame
+    phase: Frame
+    role: pm
+    prompt: |
+      Idea: {{args.idea}}
+
+      Frame it as a crisp problem statement, the target user, and the single
+      most important outcome. 5 sentences max.
+
+  - name: trio
+    phase: Trio
+    strategy: parallel
+    agents:
+      - role: pm
+        prompt: "From a PRODUCT angle, what is the must-have scope and the non-goals?\n\nFraming:\n{{steps.frame.output}}"
+      - role: designer
+        prompt: "From a DESIGN angle, what is the simplest UX and the one key interaction?\n\nFraming:\n{{steps.frame.output}}"
+      - role: engineer
+        prompt: "From an ENGINEERING angle, what is the minimal approach and the riskiest unknown?\n\nFraming:\n{{steps.frame.output}}"
+
+  - name: brief
+    phase: Synthesize
+    role: chair
+    prompt: |
+      Synthesize the three perspectives into one aligned product brief.
+
+      Framing:
+      {{steps.frame.output}}
+
+      Perspectives (PM, Design, Engineering):
+      {{steps.trio.output}}
+    schema: brief
+
+return: brief

@@ -1,0 +1,55 @@
+name: research-trio
+description: Multi-angle research on a question, synthesized into a cited brief, then adversarially verified.
+phases:
+  - title: Gather
+  - title: Synthesize
+  - title: Verify
+
+schemas:
+  brief:
+    type: object
+    required: [answer, key_points]
+    properties:
+      answer: {type: string}
+      key_points:
+        type: array
+        minItems: 1
+        items: {type: string}
+      open_questions:
+        type: array
+        items: {type: string}
+
+steps:
+  - name: angles
+    phase: Gather
+    strategy: parallel
+    agents:
+      - role: researcher
+        prompt: "Research the FACTUAL/empirical angle of: {{args.question}}. List concrete findings and note uncertainty."
+      - role: researcher
+        prompt: "Research the COUNTER-ARGUMENTS and caveats for: {{args.question}}."
+      - role: researcher
+        prompt: "Research the PRACTICAL implications of: {{args.question}}."
+
+  - name: brief
+    phase: Synthesize
+    role: chair
+    prompt: |
+      Synthesize these research angles into a single, balanced brief answering:
+      {{args.question}}
+
+      Angles:
+      {{steps.angles.output}}
+    schema: brief
+
+  - name: verify
+    phase: Verify
+    role: critic
+    prompt: |
+      Adversarially check this brief for unsupported claims or overreach.
+      List any weak points; if it holds up, say so.
+
+      Brief:
+      {{steps.brief.output}}
+
+return: brief

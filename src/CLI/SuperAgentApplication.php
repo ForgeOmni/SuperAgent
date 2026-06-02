@@ -8,6 +8,7 @@ use SuperAgent\CLI\Commands\AuthCommand;
 use SuperAgent\CLI\Commands\AutoCommand;
 use SuperAgent\CLI\Commands\ChatCommand;
 use SuperAgent\CLI\Commands\EvalCommand;
+use SuperAgent\CLI\Commands\FlowCommand;
 use SuperAgent\CLI\Commands\HealthCommand;
 use SuperAgent\CLI\Commands\InitCommand;
 use SuperAgent\CLI\Commands\McpCommand;
@@ -29,7 +30,7 @@ use SuperAgent\CLI\Commands\SwarmCommand;
  */
 class SuperAgentApplication
 {
-    private const VERSION = '1.0.9';
+    private const VERSION = '1.1.0';
     private const NAME = 'SuperAgent';
 
     public function run(): int
@@ -79,6 +80,10 @@ class SuperAgentApplication
             // subtasks routed to (best | cheapest-passing) by dim, then merged.
             // Distinct from the existing keyword-heuristic AutoMode.
             'smart'   => (new SmartCommand())->execute($options),
+            // Cross-model SmartFlow runner: agent/parallel/pipeline/gate/budget
+            // primitives over any provider, with structured-output safety net,
+            // resumable ledger, and zero-cost rehearsal. See FlowCommand.
+            'flow'    => (new FlowCommand())->execute($options),
             // INTERNAL — single-subtask worker spawned by SmartOrchestrator's
             // parallel path. Not exposed in `--help`; reads stdin JSON, emits
             // stdout JSON. See SubtaskCommand for the protocol.
@@ -124,6 +129,7 @@ class SuperAgentApplication
         $options['health_args'] = [];
         $options['eval_args'] = [];
         $options['smart_args'] = [];
+        $options['flow_args'] = [];
         $options['auto_args'] = [];
         // 0.9.7+ — `superagent resume <list|show|load> --from <harness> ...`
         $options['resume_args'] = [];
@@ -132,7 +138,7 @@ class SuperAgentApplication
         // doesn't recognize (e.g. `eval run --models X --dims Y`) end up here
         // and are routed below to the subcommand's `<name>_args` slot.
         $subcommandRaw = null;
-        $knownSubcommands = ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume', 'eval', 'smart', 'auto', '_subtask'];
+        $knownSubcommands = ['init', 'chat', 'auth', 'login', 'models', 'mcp', 'skills', 'swarm', 'health', 'doctor', 'resume', 'eval', 'smart', 'flow', 'auto', '_subtask'];
 
         while ($i < count($args)) {
             $arg = $args[$i];
@@ -210,6 +216,7 @@ class SuperAgentApplication
                 'resume'        => 'resume_args',
                 'eval'          => 'eval_args',
                 'smart'         => 'smart_args',
+                'flow'          => 'flow_args',
                 'auto'          => 'auto_args',
                 '_subtask'      => null,  // takes JSON on stdin, no args
                 default         => null,

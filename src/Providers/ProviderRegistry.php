@@ -38,6 +38,9 @@ class ProviderRegistry
         'deepseek' => DeepSeekProvider::class,
         // xAI Grok — OpenAI-compatible at api.x.ai.
         'grok' => GrokProvider::class,
+        // Deterministic zero-cost provider for SmartFlow rehearsal
+        // (MULTI_AI_FAKE_PROVIDER=1). No network, no token spend.
+        'fake' => FakeProvider::class,
     ];
 
     /**

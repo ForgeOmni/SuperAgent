@@ -66,6 +66,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | SmartFlow — cross-model dynamic flows
+    |--------------------------------------------------------------------------
+    |
+    | The multi-ai dynamic-flow engine: agent()/parallel()/pipeline()/gate()/
+    | budget primitives over any provider, a 3-layer structured-output safety
+    | net, a resumable call-ledger, and zero-cost rehearsal via the `fake`
+    | provider (MULTI_AI_FAKE_PROVIDER=1 or `flow run --rehearse`).
+    |
+    */
+    'smartflow' => [
+        'enabled'     => (bool) env('SUPERAGENT_SMARTFLOW_ENABLED', true),
+        // Max concurrent workers for parallel()/pipeline() (process pool).
+        'concurrency' => (int) env('SUPERAGENT_FLOW_CONCURRENCY', 4),
+        // Where call-ledger JSONL files are written (defaults ~/.superagent/flows).
+        'ledger_dir'  => env('SUPERAGENT_FLOW_DIR'),
+        // Extra directories scanned for *.yaml flows (string or array).
+        'flows_dir'   => env('SUPERAGENT_FLOWS_DIR'),
+        // Default hard ceilings (null = unbounded). A flow's own `defaults`
+        // and the CLI --budget-usd flag override these.
+        'budget' => [
+            // null = unbounded. Use is_numeric so an unset env (which the
+            // standalone env() polyfill returns as null) stays null instead of
+            // coercing to 0 (which would block every call).
+            'usd'    => is_numeric($flowBudgetUsd = env('SUPERAGENT_FLOW_BUDGET_USD'))
+                ? (float) $flowBudgetUsd
+                : null,
+            'tokens' => is_numeric($flowBudgetTokens = env('SUPERAGENT_FLOW_BUDGET_TOKENS'))
+                ? (int) $flowBudgetTokens
+                : null,
+        ],
+        // Reusable persona templates, merged over the built-ins and any
+        // resources/flows/personas/*.yaml. Example:
+        // 'personas' => [
+        //     'analyst' => ['system' => '...', 'provider' => 'openai', 'model' => 'gpt-5'],
+        // ],
+        'personas' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Default LLM Provider
     |--------------------------------------------------------------------------
     */

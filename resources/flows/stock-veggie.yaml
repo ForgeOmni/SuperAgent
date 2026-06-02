@@ -1,0 +1,48 @@
+# NOTE: Domain flow — best-effort interpretation, flagged for your tuning.
+# "stock-veggie" (蔬菜/家常版) is read here as a PLAIN-LANGUAGE, beginner-friendly
+# stock explainer — like explaining a dish in everyday terms. If your original
+# meaning differs (e.g. defensive/"staples" screening, or a 韭菜 retail-trap
+# explainer), adjust the personas and prompts accordingly.
+# EDUCATIONAL only — NOT investment advice.
+name: stock-veggie
+description: Explain a stock in plain, everyday language for beginners — explain, fact-check, simplify.
+phases:
+  - title: Explain
+  - title: Check
+  - title: Simplify
+
+steps:
+  - name: explain
+    phase: Explain
+    role: analyst
+    prompt: |
+      In plain, everyday language (no jargon), explain what {{args.ticker}} does,
+      how it makes money, and the simple bull and bear case. Context:
+      {{args.context}}
+      Educational only — not investment advice.
+
+  - name: check
+    phase: Check
+    role: critic
+    prompt: |
+      Fact-check this beginner explainer for misleading simplifications or errors.
+      List corrections; if it's fair, say so.
+
+      Explainer:
+      {{steps.explain.output}}
+
+  - name: simplify
+    phase: Simplify
+    role: editor
+    prompt: |
+      Rewrite the explainer incorporating the corrections, even simpler — like
+      explaining to a friend over dinner. Keep the educational-only disclaimer.
+      Output the final explainer only.
+
+      Explainer:
+      {{steps.explain.output}}
+
+      Corrections:
+      {{steps.check.output}}
+
+return: simplify

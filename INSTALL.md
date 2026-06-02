@@ -136,6 +136,12 @@ export SUPERAGENT_MAX_AGENT_DEPTH=5
 # not published a public Swarm REST spec, so the `kimi_swarm` tool errors out
 # unless you opt in (only point this at a preview/private endpoint).
 export SUPERAGENT_KIMI_SWARM_ENABLED=1
+
+# SmartFlow (v1.1.0) — cross-model dynamic flows. All optional.
+export MULTI_AI_FAKE_PROVIDER=1         # force zero-cost rehearsal everywhere
+export SUPERAGENT_FLOW_CONCURRENCY=4    # max parallel workers (process pool)
+export SUPERAGENT_FLOW_DIR=...          # call-ledger dir (default ~/.superagent/flows)
+export SUPERAGENT_FLOW_BUDGET_USD=2.0   # hard USD ceiling per run (unset = unbounded)
 ```
 
 Optional scoping headers (since v0.9.1 — declare them once on the agent, they auto-omit when the env isn't set):
@@ -493,6 +499,26 @@ The default `ModelTierMap` is cross-vendor (Anthropic + DeepSeek). Override indi
 The full mode reference (decomposition rules, parallel groups, resume semantics, checkpoint format) is in [ADVANCED_USAGE §60](docs/ADVANCED_USAGE.md#60-squad-mode--adaptive-cross-model-squad).
 
 *Since v0.9.9.*
+
+### SmartFlow — cross-model dynamic flows *(v1.1.0)*
+
+A cross-model port of Claude Code's `Workflow` engine. No setup beyond your usual provider keys; flows run on whatever providers you have configured. Rehearse any flow end-to-end at zero token cost first:
+
+```bash
+# List the 11 built-in flows.
+superagent flow list
+
+# Rehearse with the deterministic fake provider — $0.00, no keys needed.
+superagent flow run dev-from-scratch --args goal="a todo CLI" --rehearse
+
+# Run for real (cross-model: pin providers per role in the flow / personas).
+superagent flow run research-trio --args question="..."
+
+# Resume: replay the unchanged prefix from the call-ledger, rerun only what changed.
+superagent flow run research-trio --args question="..." --resume <run-id>
+```
+
+Call-ledgers are written under `~/.superagent/flows/` (override with `SUPERAGENT_FLOW_DIR`). Add your own flows as YAML under `./flows` or `./.superagent/flows`. Full guide: [docs/smartflow.md](docs/smartflow.md) and [ADVANCED_USAGE §90](docs/ADVANCED_USAGE.md#90-smartflow--cross-model-dynamic-flows-v110).
 
 ### YAML team library *(v1.0.1)*
 

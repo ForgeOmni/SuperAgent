@@ -1,0 +1,43 @@
+# NOTE: Domain flow — best-effort prompts. EDUCATIONAL only, NOT investment
+# advice. "Monthly review in a chosen style" — a recurring market wrap-up
+# written in a configurable voice ({{args.style}}). Tune to your newsletter.
+name: stock-monthly-style
+description: Produce a monthly market/portfolio review written in a chosen style — data read, narrative, polish.
+phases:
+  - title: Read
+  - title: Write
+  - title: Polish
+
+steps:
+  - name: read
+    phase: Read
+    role: analyst
+    prompt: |
+      Month: {{args.month}}. Universe/portfolio: {{args.universe}}.
+      Notes/data:
+      {{args.notes}}
+
+      Extract the month's key moves, drivers, and what changed vs last month.
+      Educational only — not investment advice.
+
+  - name: narrative
+    phase: Write
+    role: writer
+    prompt: |
+      Write a monthly review for {{args.month}} in the style of "{{args.style}}".
+      Make it a readable narrative with clear takeaways, grounded in the read-out.
+
+      Read-out:
+      {{steps.read.output}}
+
+  - name: polish
+    phase: Polish
+    role: editor
+    prompt: |
+      Polish the review: tighten, ensure the style is consistent, add a one-line
+      TL;DR at top. Keep the educational-only disclaimer. Output the final piece.
+
+      Draft:
+      {{steps.narrative.output}}
+
+return: polish

@@ -137,6 +137,12 @@ export SUPERAGENT_MAX_AGENT_DEPTH=5
 # renvoie une erreur sauf si vous l'activez (à ne pointer que vers un endpoint
 # de préversion/privé).
 export SUPERAGENT_KIMI_SWARM_ENABLED=1
+
+# SmartFlow (v1.1.0) — flux dynamiques cross-modèle. Tout est optionnel.
+export MULTI_AI_FAKE_PROVIDER=1         # forcer la répétition à coût nul partout
+export SUPERAGENT_FLOW_CONCURRENCY=4    # workers parallèles max (pool de processus)
+export SUPERAGENT_FLOW_DIR=...          # répertoire du registre d'appels (déf. ~/.superagent/flows)
+export SUPERAGENT_FLOW_BUDGET_USD=2.0   # plafond USD strict par run (non défini = illimité)
 ```
 
 En-têtes de scoping optionnels (depuis v0.9.1 — déclarez-les une fois sur l'agent, ils s'omettent si l'env n'est pas défini) :
@@ -494,6 +500,26 @@ La `ModelTierMap` par défaut est multi-fournisseurs (Anthropic + DeepSeek). Sur
 Référence complète du mode (règles de décomposition, groupes parallèles, sémantique de reprise, format checkpoint) dans [ADVANCED_USAGE §60](docs/ADVANCED_USAGE.md#60-squad-mode--adaptive-cross-model-squad).
 
 *Depuis v0.9.9.*
+
+### SmartFlow — flux dynamiques cross-modèle *(v1.1.0)*
+
+Un portage cross-modèle du moteur `Workflow` de Claude Code. Aucune configuration au-delà de vos clés provider habituelles ; les flux tournent sur les providers que vous avez configurés. Répétez d'abord n'importe quel flux de bout en bout à coût nul :
+
+```bash
+# Lister les 11 flux intégrés.
+superagent flow list
+
+# Répéter avec le provider fake déterministe — 0 $, aucune clé requise.
+superagent flow run dev-from-scratch --args goal="un todo CLI" --rehearse
+
+# Exécuter pour de vrai (cross-modèle : épinglez un provider par rôle dans le flux / les personas).
+superagent flow run research-trio --args question="..."
+
+# Reprise : rejouer le préfixe inchangé depuis le registre d'appels, ne réexécuter que ce qui a changé.
+superagent flow run research-trio --args question="..." --resume <run-id>
+```
+
+Les registres d'appels sont écrits sous `~/.superagent/flows/` (surchargez avec `SUPERAGENT_FLOW_DIR`). Ajoutez vos propres flux en YAML sous `./flows` ou `./.superagent/flows`. Guide complet : [docs/smartflow.md](docs/smartflow.md) et [ADVANCED_USAGE §90](docs/ADVANCED_USAGE.md#90-smartflow--cross-model-dynamic-flows-v110).
 
 ### Bibliothèque d'équipes YAML *(v1.0.1)*
 

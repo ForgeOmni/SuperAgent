@@ -1,0 +1,52 @@
+# NOTE: Domain flow — best-effort prompts. Tune to your channel/format.
+# Short-form video (Reels/Shorts/抖音) creation pipeline.
+name: video-creator
+description: Turn a topic into a short-video script, a shot-by-shot storyboard, and a caption.
+phases:
+  - title: Script
+  - title: Storyboard
+  - title: Publish
+
+schemas:
+  caption:
+    type: object
+    required: [caption, hashtags]
+    properties:
+      caption: {type: string}
+      hashtags:
+        type: array
+        minItems: 1
+        items: {type: string}
+
+steps:
+  - name: script
+    phase: Script
+    role: scriptwriter
+    prompt: |
+      Topic: {{args.topic}}
+      Length: {{args.seconds}} seconds. Platform: {{args.platform}}.
+
+      Write a short-video script: a 3-second hook, the body beats, and a payoff.
+      Write for the ear.
+
+  - name: storyboard
+    phase: Storyboard
+    role: storyboarder
+    prompt: |
+      Break this script into shots. For each beat: shot description, on-screen
+      text, and a B-roll idea. Keep it producible solo.
+
+      Script:
+      {{steps.script.output}}
+
+  - name: caption
+    phase: Publish
+    role: seo-editor
+    prompt: |
+      Write a {{args.platform}} caption and hashtags for this video.
+
+      Script:
+      {{steps.script.output}}
+    schema: caption
+
+return: storyboard

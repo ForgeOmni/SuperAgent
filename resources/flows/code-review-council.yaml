@@ -1,0 +1,47 @@
+name: code-review-council
+description: Review a code diff across several lenses concurrently, then a chair consolidates a verdict.
+phases:
+  - title: Review
+  - title: Consolidate
+
+schemas:
+  verdict:
+    type: object
+    required: [decision, findings]
+    properties:
+      decision: {type: string, enum: [approve, request_changes]}
+      findings:
+        type: array
+        items:
+          type: object
+          required: [severity, note]
+          properties:
+            severity: {type: string, enum: [blocker, major, minor, nit]}
+            note: {type: string}
+
+steps:
+  - name: lenses
+    phase: Review
+    strategy: parallel
+    agents:
+      - role: reviewer
+        prompt: "Review for CORRECTNESS bugs and edge cases:\n\n{{args.diff}}"
+      - role: reviewer
+        prompt: "Review for SECURITY issues (injection, authz, secrets, unsafe input):\n\n{{args.diff}}"
+      - role: reviewer
+        prompt: "Review for SIMPLICITY/reuse and dead code:\n\n{{args.diff}}"
+      - role: reviewer
+        prompt: "Review for PERFORMANCE and resource use:\n\n{{args.diff}}"
+
+  - name: verdict
+    phase: Consolidate
+    role: chair
+    prompt: |
+      Consolidate the four reviews of this diff into one verdict. Deduplicate,
+      keep only real issues, and decide approve vs request_changes.
+
+      Reviews:
+      {{steps.lenses.output}}
+    schema: verdict
+
+return: verdict
