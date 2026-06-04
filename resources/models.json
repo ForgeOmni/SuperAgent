@@ -1,7 +1,7 @@
 {
   "_meta": {
     "schema_version": 2,
-    "updated": "2026-05-28",
+    "updated": "2026-06-04",
     "note": "Source of truth for model catalog + pricing. Per-million-token USD prices. Override at runtime via SUPERAGENT_MODELS_FILE env var or ModelCatalog::loadFromFile(). Each entry may set `family` (for alias resolution), `aliases`, `date` (YYYYMMDD; newest wins within a family), `input`/`output` pricing, and `description`."
   },
 
@@ -202,7 +202,8 @@
       "regions": ["intl", "cn"],
       "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
       "models": [
-        {"id": "MiniMax-M2.7",  "family": "m2",  "date": "20260318", "input": 0.30, "output": 1.20, "aliases": ["minimax", "m2", "minimax-m2"], "description": "MiniMax M2.7 — 230B MoE, self-evolving agent", "capabilities": {"streaming": true, "tools": true, "vision": true, "skills": true, "agent_teams": true, "dynamic_tool_search": true, "mcp": true, "max_context": 204800}},
+        {"id": "MiniMax-M3",    "family": "m3",  "date": "20260520", "input": 0.60, "output": 2.40, "aliases": ["minimax", "m3", "minimax-m3"], "description": "MiniMax M3 — next-gen self-evolving agent; multi-agent collaboration + skills trained into weights, 1M ctx. Std PAYG $0.60/$2.40 per M (7-day launch promo halves to $0.30/$1.20); image/video input $1.00/M", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "thinking": true, "skills": true, "agent_teams": true, "dynamic_tool_search": true, "mcp": true, "max_context": 1048576, "max_output": 512000}},
+        {"id": "MiniMax-M2.7",  "family": "m2",  "date": "20260318", "input": 0.30, "output": 1.20, "aliases": ["m2", "minimax-m2"], "description": "MiniMax M2.7 — 230B MoE, self-evolving agent", "capabilities": {"streaming": true, "tools": true, "vision": true, "skills": true, "agent_teams": true, "dynamic_tool_search": true, "mcp": true, "max_context": 204800}},
         {"id": "MiniMax-M2.5",  "family": "m2",  "date": "20260201", "input": 0.30, "output": 1.20, "description": "MiniMax M2.5"},
         {"id": "MiniMax-M2",    "family": "m2",  "date": "20260101", "input": 0.30, "output": 1.20, "description": "MiniMax M2"}
       ]
@@ -213,7 +214,7 @@
       "regions": ["default"],
       "capabilities": {"streaming": true, "tools": true, "mcp": true},
       "models": [
-        {"id": "deepseek-v4-pro",   "family": "deepseek-v4", "date": "20260424", "input": 0.55, "output": 2.20, "aliases": ["deepseek", "deepseek-v4", "v4-pro"], "description": "DeepSeek V4 Pro — 1.6T MoE / 49B active, 1M ctx, dual thinking/non-thinking, agentic-coding SOTA", "capabilities": {"streaming": true, "tools": true, "thinking": true, "agentic": true, "context_cache": "auto", "mcp": true, "max_context": 1048576, "active_params": 49000000000, "total_params": 1600000000000}},
+        {"id": "deepseek-v4-pro",   "family": "deepseek-v4", "date": "20260424", "input": 0.435, "output": 0.87, "cache_hit_input": 0.003625, "aliases": ["deepseek", "deepseek-v4", "v4-pro"], "description": "DeepSeek V4 Pro — 1.6T MoE / 49B active, 1M ctx, dual thinking/non-thinking, agentic-coding SOTA. PAYG $0.435 in (cache-miss) / $0.003625 in (cache-hit) / $0.87 out per M", "capabilities": {"streaming": true, "tools": true, "thinking": true, "agentic": true, "context_cache": "auto", "mcp": true, "max_context": 1048576, "active_params": 49000000000, "total_params": 1600000000000}},
         {"id": "deepseek-v4-flash", "family": "deepseek-v4", "date": "20260424", "input": 0.14, "output": 0.55, "aliases": ["v4-flash", "deepseek-flash"], "description": "DeepSeek V4 Flash — 284B MoE / 13B active, 1M ctx, dual thinking/non-thinking, drop-in for retired chat/reasoner", "capabilities": {"streaming": true, "tools": true, "thinking": true, "agentic": true, "context_cache": "auto", "mcp": true, "max_context": 1048576, "active_params": 13000000000, "total_params": 284000000000}},
         {"id": "deepseek-chat",     "family": "deepseek-v3", "date": "20241226", "input": 0.27, "output": 1.10, "deprecated_until": "2026-07-24", "replaced_by": "deepseek-v4-flash", "description": "DeepSeek V3 chat — DEPRECATED, retires 2026-07-24, currently routes to deepseek-v4-flash"},
         {"id": "deepseek-reasoner", "family": "deepseek-r1", "date": "20250120", "input": 0.55, "output": 2.20, "deprecated_until": "2026-07-24", "replaced_by": "deepseek-v4-pro", "description": "DeepSeek R1 reasoner — DEPRECATED, retires 2026-07-24; replaced by V4 thinking mode"}

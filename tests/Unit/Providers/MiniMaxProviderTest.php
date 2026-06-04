@@ -41,10 +41,10 @@ class MiniMaxProviderTest extends TestCase
         $this->assertSame('minimax', $p->name());
     }
 
-    public function test_default_model_is_m2_7(): void
+    public function test_default_model_is_m3(): void
     {
         $p = new MiniMaxProvider(['api_key' => 'k']);
-        $this->assertSame('MiniMax-M2.7', $p->getModel());
+        $this->assertSame('MiniMax-M3', $p->getModel());
     }
 
     public function test_group_id_header_added_when_configured(): void
@@ -71,6 +71,61 @@ class MiniMaxProviderTest extends TestCase
         $m = $ref->getMethod('chatCompletionsPath');
         $m->setAccessible(true);
         $this->assertSame('v1/text/chatcompletion_v2', $m->invoke($p));
+    }
+
+    public function test_thinking_request_fragment_enables_thinking(): void
+    {
+        $p = new MiniMaxProvider(['api_key' => 'k']);
+        $this->assertSame(['thinking' => ['type' => 'enabled']], $p->thinkingRequestFragment(4000));
+    }
+
+    public function test_reasoning_effort_maps_to_thinking_modes(): void
+    {
+        $p = new MiniMaxProvider(['api_key' => 'k']);
+        $this->assertSame(['thinking' => ['type' => 'disabled']], $p->reasoningEffortFragment('off'));
+        $this->assertSame(['thinking' => ['type' => 'adaptive']], $p->reasoningEffortFragment('adaptive'));
+        $this->assertSame(['thinking' => ['type' => 'enabled']], $p->reasoningEffortFragment('high'));
+        $this->assertSame(['thinking' => ['type' => 'enabled']], $p->reasoningEffortFragment('max'));
+        $this->assertSame([], $p->reasoningEffortFragment('bogus'));
+    }
+
+    public function test_customize_request_body_thinking_toggle(): void
+    {
+        $p = new MiniMaxProvider(['api_key' => 'k']);
+        $m = $this->reflectMethod($p, 'customizeRequestBody');
+
+        $body = [];
+        $m->invokeArgs($p, [&$body, ['thinking' => true]]);
+        $this->assertSame(['type' => 'enabled'], $body['thinking']);
+
+        $body = [];
+        $m->invokeArgs($p, [&$body, ['thinking' => 'adaptive']]);
+        $this->assertSame(['type' => 'adaptive'], $body['thinking']);
+
+        $body = [];
+        $m->invokeArgs($p, [&$body, ['thinking' => false]]);
+        $this->assertArrayNotHasKey('thinking', $body);
+    }
+
+    public function test_customize_request_body_reasoning_effort_overlays_thinking(): void
+    {
+        $p = new MiniMaxProvider(['api_key' => 'k']);
+        $m = $this->reflectMethod($p, 'customizeRequestBody');
+
+        $body = [];
+        $m->invokeArgs($p, [&$body, ['reasoning_effort' => 'off']]);
+        $this->assertSame(['type' => 'disabled'], $body['thinking']);
+    }
+
+    private function reflectMethod(object $p, string $name): \ReflectionMethod
+    {
+        $ref = new \ReflectionObject($p);
+        while ($ref && ! $ref->hasMethod($name)) {
+            $ref = $ref->getParentClass();
+        }
+        $m = $ref->getMethod($name);
+        $m->setAccessible(true);
+        return $m;
     }
 
     private function host(object $p): string

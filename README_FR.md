@@ -33,6 +33,7 @@ echo $result->text();
 - [API OpenAI Responses](#api-openai-responses)
 - [Bascule inter-providers](#bascule-inter-providers)
 - [DeepSeek V4](#deepseek-v4)
+- [MiniMax M3](#minimax-m3)
 - [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
 - [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
@@ -108,7 +109,7 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | `qwen` | Alibaba Qwen (OpenAI-compat par défaut) | Clé API ; régions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) |
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
 | `glm` | BigModel GLM | Clé API ; régions `intl` / `cn` |
-| `minimax` | MiniMax | Clé API ; régions `intl` / `cn` |
+| `minimax` | MiniMax (M3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking entrelacé + image/vidéo natives *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
 | `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.3` *(depuis v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
@@ -432,6 +433,42 @@ $compactor = new CacheAwareCompressor(
 ```
 
 Wrap n'importe quelle `CompressionStrategy`. Forme du résultat : `[head_pinned, summary_boundary, summary, tail_preserved]` avec le préfixe caché à l'octet 0. Idempotent sur plusieurs rounds — refeeder un résultat compacté préserve les mêmes octets de préfixe, donc le cache préfixe automatique de DeepSeek continue de hit à chaque `/compact`.
+
+---
+
+## MiniMax M3
+
+MiniMax M3 (sorti le 2026-06-01, le modèle par défaut de `minimax`) est le fleuron à **architecture MSA** : un **contexte de 1 M de tokens** (512 K de sortie max), une **multimodalité native** (entrée image *et* vidéo entraînée dès le step 0) et un **bascule thinking entrelacé** dans le même modèle. Tarif pay-as-you-go standard : **0,60 $ en entrée / 2,40 $ en sortie** par million de tokens (une promo de lancement de 7 jours le réduit actuellement de moitié à 0,30 $/1,20 $ ; entrée image/vidéo facturée à 1,00 $/M) — thinking et non-thinking partagent le même tarif. `MiniMax-M2.7` reste disponible par son id ou l'alias `m2`.
+
+```php
+$agent = new Agent([
+    'provider' => 'minimax',
+    'api_key'  => getenv('MINIMAX_API_KEY'),
+    'model'    => 'MiniMax-M3',                 // ou l'alias `minimax`
+    'region'   => 'intl',                       // intl | cn
+]);
+```
+
+**Thinking entrelacé.** Un bascule on/off/adaptive dans le même modèle, câblé via le même champ `thinking: {type: ...}` qu'utilisent GLM et DeepSeek V4. Trois façons de le piloter :
+
+```php
+// 1. Bascule directe — 'enabled' | 'disabled' | 'adaptive' (ou true)
+$agent->run('prompt de raisonnement difficile', ['thinking' => 'adaptive']);
+
+// 2. Molette reasoning-effort — off → disabled, adaptive, low…max → enabled
+$agent->run('prompt de raisonnement difficile', ['reasoning_effort' => 'adaptive']);
+
+// 3. API features inter-providers
+$agent->run('prompt de raisonnement difficile', ['features' => ['thinking' => ['budget' => 4000]]]);
+```
+
+`adaptive` (le modèle choisit la profondeur à chaque tour) est la valeur par défaut recommandée par MiniMax ; `disabled` est le chemin à faible latence pour le chat / la complétion de code. Le raisonnement revient dans un bloc `ContentBlock::thinking()` séparé — le même canal que DeepSeek V4, donc le code de rendu est partagé.
+
+**Multimodalité native.** L'image et la vidéo passent par les content parts standard de style OpenAI — `image_url` et `video_url` — dans le contenu de vos messages ; aucun flag spécial.
+
+**Routage de groupe.** Définissez `MINIMAX_GROUP_ID` (ou `group_id` en config) pour émettre l'en-tête optionnel `X-GroupId` ; omis lorsqu'il n'est pas défini.
+
+*Since v1.1.1*
 
 ---
 

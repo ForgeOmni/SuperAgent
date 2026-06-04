@@ -153,7 +153,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'minimax' => [
-            'model' => 'MiniMax-M2.7',
+            'model' => 'MiniMax-M3',
             'region' => 'intl',
             'max_tokens' => 8192,
             'max_retries' => 3,

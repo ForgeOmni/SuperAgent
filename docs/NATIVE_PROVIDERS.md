@@ -67,7 +67,11 @@ $provider = ProviderRegistry::createWithRegion('qwen', 'us', ['api_key' => '...'
 | **kimi** | `kimi-k2-6` | `intl` → api.moonshot.ai<br>`cn` → api.moonshot.cn |
 | **qwen** | `qwen3.6-max-preview` | `intl` → dashscope-intl.aliyuncs.com (Singapore)<br>`us` → dashscope-us.aliyuncs.com (Virginia)<br>`cn` → dashscope.aliyuncs.com (Beijing)<br>`hk` → cn-hongkong.dashscope.aliyuncs.com |
 | **glm** | `glm-4.6` | `intl` → api.z.ai/api/paas/v4<br>`cn` → open.bigmodel.cn/api/paas/v4 |
-| **minimax** | `MiniMax-M2.7` | `intl` → api.minimax.io<br>`cn` → api.minimaxi.com |
+| **minimax** | `MiniMax-M3` | `intl` → api.minimax.io<br>`cn` → api.minimaxi.com |
+
+> `MiniMax-M3` is the current flagship and the provider default (1M context).
+> The `minimax` alias resolves to it. `MiniMax-M2.7` stays reachable by id or
+> the `m2` / `minimax-m2` aliases.
 
 Full model list: `superagent models list` or `resources/models.json`.
 
@@ -119,13 +123,17 @@ endpoints**, so your main LLM doesn't need to be GLM to use them.
 | **ASR** (speech-to-text, GLM-ASR-2512) | `glm_asr` tool |
 | Strongest open-weight agentic model | Use `glm-5` (744B / 40B active) — #1 on MCP-Atlas, τ²-Bench, BrowseComp |
 
-### 3.4 MiniMax M2.7
+### 3.4 MiniMax M3 / M2.7
 
-M2.7 is a **self-evolving agent model** with multi-agent collaboration
-trained into the weights (not via prompt engineering).
+**M3** (default, launched 2026-06-01) is the MSA-architecture flagship: 1M
+context, native multimodality (image **and video** input trained from step 0),
+and interleaved thinking. **M2.7** remains a self-evolving agent model with
+multi-agent collaboration trained into the weights (not via prompt engineering).
 
 | Capability | How to use |
 |---|---|
+| **Interleaved thinking** (M3, single-model toggle) | `$options['thinking'] = true` / `'disabled'` / `'adaptive'`, or `$options['reasoning_effort'] = 'off'｜'adaptive'｜'high'`, or the generic `$options['features']['thinking']`. `adaptive` (model picks depth) is MiniMax's recommended default; thinking and non-thinking share one price. Reasoning streams back as a `thinking` content block. |
+| **Native multimodality** (M3) | Standard OpenAI-style content parts — `image_url` and `video_url` — in your message content; no special flags. |
 | **Agent Teams** (native multi-agent, role boundaries + adversarial reasoning + protocol adherence) | `$options['features']['agent_teams']` with `roles` and `objective` |
 | **Skills** (2000+ token skills, 97% adherence rate) | `SkillManager` + `SkillInjector` (MiniMax bridge) |
 | **Dynamic tool search** (model finds its own tools) | Just attach all relevant tools |

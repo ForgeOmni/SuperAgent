@@ -33,6 +33,7 @@ echo $result->text();
 - [OpenAI Responses API](#openai-responses-api)
 - [跨 Provider 切换](#跨-provider-切换)
 - [DeepSeek V4](#deepseek-v4)
+- [MiniMax M3](#minimax-m3)
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
@@ -108,7 +109,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）|
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
 | `glm` | BigModel GLM | API key；region `intl` / `cn` |
-| `minimax` | MiniMax | API key；region `intl` / `cn` |
+| `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
 | `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.3` *（v1.0.8 起）* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
@@ -431,6 +432,42 @@ $compactor = new CacheAwareCompressor(
 ```
 
 包装任意 `CompressionStrategy`。结果形态：`[head_pinned, summary_boundary, summary, tail_preserved]`，缓存前缀停留在 byte 0。多轮压缩幂等 —— 把压缩结果再喂回去也保持同样的前缀字节，DeepSeek 自动前缀缓存每轮 `/compact` 都继续命中。
+
+---
+
+## MiniMax M3
+
+MiniMax M3（2026-06-01 发布，`minimax` 默认模型）是 **MSA 架构**旗舰：**1M token context**（最大输出 512K）、**原生多模态**（图像*和*视频从 step 0 起就一起训练），以及单模型**交错式思考（interleaved thinking）开关**。标准按量计费 **$0.60 输入 / $2.40 输出**（每百万 token；当前 7 天上线促销期减半至 $0.30/$1.20，图像/视频输入按 $1.00/M 计费）—— 思考与非思考模式同价。`MiniMax-M2.7` 仍可通过 id 或 `m2` 别名使用。
+
+```php
+$agent = new Agent([
+    'provider' => 'minimax',
+    'api_key'  => getenv('MINIMAX_API_KEY'),
+    'model'    => 'MiniMax-M3',                 // 或用 `minimax` 别名
+    'region'   => 'intl',                       // intl | cn
+]);
+```
+
+**交错式思考**。单模型 on/off/adaptive 三态开关，走的是 GLM 和 DeepSeek V4 同款的 `thinking: {type: ...}` 字段。三种驱动方式：
+
+```php
+// 1. 直接开关 —— 'enabled' | 'disabled' | 'adaptive'（或 true）
+$agent->run('需要推理的复杂提示', ['thinking' => 'adaptive']);
+
+// 2. Reasoning-effort 档位 —— off → disabled，adaptive，low…max → enabled
+$agent->run('需要推理的复杂提示', ['reasoning_effort' => 'adaptive']);
+
+// 3. 跨 provider features API
+$agent->run('需要推理的复杂提示', ['features' => ['thinking' => ['budget' => 4000]]]);
+```
+
+`adaptive`（模型自行决定每轮思考深度）是 MiniMax 推荐的默认值；`disabled` 是面向聊天 / 代码补全的低延迟路径。推理链以独立的 `ContentBlock::thinking()` block 回传 —— 与 DeepSeek V4 同一通道，渲染代码共用。
+
+**原生多模态**。图像和视频走标准的 OpenAI 风格 content part —— 消息内容里的 `image_url` 和 `video_url`，无需特殊标志位。
+
+**Group 路由**。设置 `MINIMAX_GROUP_ID`（或 config 里的 `group_id`）即可带上可选的 `X-GroupId` header；未设置时省略。
+
+*Since v1.1.1*
 
 ---
 

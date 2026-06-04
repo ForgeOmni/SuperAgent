@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-04
+
+### 💻 Summary
+
+**MiniMax M3 lands as a first-class native model, and the DeepSeek / MiniMax catalog is repriced to live rates.** MiniMax shipped M3 on 2026-06-01 — an MSA-architecture flagship with a 1M-token context, native image *and* video input, and a single-model interleaved-thinking toggle. This release adds M3 to the catalog, makes it the `minimax` provider default, and teaches `MiniMaxProvider` the thinking toggle (it now implements `SupportsThinking` + `SupportsReasoningEffort`, so the generic features API and reasoning-effort dial both route to it). Pricing for M3 and `deepseek-v4-pro` was verified against the vendors' published rates and corrected. Additive and non-breaking on top of 1.1.0.
+
+No breaking changes. Existing `MiniMax-M2.7` callers keep working — M2.7 stays reachable by id and the `m2` / `minimax-m2` aliases; only the bare `minimax` shorthand and the zero-config default now resolve to M3.
+
+### Added
+
+- **MiniMax M3** in the catalog (`resources/models.json`) and promoted to the `minimax` provider default (`MiniMaxProvider::defaultModel()` + `ProviderRegistry`) — MSA-architecture flagship: 1M context, 512K max output, native image/video input, interleaved thinking, tools / skills / agent-teams / dynamic-tool-search / MCP. The `minimax` alias resolves to M3 (newest-wins); `MiniMax-M2.7` stays reachable by id and the `m2` / `minimax-m2` aliases.
+- **MiniMax M3 interleaved thinking** — `MiniMaxProvider` now implements `SupportsThinking` + `SupportsReasoningEffort`, emitting the `thinking: {type: enabled｜disabled｜adaptive}` field. Drive it via `$options['thinking']` (`true`/`'enabled'`/`'disabled'`/`'adaptive'`/array), `$options['reasoning_effort']` (`off`/`adaptive`/`low`…`max`), or the generic `$options['features']['thinking']`. `adaptive` (model picks depth per turn) is MiniMax's recommended default; thinking and non-thinking share one price. Reasoning streams back as a separate `ContentBlock::thinking()` block.
+
+### Changed
+
+- **MiniMax M3 pricing** set to the standard pay-as-you-go rate **$0.60 in / $2.40 out** per M tokens (a 7-day launch promo currently halves this to $0.30/$1.20; image/video input billed at $1.00/M). Catalog records 1M context + 512K max output and the `thinking` / `video` capabilities.
+- **DeepSeek V4 Pro repriced** to the current official rate — **$0.435** in (cache-miss) / **$0.003625** in (cache-hit) / **$0.87** out per M tokens, down from the stale $0.55 / $2.20. (`deepseek-v4-pro` was already wired end-to-end via `DeepSeekProvider`; this release only corrects its price.)
+- READMEs (EN / 中文 / FR) gain a **MiniMax M3** section (install + advanced usage) and an updated provider table; `docs/NATIVE_PROVIDERS.md` documents the M3 default, thinking modes, and native multimodality.
+
 ## [1.1.0] - 2026-06-02
 
 ### 💻 Summary
@@ -416,7 +435,6 @@ Six features ported from [opencode](https://opencode.ai) (`packages/opencode/src
 - **`LSP\` namespace** — real LSP stdio JSON-RPC client (was a `simulated` placeholder). `Client` handles initialize/didOpen/didChange/diagnostic/hover/definition with Content-Length framing; `ServerRegistry` ships defaults for 9 language servers (phpactor, intelephense, gopls, rust-analyzer, pyright, typescript-language-server, clangd, bash-language-server, zls) with per-server root markers (composer.json/go.mod/Cargo.toml/...); `Manager` per-worktree caches one client per (server-id, root-dir) pair so multi-file edits don't re-initialize. `Tools\Builtin\LSPTool` now exposes `diagnostics`/`hover`/`definition`/`touch` actions to the agent.
 - **`ACP\` namespace** — Agent Client Protocol v1 server (JSON-RPC over stdio with newline framing, not Content-Length). Editors that speak ACP — Zed, Neovim with Codecompanion, future VS Code extensions — can plug into SuperAgent directly. Components: `Protocol` (constants + envelope helpers), `Server` (transport with notification support for streaming `session/update`), `Handler` (pluggable backend interface), `DefaultHandler` (reference implementation taking a prompt closure), `SessionRegistry` + `SessionEntry` (in-memory session map). Hosts wire SuperAgent's `Agent` into a `DefaultHandler` and call `(new Server($h))->serve()`.
 - **`Skills\SkillManager::discoverExternalSkills()`** — opencode-style worktree-bounded upward walk loading SKILL.md files. At each directory level between cwd and worktree root, scans `.claude/skills/**/SKILL.md` and `.agents/skills/**/SKILL.md`; at the worktree root, also scans `skills/**/SKILL.md` and `skill/**/SKILL.md`. Files must literally be named `SKILL.md` (avoids treating arbitrary docs as skills). Walk stops at the worktree boundary so monorepo parents don't bleed in.
-
 ## [1.0.1] - 2026-05-17
 
 ### 💻 Summary

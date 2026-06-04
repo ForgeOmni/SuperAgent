@@ -72,9 +72,10 @@ class CostCalculatorTest extends TestCase
 
     public function test_deepseek_v4_pro_pricing(): void
     {
+        // V4 Pro: $0.435/M input + $0.87/M output per the catalog.
         $usage = new Usage(1_000_000, 1_000_000);
         $cost = CostCalculator::calculate('deepseek-v4-pro', $usage);
-        $this->assertEqualsWithDelta(0.55 + 2.20, $cost, 0.001);
+        $this->assertEqualsWithDelta(0.435 + 0.87, $cost, 0.001);
     }
 
     public function test_cache_read_billed_at_one_tenth_input_price(): void
