@@ -147,7 +147,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'glm' => [
-            'model' => 'glm-4.6',
+            'model' => 'glm-5.2',
             'region' => 'intl',
             'max_tokens' => 8192,
             'max_retries' => 3,

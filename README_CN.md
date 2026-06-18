@@ -34,6 +34,7 @@ echo $result->text();
 - [跨 Provider 切换](#跨-provider-切换)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
+- [GLM-5.2](#glm-52)
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
@@ -108,7 +109,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `kimi` | Moonshot Kimi | API key；region `intl` / `cn` / `code`（OAuth）|
 | `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）|
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
-| `glm` | BigModel GLM | API key；region `intl` / `cn` |
+| `glm` | BigModel GLM（默认 GLM-5.2）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.2，v1.1.2)* |
 | `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
 | `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.3` *（v1.0.8 起）* |
@@ -468,6 +469,40 @@ $agent->run('需要推理的复杂提示', ['features' => ['thinking' => ['budge
 **Group 路由**。设置 `MINIMAX_GROUP_ID`（或 config 里的 `group_id`）即可带上可选的 `X-GroupId` header；未设置时省略。
 
 *Since v1.1.1*
+
+---
+
+## GLM-5.2
+
+GLM-5.2（自 v1.1.2 起为 `glm` 默认模型）是 Z.ai 面向编码的 agentic 旗舰：**1M token context**（最大输出 128K）、**纯文本**输入输出，并且 —— 5.2 系列新增 —— 在二元 thinking 开关之上多了一个 **reasoning-effort 档位**。官方按量计费 **$1.40 输入 / $4.40 输出**（每百万 token），**缓存命中输入 $0.26**（缓存存储目前限时免费）。`glm-5.1`（200K context，同价）一同发布，此前的每一个 `glm-5` / `glm-4.x` id 仍可继续使用。
+
+```php
+$agent = new Agent([
+    'provider' => 'glm',
+    'api_key'  => getenv('GLM_API_KEY'),
+    'model'    => 'glm-5.2',                    // or the `glm` alias
+    'region'   => 'intl',                       // intl | cn
+]);
+```
+
+**Reasoning effort**。GLM-5.2 在二元 `thinking` 开关之上新增了一个 `reasoning_effort` 档位；`GlmProvider` 同时实现 `SupportsThinking` 和 `SupportsReasoningEffort`。三种驱动方式：
+
+```php
+// 1. Direct thinking toggle — true | 'enabled' | 'disabled'
+$agent->run('hard reasoning prompt', ['thinking' => true]);
+
+// 2. Reasoning-effort dial — off → disabled, low…high → high, max → max
+$agent->run('hard reasoning prompt', ['reasoning_effort' => 'max']);
+
+// 3. Cross-provider features API
+$agent->run('hard reasoning prompt', ['features' => ['thinking' => ['budget' => 4000]]]);
+```
+
+`off` 发送 `thinking: {type: disabled}`；`high` 和 `max` 发送 `reasoning_effort` 并配上 `thinking: {type: enabled}`（两者同时设置时，`reasoning_effort` 优先于裸的 `thinking` 开关）。推理链经由共享的 `delta.reasoning_content` 通道以独立的 `ContentBlock::thinking()` block 回传 —— 与 DeepSeek V4 同一通道。
+
+**伴生工具**。GLM 的服务端工具依然可用：`glm_web_search`、`glm_web_reader`、`glm_ocr`、`glm_asr`。
+
+*Since v1.1.2*
 
 ---
 

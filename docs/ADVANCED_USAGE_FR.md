@@ -12027,3 +12027,32 @@ La config est sous `config/superagent.php → 'smartflow'` ; les miroirs d'env s
 
 Tests : `tests/Unit/SmartFlow/StructuredOutputLadderTest.php`, `FlowEngineTest.php`, `ResumeTest.php`, `ProcessPoolTest.php`, `YamlFlowLoaderTest.php`, `FlowsRehearsalTest.php`.
 
+## 91. Molette reasoning-effort de GLM-5.2 (v1.1.2)
+
+GLM-5.2 (le modèle par défaut de `glm` depuis v1.1.2) est en texte uniquement, avec 1 M de contexte / 128 K de sortie max, facturé au tarif officiel de Z.ai : **1,40 $ en entrée / 4,40 $ en sortie / 0,26 $ en cache-hit** par M de tokens. `glm-5.1` (200 K de contexte, même tarif) est livré en parallèle ; les deux sont ajoutés à `resources/models.json` et chaque id `glm-5` / `glm-4.x` antérieur reste accessible. `GlmProvider::defaultModel()` et le défaut du `ProviderRegistry` sont passés de `glm-4.6` à `glm-5.2`.
+
+La série 5.2 ajoute une molette `reasoning_effort` par-dessus le bascule thinking binaire. `GlmProvider` implémente à la fois `SupportsThinking` et `SupportsReasoningEffort` ; l'option est câblée dans `customizeRequestBody()` de la même façon que DeepSeek et MiniMax câblent les leurs (`reasoning_effort` l'emporte sur un simple bascule `thinking` lorsque les deux sont définis).
+
+### Ce que transporte la wire
+
+```php
+// Binary toggle
+$provider->chat($messages, $tools, $system, ['thinking' => true]);
+// → {"model": "glm-5.2", ..., "thinking": {"type": "enabled"}}
+
+// Effort dial
+$provider->chat($messages, $tools, $system, ['reasoning_effort' => 'max']);
+// → {..., "reasoning_effort": "max", "thinking": {"type": "enabled"}}
+
+// Off — force a reasoning-capable model out of thinking
+$provider->chat($messages, $tools, $system, ['reasoning_effort' => 'off']);
+// → {..., "thinking": {"type": "disabled"}}
+
+// Generic features API (cross-provider)
+$provider->chat($messages, $tools, $system, ['features' => ['thinking' => ['budget' => 4000]]]);
+```
+
+Normalisation de l'effort (`GlmProvider::reasoningEffortFragment()`) : `off` / `disabled` / `none` / `false` → `thinking: {type: disabled}` ; `low` / `minimal` / `medium` / `mid` / `high` (et vide) → `reasoning_effort: high` + `thinking: {type: enabled}` ; `max` / `xhigh` / `highest` → `reasoning_effort: max` + `thinking: {type: enabled}`. Les valeurs inconnues renvoient `[]`, de sorte qu'un appelant mal configuré n'empoisonne jamais la requête.
+
+Le raisonnement revient sur le canal partagé `delta.reasoning_content` (géré dans `ChatCompletionsProvider::parseSSEStream()`), exposé sous forme de bloc `ContentBlock::thinking()` — aucun parsing spécifique à GLM. GLM-5.2 est en texte uniquement : la série multimodale `glm-5v` est distincte, donc l'entrée de catalogue ne porte aucun flag de capacité `vision` / `ocr` / `asr`. Tests : `Providers\GlmProviderTest`.
+

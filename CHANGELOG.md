@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-06-17
+
+### 💻 Summary
+
+**GLM-5.2 lands as the `glm` flagship, GLM-5.1 ships alongside, and `GlmProvider` gains a reasoning-effort dial — all priced to Z.ai's official rates.** GLM-5.2 is Z.ai's coding-first agentic flagship: a 1M-token context (128K max output), text-only I/O, and — new for the 5.2 line — a `reasoning_effort` dial on top of the binary thinking toggle. This release adds both `glm-5.2` and `glm-5.1` to the catalog, promotes `glm-5.2` to the `glm` provider default, and teaches `GlmProvider` the effort dial (it now implements `SupportsThinking` + `SupportsReasoningEffort`, so the generic features API, the bare `thinking` toggle, and the `reasoning_effort` option all route to it). All pricing and context specs were taken from Z.ai's official docs, not third-party aggregators. Additive and non-breaking on top of 1.1.1.
+
+No breaking changes. Existing `glm-4.6` / `glm-5` callers keep working — every prior id stays reachable; only the bare `glm` shorthand and the zero-config default now resolve to `glm-5.2`.
+
+### Added
+
+- **GLM-5.2** in the catalog (`resources/models.json`) and promoted to the `glm` provider default (`GlmProvider::defaultModel()` + `ProviderRegistry`) — coding-first agentic flagship: 1M context, 128K max output, text-only, thinking + reasoning-effort, tools / web-search / MCP. The `glm` / `glm5` / `glm5.2` aliases resolve to it (newest-wins); `glm-5` and the `glm-4.x` line stay reachable by id.
+- **GLM-5.1** in the catalog — long-horizon agentic, 200K context / 128K max output, text-only, thinking + tools + streaming. Ships as a non-flagship entry (still active on Z.ai; reachable by id).
+- **GLM-5.2 reasoning-effort dial** — `GlmProvider` now implements `SupportsReasoningEffort`. Drive it via `$options['reasoning_effort']` (`off` → `thinking: {type: disabled}`; `low`…`high` → `reasoning_effort: high`; `max` → `reasoning_effort: max`, each paired with `thinking: {type: enabled}`), the bare `$options['thinking']` toggle (`true` / `'enabled'` / `'disabled'`), or the generic `$options['features']['thinking']`. Reasoning streams back on the shared `delta.reasoning_content` channel as a `ContentBlock::thinking()` block (already handled by `ChatCompletionsProvider`). Tests in `Providers\GlmProviderTest`.
+
+### Changed
+
+- **GLM pricing set to Z.ai's official rates** — `glm-5.2` and `glm-5.1` both **$1.40 in / $4.40 out** per M tokens, with **$0.26 cache-hit input** (cache storage currently limited-time free). Catalog records 1M / 200K context respectively and 128K max output.
+- **`glm` provider default bumped `glm-4.6` → `glm-5.2`** (`GlmProvider::defaultModel()` + `ProviderRegistry` default config). Zero-config `provider => 'glm'` now resolves to GLM-5.2.
+- READMEs (EN / 中文 / FR) gain a **GLM-5.2** section (install + reasoning-effort usage) and an updated provider table; `docs/ADVANCED_USAGE.*` document the effort dial and wire shapes.
+
+### Fixed
+
+- **Corrected GLM-5.2 catalog capabilities** — removed an erroneous `vision` / `ocr` / `asr` flag set; GLM-5.2 is text-only (the multimodal `glm-5v` line is separate).
+
 ## [1.1.1] - 2026-06-04
 
 ### 💻 Summary

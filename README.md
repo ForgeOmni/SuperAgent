@@ -34,6 +34,7 @@ echo $result->text();
 - [Cross-provider handoff](#cross-provider-handoff)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
+- [GLM-5.2](#glm-52)
 - [Goal mode (codex `/goal` parity)](#goal-mode-codex-goal-parity-v098)
 - [Operational guardrails](#operational-guardrails-v098)
 - [Companion tools (jcode-inspired)](#companion-tools-jcode-inspired)
@@ -108,7 +109,7 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 | `kimi` | Moonshot Kimi | API key; regions `intl` / `cn` / `code` (OAuth) |
 | `qwen` | Alibaba Qwen (OpenAI-compat default) | API key; regions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) |
 | `qwen-native` | Alibaba Qwen (DashScope-native body) | Kept for `parameters.thinking_budget` callers |
-| `glm` | BigModel GLM | API key; regions `intl` / `cn` |
+| `glm` | BigModel GLM (GLM-5.2 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.2, v1.1.2)* |
 | `minimax` | MiniMax (M3 default) | API key; regions `intl` / `cn`; interleaved thinking + native image/video *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(since v0.9.6, multi-upstream v0.9.8)* |
 | `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.3` *(since v1.0.8)* |
@@ -491,6 +492,40 @@ $agent->run('hard reasoning prompt', ['features' => ['thinking' => ['budget' => 
 **Group routing.** Set `MINIMAX_GROUP_ID` (or `group_id` in config) to emit the optional `X-GroupId` header; it's omitted when unset.
 
 *Since v1.1.1*
+
+---
+
+## GLM-5.2
+
+GLM-5.2 (the `glm` default as of v1.1.2) is Z.ai's coding-first agentic flagship: a **1M-token context** (128K max output), **text-only** I/O, and — new for the 5.2 line — a **reasoning-effort dial** on top of the binary thinking toggle. Official pay-as-you-go pricing is **$1.40 in / $4.40 out** per million tokens, with **$0.26 cache-hit input** (cache storage currently free, limited-time). `glm-5.1` (200K context, same pricing) ships alongside, and every prior `glm-5` / `glm-4.x` id stays reachable.
+
+```php
+$agent = new Agent([
+    'provider' => 'glm',
+    'api_key'  => getenv('GLM_API_KEY'),
+    'model'    => 'glm-5.2',                    // or the `glm` alias
+    'region'   => 'intl',                       // intl | cn
+]);
+```
+
+**Reasoning effort.** GLM-5.2 adds a `reasoning_effort` dial on top of the binary `thinking` toggle; `GlmProvider` implements both `SupportsThinking` and `SupportsReasoningEffort`. Drive it three ways:
+
+```php
+// 1. Direct thinking toggle — true | 'enabled' | 'disabled'
+$agent->run('hard reasoning prompt', ['thinking' => true]);
+
+// 2. Reasoning-effort dial — off → disabled, low…high → high, max → max
+$agent->run('hard reasoning prompt', ['reasoning_effort' => 'max']);
+
+// 3. Cross-provider features API
+$agent->run('hard reasoning prompt', ['features' => ['thinking' => ['budget' => 4000]]]);
+```
+
+`off` sends `thinking: {type: disabled}`; `high` and `max` send `reasoning_effort` paired with `thinking: {type: enabled}` (`reasoning_effort` wins over a bare `thinking` toggle when both are set). Reasoning streams back as a separate `ContentBlock::thinking()` block via the shared `delta.reasoning_content` channel — the same one DeepSeek V4 uses.
+
+**Companion tools.** GLM's server-side tools stay available: `glm_web_search`, `glm_web_reader`, `glm_ocr`, `glm_asr`.
+
+*Since v1.1.2*
 
 ---
 

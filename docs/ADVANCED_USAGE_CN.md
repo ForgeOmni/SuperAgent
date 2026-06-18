@@ -11474,3 +11474,32 @@ superagent flow run research-trio --args question="…" --resume <run-id>
 
 测试：`tests/Unit/SmartFlow/StructuredOutputLadderTest.php`、`FlowEngineTest.php`、`ResumeTest.php`、`ProcessPoolTest.php`、`YamlFlowLoaderTest.php`、`FlowsRehearsalTest.php`。
 
+## 91. GLM-5.2 reasoning-effort 档位 (v1.1.2)
+
+GLM-5.2（自 v1.1.2 起为 `glm` 默认模型）为纯文本，1M context / 128K 最大输出，按 Z.ai 官方价 **$1.40 输入 / $4.40 输出 / 缓存命中 $0.26**（每百万 token）计费。`glm-5.1`（200K context，同价）一同发布；两者均已加入 `resources/models.json`，此前的每一个 `glm-5` / `glm-4.x` id 仍可继续使用。`GlmProvider::defaultModel()` 与 `ProviderRegistry` 默认值已从 `glm-4.6` 升到 `glm-5.2`。
+
+5.2 系列在二元 thinking 开关之上新增了一个 `reasoning_effort` 档位。`GlmProvider` 同时实现 `SupportsThinking` 和 `SupportsReasoningEffort`；该选项在 `customizeRequestBody()` 中接线，方式与 DeepSeek、MiniMax 一致（两者同时设置时，`reasoning_effort` 优先于裸的 `thinking` 开关）。
+
+### wire 上承载的内容
+
+```php
+// Binary toggle
+$provider->chat($messages, $tools, $system, ['thinking' => true]);
+// → {"model": "glm-5.2", ..., "thinking": {"type": "enabled"}}
+
+// Effort dial
+$provider->chat($messages, $tools, $system, ['reasoning_effort' => 'max']);
+// → {..., "reasoning_effort": "max", "thinking": {"type": "enabled"}}
+
+// Off — force a reasoning-capable model out of thinking
+$provider->chat($messages, $tools, $system, ['reasoning_effort' => 'off']);
+// → {..., "thinking": {"type": "disabled"}}
+
+// Generic features API (cross-provider)
+$provider->chat($messages, $tools, $system, ['features' => ['thinking' => ['budget' => 4000]]]);
+```
+
+档位归一化（`GlmProvider::reasoningEffortFragment()`）：`off` / `disabled` / `none` / `false` → `thinking: {type: disabled}`；`low` / `minimal` / `medium` / `mid` / `high`（以及空值）→ `reasoning_effort: high` + `thinking: {type: enabled}`；`max` / `xhigh` / `highest` → `reasoning_effort: max` + `thinking: {type: enabled}`。未知值返回 `[]`，因此配置错误的调用方绝不会污染请求。
+
+推理链经由共享的 `delta.reasoning_content` 通道回传（在 `ChatCompletionsProvider::parseSSEStream()` 中处理），以 `ContentBlock::thinking()` block 的形式呈现 —— 没有 GLM 专属解析。GLM-5.2 为纯文本：多模态的 `glm-5v` 系列是独立的，因此该 catalog 条目不带 `vision` / `ocr` / `asr` 能力标志。测试：`Providers\GlmProviderTest`。
+

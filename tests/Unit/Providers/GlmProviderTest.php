@@ -42,10 +42,10 @@ class GlmProviderTest extends TestCase
         $this->assertSame('glm', $p->name());
     }
 
-    public function test_default_model_is_glm_4_6(): void
+    public function test_default_model_is_glm_5_2(): void
     {
         $p = new GlmProvider(['api_key' => 'k']);
-        $this->assertSame('glm-4.6', $p->getModel());
+        $this->assertSame('glm-5.2', $p->getModel());
     }
 
     public function test_thinking_option_injects_body_field(): void
@@ -73,6 +73,35 @@ class GlmProviderTest extends TestCase
         $p = new GlmProvider(['api_key' => 'k']);
         $body = $this->buildBody($p, [new UserMessage('hi')], [], null, []);
         $this->assertArrayNotHasKey('thinking', $body);
+    }
+
+    public function test_reasoning_effort_option_merges_into_body(): void
+    {
+        $p = new GlmProvider(['api_key' => 'k']);
+        $body = $this->buildBody($p, [new UserMessage('hi')], [], null, ['reasoning_effort' => 'max']);
+        $this->assertSame('max', $body['reasoning_effort']);
+        $this->assertSame(['type' => 'enabled'], $body['thinking']);
+
+        $off = $this->buildBody($p, [new UserMessage('hi')], [], null, ['reasoning_effort' => 'off']);
+        $this->assertSame(['type' => 'disabled'], $off['thinking']);
+        $this->assertArrayNotHasKey('reasoning_effort', $off);
+    }
+
+    public function test_reasoning_effort_fragment_tiers(): void
+    {
+        $p = new GlmProvider(['api_key' => 'k']);
+        $this->assertSame(['thinking' => ['type' => 'disabled']], $p->reasoningEffortFragment('off'));
+        $this->assertSame(
+            ['reasoning_effort' => 'high', 'thinking' => ['type' => 'enabled']],
+            $p->reasoningEffortFragment('high'),
+        );
+        $this->assertSame(
+            ['reasoning_effort' => 'max', 'thinking' => ['type' => 'enabled']],
+            $p->reasoningEffortFragment('max'),
+        );
+        // Unknown values yield an empty fragment so a misconfigured caller
+        // never poisons the request body.
+        $this->assertSame([], $p->reasoningEffortFragment('bogus'));
     }
 
     public function test_base_path_is_api_paas_v4(): void
