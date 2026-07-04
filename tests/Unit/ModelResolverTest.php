@@ -24,8 +24,8 @@ class ModelResolverTest extends TestCase
     {
         $resolved = ModelResolver::resolve('sonnet');
         $this->assertStringContains('sonnet', $resolved);
-        // Should be the latest sonnet
-        $this->assertStringContains('20250514', $resolved);
+        // Should be the latest sonnet — Sonnet 5 is the current flagship.
+        $this->assertSame('claude-sonnet-5', $resolved);
     }
 
     public function test_resolves_haiku_alias(): void

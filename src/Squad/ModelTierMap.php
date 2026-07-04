@@ -20,7 +20,7 @@ use SuperAgent\Providers\ProviderRegistry;
  *   EASY      → DeepSeek V4-Flash      (cheap, good code edits)
  *   MODERATE  → Anthropic Sonnet       (balanced)
  *   HARD      → DeepSeek V4-Pro        (deep reasoning, lower $ than Opus)
- *   EXPERT    → Anthropic Opus         (best reasoning, willing to pay)
+ *   EXPERT    → Anthropic Fable 5      (most capable, willing to pay)
  *
  * Callers can override the whole map via constructor or per-band
  * via `with()`. The map is immutable — `with()` returns a new copy.
@@ -52,7 +52,7 @@ final class ModelTierMap
             DifficultyClass::EASY->value     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-flash'],
             DifficultyClass::MODERATE->value => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6'],
             DifficultyClass::HARD->value     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-pro'],
-            DifficultyClass::EXPERT->value   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-7'],
+            DifficultyClass::EXPERT->value   => ['provider' => 'anthropic', 'model' => 'claude-fable-5'],
         ];
     }
 

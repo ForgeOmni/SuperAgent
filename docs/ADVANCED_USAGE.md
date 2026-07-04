@@ -2710,9 +2710,29 @@ $param = $config->toApiParameter('claude-sonnet-4-20260401');
 // ['type' => 'enabled', 'budget_tokens' => 20000]
 ```
 
+### Adaptive-only models (Opus 4.6/4.7/4.8, Sonnet 4.6, Fable 5, Sonnet 5)
+
+These models take `thinking: {type: "adaptive"}` and **400 on an explicit `budget_tokens`**. `toApiParameter()` emits the bare adaptive shape for them — even when the caller asked for `enabled` with a fixed budget, it switches to adaptive rather than sending a request that fails:
+
+```php
+ThinkingConfig::adaptive()->toApiParameter('claude-fable-5');   // ['type' => 'adaptive']
+ThinkingConfig::enabled(20_000)->toApiParameter('claude-opus-4-8'); // ['type' => 'adaptive'] (budget dropped)
+```
+
+On **Fable 5** thinking is always on (it also 400s on `type: "disabled"`), so depth is steered by the effort dial, not a token budget. `AnthropicProvider` implements `SupportsReasoningEffort` → Anthropic's GA `output_config.effort` (`low`/`medium`/`high`/`xhigh`/`max`, GA on Fable 5, Opus 4.5+, Sonnet 4.6):
+
+```php
+$agent->run('long-horizon task', ['reasoning_effort' => 'xhigh']);
+// body: output_config => ['effort' => 'xhigh']
+```
+
+`AnthropicProvider` also drops `temperature`/`top_p`/`top_k` and trailing assistant prefills for Fable 5 / Opus 4.7 / 4.8 (they 400 there) — no caller change needed.
+
 ### Troubleshooting
 
-**Thinking not activating** -- Verify model supports thinking. Only Claude 4+ and Claude 3.5 Sonnet v2+ support it.
+**Thinking not activating** -- Verify model supports thinking. Only Claude 4+, Claude 3.5 Sonnet v2+, and the Claude 5 generation (Fable 5, Sonnet 5) support it.
+
+**`budget_tokens` 400 on Fable 5 / Sonnet 5 / Opus 4.7 / 4.8** -- Expected; these are adaptive-only. The SDK already emits `{type: "adaptive"}` for them — don't hand-build an `enabled` + `budget_tokens` thinking body.
 
 **Ultrathink not working** -- Requires the `ultrathink` experimental feature flag.
 
@@ -10947,4 +10967,27 @@ $provider->chat($messages, $tools, $system, ['features' => ['thinking' => ['budg
 Effort normalisation (`GlmProvider::reasoningEffortFragment()`): `off` / `disabled` / `none` / `false` → `thinking: {type: disabled}`; `low` / `minimal` / `medium` / `mid` / `high` (and empty) → `reasoning_effort: high` + `thinking: {type: enabled}`; `max` / `xhigh` / `highest` → `reasoning_effort: max` + `thinking: {type: enabled}`. Unknown values return `[]` so a misconfigured caller never poisons the request.
 
 Reasoning streams back on the shared `delta.reasoning_content` channel (handled in `ChatCompletionsProvider::parseSSEStream()`), surfaced as a `ContentBlock::thinking()` block — no GLM-specific parsing. GLM-5.2 is text-only: the multimodal `glm-5v` line is separate, so the catalog entry carries no `vision` / `ocr` / `asr` capability flags. Tests: `Providers\GlmProviderTest`.
+
+---
+
+## 92. Claude 5 generation — Fable 5 & Sonnet 5 (v1.1.5)
+
+Two new `anthropic` models land on the **Claude 5 adaptive-only** request surface:
+
+- **`claude-fable-5`** — Anthropic's most capable model. 1M context / 128K output, high-res vision. Priced **$10 in / $50 out** per M (above the Opus tier — Opus 4.8 is $5/$25). Promoted to the Squad **EXPERT** tier (`Squad\ModelTierMap`). Requires 30-day data retention (ZDR orgs 400); refusals fall back to Opus 4.8 (`stop_reason: "refusal"`).
+- **`claude-sonnet-5`** — most agentic Sonnet yet (released 2026-06-30), close to Opus 4.8 at a lower price; the new `sonnet` flagship. 1M context / 128K output, **$3 in / $15 out** per M (intro **$2/$10 through 2026-08-31**). Registered as the newest entry of the `sonnet` family in the `ModelResolver` seed, so `sonnet` / `claude-sonnet` / `sonnet-5` resolve to it.
+
+The zero-config `anthropic` default is **`claude-opus-4-8`** (bumped from the retired `claude-3-5-sonnet-20241022`) — Fable 5 is opt-in by id/alias or via the EXPERT tier, not the blanket default.
+
+**Request surface** (handled automatically by `AnthropicProvider` + `ThinkingConfig`; details in §16 → Adaptive-only models):
+
+```php
+// Thinking → {type: adaptive}; budget_tokens is never sent (would 400)
+$agent->run('hard task', ['features' => ['thinking' => true]]);
+
+// Effort dial → output_config.effort (low|medium|high|xhigh|max)
+$agent->run('long-horizon task', ['model' => 'claude-fable-5', 'reasoning_effort' => 'xhigh']);
+```
+
+`AnthropicProvider` implements `SupportsReasoningEffort` (→ `output_config.effort`) and drops `temperature`/`top_p`/`top_k` and trailing assistant prefills for both models (and Opus 4.7/4.8), since those 400 on this surface. Effort is emitted only for models that support it (Fable 5, Sonnet 5, Opus 4.5+, Sonnet 4.6); `off`/unknown yield no `output_config`. Tests: `Providers\AnthropicProviderTest`, `Thinking\ThinkingConfigTest`.
 

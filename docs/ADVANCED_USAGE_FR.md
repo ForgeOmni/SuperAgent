@@ -4416,9 +4416,29 @@ $param = $config->toApiParameter('claude-sonnet-4-20260401');
 // ['type' => 'enabled', 'budget_tokens' => 20000]
 ```
 
+### Modèles adaptatifs uniquement (Opus 4.6/4.7/4.8, Sonnet 4.6, Fable 5, Sonnet 5)
+
+Ces modèles n'acceptent que `thinking: {type: "adaptive"}` et renvoient **400** sur un `budget_tokens` explicite. `toApiParameter()` n'émet que la forme adaptative pour eux — même si l'appelant demande `enabled` avec un budget fixe, il bascule en adaptatif plutôt que d'envoyer une requête qui échoue :
+
+```php
+ThinkingConfig::adaptive()->toApiParameter('claude-fable-5');   // ['type' => 'adaptive']
+ThinkingConfig::enabled(20_000)->toApiParameter('claude-opus-4-8'); // ['type' => 'adaptive'] (budget retiré)
+```
+
+Sur **Fable 5** le thinking est toujours actif (il renvoie aussi 400 sur `type: "disabled"`), donc la profondeur se pilote via la molette effort, pas un budget de tokens. `AnthropicProvider` implémente `SupportsReasoningEffort` → le `output_config.effort` GA d'Anthropic (`low`/`medium`/`high`/`xhigh`/`max` ; dispo sur Fable 5, Opus 4.5+, Sonnet 4.6) :
+
+```php
+$agent->run('tâche de long horizon', ['reasoning_effort' => 'xhigh']);
+// body: output_config => ['effort' => 'xhigh']
+```
+
+`AnthropicProvider` retire aussi `temperature`/`top_p`/`top_k` et le prefill assistant final pour Fable 5 / Opus 4.7 / 4.8 (ils renvoient 400) — sans changement côté appelant.
+
 ### Dépannage
 
-**La réflexion ne s'active pas** -- Vérifiez que le modèle supporte la réflexion. Seuls Claude 4+ et Claude 3.5 Sonnet v2+ le supportent.
+**La réflexion ne s'active pas** -- Vérifiez que le modèle supporte la réflexion. Seuls Claude 4+, Claude 3.5 Sonnet v2+ et la génération Claude 5 (Fable 5, Sonnet 5) le supportent.
+
+**`budget_tokens` renvoie 400 sur Fable 5 / Sonnet 5 / Opus 4.7 / 4.8** -- Attendu ; ce sont des modèles adaptatifs uniquement. Le SDK émet déjà `{type: "adaptive"}` pour eux — ne construisez pas à la main un corps thinking `enabled` + `budget_tokens`.
 
 **Ultrathink ne fonctionne pas** -- Nécessite le flag de fonctionnalité expérimentale `ultrathink`.
 
@@ -12055,4 +12075,27 @@ $provider->chat($messages, $tools, $system, ['features' => ['thinking' => ['budg
 Normalisation de l'effort (`GlmProvider::reasoningEffortFragment()`) : `off` / `disabled` / `none` / `false` → `thinking: {type: disabled}` ; `low` / `minimal` / `medium` / `mid` / `high` (et vide) → `reasoning_effort: high` + `thinking: {type: enabled}` ; `max` / `xhigh` / `highest` → `reasoning_effort: max` + `thinking: {type: enabled}`. Les valeurs inconnues renvoient `[]`, de sorte qu'un appelant mal configuré n'empoisonne jamais la requête.
 
 Le raisonnement revient sur le canal partagé `delta.reasoning_content` (géré dans `ChatCompletionsProvider::parseSSEStream()`), exposé sous forme de bloc `ContentBlock::thinking()` — aucun parsing spécifique à GLM. GLM-5.2 est en texte uniquement : la série multimodale `glm-5v` est distincte, donc l'entrée de catalogue ne porte aucun flag de capacité `vision` / `ocr` / `asr`. Tests : `Providers\GlmProviderTest`.
+
+---
+
+## 92. Génération Claude 5 — Fable 5 & Sonnet 5 (v1.1.5)
+
+Deux nouveaux modèles `anthropic` arrivent sur la surface de requête **adaptative uniquement de Claude 5** :
+
+- **`claude-fable-5`** — le modèle le plus capable d'Anthropic. Contexte 1 M / sortie 128 K, vision haute résolution. Tarif **10 $ en entrée / 50 $ en sortie** par M (au-dessus de la gamme Opus — Opus 4.8 à 5 $/25 $). Promu au palier Squad **EXPERT** (`Squad\ModelTierMap`). Rétention de 30 jours requise (les orgs ZDR renvoient 400) ; les refus basculent vers Opus 4.8 (`stop_reason: "refusal"`).
+- **`claude-sonnet-5`** — le Sonnet le plus agentique (sorti le 2026-06-30), proche d'Opus 4.8 à tarif inférieur ; le nouveau fleuron `sonnet`. Contexte 1 M / sortie 128 K, **3 $ en entrée / 15 $ en sortie** par M (tarif de lancement **2 $/10 $ jusqu'au 2026-08-31**). Enregistré comme l'entrée la plus récente de la famille `sonnet` dans le seed `ModelResolver`, donc `sonnet` / `claude-sonnet` / `sonnet-5` s'y résolvent.
+
+Le défaut zéro-config d'`anthropic` est **`claude-opus-4-8`** (relevé depuis le `claude-3-5-sonnet-20241022` retiré) — Fable 5 s'active par id/alias ou via le palier EXPERT, pas comme défaut général.
+
+**Surface de requête** (gérée automatiquement par `AnthropicProvider` + `ThinkingConfig` ; détails au §16 → Modèles adaptatifs uniquement) :
+
+```php
+// Thinking → {type: adaptive} ; budget_tokens n'est jamais envoyé (400 sinon)
+$agent->run('tâche difficile', ['features' => ['thinking' => true]]);
+
+// Molette effort → output_config.effort (low|medium|high|xhigh|max)
+$agent->run('tâche de long horizon', ['model' => 'claude-fable-5', 'reasoning_effort' => 'xhigh']);
+```
+
+`AnthropicProvider` implémente `SupportsReasoningEffort` (→ `output_config.effort`) et retire `temperature`/`top_p`/`top_k` et le prefill assistant final pour ces deux modèles (et Opus 4.7/4.8), car ils renvoient 400 sur cette surface. L'effort n'est émis que pour les modèles qui le supportent (Fable 5, Sonnet 5, Opus 4.5+, Sonnet 4.6) ; `off`/inconnu ne produit aucun `output_config`. Tests : `Providers\AnthropicProviderTest`, `Thinking\ThinkingConfigTest`.
 

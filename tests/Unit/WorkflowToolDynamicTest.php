@@ -179,7 +179,7 @@ class WorkflowToolDynamicTest extends TestCase
     public function test_opus_4_8_pricing_is_registered(): void
     {
         $cost = CostCalculator::calculate('claude-opus-4-8', new Usage(1_000_000, 1_000_000));
-        // $15 / 1M input + $75 / 1M output.
-        $this->assertEqualsWithDelta(90.0, $cost, 0.0001);
+        // $5 / 1M input + $25 / 1M output = $30 (official Opus 4.8 pricing).
+        $this->assertEqualsWithDelta(30.0, $cost, 0.0001);
     }
 }

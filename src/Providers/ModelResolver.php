@@ -312,6 +312,9 @@ class ModelResolver
         static::register('claude-3-opus-20240229', 'opus', [], 20240229);
 
         // Sonnet family
+        static::register('claude-sonnet-5', 'sonnet', [
+            'claude-sonnet-5', 'sonnet-5', 'sonnet5',
+        ], 20260615);
         static::register('claude-sonnet-4-20250514', 'sonnet', [
             'claude-sonnet', 'claude-sonnet-4',
         ], 20250514);

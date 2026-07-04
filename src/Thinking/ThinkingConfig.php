@@ -128,10 +128,12 @@ class ThinkingConfig
     {
         $model = strtolower($model);
 
-        // Claude 4+ models support thinking
+        // Claude 4+ models support thinking. Fable 5 is a separate family that
+        // also thinks (always-on, adaptive).
         $thinkingModels = [
             'claude-4', 'claude-opus-4', 'claude-sonnet-4',
-            'claude-haiku-4',
+            'claude-haiku-4', 'claude-fable', 'fable-5',
+            'claude-sonnet-5', 'sonnet-5',
         ];
 
         foreach ($thinkingModels as $prefix) {
@@ -149,14 +151,26 @@ class ThinkingConfig
     }
 
     /**
-     * Check if a model supports adaptive thinking.
+     * Check if a model uses the adaptive-thinking surface.
+     *
+     * These models take `thinking: {type: "adaptive"}` and REJECT an explicit
+     * `budget_tokens` — Opus 4.7 / 4.8 and Fable 5 return a 400 if `budget_tokens`
+     * is sent, and it is deprecated on Opus 4.6 / Sonnet 4.6. On Fable 5 thinking
+     * is always on; passing `type:"disabled"` also 400s, so we simply omit the
+     * budget and let the server manage depth (steer via `output_config.effort`).
      */
     public static function modelSupportsAdaptiveThinking(string $model): bool
     {
         $model = strtolower($model);
 
-        // Only 4.6+ models support adaptive thinking
-        $adaptiveModels = ['opus-4-6', 'sonnet-4-6'];
+        // 4.6+ Opus/Sonnet and the Claude 5 generation (Fable 5, Sonnet 5) are
+        // adaptive-only.
+        $adaptiveModels = [
+            'opus-4-6', 'opus-4-7', 'opus-4-8',
+            'sonnet-4-6',
+            'claude-fable', 'fable-5',
+            'claude-sonnet-5', 'sonnet-5',
+        ];
 
         foreach ($adaptiveModels as $modelId) {
             if (str_contains($model, $modelId)) {
@@ -182,21 +196,16 @@ class ThinkingConfig
             return null;
         }
 
-        if ($this->mode === 'adaptive') {
-            if (self::modelSupportsAdaptiveThinking($model)) {
-                return [
-                    'type' => 'enabled',
-                    'budget_tokens' => $this->budgetTokens,
-                ];
-            }
-            // Non-adaptive models: fall back to enabled with budget
-            return [
-                'type' => 'enabled',
-                'budget_tokens' => $this->budgetTokens,
-            ];
+        // Adaptive-only models (Opus 4.6/4.7/4.8, Sonnet 4.6, Fable 5) take
+        // `{type: adaptive}` and 400 on an explicit `budget_tokens`. This holds
+        // even when the caller asked for `enabled` with a fixed budget — the
+        // budget is unsupported on these models, so honour the intent to think
+        // by switching to adaptive rather than emitting a request that 400s.
+        if (self::modelSupportsAdaptiveThinking($model)) {
+            return ['type' => 'adaptive'];
         }
 
-        // Enabled mode
+        // Older models: fixed-budget extended thinking.
         return [
             'type' => 'enabled',
             'budget_tokens' => $this->budgetTokens,

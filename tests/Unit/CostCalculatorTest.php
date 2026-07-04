@@ -26,6 +26,15 @@ class CostCalculatorTest extends TestCase
         $this->assertEqualsWithDelta(90.0, $cost, 0.001);
     }
 
+    public function test_fable_pricing(): void
+    {
+        $usage = new Usage(1_000_000, 1_000_000);
+        $cost = CostCalculator::calculate('claude-fable-5', $usage);
+
+        // $10/M input + $50/M output = $60 (official Fable 5 pricing, above Opus)
+        $this->assertEqualsWithDelta(60.0, $cost, 0.001);
+    }
+
     public function test_small_usage(): void
     {
         $usage = new Usage(100, 50);

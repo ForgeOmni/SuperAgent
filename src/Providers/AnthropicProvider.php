@@ -15,6 +15,7 @@ use SuperAgent\Messages\Message;
 use SuperAgent\Messages\Usage;
 use SuperAgent\StreamingHandler;
 use SuperAgent\Prompt\SystemPromptBuilder;
+use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
 use SuperAgent\Providers\Capabilities\SupportsThinking;
 use SuperAgent\Thinking\ThinkingConfig;
 use SuperAgent\Tools\Tool;
@@ -35,15 +36,84 @@ use SuperAgent\Tools\Tool;
  *   - Bedrock / Vertex Anthropic models go through their own providers
  *     (BedrockProvider) — this base_url override is for direct-HTTP gateways.
  */
-class AnthropicProvider implements LLMProvider, SupportsThinking
+class AnthropicProvider implements LLMProvider, SupportsThinking, SupportsReasoningEffort
 {
     public function thinkingRequestFragment(int $budgetTokens): array
     {
+        // Adaptive-only models (Opus 4.6/4.7/4.8, Sonnet 4.6, Fable 5) take
+        // `{type: adaptive}` and 400 on an explicit `budget_tokens`; older
+        // models take a fixed token budget.
+        if (ThinkingConfig::modelSupportsAdaptiveThinking($this->model)) {
+            return ['thinking' => ['type' => 'adaptive']];
+        }
+
         // Anthropic extended thinking: explicit budget in tokens.
         return ['thinking' => [
             'type' => 'enabled',
             'budget_tokens' => max(1, $budgetTokens),
         ]];
+    }
+
+    /**
+     * Anthropic's GA effort dial → `output_config.effort` ∈
+     * low | medium | high | xhigh | max. Supported on Fable 5, Opus 4.5+, and
+     * Sonnet 4.6; emitted only for those models so a stray `reasoning_effort`
+     * on an unsupported model (Haiku, older Sonnet) never 400s the request.
+     * "off"/unknown yield [] — there is no effort-off on Anthropic (thinking is
+     * controlled separately, and is always on for Fable 5).
+     *
+     * @return array<string, mixed>
+     */
+    public function reasoningEffortFragment(string $effort): array
+    {
+        if (! self::modelSupportsEffort($this->model)) {
+            return [];
+        }
+
+        $level = match (strtolower(trim($effort))) {
+            'low', 'minimal' => 'low',
+            'medium', 'mid' => 'medium',
+            'high' => 'high',
+            'xhigh' => 'xhigh',
+            'max', 'highest' => 'max',
+            default => null,
+        };
+
+        return $level === null ? [] : ['output_config' => ['effort' => $level]];
+    }
+
+    /**
+     * Models that accept the `output_config.effort` dial (GA, no beta header):
+     * Fable 5, Opus 4.5 / 4.6 / 4.7 / 4.8, and Sonnet 4.6.
+     */
+    protected static function modelSupportsEffort(string $model): bool
+    {
+        $model = strtolower($model);
+        foreach (['claude-fable', 'fable-5', 'claude-sonnet-5', 'sonnet-5', 'opus-4-5', 'opus-4-6', 'opus-4-7', 'opus-4-8', 'sonnet-4-6'] as $needle) {
+            if (str_contains($model, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The Claude 5 generation (Fable 5, Sonnet 5) and the Opus 4.7 / 4.8 family
+     * reject `temperature`, `top_p`, and `top_k` with a 400 (sampling params were
+     * removed). Prefill and thinking `budget_tokens` are handled via
+     * ThinkingConfig::modelSupportsAdaptiveThinking().
+     */
+    protected static function modelRejectsSamplingParams(string $model): bool
+    {
+        $model = strtolower($model);
+        foreach (['claude-fable', 'fable-5', 'claude-sonnet-5', 'sonnet-5', 'opus-4-7', 'opus-4-8'] as $needle) {
+            if (str_contains($model, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected Client $client;
@@ -89,7 +159,7 @@ class AnthropicProvider implements LLMProvider, SupportsThinking
         // 'https://host/prefix/' + 'v1/messages' => 'https://host/prefix/v1/messages'.
         $baseUrl = rtrim($config['base_url'] ?? 'https://api.anthropic.com', '/') . '/';
         $this->apiVersion = $config['api_version'] ?? '2023-06-01';
-        $this->model = $config['model'] ?? 'claude-sonnet-4-20250514';
+        $this->model = $config['model'] ?? 'claude-opus-4-8';
         $this->maxTokens = $config['max_tokens'] ?? 8192;
         $this->maxRetries = $config['max_retries'] ?? 3;
 
@@ -314,15 +384,27 @@ class AnthropicProvider implements LLMProvider, SupportsThinking
             $body['tools'] = $this->formatTools($tools);
         }
 
-        // Pass through extra options (temperature, top_p, etc.)
-        foreach (['temperature', 'top_p', 'top_k', 'stop_sequences', 'metadata'] as $key) {
+        $model = $body['model'];
+
+        // Pass through extra options (temperature, top_p, etc.). Fable 5 /
+        // Opus 4.7 / 4.8 reject the sampling params with a 400, so drop them
+        // for those models (steer via prompting / output_config.effort instead).
+        $passthrough = ['stop_sequences', 'metadata'];
+        if (! self::modelRejectsSamplingParams($model)) {
+            array_unshift($passthrough, 'temperature', 'top_p', 'top_k');
+        }
+        foreach ($passthrough as $key) {
             if (isset($options[$key])) {
                 $body[$key] = $options[$key];
             }
         }
 
-        // Response prefill: inject partial assistant message to guide output
-        if (isset($options['assistant_prefill']) && is_string($options['assistant_prefill'])) {
+        // Response prefill: inject partial assistant message to guide output.
+        // The 4.6+ family and Fable 5 reject a trailing assistant prefill (400),
+        // so skip it on those models.
+        if (isset($options['assistant_prefill'])
+            && is_string($options['assistant_prefill'])
+            && ! ThinkingConfig::modelSupportsAdaptiveThinking($model)) {
             $body['messages'][] = [
                 'role' => 'assistant',
                 'content' => $options['assistant_prefill'],
@@ -339,14 +421,26 @@ class AnthropicProvider implements LLMProvider, SupportsThinking
                 unset($body['temperature']);
             }
         } elseif (isset($options['thinking_budget_tokens']) && (int) $options['thinking_budget_tokens'] > 0) {
-            // Shorthand: pass thinking_budget_tokens directly
-            $model = $body['model'];
-            if (ThinkingConfig::modelSupportsThinking($model)) {
+            // Shorthand: pass thinking_budget_tokens directly.
+            if (ThinkingConfig::modelSupportsAdaptiveThinking($model)) {
+                // Adaptive-only models can't take an explicit budget (400) —
+                // enable thinking adaptively and let the server manage depth.
+                $body['thinking'] = ['type' => 'adaptive'];
+                unset($body['temperature']);
+            } elseif (ThinkingConfig::modelSupportsThinking($model)) {
                 $body['thinking'] = [
                     'type' => 'enabled',
                     'budget_tokens' => (int) $options['thinking_budget_tokens'],
                 ];
                 unset($body['temperature']);
+            }
+        }
+
+        // Reasoning-effort dial → Anthropic `output_config.effort` (Fable 5,
+        // Opus 4.5+, Sonnet 4.6). Merged after thinking so both can coexist.
+        if (isset($options['reasoning_effort']) && is_string($options['reasoning_effort'])) {
+            foreach ($this->reasoningEffortFragment($options['reasoning_effort']) as $k => $v) {
+                $body[$k] = $v;
             }
         }
 

@@ -32,6 +32,7 @@ echo $result->text();
 - [Providers et authentification](#providers-et-authentification)
 - [API OpenAI Responses](#api-openai-responses)
 - [Bascule inter-providers](#bascule-inter-providers)
+- [Fable 5](#fable-5)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -101,7 +102,7 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 
 | Clé de registre | Provider | Notes |
 |---|---|---|
-| `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké |
+| `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké ; fleuron `claude-fable-5` + `claude-sonnet-5` — thinking adaptatif + molette effort *(Fable 5 / Sonnet 5, v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | [Section dédiée ci-dessous](#api-openai-responses) |
 | `openrouter` | OpenRouter | Clé API |
@@ -291,6 +292,40 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 ```
 
 *Depuis v0.9.5*
+
+---
+
+## Fable 5
+
+Fable 5 (`claude-fable-5`) est le modèle le plus capable d'Anthropic — pour le raisonnement le plus exigeant et le travail agentique de long horizon. Il passe par le provider standard `anthropic` (clé API **ou** OAuth Claude Code), avec un **contexte de 1 M de tokens** (128 K de sortie max) et la **vision haute résolution**. Tarif pay-as-you-go : **10 $ en entrée / 50 $ en sortie** par million de tokens — au-dessus de la gamme Opus (Opus 4.8 est à 5 $/25 $). C'est le modèle du palier Squad **EXPERT** ; le défaut zéro-config d'`anthropic` reste **Claude Opus 4.8**. Les refus basculent vers Opus 4.8.
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('ANTHROPIC_API_KEY'),
+    'model'    => 'claude-fable-5',             // ou l'alias `fable`
+]);
+```
+
+Sa surface de requête diffère de la gamme Opus — le SDK s'en charge automatiquement :
+
+- **Le thinking est toujours actif et adaptatif.** Le provider émet `thinking: {type: "adaptive"}` et n'envoie jamais de `budget_tokens` (Fable 5 / Opus 4.7 / 4.8 renvoient **400** dessus). La profondeur est pilotée par la molette effort, pas par un budget de tokens.
+- **Ni paramètres d'échantillonnage, ni prefill.** `temperature` / `top_p` / `top_k` et un prefill assistant en fin de conversation sont retirés pour Fable 5 (ils renvoient 400) ; pilotez via le prompt + effort.
+- **Molette effort.** `AnthropicProvider` implémente `SupportsReasoningEffort` → le `output_config.effort` GA d'Anthropic (`low` … `high` … `xhigh` … `max`), aussi dispo sur Opus 4.5+/Sonnet 4.6.
+
+```php
+// Molette effort → output_config.effort
+$agent->run('tâche agentique de long horizon', ['reasoning_effort' => 'xhigh']);
+
+// Le thinking est actif par défaut ; pilotable aussi via l'API features
+$agent->run('prompt de raisonnement difficile', ['features' => ['thinking' => true]]);
+```
+
+> ⚠️ **Rétention des données de 30 jours requise.** Fable 5 n'est pas disponible en rétention zéro — une organisation configurée sous 30 jours reçoit un `400` sur chaque requête. Les classifieurs de sécurité peuvent aussi renvoyer `stop_reason: "refusal"`.
+
+**Sonnet 5** (`claude-sonnet-5`, sorti le 2026-06-30) est livré en parallèle comme nouveau fleuron `sonnet` — le Sonnet le plus agentique d'Anthropic, proche d'Opus 4.8 à un tarif inférieur. La même surface adaptative de la génération Claude 5 (thinking adaptatif uniquement, molette effort, ni paramètres d'échantillonnage ni prefill), contexte de 1 M (128 K de sortie max), **3 $ en entrée / 15 $ en sortie** (tarif de lancement **2 $/10 $ jusqu'au 2026-08-31**). Les alias `sonnet` / `claude-sonnet` / `sonnet-5` s'y résolvent désormais.
+
+*Depuis v1.1.5*
 
 ---
 

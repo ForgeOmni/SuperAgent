@@ -11,14 +11,18 @@ class CostCalculator
      * Pricing per million tokens [input, output] in USD.
      */
     protected static array $pricing = [
-        // Anthropic Claude 4.8 (latest flagship — same Opus tier pricing as 4.x)
-        'claude-opus-4-8'            => ['input' => 15.0, 'output' => 75.0],
-        // Anthropic Claude 4.6 / 4.7 models
-        'claude-opus-4-7'            => ['input' => 15.0, 'output' => 75.0],
+        // Anthropic Fable 5 (most capable model — above the Opus tier)
+        'claude-fable-5'             => ['input' => 10.0, 'output' => 50.0],
+        // Anthropic Claude 4.8 (flagship Opus — $5/$25)
+        'claude-opus-4-8'            => ['input' => 5.0, 'output' => 25.0],
+        // Anthropic Sonnet 5 (next-gen balanced; intro $2/$10 through 2026-08-31)
+        'claude-sonnet-5'            => ['input' => 3.0, 'output' => 15.0],
+        // Anthropic Claude 4.6 / 4.7 Opus (all $5/$25)
+        'claude-opus-4-7'            => ['input' => 5.0, 'output' => 25.0],
         'claude-sonnet-4-7'          => ['input' => 3.0, 'output' => 15.0],
         'claude-sonnet-4-6-20250627' => ['input' => 3.0, 'output' => 15.0],
-        'claude-opus-4-6-20250514'   => ['input' => 15.0, 'output' => 75.0],
-        'claude-haiku-4-5-20251001'  => ['input' => 0.80, 'output' => 4.0],
+        'claude-opus-4-6-20250514'   => ['input' => 5.0, 'output' => 25.0],
+        'claude-haiku-4-5-20251001'  => ['input' => 1.0, 'output' => 5.0],
         // Anthropic Claude 4.x models
         'claude-sonnet-4-20250514' => ['input' => 3.0, 'output' => 15.0],
         'claude-opus-4-20250514'   => ['input' => 15.0, 'output' => 75.0],
@@ -52,7 +56,9 @@ class CostCalculator
         'gpt-3.5-turbo-16k' => ['input' => 3.0, 'output' => 4.0],
         
         // OpenRouter models (varied pricing)
-        'anthropic/claude-opus-4-8' => ['input' => 15.0, 'output' => 75.0],
+        'anthropic/claude-fable-5' => ['input' => 10.0, 'output' => 50.0],
+        'anthropic/claude-sonnet-5' => ['input' => 3.0, 'output' => 15.0],
+        'anthropic/claude-opus-4-8' => ['input' => 5.0, 'output' => 25.0],
         'anthropic/claude-3-5-sonnet' => ['input' => 3.0, 'output' => 15.0],
         'anthropic/claude-3-opus' => ['input' => 15.0, 'output' => 75.0],
         'anthropic/claude-3-sonnet' => ['input' => 3.0, 'output' => 15.0],
@@ -83,10 +89,12 @@ class CostCalculator
         'mistralai/mixtral-8x7b-instruct' => ['input' => 0.60, 'output' => 0.60],
         
         // AWS Bedrock models
-        'anthropic.claude-opus-4-8-v1:0'            => ['input' => 15.0, 'output' => 75.0],
+        'anthropic.claude-fable-5-v1:0'             => ['input' => 10.0, 'output' => 50.0],
+        'anthropic.claude-sonnet-5-v1:0'            => ['input' => 3.0, 'output' => 15.0],
+        'anthropic.claude-opus-4-8-v1:0'            => ['input' => 5.0,  'output' => 25.0],
         'anthropic.claude-sonnet-4-6-20250627-v1:0' => ['input' => 3.0, 'output' => 15.0],
-        'anthropic.claude-opus-4-6-20250514-v1:0'   => ['input' => 15.0, 'output' => 75.0],
-        'anthropic.claude-haiku-4-5-20251001-v1:0'   => ['input' => 0.80, 'output' => 4.0],
+        'anthropic.claude-opus-4-6-20250514-v1:0'   => ['input' => 5.0,  'output' => 25.0],
+        'anthropic.claude-haiku-4-5-20251001-v1:0'   => ['input' => 1.0,  'output' => 5.0],
         'anthropic.claude-sonnet-4-20250514-v1:0' => ['input' => 3.0, 'output' => 15.0],
         'anthropic.claude-opus-4-20250514-v1:0'   => ['input' => 15.0, 'output' => 75.0],
         'anthropic.claude-3-5-sonnet-20241022-v2:0' => ['input' => 3.0, 'output' => 15.0],

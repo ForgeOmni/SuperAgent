@@ -32,6 +32,7 @@ echo $result->text();
 - [Provider 与认证](#provider-与认证)
 - [OpenAI Responses API](#openai-responses-api)
 - [跨 Provider 切换](#跨-provider-切换)
+- [Fable 5](#fable-5)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -101,7 +102,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 
 | 注册表 key | Provider | 说明 |
 |---|---|---|
-| `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth |
+| `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth；旗舰 `claude-fable-5` + `claude-sonnet-5` —— 自适应思考 + effort 档位 *(Fable 5 / Sonnet 5，v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT` |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | [下方专门小节](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
@@ -290,6 +291,40 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 ```
 
 *v0.9.5 起*
+
+---
+
+## Fable 5
+
+Fable 5（`claude-fable-5`）是 Anthropic 最强模型 —— 面向最艰深的推理与长时程 agentic 任务。走标准 `anthropic` provider（API key **或** Claude Code OAuth），**1M token context**（最大输出 128K），支持**高分辨率视觉**。按量计费 **$10 输入 / $50 输出**（每百万 token，高于 Opus 档 —— Opus 4.8 为 $5/$25）。它是 Squad **EXPERT** 档模型；零配置 `anthropic` 默认仍是 **Claude Opus 4.8**。触发拒绝时回退到 Opus 4.8。
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('ANTHROPIC_API_KEY'),
+    'model'    => 'claude-fable-5',             // 或 `fable` 别名
+]);
+```
+
+它的请求形态与 Opus 档不同，SDK 已自动处理：
+
+- **思考始终开启且自适应**：provider 发送 `thinking: {type: "adaptive"}`，绝不发送 `budget_tokens`（Fable 5 / Opus 4.7 / 4.8 收到会 **400**）。思考深度由 effort 档位控制，而非 token 预算。
+- **不发采样参数、不发 prefill**：`temperature` / `top_p` / `top_k` 与末尾的 assistant prefill 在 Fable 5 上会被丢弃（发了会 400）；改用提示词 + effort 引导。
+- **effort 档位**：`AnthropicProvider` 实现 `SupportsReasoningEffort` → Anthropic GA 的 `output_config.effort`（`low` … `high` … `xhigh` … `max`），Opus 4.5+/Sonnet 4.6 也可用。
+
+```php
+// effort 档位 → output_config.effort
+$agent->run('长时程 agentic 任务', ['reasoning_effort' => 'xhigh']);
+
+// 思考默认开启；也可通过 features API 显式驱动
+$agent->run('高难推理', ['features' => ['thinking' => true]]);
+```
+
+> ⚠️ **需要 30 天数据保留**：Fable 5 不支持零数据保留（ZDR）—— 组织若配置低于 30 天保留，每个请求都会 `400`。安全分类器还可能返回 `stop_reason: "refusal"`。
+
+**Sonnet 5**（`claude-sonnet-5`，2026-06-30 发布）作为新的 `sonnet` 旗舰一同发布 —— Anthropic 最具 agentic 能力的 Sonnet，性能接近 Opus 4.8 但价格更低。同为 Claude 5 代的自适应形态（仅自适应思考、effort 档位、不发采样参数/prefill），1M context（最大输出 128K），**$3 输入 / $15 输出**（限时价 **$2/$10 至 2026-08-31**）。`sonnet` / `claude-sonnet` / `sonnet-5` 别名现解析到它。
+
+*v1.1.5 起*
 
 ---
 

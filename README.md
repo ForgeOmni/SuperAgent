@@ -32,6 +32,7 @@ echo $result->text();
 - [Providers & Authentication](#providers--authentication)
 - [OpenAI Responses API](#openai-responses-api)
 - [Cross-provider handoff](#cross-provider-handoff)
+- [Fable 5](#fable-5)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -101,7 +102,7 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 
 | Registry key | Provider | Notes |
 |---|---|---|
-| `anthropic` | Anthropic | API key or stored Claude Code OAuth |
+| `anthropic` | Anthropic | API key or stored Claude Code OAuth; `claude-fable-5` flagship + `claude-sonnet-5` — adaptive thinking + effort dial *(Fable 5 / Sonnet 5, v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | [Dedicated section below](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
@@ -290,6 +291,40 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 ```
 
 *Since v0.9.5*
+
+---
+
+## Fable 5
+
+Fable 5 (`claude-fable-5`) is Anthropic's most capable model — for the most demanding reasoning and long-horizon agentic work. It runs on the standard `anthropic` provider (API key **or** Claude Code OAuth), with a **1M-token context** (128K max output) and **high-res vision**. PAYG pricing is **$10 in / $50 out** per million tokens — above the Opus tier (Opus 4.8 is $5/$25). It is the Squad **EXPERT**-tier model; the zero-config `anthropic` default remains **Claude Opus 4.8**. Refusals fall back to Opus 4.8.
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('ANTHROPIC_API_KEY'),
+    'model'    => 'claude-fable-5',             // or the `fable` alias
+]);
+```
+
+Its request surface differs from the Opus tier — the SDK handles this automatically:
+
+- **Thinking is always on and adaptive.** The provider emits `thinking: {type: "adaptive"}`; an explicit `budget_tokens` is never sent (Fable 5 / Opus 4.7 / 4.8 **400** on it). Depth is steered by the effort dial, not a token budget.
+- **No sampling params, no prefill.** `temperature` / `top_p` / `top_k` and a trailing assistant prefill are dropped for Fable 5 (they 400 there); steer via prompting + effort instead.
+- **Effort dial.** `AnthropicProvider` implements `SupportsReasoningEffort` → Anthropic's GA `output_config.effort` (`low` … `high` … `xhigh` … `max`), also available on Opus 4.5+/Sonnet 4.6.
+
+```php
+// Effort dial → output_config.effort
+$agent->run('long-horizon agentic task', ['reasoning_effort' => 'xhigh']);
+
+// Thinking is on by default; drive it explicitly via the features API too
+$agent->run('hard reasoning prompt', ['features' => ['thinking' => true]]);
+```
+
+> ⚠️ **30-day data retention required.** Fable 5 is not available under zero data retention — an org configured below 30-day retention gets a `400` on every request. Safety classifiers may also return `stop_reason: "refusal"`.
+
+**Sonnet 5** (`claude-sonnet-5`, released 2026-06-30) ships alongside as the new `sonnet` flagship — Anthropic's most agentic Sonnet, close to Opus 4.8 at a lower price. Same Claude-5-generation adaptive surface (adaptive-only thinking, effort dial, no sampling params / prefill), 1M context (128K max output), **$3 in / $15 out** (intro **$2/$10 through 2026-08-31**). The `sonnet` / `claude-sonnet` / `sonnet-5` aliases now resolve to it.
+
+*Since v1.1.5*
 
 ---
 

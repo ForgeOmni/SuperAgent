@@ -32,8 +32,9 @@ class ModelCatalogTest extends TestCase
     {
         $p = ModelCatalog::pricing('claude-opus-4-7');
         $this->assertNotNull($p);
-        $this->assertSame(15.0, $p['input']);
-        $this->assertSame(75.0, $p['output']);
+        // Official Opus 4.7 pricing is $5/$25 per M.
+        $this->assertSame(5.0, $p['input']);
+        $this->assertSame(25.0, $p['output']);
     }
 
     public function test_pricing_lookup_for_gemini_25_flash(): void
@@ -120,7 +121,7 @@ class ModelCatalogTest extends TestCase
         // Opus 4.7 was added via resources/models.json — CostCalculator should find it
         $usage = new \SuperAgent\Messages\Usage(1_000_000, 1_000_000);
         $cost = \SuperAgent\CostCalculator::calculate('claude-opus-4-7', $usage);
-        // input 15 + output 75 = 90 USD for 1M in/out
-        $this->assertEqualsWithDelta(90.0, $cost, 0.01);
+        // input 5 + output 25 = 30 USD for 1M in/out (official Opus 4.7 pricing)
+        $this->assertEqualsWithDelta(30.0, $cost, 0.01);
     }
 }

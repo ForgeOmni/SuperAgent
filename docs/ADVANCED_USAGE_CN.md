@@ -3828,9 +3828,29 @@ $param = $config->toApiParameter('claude-sonnet-4-20260401');
 // ['type' => 'enabled', 'budget_tokens' => 20000]
 ```
 
+### 仅自适应模型（Opus 4.6/4.7/4.8、Sonnet 4.6、Fable 5、Sonnet 5）
+
+这些模型只接受 `thinking: {type: "adaptive"}`，收到显式 `budget_tokens` 会 **400**。`toApiParameter()` 对它们只发自适应形态 —— 即使调用方指定了 `enabled` + 固定预算，也会切换为 adaptive，而不是发出一个会失败的请求：
+
+```php
+ThinkingConfig::adaptive()->toApiParameter('claude-fable-5');   // ['type' => 'adaptive']
+ThinkingConfig::enabled(20_000)->toApiParameter('claude-opus-4-8'); // ['type' => 'adaptive']（丢弃预算）
+```
+
+**Fable 5** 思考始终开启（`type: "disabled"` 也会 400），因此深度靠 effort 档位控制，而非 token 预算。`AnthropicProvider` 实现 `SupportsReasoningEffort` → Anthropic GA 的 `output_config.effort`（`low`/`medium`/`high`/`xhigh`/`max`；Fable 5、Opus 4.5+、Sonnet 4.6 可用）：
+
+```php
+$agent->run('长时程任务', ['reasoning_effort' => 'xhigh']);
+// body: output_config => ['effort' => 'xhigh']
+```
+
+`AnthropicProvider` 还会为 Fable 5 / Opus 4.7 / 4.8 丢弃 `temperature`/`top_p`/`top_k` 与末尾 assistant prefill（它们会 400）—— 无需调用方改动。
+
 ### 故障排除
 
-**思维未激活** -- 确认模型支持思维。仅 Claude 4+ 和 Claude 3.5 Sonnet v2+ 支持。
+**思维未激活** -- 确认模型支持思维。仅 Claude 4+、Claude 3.5 Sonnet v2+ 和 Claude 5 代（Fable 5、Sonnet 5）支持。
+
+**Fable 5 / Sonnet 5 / Opus 4.7 / 4.8 上 `budget_tokens` 报 400** -- 属预期；它们是仅自适应模型。SDK 已对它们下发 `{type: "adaptive"}` —— 不要手工拼 `enabled` + `budget_tokens` 的 thinking 请求体。
 
 **Ultrathink 不工作** -- 需要 `ultrathink` 实验功能标志。
 
@@ -11502,4 +11522,27 @@ $provider->chat($messages, $tools, $system, ['features' => ['thinking' => ['budg
 档位归一化（`GlmProvider::reasoningEffortFragment()`）：`off` / `disabled` / `none` / `false` → `thinking: {type: disabled}`；`low` / `minimal` / `medium` / `mid` / `high`（以及空值）→ `reasoning_effort: high` + `thinking: {type: enabled}`；`max` / `xhigh` / `highest` → `reasoning_effort: max` + `thinking: {type: enabled}`。未知值返回 `[]`，因此配置错误的调用方绝不会污染请求。
 
 推理链经由共享的 `delta.reasoning_content` 通道回传（在 `ChatCompletionsProvider::parseSSEStream()` 中处理），以 `ContentBlock::thinking()` block 的形式呈现 —— 没有 GLM 专属解析。GLM-5.2 为纯文本：多模态的 `glm-5v` 系列是独立的，因此该 catalog 条目不带 `vision` / `ocr` / `asr` 能力标志。测试：`Providers\GlmProviderTest`。
+
+---
+
+## 92. Claude 5 代 —— Fable 5 与 Sonnet 5 (v1.1.5)
+
+两个新的 `anthropic` 模型落在 **Claude 5 仅自适应**请求形态上：
+
+- **`claude-fable-5`** —— Anthropic 最强模型。1M context / 128K 输出，高分辨率视觉。定价 **$10 输入 / $50 输出**（每 M，高于 Opus 档 —— Opus 4.8 为 $5/$25）。提升为 Squad **EXPERT** 档（`Squad\ModelTierMap`）。需 30 天数据保留（ZDR 组织 400）；触发拒绝时回退到 Opus 4.8（`stop_reason: "refusal"`）。
+- **`claude-sonnet-5`** —— 最具 agentic 能力的 Sonnet（2026-06-30 发布），性能接近 Opus 4.8 但价格更低；新的 `sonnet` 旗舰。1M context / 128K 输出，**$3 输入 / $15 输出**（每 M，限时 **$2/$10 至 2026-08-31**）。在 `ModelResolver` seed 中注册为 `sonnet` family 最新条目，因此 `sonnet` / `claude-sonnet` / `sonnet-5` 都解析到它。
+
+零配置 `anthropic` 默认是 **`claude-opus-4-8`**（由已退役的 `claude-3-5-sonnet-20241022` 升级而来）—— Fable 5 通过 id/别名或 EXPERT 档按需选用，而非一刀切默认。
+
+**请求形态**（由 `AnthropicProvider` + `ThinkingConfig` 自动处理；详见 §16 → 仅自适应模型）：
+
+```php
+// 思考 → {type: adaptive}；绝不发 budget_tokens（否则 400）
+$agent->run('高难任务', ['features' => ['thinking' => true]]);
+
+// effort 档位 → output_config.effort（low|medium|high|xhigh|max）
+$agent->run('长时程任务', ['model' => 'claude-fable-5', 'reasoning_effort' => 'xhigh']);
+```
+
+`AnthropicProvider` 实现 `SupportsReasoningEffort`（→ `output_config.effort`），并为这两个模型（以及 Opus 4.7/4.8）丢弃 `temperature`/`top_p`/`top_k` 与末尾 assistant prefill（在此形态上会 400）。effort 只对支持的模型下发（Fable 5、Sonnet 5、Opus 4.5+、Sonnet 4.6）；`off`/未知值不产生 `output_config`。测试：`Providers\AnthropicProviderTest`、`Thinking\ThinkingConfigTest`。
 
