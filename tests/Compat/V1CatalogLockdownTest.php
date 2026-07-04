@@ -128,7 +128,8 @@ class V1CatalogLockdownTest extends TestCase
 
         $opus = ModelCatalog::model('claude-opus-4-7');
         $this->assertNotNull($opus);
-        $this->assertSame(15.0, $opus['input']);
-        $this->assertSame(75.0, $opus['output']);
+        // Official Opus 4.7 pricing is $5/$25 per M (was mis-stated as $15/$75).
+        $this->assertSame(5.0, $opus['input']);
+        $this->assertSame(25.0, $opus['output']);
     }
 }
