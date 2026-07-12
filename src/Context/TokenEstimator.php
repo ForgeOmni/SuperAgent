@@ -30,13 +30,20 @@ class TokenEstimator
         'claude-fable' => 1_000_000,
         
         // OpenAI models
+        'gpt-5.6' => 1_050_000,
+        'gpt-5' => 400_000,
         'gpt-4' => 8_192,
         'gpt-4-32k' => 32_768,
         'gpt-4-turbo-preview' => 128_000,
         'gpt-4-turbo' => 128_000,
         'gpt-4o' => 128_000,
         'gpt-3.5-turbo' => 16_385,
-        
+
+        // xAI Grok
+        'grok-4.5' => 500_000,
+        'grok-4.3' => 1_000_000,
+        'grok-4-fast' => 2_000_000,
+
         // Default fallback
         'default' => 200_000,
     ];

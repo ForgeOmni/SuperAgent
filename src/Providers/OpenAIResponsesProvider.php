@@ -29,9 +29,15 @@ use SuperAgent\StreamingHandler;
  *   - `previous_response_id` — multi-turn that skips re-sending prior
  *     context; OpenAI holds the state server-side. Large cost savings
  *     on long sessions.
- *   - Native reasoning controls — `reasoning.effort = minimal|low|medium|
- *     high|xhigh` + `reasoning.summary` — no more hacking Chat
- *     Completions with model-id tricks for o1/o3/o4-mini.
+ *   - Native reasoning controls — `reasoning.effort` (`minimal|low|medium|
+ *     high|xhigh` pre-5.6; `none|low|medium|high|xhigh|max` on GPT-5.6,
+ *     which retired `minimal`) + `reasoning.summary` — no more hacking
+ *     Chat Completions with model-id tricks for o1/o3/o4-mini. GPT-5.6
+ *     adds `reasoning.mode = standard|pro` (Sol Pro: same weights, more
+ *     parallel compute) and `reasoning.context = auto|all_turns|
+ *     current_turn` (persisted-reasoning reuse across turns); both are
+ *     forwarded verbatim and normalization keeps the effort value legal
+ *     for whichever generation the request targets.
  *   - `prompt_cache_key` — explicit server-side prompt cache pinning
  *     (same concept as Kimi's, now surfaced on the OpenAI wire).
  *   - `text.verbosity = low|medium|high` — response-length tuning.
@@ -75,7 +81,7 @@ use SuperAgent\StreamingHandler;
  *   - WebSocket transport (see the opt-in flag on OpenAIProvider;
  *     shipping as experimental)
  */
-class OpenAIResponsesProvider extends OpenAIProvider
+class OpenAIResponsesProvider extends OpenAIProvider implements \SuperAgent\Providers\Capabilities\SupportsReasoningEffort
 {
     /** Last known response_id — seeds `previous_response_id` on the next call. */
     protected ?string $lastResponseId = null;
@@ -87,11 +93,12 @@ class OpenAIResponsesProvider extends OpenAIProvider
 
     protected function defaultModel(): string
     {
-        // gpt-5 is the current flagship on the Responses API path.
-        // gpt-4o-family still works here but its native home is Chat
-        // Completions; we default to the endpoint-native family so
-        // callers who pick this provider get the intended shape.
-        return 'gpt-5';
+        // gpt-5.6-sol is the current flagship on the Responses API path
+        // (`gpt-5.6` is OpenAI's alias for it). gpt-4o-family still works
+        // here but its native home is Chat Completions; we default to the
+        // endpoint-native family so callers who pick this provider get
+        // the intended shape.
+        return 'gpt-5.6-sol';
     }
 
     protected function chatCompletionsPath(): string
@@ -329,6 +336,13 @@ class OpenAIResponsesProvider extends OpenAIProvider
             $body['prompt_cache_key'] = $cacheKey;
         }
 
+        // GPT-5.6 explicit prompt caching — e.g. {mode: "explicit"}. On
+        // this surface cache writes bill at 1.25x uncached input while
+        // reads keep the 90% discount; earlier generations ignore it.
+        if (isset($options['prompt_cache_options']) && is_array($options['prompt_cache_options'])) {
+            $body['prompt_cache_options'] = $options['prompt_cache_options'];
+        }
+
         if (isset($options['service_tier']) && is_string($options['service_tier'])) {
             $body['service_tier'] = $options['service_tier'];
         }
@@ -433,27 +447,53 @@ class OpenAIResponsesProvider extends OpenAIProvider
      */
     protected function resolveReasoning(array $options): ?array
     {
+        $reasoning = null;
+
         if (isset($options['reasoning']) && is_array($options['reasoning'])) {
-            return $options['reasoning'];
+            $reasoning = $options['reasoning'];
+        } elseif (isset($options['reasoning_effort']) && is_string($options['reasoning_effort'])) {
+            // The cross-provider effort dial (same option every other
+            // SupportsReasoningEffort provider takes).
+            $reasoning = ['effort' => $options['reasoning_effort']];
+        } else {
+            $thinking = $options['features']['thinking'] ?? null;
+            if (is_array($thinking)) {
+                $budget = (int) ($thinking['budget_tokens'] ?? 0);
+                if ($budget > 0) {
+                    $reasoning = [
+                        'effort'  => $this->budgetToEffort($budget),
+                        'summary' => $thinking['summary'] ?? 'auto',
+                    ];
+                } elseif (isset($thinking['effort']) && is_string($thinking['effort'])) {
+                    $reasoning = [
+                        'effort'  => $thinking['effort'],
+                        'summary' => $thinking['summary'] ?? 'auto',
+                    ];
+                }
+            }
         }
 
-        $thinking = $options['features']['thinking'] ?? null;
-        if (is_array($thinking)) {
-            $budget = (int) ($thinking['budget_tokens'] ?? 0);
-            if ($budget > 0) {
-                return [
-                    'effort'  => $this->budgetToEffort($budget),
-                    'summary' => $thinking['summary'] ?? 'auto',
-                ];
-            }
-            if (isset($thinking['effort']) && is_string($thinking['effort'])) {
-                return [
-                    'effort'  => $thinking['effort'],
-                    'summary' => $thinking['summary'] ?? 'auto',
-                ];
-            }
+        // First-class knobs for the GPT-5.6 reasoning surface. Keys set
+        // explicitly inside options['reasoning'] win over the flat spelling.
+        if (! isset($reasoning['mode'])
+            && in_array($options['reasoning_mode'] ?? null, ['standard', 'pro'], true)) {
+            $reasoning ??= [];
+            $reasoning['mode'] = $options['reasoning_mode'];
         }
-        return null;
+        if (! isset($reasoning['context'])
+            && in_array($options['reasoning_context'] ?? null, ['auto', 'all_turns', 'current_turn'], true)) {
+            $reasoning ??= [];
+            $reasoning['context'] = $options['reasoning_context'];
+        }
+
+        if ($reasoning !== null && isset($reasoning['effort']) && is_string($reasoning['effort'])) {
+            $reasoning['effort'] = $this->normalizeEffortForModel(
+                $reasoning['effort'],
+                (string) ($options['model'] ?? $this->model),
+            );
+        }
+
+        return $reasoning;
     }
 
     protected function budgetToEffort(int $budget): string
@@ -462,6 +502,58 @@ class OpenAIResponsesProvider extends OpenAIProvider
         if ($budget < 2000) return 'low';
         if ($budget <= 8000) return 'medium';
         return 'high';
+    }
+
+    /**
+     * Keep the effort value legal for the generation being targeted.
+     * GPT-5.6 retired `minimal` and added `none` + `max`; the pre-5.6 dial
+     * runs minimal…xhigh with no `none`. Unrecognised values pass through
+     * untouched so server-side additions keep working without a release.
+     */
+    protected function normalizeEffortForModel(string $effort, string $model): string
+    {
+        $tier = strtolower(trim($effort));
+
+        if ($this->isGpt56($model)) {
+            return match ($tier) {
+                'off', 'disabled', 'false' => 'none',
+                'minimal' => 'low',
+                'mid' => 'medium',
+                'highest' => 'max',
+                default => $tier,
+            };
+        }
+
+        return match ($tier) {
+            'off', 'disabled', 'false', 'none' => 'minimal',
+            'mid' => 'medium',
+            'max', 'highest' => 'xhigh',
+            default => $tier,
+        };
+    }
+
+    protected function isGpt56(string $model): bool
+    {
+        return str_starts_with(strtolower($model), 'gpt-5.6');
+    }
+
+    /**
+     * Uniform effort dial ({@see \SuperAgent\Providers\Capabilities\SupportsReasoningEffort}).
+     * Emits the Responses-API `reasoning.effort` fragment, normalized for
+     * the configured model's generation. Unknown tiers yield [] per the
+     * interface contract.
+     */
+    public function reasoningEffortFragment(string $effort): array
+    {
+        $tier = strtolower(trim($effort));
+        $known = [
+            'off', 'disabled', 'false', 'none', 'minimal',
+            'low', 'mid', 'medium', 'high', 'xhigh', 'max', 'highest',
+        ];
+        if (! in_array($tier, $known, true)) {
+            return [];
+        }
+        return ['reasoning' => ['effort' => $this->normalizeEffortForModel($tier, $this->model)]];
     }
 
     /**

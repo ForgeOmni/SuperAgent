@@ -11546,3 +11546,65 @@ $agent->run('长时程任务', ['model' => 'claude-fable-5', 'reasoning_effort' 
 
 `AnthropicProvider` 实现 `SupportsReasoningEffort`（→ `output_config.effort`），并为这两个模型（以及 Opus 4.7/4.8）丢弃 `temperature`/`top_p`/`top_k` 与末尾 assistant prefill（在此形态上会 400）。effort 只对支持的模型下发（Fable 5、Sonnet 5、Opus 4.5+、Sonnet 4.6）；`off`/未知值不产生 `output_config`。测试：`Providers\AnthropicProviderTest`、`Thinking\ThinkingConfigTest`。
 
+---
+
+## 93. GPT-5.6 系列 —— Sol / Terra / Luna (v1.1.6)
+
+GPT-5.6（2026-07-09 GA）取代 GPT-5.5 成为 OpenAI 旗舰线，弃用 mini/nano 命名 —— 三档分别名为 **Sol**（前沿，`gpt-5.6` 别名）、**Terra**（均衡默认）与 **Luna**（高吞吐），共享 1.05M context / 128K 输出与视觉。catalog 定价：Sol $5/缓存 $0.50/$30，Terra $2.50/$0.25/$15，Luna $1/$0.10/$6（每 M；输入超 272K 部分 2× 输入 / 1.5× 输出）。`openai-responses` 现默认 `gpt-5.6-sol`。
+
+**新的请求面**（全部在 `OpenAIResponsesProvider` 上）：
+
+```php
+$provider->chat($messages, $tools, $system, [
+    'reasoning_effort'     => 'max',                  // 档位：none|low|medium|high|xhigh|max
+    'reasoning_mode'       => 'pro',                  // Sol Pro —— reasoning.mode
+    'reasoning_context'    => 'all_turns',            // 持久化推理 —— reasoning.context
+    'prompt_cache_options' => ['mode' => 'explicit'], // 5.6 显式缓存（写 1.25x，读 -90%）
+]);
+```
+
+wire fragment：`reasoning: {effort, mode, context}`，`prompt_cache_options` 为顶层字段。所有内容也可原样放进 `options['reasoning']` 透传（显式 key 优先于扁平 knob）；非法的 `reasoning_mode` / `reasoning_context` 值会被丢弃，绝不转发。
+
+**effort 归一化**（`OpenAIResponsesProvider::normalizeEffortForModel()`）：GPT-5.6 弃用了 `minimal` 并新增 `none` + `max`，provider 会把传入值按代保持合法 —— `gpt-5.6*` 上：`minimal` → `low`、`off` → `none`、`highest` → `max`；5.6 之前的 id 上：`max`/`highest` → `xhigh`、`none`/`off` → `minimal`。未知值原样透传（服务端后续新增值仍可用）。provider 现已实现 `SupportsReasoningEffort`，因此跨 provider 的 `reasoning_effort` 选项与 Anthropic/GLM/Grok 上行为一致；`reasoningEffortFragment()` 返回 `{reasoning: {effort}}`，未知档位返回 `[]`。
+
+Chat Completions 的 `openai` provider 保持 `gpt-4o` 默认，但能解析三个新 id（`getSupportedModels()`，整个 `gpt-5*` 线启用 structured outputs）。Programmatic tool calling 与多 agent beta 仍可经 `extra_body` 使用。测试：`Providers\OpenAIResponsesProviderTest`、`CostCalculatorTest`。
+
+---
+
+## 94. Grok 4.5 (v1.1.6)
+
+`grok-4.5`（2026-07-08 发布）是 xAI 新旗舰 —— "最聪明也最快"、Grok Build 的默认模型 —— 也是 `grok` provider 的新默认（`GrokProvider::defaultModel()` + `ProviderRegistry`）。500K context（grok-4.3 保持 1M 作为性价比档）、视觉、服务端工具 + 远程 MCP。定价 $2 输入 / $0.50 缓存 / $6 输出（每 M；prompt 超 200K 部分 2×）；`grok` 别名现解析到它。
+
+**reasoning-effort 档位** —— Grok 4.5 无条件推理（没有关闭开关），`reasoning_effort: low | medium | high`（服务端默认 `high`）：
+
+```php
+$provider->chat($messages, $tools, $system, ['reasoning_effort' => 'medium']);
+// → {"reasoning_effort": "medium"}  (grok-4.5)
+```
+
+`GrokProvider::reasoningEffortFragment()` 按 model id 门控：`grok-4.5*` → 三级档位（`max`/`xhigh` 收敛到 `high`；推理无法关闭，`off` 不发送任何内容）；`*mini*` → 旧的两级 `low`/`high`；grok-4.3 / grok-4 / grok-3 → `[]`（发了该参数会 400）。
+
+**cache 绑定** —— xAI 建议把会话绑定到同一台服务器以获得稳定的缓存命中。在 provider 配置里传 `conversation_id`（或 `prompt_cache_key`）；Chat Completions 面在每个请求上以 `x-grok-conv-id` header 发送：
+
+```php
+new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
+```
+
+测试：`Providers\GrokProviderTest`。
+
+---
+
+## 95. 2026-07 catalog 刷新 —— Gemini 3.5 Flash + 全线修正 (v1.1.6)
+
+对 `resources/models.json` 其余部分按各 vendor 官方定价页做了一轮核对：
+
+- **Gemini（修正）：** `gemini-3.5-pro` / `gemini-3.5-flash-lite` 从未公开上线，已移除。**`gemini-3.5-flash`**（2026-05-19）是 Google 的事实旗舰，真实价格 **$1.50 / 缓存 $0.15 / $9**（每 M；1.05M ctx / 64K 输出）；`gemini-3.1-pro-preview` 修正为 **$2/$12**（≤200K）；新增 **`gemini-3.1-flash-lite`**（2026-05-07 GA，$0.25/$1.50）。整个 Gemini 2.0 线已于 2026-06-01 退役，因此 `gemini` provider 默认与 `ModelResolver` seed 从 `gemini-2.0-flash` 迁到 `gemini-3.5-flash`（`gemini` / `gemini-3.5` / `gemini-flash-latest` 别名）。`GeminiProvider` 新增 3.5 代 **`thinking_level`** 控制（`minimal|low|medium|high`，取代 `thinkingBudget` —— 两者混用会 400），并把跨 provider 的 `reasoning_effort` 档位映射到它上面（`off` 抑制 thinkingConfig）。测试：`Providers\GeminiProviderTest`。
+- **Kimi：** 新增 **`kimi-k2.7-code`**（2026-06-12 编码旗舰，1T MoE / 32B 激活，开放权重；$0.95 / 缓存命中 $0.19 / $4 每 M，262K ctx / 32K 输出，thinking 强制开启，图像+视频输入）与 `kimi-k2.7-code-highspeed`（~180 tok/s，2× 价格）。
+- **DeepSeek：** `deepseek-v4-flash` 输出价修正 **$0.55 → $0.28**（每 M，官方价），并记录 `cache_hit_input` $0.0028 与 384K 最大输出。预告：V4 GA 将于 2026 年 7 月中旬落地，带**高峰时段 2× 定价**（北京时间 9:00–12:00 / 14:00–18:00）；当前价格届时成为非高峰基准。
+- **MiniMax：** M3 迁到永久 5 折的阶梯价 —— 输入 ≤512K 时 **$0.30 / 缓存读 $0.06 / $1.20**（每 M；超过则 $0.60/$0.12/$2.40）；`service_tier: priority`（1.5×）可经 `extra_body` 使用。
+- **Qwen：** `qwen3.7-plus` 多模态（图像+视频）GA，新阶梯价 **$0.40/$1.60**（每 M，≤256K；256K–1M 为 $1.20/$4.80）。
+- **GLM：** `glm-5-turbo` / `glm-5v-turbo` 修正为官方 **$1.20/$4**（每 M）；没有比 glm-5.2 更新的模型。
+- **Anthropic：** 核对无误 —— 无变化（Sonnet 5 限时价持续到 2026-08-31；Opus 4.1 于 2026-08-05 退役）。
+
+已退役 id 带 `replaced_by` 标记留在 catalog 中，供 `ModelResolver::warnIfDeprecated()` 引导调用方。测试：`Providers\ModelCatalogTest`、`Providers\GeminiProviderTest`、`CostCalculatorTest`。
+

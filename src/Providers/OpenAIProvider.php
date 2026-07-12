@@ -107,6 +107,12 @@ class OpenAIProvider extends ChatCompletionsProvider
     public function getSupportedModels(): array
     {
         return [
+            'gpt-5.6-sol',
+            'gpt-5.6-terra',
+            'gpt-5.6-luna',
+            'gpt-5',
+            'gpt-5-mini',
+            'gpt-5-nano',
             'gpt-4o',
             'gpt-4o-mini',
             'gpt-4-turbo',
@@ -119,6 +125,9 @@ class OpenAIProvider extends ChatCompletionsProvider
 
     public function supportsStructuredOutput(): bool
     {
-        return in_array($this->model, ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], true);
+        // The whole GPT-5 line (incl. 5.6 Sol/Terra/Luna) ships structured
+        // outputs; before that it was a per-model rollout.
+        return str_starts_with($this->model, 'gpt-5')
+            || in_array($this->model, ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'], true);
     }
 }

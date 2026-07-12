@@ -33,6 +33,8 @@ echo $result->text();
 - [OpenAI Responses API](#openai-responses-api)
 - [跨 Provider 切换](#跨-provider-切换)
 - [Fable 5](#fable-5)
+- [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
+- [Grok 4.5](#grok-45)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -103,8 +105,8 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | 注册表 key | Provider | 说明 |
 |---|---|---|
 | `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth；旗舰 `claude-fable-5` + `claude-sonnet-5` —— 自适应思考 + effort 档位 *(Fable 5 / Sonnet 5，v1.1.5)* |
-| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT` |
-| `openai-responses` | OpenAI Responses API (`/v1/responses`) | [下方专门小节](#openai-responses-api) |
+| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT`；catalog 收录 GPT-5.6 Sol / Terra / Luna *(v1.1.6)* |
+| `openai-responses` | OpenAI Responses API (`/v1/responses`) | 默认 `gpt-5.6-sol` —— effort `none…max`、`reasoning.mode: pro`、显式缓存 *(v1.1.6)*；[下方专门小节](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
 | `gemini` | Google Gemini | API key |
 | `kimi` | Moonshot Kimi | API key；region `intl` / `cn` / `code`（OAuth）|
@@ -113,7 +115,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `glm` | BigModel GLM（默认 GLM-5.2）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.2，v1.1.2)* |
 | `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
-| `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.3` *（v1.0.8 起）* |
+| `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.5` —— reasoning-effort 档位 + cache 绑定 *（Grok 4.5，v1.1.6；v1.0.8 起）* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | 本地 Ollama daemon | 无需 auth — 默认 localhost:11434 |
 | `lmstudio` | 本地 LM Studio server | 占位 auth — 默认 localhost:1234 *（v0.9.1 起）* |
@@ -172,9 +174,10 @@ superagent models status               # catalog 来源 + age
 | 特性 | Responses | Chat Completions |
 |---|---|---|
 | `previous_response_id` 接续 | ✅ —— 服务端持有状态，新轮次跳过重发上下文 | ❌ —— 每轮都得重发 `messages[]` |
-| `reasoning.effort`（`minimal / low / medium / high / xhigh`）| ✅ 原生 | ❌ o 系列要靠 model id 技巧 |
+| `reasoning.effort`（5.6 之前 `minimal…xhigh`；GPT-5.6 上 `none…max`，按代归一化）| ✅ 原生 | ❌ o 系列要靠 model id 技巧 |
+| `reasoning.mode`（`standard / pro` —— GPT-5.6 Sol Pro）+ `reasoning.context`（`auto / all_turns / current_turn`）| ✅ 原生 *(v1.1.6)* | ❌ |
 | `reasoning.summary` | ✅ 原生 | ❌ |
-| `prompt_cache_key`（服务端 cache 绑定）| ✅ 原生 | ❌ |
+| `prompt_cache_key`（服务端 cache 绑定）+ `prompt_cache_options`（GPT-5.6 显式缓存）| ✅ 原生 | ❌ |
 | `text.verbosity`（`low / medium / high`）| ✅ 原生 | ❌ |
 | `service_tier`（`priority / default / flex / scale`）| ✅ 原生 | ❌ |
 | 分类错误 | ✅ 通过 `response.failed` 事件 code | 从 HTTP body 字符串匹配 |
@@ -182,7 +185,7 @@ superagent models status               # catalog 来源 + age
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5',
+    'model'    => 'gpt-5.6-sol',   // 默认；`gpt-5.6` 别名解析到此
 ]);
 
 $result = $agent->run('分析这个代码库并提出重构建议', [
@@ -325,6 +328,69 @@ $agent->run('高难推理', ['features' => ['thinking' => true]]);
 **Sonnet 5**（`claude-sonnet-5`，2026-06-30 发布）作为新的 `sonnet` 旗舰一同发布 —— Anthropic 最具 agentic 能力的 Sonnet，性能接近 Opus 4.8 但价格更低。同为 Claude 5 代的自适应形态（仅自适应思考、effort 档位、不发采样参数/prefill），1M context（最大输出 128K），**$3 输入 / $15 输出**（限时价 **$2/$10 至 2026-08-31**）。`sonnet` / `claude-sonnet` / `sonnet-5` 别名现解析到它。
 
 *v1.1.5 起*
+
+---
+
+## GPT-5.6 (Sol / Terra / Luna)
+
+GPT-5.6（2026-07-09 GA）取代 GPT-5.5 成为 OpenAI 旗舰线，并弃用 mini/nano 后缀 —— 家族分三档，共享 **1.05M token context**（最大输出 128K）与视觉能力：
+
+| 模型 | 定位 | $/M 输入 · 缓存 · 输出 |
+|---|---|---|
+| `gpt-5.6-sol`（别名 `gpt-5.6`、`sol`）| 面向复杂专业工作的前沿旗舰 | $5 · $0.50 · $30 |
+| `gpt-5.6-terra`（别名 `terra`）| 均衡默认档（≈5.5 水平，更便宜）| $2.50 · $0.25 · $15 |
+| `gpt-5.6-luna`（别名 `luna`）| 高吞吐低成本档 | $1 · $0.10 · $6 |
+
+输入超过 272K token 的部分按 2× 输入 / 1.5× 输出计费。`openai-responses` 现默认 `gpt-5.6-sol`；Chat Completions 的 `openai` provider 保持 `gpt-4o` 默认，但三个 id 都能解析。
+
+```php
+$agent = new Agent([
+    'provider' => 'openai-responses',
+    'model'    => 'gpt-5.6-sol',
+]);
+
+$result = $agent->run('先设计再实现这次迁移', [
+    'reasoning_effort'     => 'max',              // 5.6 档位：none|low|medium|high|xhigh|max
+    'reasoning_mode'       => 'pro',              // Sol Pro —— 同一权重，更多并行算力
+    'reasoning_context'    => 'all_turns',        // 跨轮次复用持久化推理
+    'prompt_cache_options' => ['mode' => 'explicit'],
+]);
+```
+
+- **按代归一化的 effort 档位。** GPT-5.6 弃用了 `minimal`，新增 `none` + `max`（默认 `medium`）。provider 会把你传的任何值归一化到目标模型的合法集合 —— 5.6 上 `minimal` → `low`，5.6 之前 `max` → `xhigh` —— 因此跨 provider 的 `reasoning_effort` 调用继续可用。`OpenAIResponsesProvider` 现已实现 `SupportsReasoningEffort`。
+- **`reasoning.mode: pro`** 是 ChatGPT 版 Sol Pro 的 API 形态（仅 Sol）；**`reasoning.context`** 控制推理在轮次间的持久化。两者也都可以原样放进 `options['reasoning']` 透传。
+- **显式 prompt 缓存。** `prompt_cache_options: {mode: explicit}` —— 缓存写入按未缓存输入的 1.25× 计费，读取保持 90% 折扣。
+- Programmatic tool calling / 多 agent beta 在一等 knob 落地前仍可经 `extra_body` 使用。
+
+*v1.1.6 起*
+
+---
+
+## Grok 4.5
+
+Grok 4.5（`grok-4.5`，2026-07-08 发布）是 xAI 新旗舰，也是 `grok` provider 的新默认 —— "最聪明也最快"，Grok Build 背后的模型，**500K context**、视觉、服务端工具（web/X 搜索、代码执行）与远程 MCP。定价 **$2 输入 / $0.50 缓存 / $6 输出**（每百万 token，prompt 超 200K 部分 2×）；`grok-4.3`（1M ctx，$1.25/$2.50，可用 batch）作为性价比档留在 catalog。
+
+```php
+$agent = new Agent([
+    'provider' => 'grok',
+    'api_key'  => getenv('XAI_API_KEY'),
+    'model'    => 'grok-4.5',                    // 或 `grok` 别名
+]);
+```
+
+- **reasoning-effort 档位。** Grok 4.5 无条件推理（没有关闭开关），接受 `reasoning_effort: low | medium | high`（服务端默认 `high`）；`max`/`xhigh` 收敛到 `high`，`off` 不发送任何内容。grok-4.3 / grok-4 仍会拒绝该参数，所以 fragment 按 model id 门控。
+
+```php
+$agent->run('深度 agentic 编码任务', ['reasoning_effort' => 'medium']);
+```
+
+- **prompt-cache 绑定。** xAI 建议把会话绑定到同一台服务器以获得稳定的缓存命中（$0.50/M vs $2/M）。在 provider 配置里传 `conversation_id`（或 `prompt_cache_key`），Chat Completions 面在每个请求上以 `x-grok-conv-id` header 发送：
+
+```php
+new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
+```
+
+*v1.1.6 起*
 
 ---
 

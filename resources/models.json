@@ -1,7 +1,7 @@
 {
   "_meta": {
     "schema_version": 2,
-    "updated": "2026-06-04",
+    "updated": "2026-07-12",
     "note": "Source of truth for model catalog + pricing. Per-million-token USD prices. Override at runtime via SUPERAGENT_MODELS_FILE env var or ModelCatalog::loadFromFile(). Each entry may set `family` (for alias resolution), `aliases`, `date` (YYYYMMDD; newest wins within a family), `input`/`output` pricing, and `description`."
   },
 
@@ -34,7 +34,11 @@
     "openai": {
       "env": "OPENAI_API_KEY",
       "models": [
-        {"id": "gpt-5",         "family": "gpt-5",      "date": "20251101", "input": 1.25, "output": 10.0, "aliases": ["gpt5"], "description": "GPT-5 — flagship"},
+        {"id": "gpt-5.6-sol",   "family": "gpt-5.6",       "date": "20260709", "input": 5.00, "output": 30.0, "cache_hit_input": 0.50, "aliases": ["gpt-5.6", "gpt5.6", "sol"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true, "max_context": 1050000, "max_output": 128000}, "description": "GPT-5.6 Sol — frontier flagship (Sol/Terra/Luna naming replaces mini/nano). 1.05M ctx / 128K output, adaptive reasoning with effort dial none…max + reasoning.mode standard|pro and multi-agent beta (Responses API). $5 in / $0.50 cached / $30 out per M; 2x in / 1.5x out beyond 272K input"},
+        {"id": "gpt-5.6-terra", "family": "gpt-5.6-terra", "date": "20260709", "input": 2.50, "output": 15.0, "cache_hit_input": 0.25, "aliases": ["terra"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true, "max_context": 1050000, "max_output": 128000}, "description": "GPT-5.6 Terra — balanced default tier (≈GPT-5.5 level, cheaper). 1.05M ctx / 128K output, effort dial none…max. $2.50 in / $0.25 cached / $15 out per M"},
+        {"id": "gpt-5.6-luna",  "family": "gpt-5.6-luna",  "date": "20260709", "input": 1.00, "output": 6.0,  "cache_hit_input": 0.10, "aliases": ["luna"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true, "max_context": 1050000, "max_output": 128000}, "description": "GPT-5.6 Luna — high-throughput low-cost tier. 1.05M ctx / 128K output, effort dial none…max. $1 in / $0.10 cached / $6 out per M"},
+
+        {"id": "gpt-5",         "family": "gpt-5",      "date": "20251101", "input": 1.25, "output": 10.0, "aliases": ["gpt5"], "description": "GPT-5 — previous flagship"},
         {"id": "gpt-5-mini",    "family": "gpt-5-mini", "date": "20251101", "input": 0.25, "output": 2.0,  "aliases": ["gpt5-mini"], "description": "GPT-5 mini"},
         {"id": "gpt-5-nano",    "family": "gpt-5-nano", "date": "20251101", "input": 0.05, "output": 0.40, "description": "GPT-5 nano"},
 
@@ -56,22 +60,21 @@
     "gemini": {
       "env": "GEMINI_API_KEY",
       "models": [
-        {"id": "gemini-3.5-pro",              "family": "gemini-pro",   "date": "20260501", "input": 2.0,    "output": 15.0,  "aliases": ["gemini-pro", "gemini-3.5", "gemini", "gemini-3"], "capabilities": {"thinking": true, "multimodal": true, "tools": true, "grounding": true}, "description": "Gemini 3.5 Pro — top reasoning + thinking + multimodal tools"},
-        {"id": "gemini-3.5-flash",            "family": "gemini-flash", "date": "20260501", "input": 0.40,   "output": 3.0,   "aliases": ["gemini-3.5-flash"], "capabilities": {"thinking": true, "multimodal": true, "tools": true, "grounding": true}, "description": "Gemini 3.5 Flash — fast tier with thinking"},
-        {"id": "gemini-3.5-flash-lite",       "family": "gemini-flash", "date": "20260501", "input": 0.10,   "output": 0.80,  "capabilities": {"thinking": false, "multimodal": true, "tools": true}, "description": "Gemini 3.5 Flash Lite — cheapest 3.x tier"},
+        {"id": "gemini-3.5-flash",            "family": "gemini-flash", "date": "20260519", "input": 1.50,   "output": 9.0,   "cache_hit_input": 0.15, "aliases": ["gemini", "gemini-3.5", "gemini-3.5-flash", "gemini-flash-latest"], "capabilities": {"thinking": true, "multimodal": true, "tools": true, "grounding": true, "max_context": 1048576, "max_output": 65536}, "description": "Gemini 3.5 Flash — Google's most intelligent model (de-facto flagship; 3.5 Pro still in limited preview, no public API). Agentic/coding frontier, thinking_level minimal…high (default medium), computer use, Search/Maps grounding. $1.50 in / $0.15 cached / $9 out per M"},
+        {"id": "gemini-3.1-pro-preview",      "family": "gemini-pro",   "date": "20260219", "input": 2.0,    "output": 12.0,  "aliases": ["gemini-pro"], "capabilities": {"thinking": true, "multimodal": true, "tools": true, "grounding": true, "max_context": 1048576, "max_output": 65536}, "description": "Gemini 3.1 Pro (preview) — Pro line latest. $2 in / $12 out per M (≤200K; $4/$18 above); thinking_level default high"},
+        {"id": "gemini-3.1-flash-lite",       "family": "gemini-flash", "date": "20260507", "input": 0.25,   "output": 1.50,  "capabilities": {"thinking": true, "multimodal": true, "tools": true, "max_context": 1048576, "max_output": 65536}, "description": "Gemini 3.1 Flash-Lite — cheapest current tier; thinking_level default minimal. $0.25 in / $1.50 out per M"},
 
-        {"id": "gemini-3.1-pro-preview",        "family": "gemini-pro",   "date": "20260301", "input": 2.0,    "output": 15.0,  "capabilities": {"thinking": true, "multimodal": true, "tools": true}, "description": "Gemini 3.1 Pro (preview)"},
-        {"id": "gemini-3-pro-preview",          "family": "gemini-pro",   "date": "20260115", "input": 2.0,    "output": 15.0,  "capabilities": {"thinking": true, "multimodal": true, "tools": true}, "description": "Gemini 3 Pro (preview)"},
-        {"id": "gemini-3-flash-preview",        "family": "gemini-flash", "date": "20260115", "input": 0.40,   "output": 3.0,   "capabilities": {"thinking": false, "multimodal": true, "tools": true}, "description": "Gemini 3 Flash (preview)"},
-        {"id": "gemini-3.1-flash-lite-preview", "family": "gemini-flash", "date": "20260301", "input": 0.10,   "output": 0.80,  "capabilities": {"thinking": false, "multimodal": true, "tools": true}, "description": "Gemini 3.1 Flash Lite (preview)"},
+        {"id": "gemini-3-pro-preview",          "family": "gemini-pro",   "date": "20260115", "input": 2.0,    "output": 15.0,  "replaced_by": "gemini-3.1-pro-preview", "capabilities": {"thinking": true, "multimodal": true, "tools": true}, "description": "Gemini 3 Pro (preview) — RETIRED 2026-03-09, redirects to gemini-3.1-pro-preview"},
+        {"id": "gemini-3-flash-preview",        "family": "gemini-flash", "date": "20260115", "input": 0.40,   "output": 3.0,   "replaced_by": "gemini-3.5-flash", "capabilities": {"thinking": false, "multimodal": true, "tools": true}, "description": "Gemini 3 Flash (preview) — superseded by gemini-3.5-flash"},
+        {"id": "gemini-3.1-flash-lite-preview", "family": "gemini-flash", "date": "20260303", "input": 0.10,   "output": 0.80,  "replaced_by": "gemini-3.1-flash-lite", "capabilities": {"thinking": false, "multimodal": true, "tools": true}, "description": "Gemini 3.1 Flash Lite (preview) — RETIRED 2026-05-25, use gemini-3.1-flash-lite"},
 
         {"id": "gemini-2.5-pro",              "family": "gemini-pro",   "date": "20250325", "input": 1.25,   "output": 10.0,  "aliases": ["gemini-2.5"], "description": "Gemini 2.5 Pro — long-context reasoning"},
         {"id": "gemini-2.5-flash",            "family": "gemini-flash", "date": "20250325", "input": 0.30,   "output": 2.50,  "description": "Gemini 2.5 Flash"},
         {"id": "gemini-2.5-flash-lite",       "family": "gemini-flash", "date": "20250601", "input": 0.075,  "output": 0.30,  "description": "Gemini 2.5 Flash Lite"},
 
-        {"id": "gemini-2.0-flash",             "family": "gemini-flash", "date": "20250205", "input": 0.10,   "output": 0.40,  "aliases": ["gemini-2", "gemini-2-flash"], "description": "Gemini 2.0 Flash — fast + cheap"},
-        {"id": "gemini-2.0-flash-lite",        "family": "gemini-flash", "date": "20250205", "input": 0.075,  "output": 0.30,  "description": "Gemini 2.0 Flash Lite"},
-        {"id": "gemini-2.0-flash-thinking-exp","family": "gemini-flash", "date": "20250205", "input": 0.10,   "output": 0.40,  "description": "Gemini 2.0 Flash Thinking (experimental)"},
+        {"id": "gemini-2.0-flash",             "family": "gemini-flash", "date": "20250205", "input": 0.10,   "output": 0.40,  "aliases": ["gemini-2", "gemini-2-flash"], "replaced_by": "gemini-3.5-flash", "description": "Gemini 2.0 Flash — RETIRED 2026-06-01 (whole 2.0 line shut down)"},
+        {"id": "gemini-2.0-flash-lite",        "family": "gemini-flash", "date": "20250205", "input": 0.075,  "output": 0.30,  "replaced_by": "gemini-3.1-flash-lite", "description": "Gemini 2.0 Flash Lite — RETIRED 2026-06-01"},
+        {"id": "gemini-2.0-flash-thinking-exp","family": "gemini-flash", "date": "20250205", "input": 0.10,   "output": 0.40,  "replaced_by": "gemini-3.5-flash", "description": "Gemini 2.0 Flash Thinking (experimental) — RETIRED 2026-06-01"},
 
         {"id": "gemini-1.5-pro",     "family": "gemini-pro",   "date": "20240924", "input": 1.25,  "output": 5.0,  "description": "Gemini 1.5 Pro (legacy)"},
         {"id": "gemini-1.5-flash",   "family": "gemini-flash", "date": "20240924", "input": 0.075, "output": 0.30, "description": "Gemini 1.5 Flash (legacy)"},
@@ -90,10 +93,14 @@
         {"id": "anthropic/claude-haiku-4-5",    "input": 1.0,   "output": 5.0},
         {"id": "anthropic/claude-3-5-sonnet",   "input": 3.0,   "output": 15.0},
         {"id": "anthropic/claude-3-opus",       "input": 15.0,  "output": 75.0},
+        {"id": "openai/gpt-5.6-sol",            "input": 5.0,   "output": 30.0},
+        {"id": "openai/gpt-5.6-terra",          "input": 2.5,   "output": 15.0},
+        {"id": "openai/gpt-5.6-luna",           "input": 1.0,   "output": 6.0},
         {"id": "openai/gpt-5",                  "input": 1.25,  "output": 10.0},
         {"id": "openai/gpt-4o",                 "input": 2.50,  "output": 10.0},
-        {"id": "google/gemini-3.5-pro",         "input": 2.0,   "output": 15.0},
-        {"id": "google/gemini-3.5-flash",       "input": 0.40,  "output": 3.0},
+        {"id": "x-ai/grok-4.5",                 "input": 2.0,   "output": 6.0},
+        {"id": "google/gemini-3.5-flash",       "input": 1.50,  "output": 9.0},
+        {"id": "google/gemini-3.1-pro-preview", "input": 2.0,   "output": 12.0},
         {"id": "google/gemini-3-pro-preview",   "input": 2.0,   "output": 15.0},
         {"id": "google/gemini-2.5-pro",         "input": 1.25,  "output": 10.0},
         {"id": "google/gemini-2.0-flash",       "input": 0.10,  "output": 0.40},
@@ -166,7 +173,9 @@
       "regions": ["intl", "cn"],
       "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
       "models": [
-        {"id": "kimi-k2-6",                "family": "k2",         "date": "20260420", "input": 0.95, "output": 4.00, "aliases": ["kimi", "k2", "kimi-k2"], "description": "Kimi K2.6 — 1T MoE, agent swarm, skills (cache-hit input $0.16/M); thinking via reasoning_effort + thinking.type", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "swarm": true, "skills": true, "file_extract": true, "context_cache": "auto", "batch": true, "mcp": true, "max_context": 262144}},
+        {"id": "kimi-k2.7-code",           "family": "k2-code",    "date": "20260612", "input": 0.95, "output": 4.00, "cache_hit_input": 0.19, "aliases": ["kimi-code", "k2.7-code"], "description": "Kimi K2.7 Code — coding flagship (1T MoE / 32B active, open weights): +21.8% Kimi Code Bench v2 over K2.6, thinking forced on (thinking.type enabled, cannot disable; temperature/top_p pinned), image + video input. $0.95 in / $0.19 cache-hit / $4 out per M", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "thinking": true, "context_cache": "auto", "mcp": true, "max_context": 262144, "max_output": 32768}},
+        {"id": "kimi-k2.7-code-highspeed", "family": "k2-code",    "date": "20260612", "input": 1.90, "output": 8.00, "cache_hit_input": 0.38, "description": "Kimi K2.7 Code high-speed (~180 tok/s) — same model, 2x price", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "thinking": true, "context_cache": "auto", "mcp": true, "max_context": 262144, "max_output": 32768}},
+        {"id": "kimi-k2-6",                "family": "k2",         "date": "20260420", "input": 0.95, "output": 4.00, "aliases": ["kimi", "k2", "kimi-k2"], "description": "Kimi K2.6 — 1T MoE general flagship, agent swarm, skills (cache-hit input $0.16/M); thinking via reasoning_effort + thinking.type", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "swarm": true, "skills": true, "file_extract": true, "context_cache": "auto", "batch": true, "mcp": true, "max_context": 262144}},
         {"id": "kimi-k2-5",                "family": "k2",         "date": "20251001", "input": 0.95, "output": 4.00, "description": "Kimi K2.5 (previous)"},
         {"id": "kimi-latest",              "family": "kimi-latest","date": "20260301", "input": 0.95, "output": 4.00, "description": "Rolling latest"}
       ]
@@ -178,7 +187,7 @@
       "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
       "models": [
         {"id": "qwen3.7-max",         "family": "qwen-max", "date": "20260521", "input": 2.50, "output": 7.50, "aliases": ["qwen", "qwen-max", "qwen3.7"], "description": "Qwen3.7-Max — 1M ctx flagship; native Anthropic API protocol support (works as drop-in for Claude Code). Tool calling verified at 1,158 calls per autonomous session. No public 'thinking' switch on this tier.", "capabilities": {"streaming": true, "tools": true, "vision": false, "thinking": false, "anthropic_protocol": true, "mcp": true, "max_context": 1000000}},
-        {"id": "qwen3.7-plus",        "family": "qwen-plus","date": "20260521", "input": 0.80, "output": 2.40, "description": "Qwen3.7-Plus — multimodal (vision) variant of 3.7", "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true, "max_context": 1000000}},
+        {"id": "qwen3.7-plus",        "family": "qwen-plus","date": "20260601", "input": 0.40, "output": 1.60, "description": "Qwen3.7-Plus — multimodal (image+video) variant of 3.7, GA 2026-06. Tiered: $0.40/$1.60 per M ≤256K input, $1.20/$4.80 above (256K–1M)", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "mcp": true, "max_context": 1000000}},
         {"id": "qwen3.6-max-preview", "family": "qwen-max", "date": "20260420", "input": 0.78, "output": 3.90, "description": "Qwen3.6-Max-Preview — 260K ctx flagship; thinking via extra_body.enable_thinking on the OpenAI-compat endpoint (no thinking_budget — opt into provider=qwen-native for budget control). code_interpreter is qwen-native only.", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "file_extract": true, "mcp": true, "max_context": 260000}},
         {"id": "qwen3-max",           "family": "qwen-max", "date": "20260123", "input": 0.78, "output": 3.90, "description": "Qwen3-Max"},
         {"id": "qwen3.5-plus",        "family": "qwen-plus","date": "20260215", "input": 0.40, "output": 1.20, "description": "Qwen3.5-Plus"},
@@ -197,8 +206,8 @@
         {"id": "glm-5.2",        "family": "glm-5",    "date": "20260601", "input": 1.40, "output": 4.40, "cache_hit_input": 0.26, "aliases": ["glm", "glm5", "glm5.2"], "description": "GLM-5.2 — coding-first agentic flagship, 1M ctx / 128K max output, text-only, open weights. Thinking + reasoning_effort (high/max). PAYG $1.40 in / $4.40 out / $0.26 cache-hit per M (official z.ai pricing)", "capabilities": {"streaming": true, "tools": true, "thinking": true, "reasoning_effort": true, "web_search": true, "mcp": true, "max_context": 1000000, "max_output": 131072}},
         {"id": "glm-5.1",        "family": "glm-5",    "date": "20260420", "input": 1.40, "output": 4.40, "cache_hit_input": 0.26, "description": "GLM-5.1 — long-horizon agentic, 200K ctx / 128K max output, text-only. Thinking + tools + streaming. PAYG $1.40 in / $4.40 out / $0.26 cache-hit per M (official z.ai pricing)", "capabilities": {"streaming": true, "tools": true, "thinking": true, "mcp": true, "max_context": 200000, "max_output": 131072}},
         {"id": "glm-5",          "family": "glm-5",    "date": "20260301", "input": 1.00, "output": 3.20, "description": "GLM-5 — 744B MoE agentic flagship", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "web_search": true, "ocr": true, "asr": true, "mcp": true, "max_context": 200000}},
-        {"id": "glm-5-turbo",    "family": "glm-5",    "date": "20260301", "input": 0.30, "output": 1.00, "description": "GLM-5-Turbo"},
-        {"id": "glm-5v-turbo",   "family": "glm-5v",   "date": "20260301", "input": 0.60, "output": 2.00, "description": "GLM-5V-Turbo — native multimodal agent"},
+        {"id": "glm-5-turbo",    "family": "glm-5",    "date": "20260315", "input": 1.20, "output": 4.00, "cache_hit_input": 0.24, "description": "GLM-5-Turbo — speed-optimized agent tier, ~200K ctx / 131K max output. $1.20 in / $4 out / $0.24 cache-hit per M (official z.ai pricing)"},
+        {"id": "glm-5v-turbo",   "family": "glm-5v",   "date": "20260401", "input": 1.20, "output": 4.00, "description": "GLM-5V-Turbo — native multimodal vision-coding agent, 200K ctx / 131K max output. $1.20 in / $4 out per M"},
         {"id": "glm-4.7",        "family": "glm-4",    "date": "20260201", "input": 0.60, "output": 2.20, "description": "GLM-4.7"},
         {"id": "glm-4.6",        "family": "glm-4",    "date": "20260101", "input": 0.60, "output": 2.20, "description": "GLM-4.6 — 200K ctx"},
         {"id": "glm-4.5",        "family": "glm-4",    "date": "20251001", "input": 0.60, "output": 2.20, "description": "GLM-4.5"}
@@ -210,7 +219,7 @@
       "regions": ["intl", "cn"],
       "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
       "models": [
-        {"id": "MiniMax-M3",    "family": "m3",  "date": "20260520", "input": 0.60, "output": 2.40, "aliases": ["minimax", "m3", "minimax-m3"], "description": "MiniMax M3 — next-gen self-evolving agent; multi-agent collaboration + skills trained into weights, 1M ctx. Std PAYG $0.60/$2.40 per M (7-day launch promo halves to $0.30/$1.20); image/video input $1.00/M", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "thinking": true, "skills": true, "agent_teams": true, "dynamic_tool_search": true, "mcp": true, "max_context": 1048576, "max_output": 512000}},
+        {"id": "MiniMax-M3",    "family": "m3",  "date": "20260601", "input": 0.30, "output": 1.20, "cache_hit_input": 0.06, "aliases": ["minimax", "m3", "minimax-m3"], "description": "MiniMax M3 — 428B MoE / 23B active self-evolving agent; multi-agent collaboration + skills trained into weights, native text/image/video input, 1M ctx. Std PAYG (permanent 50%-off): $0.30 in / $0.06 cache-read / $1.20 out per M ≤512K input, $0.60/$0.12/$2.40 above; priority tier (service_tier) 1.5x; auto prompt caching ≥512 tokens", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "thinking": true, "skills": true, "agent_teams": true, "dynamic_tool_search": true, "mcp": true, "max_context": 1048576, "max_output": 512000}},
         {"id": "MiniMax-M2.7",  "family": "m2",  "date": "20260318", "input": 0.30, "output": 1.20, "aliases": ["m2", "minimax-m2"], "description": "MiniMax M2.7 — 230B MoE, self-evolving agent", "capabilities": {"streaming": true, "tools": true, "vision": true, "skills": true, "agent_teams": true, "dynamic_tool_search": true, "mcp": true, "max_context": 204800}},
         {"id": "MiniMax-M2.5",  "family": "m2",  "date": "20260201", "input": 0.30, "output": 1.20, "description": "MiniMax M2.5"},
         {"id": "MiniMax-M2",    "family": "m2",  "date": "20260101", "input": 0.30, "output": 1.20, "description": "MiniMax M2"}
@@ -223,7 +232,7 @@
       "capabilities": {"streaming": true, "tools": true, "mcp": true},
       "models": [
         {"id": "deepseek-v4-pro",   "family": "deepseek-v4", "date": "20260424", "input": 0.435, "output": 0.87, "cache_hit_input": 0.003625, "aliases": ["deepseek", "deepseek-v4", "v4-pro"], "description": "DeepSeek V4 Pro — 1.6T MoE / 49B active, 1M ctx, dual thinking/non-thinking, agentic-coding SOTA. PAYG $0.435 in (cache-miss) / $0.003625 in (cache-hit) / $0.87 out per M", "capabilities": {"streaming": true, "tools": true, "thinking": true, "agentic": true, "context_cache": "auto", "mcp": true, "max_context": 1048576, "active_params": 49000000000, "total_params": 1600000000000}},
-        {"id": "deepseek-v4-flash", "family": "deepseek-v4", "date": "20260424", "input": 0.14, "output": 0.55, "aliases": ["v4-flash", "deepseek-flash"], "description": "DeepSeek V4 Flash — 284B MoE / 13B active, 1M ctx, dual thinking/non-thinking, drop-in for retired chat/reasoner", "capabilities": {"streaming": true, "tools": true, "thinking": true, "agentic": true, "context_cache": "auto", "mcp": true, "max_context": 1048576, "active_params": 13000000000, "total_params": 284000000000}},
+        {"id": "deepseek-v4-flash", "family": "deepseek-v4", "date": "20260424", "input": 0.14, "output": 0.28, "cache_hit_input": 0.0028, "aliases": ["v4-flash", "deepseek-flash"], "description": "DeepSeek V4 Flash — 284B MoE / 13B active, 1M ctx / 384K max output, dual thinking/non-thinking, drop-in for retired chat/reasoner. PAYG $0.14 in (cache-miss) / $0.0028 in (cache-hit) / $0.28 out per M (off-peak base; peak-hour 2x lands with V4 GA mid-July 2026)", "capabilities": {"streaming": true, "tools": true, "thinking": true, "agentic": true, "context_cache": "auto", "mcp": true, "max_context": 1048576, "max_output": 393216, "active_params": 13000000000, "total_params": 284000000000}},
         {"id": "deepseek-chat",     "family": "deepseek-v3", "date": "20241226", "input": 0.27, "output": 1.10, "deprecated_until": "2026-07-24", "replaced_by": "deepseek-v4-flash", "description": "DeepSeek V3 chat — DEPRECATED, retires 2026-07-24, currently routes to deepseek-v4-flash"},
         {"id": "deepseek-reasoner", "family": "deepseek-r1", "date": "20250120", "input": 0.55, "output": 2.20, "deprecated_until": "2026-07-24", "replaced_by": "deepseek-v4-pro", "description": "DeepSeek R1 reasoner — DEPRECATED, retires 2026-07-24; replaced by V4 thinking mode"}
       ]
@@ -234,7 +243,8 @@
       "regions": ["default"],
       "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "mcp": true},
       "models": [
-        {"id": "grok-4.3",                     "family": "grok",       "date": "20260520", "input": 1.25, "output": 2.50, "aliases": ["grok", "grok-4.3"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "mcp": true, "max_context": 1000000}, "description": "Grok 4.3 — xAI flagship reasoning + coding (recommended default)"},
+        {"id": "grok-4.5",                     "family": "grok",       "date": "20260708", "input": 2.00, "output": 6.00, "cache_hit_input": 0.50, "aliases": ["grok", "grok-4.5", "grok-4.5-latest"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "reasoning_effort": true, "web_search": true, "mcp": true, "max_context": 500000}, "description": "Grok 4.5 — xAI flagship + Grok Build default (recommended default). Always-on reasoning with reasoning_effort low|medium|high (default high, no off switch), 500K ctx, server-side tools (web/x search, code exec) + remote MCP, prompt-cache routing via prompt_cache_key / x-grok-conv-id. $2 in / $0.50 cached / $6 out per M; 2x beyond 200K prompt"},
+        {"id": "grok-4.3",                     "family": "grok",       "date": "20260520", "input": 1.25, "output": 2.50, "aliases": ["grok-4.3"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "mcp": true, "max_context": 1000000}, "description": "Grok 4.3 — previous flagship (1M ctx, batch-discount eligible)"},
         {"id": "grok-4.20-0309-reasoning",     "family": "grok-4.20",  "date": "20260309", "input": 1.25, "output": 2.50, "aliases": ["grok-4.20"], "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "max_context": 1000000}, "description": "Grok 4.20 reasoning"},
         {"id": "grok-4.20-0309-non-reasoning", "family": "grok-4.20",  "date": "20260309", "input": 1.25, "output": 2.50, "capabilities": {"streaming": true, "tools": true, "vision": true, "max_context": 1000000}, "description": "Grok 4.20 non-reasoning"},
         {"id": "grok-4.20-multi-agent-0309",   "family": "grok-4.20",  "date": "20260309", "input": 1.25, "output": 2.50, "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "max_context": 1000000}, "description": "Grok 4.20 multi-agent"},

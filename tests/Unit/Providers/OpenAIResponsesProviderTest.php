@@ -109,6 +109,92 @@ class OpenAIResponsesProviderTest extends TestCase
         $this->assertSame('high', $body['reasoning']['effort']);
     }
 
+    public function test_default_model_is_gpt_56_sol(): void
+    {
+        $p = new OpenAIResponsesProvider(['api_key' => 'sk-test']);
+        $this->assertSame('gpt-5.6-sol', $p->getModel());
+    }
+
+    public function test_effort_normalized_per_generation(): void
+    {
+        // GPT-5.6 retired `minimal` and added `none` + `max`.
+        $p56 = new OpenAIResponsesProvider(['api_key' => 'sk-test']);
+        $body = $this->invokeBuild($p56, [new UserMessage('hi')], [], null, [
+            'reasoning' => ['effort' => 'minimal'],
+        ]);
+        $this->assertSame('low', $body['reasoning']['effort']);
+
+        $body = $this->invokeBuild($p56, [new UserMessage('hi')], [], null, [
+            'reasoning' => ['effort' => 'max'],
+        ]);
+        $this->assertSame('max', $body['reasoning']['effort']);
+
+        // Pre-5.6 models keep the minimal…xhigh dial: max clamps to xhigh,
+        // none maps back to minimal.
+        $p5 = new OpenAIResponsesProvider(['api_key' => 'sk-test', 'model' => 'gpt-5']);
+        $body = $this->invokeBuild($p5, [new UserMessage('hi')], [], null, [
+            'reasoning' => ['effort' => 'max'],
+        ]);
+        $this->assertSame('xhigh', $body['reasoning']['effort']);
+
+        $body = $this->invokeBuild($p5, [new UserMessage('hi')], [], null, [
+            'reasoning' => ['effort' => 'none'],
+        ]);
+        $this->assertSame('minimal', $body['reasoning']['effort']);
+    }
+
+    public function test_flat_reasoning_effort_option_supported(): void
+    {
+        // The cross-provider effort dial spelling.
+        $p = new OpenAIResponsesProvider(['api_key' => 'sk-test']);
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], [], null, [
+            'reasoning_effort' => 'xhigh',
+        ]);
+        $this->assertSame('xhigh', $body['reasoning']['effort']);
+
+        $this->assertSame(
+            ['reasoning' => ['effort' => 'max']],
+            $p->reasoningEffortFragment('max'),
+        );
+        $this->assertSame([], $p->reasoningEffortFragment('bogus'));
+    }
+
+    public function test_reasoning_mode_and_context_knobs(): void
+    {
+        $p = new OpenAIResponsesProvider(['api_key' => 'sk-test']);
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], [], null, [
+            'reasoning'         => ['effort' => 'high'],
+            'reasoning_mode'    => 'pro',
+            'reasoning_context' => 'all_turns',
+        ]);
+        $this->assertSame('high', $body['reasoning']['effort']);
+        $this->assertSame('pro', $body['reasoning']['mode']);
+        $this->assertSame('all_turns', $body['reasoning']['context']);
+
+        // Invalid values are dropped rather than forwarded.
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], [], null, [
+            'reasoning_mode'    => 'turbo',
+            'reasoning_context' => 'sometimes',
+        ]);
+        $this->assertArrayNotHasKey('reasoning', $body);
+
+        // Explicit keys inside options['reasoning'] win over the flat knobs.
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], [], null, [
+            'reasoning'      => ['effort' => 'high', 'mode' => 'standard'],
+            'reasoning_mode' => 'pro',
+        ]);
+        $this->assertSame('standard', $body['reasoning']['mode']);
+    }
+
+    public function test_prompt_cache_options_forwarded(): void
+    {
+        $p = new OpenAIResponsesProvider(['api_key' => 'sk-test']);
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], [], null, [
+            'prompt_cache_options' => ['mode' => 'explicit'],
+        ]);
+        $this->assertSame(['mode' => 'explicit'], $body['prompt_cache_options']);
+    }
+
     public function test_verbosity_and_json_schema_map_to_text_controls(): void
     {
         $p = new OpenAIResponsesProvider(['api_key' => 'sk-test']);

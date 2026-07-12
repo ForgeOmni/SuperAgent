@@ -183,13 +183,18 @@ class GeminiProvider implements LLMProvider
 
         // Thinking / reasoning config — Gemini 3.x exposes `thinkingConfig` with
         // either an integer `thinkingBudget` (token budget) or a `thinkingLevel`
-        // enum (LOW/HIGH). We accept both an explicit `thinking_config` array
-        // (escape hatch for advanced callers) and a generic ThinkingConfig the
-        // rest of the SDK already speaks via the same `thinking` option.
+        // enum. Since the 3.5 generation `thinking_level` (MINIMAL/LOW/MEDIUM/
+        // HIGH) is the primary control and `thinkingBudget` is
+        // backwards-compat only — Gemini 400s when both are sent, so exactly
+        // one is emitted. We accept an explicit `thinking_config` array
+        // (escape hatch), a `thinking_level` string, the cross-provider
+        // `reasoning_effort` dial, and a generic ThinkingConfig the rest of
+        // the SDK already speaks via the same `thinking` option.
         $thinkingCfg = $this->buildThinkingConfig(
             $options['thinking_config'] ?? null,
             $options['thinking'] ?? null,
             $body['model'] ?? ($options['model'] ?? $this->model),
+            $options,
         );
         if ($thinkingCfg !== null) {
             $body['generationConfig']['thinkingConfig'] = $thinkingCfg;
@@ -225,15 +230,28 @@ class GeminiProvider implements LLMProvider
      *
      * Accepts (in priority order):
      *   1. `thinking_config` raw array → returned as-is (camelCase preserved)
-     *   2. `thinking` instance of \SuperAgent\Thinking\ThinkingConfig → mapped:
+     *   2. `thinking_level` string (minimal|low|medium|high — the Gemini 3.5
+     *      surface) or the cross-provider `reasoning_effort` dial mapped onto
+     *      it (off → null, minimal/low/medium/high → same, max/xhigh → HIGH)
+     *   3. `thinking` instance of \SuperAgent\Thinking\ThinkingConfig → mapped:
      *        adaptive → {thinkingLevel: 'HIGH', includeThoughts: true}
      *        enabled  → {thinkingBudget: N, includeThoughts: true}
      *        disabled → null
+     *
+     * @param array<string, mixed> $options
      */
-    protected function buildThinkingConfig(mixed $raw, mixed $generic, string $model): ?array
+    protected function buildThinkingConfig(mixed $raw, mixed $generic, string $model, array $options = []): ?array
     {
         if (is_array($raw) && ! empty($raw)) {
             return $raw;
+        }
+
+        $level = $this->resolveThinkingLevel($options);
+        if ($level !== null) {
+            if ($level === 'off' || ! $this->modelSupportsThinking($model)) {
+                return null;
+            }
+            return ['thinkingLevel' => $level, 'includeThoughts' => true];
         }
 
         if ($generic instanceof ThinkingConfig) {
@@ -250,6 +268,31 @@ class GeminiProvider implements LLMProvider
         }
 
         return null;
+    }
+
+    /**
+     * Map `thinking_level` / `reasoning_effort` options onto Gemini's
+     * thinkingLevel enum (wire values are uppercase). Returns 'off' when the
+     * caller asked for no thinking, null when neither option is set or the
+     * value is unrecognised.
+     *
+     * @param array<string, mixed> $options
+     */
+    protected function resolveThinkingLevel(array $options): ?string
+    {
+        $value = $options['thinking_level'] ?? $options['reasoning_effort'] ?? null;
+        if (! is_string($value)) {
+            return null;
+        }
+
+        return match (strtolower(trim($value))) {
+            'off', 'disabled', 'none', 'false' => 'off',
+            'minimal' => 'MINIMAL',
+            'low' => 'LOW',
+            'medium', 'mid' => 'MEDIUM',
+            'high', 'max', 'xhigh', 'highest' => 'HIGH',
+            default => null,
+        };
     }
 
     /**

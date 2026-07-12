@@ -33,6 +33,8 @@ echo $result->text();
 - [API OpenAI Responses](#api-openai-responses)
 - [Bascule inter-providers](#bascule-inter-providers)
 - [Fable 5](#fable-5)
+- [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
+- [Grok 4.5](#grok-45)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -103,8 +105,8 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | Clé de registre | Provider | Notes |
 |---|---|---|
 | `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké ; fleuron `claude-fable-5` + `claude-sonnet-5` — thinking adaptatif + molette effort *(Fable 5 / Sonnet 5, v1.1.5)* |
-| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` |
-| `openai-responses` | OpenAI Responses API (`/v1/responses`) | [Section dédiée ci-dessous](#api-openai-responses) |
+| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` ; GPT-5.6 Sol / Terra / Luna au catalogue *(v1.1.6)* |
+| `openai-responses` | OpenAI Responses API (`/v1/responses`) | Défaut `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, cache explicite *(v1.1.6)* ; [section dédiée ci-dessous](#api-openai-responses) |
 | `openrouter` | OpenRouter | Clé API |
 | `gemini` | Google Gemini | Clé API |
 | `kimi` | Moonshot Kimi | Clé API ; régions `intl` / `cn` / `code` (OAuth) |
@@ -113,7 +115,7 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | `glm` | BigModel GLM (GLM-5.2 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(GLM-5.2, v1.1.2)* |
 | `minimax` | MiniMax (M3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking entrelacé + image/vidéo natives *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
-| `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.3` *(depuis v1.0.8)* |
+| `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.5` — molette reasoning-effort + pinning de cache *(Grok 4.5, v1.1.6 ; depuis v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Ollama local | Aucune auth — localhost:11434 par défaut |
 | `lmstudio` | Serveur LM Studio local | Auth placeholder — localhost:1234 par défaut *(depuis v0.9.1)* |
@@ -172,9 +174,10 @@ Provider dédié : `provider: 'openai-responses'`. Frappe `/v1/responses` avec l
 | Fonctionnalité | Responses | Chat Completions |
 |---|---|---|
 | Continuation via `previous_response_id` | ✅ — l'état reste côté serveur ; le nouveau tour évite de renvoyer le contexte | ❌ — doit renvoyer `messages[]` à chaque tour |
-| `reasoning.effort` (`minimal / low / medium / high / xhigh`) | ✅ natif | ❌ hacks d'id modèle pour la série o |
+| `reasoning.effort` (`minimal…xhigh` avant 5.6 ; `none…max` sur GPT-5.6, normalisé par génération) | ✅ natif | ❌ hacks d'id modèle pour la série o |
+| `reasoning.mode` (`standard / pro` — GPT-5.6 Sol Pro) + `reasoning.context` (`auto / all_turns / current_turn`) | ✅ natif *(v1.1.6)* | ❌ |
 | `reasoning.summary` | ✅ natif | ❌ |
-| `prompt_cache_key` (cache serveur) | ✅ natif | ❌ |
+| `prompt_cache_key` (cache serveur) + `prompt_cache_options` (cache explicite GPT-5.6) | ✅ natif | ❌ |
 | `text.verbosity` (`low / medium / high`) | ✅ natif | ❌ |
 | `service_tier` (`priority / default / flex / scale`) | ✅ natif | ❌ |
 | Erreurs classifiées | ✅ via les codes d'événement `response.failed` | Pattern-matching sur le body HTTP |
@@ -182,7 +185,7 @@ Provider dédié : `provider: 'openai-responses'`. Frappe `/v1/responses` avec l
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5',
+    'model'    => 'gpt-5.6-sol',   // défaut ; l'alias `gpt-5.6` s'y résout
 ]);
 
 $result = $agent->run('analyse ce codebase et propose des refactos', [
@@ -326,6 +329,69 @@ $agent->run('prompt de raisonnement difficile', ['features' => ['thinking' => tr
 **Sonnet 5** (`claude-sonnet-5`, sorti le 2026-06-30) est livré en parallèle comme nouveau fleuron `sonnet` — le Sonnet le plus agentique d'Anthropic, proche d'Opus 4.8 à un tarif inférieur. La même surface adaptative de la génération Claude 5 (thinking adaptatif uniquement, molette effort, ni paramètres d'échantillonnage ni prefill), contexte de 1 M (128 K de sortie max), **3 $ en entrée / 15 $ en sortie** (tarif de lancement **2 $/10 $ jusqu'au 2026-08-31**). Les alias `sonnet` / `claude-sonnet` / `sonnet-5` s'y résolvent désormais.
 
 *Depuis v1.1.5*
+
+---
+
+## GPT-5.6 (Sol / Terra / Luna)
+
+GPT-5.6 (GA le 2026-07-09) remplace GPT-5.5 comme gamme fleuron d'OpenAI et retire les suffixes mini/nano — la famille compte trois paliers partageant un **contexte de 1,05 M de tokens** (128 K de sortie max) et la vision :
+
+| Modèle | Positionnement | $/M entrée · caché · sortie |
+|---|---|---|
+| `gpt-5.6-sol` (alias `gpt-5.6`, `sol`) | Fleuron frontier pour le travail professionnel complexe | 5 $ · 0,50 $ · 30 $ |
+| `gpt-5.6-terra` (alias `terra`) | Palier équilibré par défaut (≈ niveau 5.5, moins cher) | 2,50 $ · 0,25 $ · 15 $ |
+| `gpt-5.6-luna` (alias `luna`) | Palier haut débit à bas coût | 1 $ · 0,10 $ · 6 $ |
+
+Les entrées au-delà de 272 K tokens sont facturées à 2× en entrée / 1,5× en sortie. `openai-responses` prend désormais `gpt-5.6-sol` par défaut ; le provider Chat Completions `openai` garde son défaut `gpt-4o` mais résout les trois ids.
+
+```php
+$agent = new Agent([
+    'provider' => 'openai-responses',
+    'model'    => 'gpt-5.6-sol',
+]);
+
+$result = $agent->run('conçois puis implémente la migration', [
+    'reasoning_effort'     => 'max',              // molette 5.6 : none|low|medium|high|xhigh|max
+    'reasoning_mode'       => 'pro',              // Sol Pro — mêmes poids, plus de calcul parallèle
+    'reasoning_context'    => 'all_turns',        // réutilisation du raisonnement persistant entre tours
+    'prompt_cache_options' => ['mode' => 'explicit'],
+]);
+```
+
+- **Molette effort, normalisée par génération.** GPT-5.6 retire `minimal` et ajoute `none` + `max` (défaut `medium`). Le provider normalise ce que vous passez vers l'ensemble légal du modèle cible — `minimal` → `low` sur 5.6, `max` → `xhigh` avant 5.6 — de sorte que les appels cross-provider `reasoning_effort` continuent de fonctionner. `OpenAIResponsesProvider` implémente désormais `SupportsReasoningEffort`.
+- **`reasoning.mode: pro`** est la forme API du Sol Pro de ChatGPT (Sol uniquement) ; **`reasoning.context`** contrôle la persistance du raisonnement entre les tours. Les deux passent aussi tels quels dans `options['reasoning']`.
+- **Cache de prompt explicite.** `prompt_cache_options: {mode: explicit}` — les écritures de cache sont facturées à 1,25× l'entrée non cachée, les lectures gardent la remise de 90 %.
+- L'appel d'outils programmatique / la bêta multi-agents restent accessibles via `extra_body` en attendant des réglages de premier ordre.
+
+*Depuis v1.1.6*
+
+---
+
+## Grok 4.5
+
+Grok 4.5 (`grok-4.5`, sorti le 2026-07-08) est le nouveau fleuron de xAI et le défaut du provider `grok` — « smartest and fastest », le modèle derrière Grok Build, avec un **contexte de 500 K**, la vision, les outils côté serveur (recherche web/X, exécution de code) et le MCP distant. Tarif : **2 $ en entrée / 0,50 $ en cache / 6 $ en sortie** par million (2× au-delà d'un prompt de 200 K) ; `grok-4.3` (1 M de contexte, 1,25 $/2,50 $, éligible batch) reste au catalogue comme palier économique.
+
+```php
+$agent = new Agent([
+    'provider' => 'grok',
+    'api_key'  => getenv('XAI_API_KEY'),
+    'model'    => 'grok-4.5',                    // ou l'alias `grok`
+]);
+```
+
+- **Molette reasoning-effort.** Grok 4.5 raisonne inconditionnellement (pas d'interrupteur off) et accepte `reasoning_effort: low | medium | high` (défaut serveur `high`) ; `max`/`xhigh` sont ramenés à `high`, `off` n'envoie rien. grok-4.3 / grok-4 rejettent toujours le paramètre, donc le fragment reste conditionné par id de modèle.
+
+```php
+$agent->run('tâche de codage agentique profonde', ['reasoning_effort' => 'medium']);
+```
+
+- **Pinning du cache de prompt.** xAI recommande d'épingler une conversation à un serveur pour des cache hits fiables (0,50 $/M contre 2 $/M). Passez `conversation_id` (ou `prompt_cache_key`) dans la config du provider et la surface Chat Completions l'envoie comme en-tête `x-grok-conv-id` sur chaque requête :
+
+```php
+new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
+```
+
+*Depuis v1.1.6*
 
 ---
 

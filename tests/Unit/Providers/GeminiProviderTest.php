@@ -234,6 +234,43 @@ class GeminiProviderTest extends TestCase
         $this->assertTrue($response['error']);
     }
 
+    public function test_thinking_level_option_maps_to_thinking_config(): void
+    {
+        $p = new GeminiProvider(['api_key' => 'k']); // gemini-3.5-flash default
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], [
+            'thinking_level' => 'medium',
+        ]);
+        $this->assertSame(
+            ['thinkingLevel' => 'MEDIUM', 'includeThoughts' => true],
+            $body['generationConfig']['thinkingConfig'],
+        );
+    }
+
+    public function test_reasoning_effort_dial_maps_to_thinking_level(): void
+    {
+        $p = new GeminiProvider(['api_key' => 'k']);
+
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], ['reasoning_effort' => 'max']);
+        $this->assertSame('HIGH', $body['generationConfig']['thinkingConfig']['thinkingLevel']);
+
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], ['reasoning_effort' => 'minimal']);
+        $this->assertSame('MINIMAL', $body['generationConfig']['thinkingConfig']['thinkingLevel']);
+
+        // `off` suppresses the thinkingConfig entirely.
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], ['reasoning_effort' => 'off']);
+        $this->assertArrayNotHasKey('thinkingConfig', $body['generationConfig'] ?? []);
+    }
+
+    public function test_raw_thinking_config_wins_over_thinking_level(): void
+    {
+        $p = new GeminiProvider(['api_key' => 'k']);
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], [
+            'thinking_config' => ['thinkingBudget' => 2048],
+            'thinking_level'  => 'high',
+        ]);
+        $this->assertSame(['thinkingBudget' => 2048], $body['generationConfig']['thinkingConfig']);
+    }
+
     public function test_registry_has_gemini(): void
     {
         $this->assertTrue(ProviderRegistry::hasProvider('gemini'));
@@ -260,6 +297,18 @@ class GeminiProviderTest extends TestCase
         $p = ProviderRegistry::create('gemini', ['api_key' => 'k']);
         $this->assertInstanceOf(GeminiProvider::class, $p);
         $this->assertSame('gemini', $p->name());
+    }
+
+    /**
+     * @param array<int, \SuperAgent\Messages\Message> $messages
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    private function invokeBuild(GeminiProvider $p, array $messages, array $options): array
+    {
+        $m = new \ReflectionMethod($p, 'buildRequestBody');
+        $m->setAccessible(true);
+        return $m->invoke($p, $messages, [], null, $options);
     }
 
     private function clientHeaders(GeminiProvider $p): array

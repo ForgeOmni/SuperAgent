@@ -726,6 +726,9 @@ class CommandRouter
         if ($provider === '' && (str_starts_with($model, 'gpt') || str_starts_with($model, 'o'))) {
             $provider = 'openai';
         }
+        if ($provider === '' && str_starts_with($model, 'grok')) {
+            $provider = 'grok';
+        }
         if ($provider === '' && str_starts_with($model, 'gemini')) {
             $provider = 'gemini';
         }
@@ -763,15 +766,25 @@ class CommandRouter
                 ['id' => 'claude-sonnet-4',    'description' => 'Sonnet 4'],
             ],
             'openai' => [
+                ['id' => 'gpt-5.6-sol',        'description' => 'GPT-5.6 Sol — frontier flagship; effort none…max + pro mode'],
+                ['id' => 'gpt-5.6-terra',      'description' => 'GPT-5.6 Terra — balanced default tier'],
+                ['id' => 'gpt-5.6-luna',       'description' => 'GPT-5.6 Luna — high-throughput low-cost'],
                 ['id' => 'gpt-5',              'description' => 'GPT-5'],
                 ['id' => 'gpt-5-mini',         'description' => 'GPT-5 mini'],
                 ['id' => 'gpt-4o',             'description' => 'GPT-4o'],
                 ['id' => 'o4-mini',            'description' => 'o4-mini — reasoning'],
             ],
+            'grok' => [
+                ['id' => 'grok-4.5',           'description' => 'Grok 4.5 — flagship; reasoning_effort low|medium|high (default)'],
+                ['id' => 'grok-4.3',           'description' => 'Grok 4.3 — previous flagship, 1M ctx'],
+                ['id' => 'grok-4-fast',        'description' => 'Grok 4 Fast — cheap 2M-context tier'],
+                ['id' => 'grok-code-fast-1',   'description' => 'Grok Code Fast — agentic coding'],
+            ],
             'gemini' => [
-                ['id' => 'gemini-2.0-flash',             'description' => 'Gemini 2.0 Flash — fast + cheap'],
-                ['id' => 'gemini-2.0-flash-thinking-exp','description' => 'Gemini 2.0 Flash Thinking (experimental)'],
-                ['id' => 'gemini-1.5-pro',               'description' => 'Gemini 1.5 Pro — long context'],
+                ['id' => 'gemini-3.5-flash',             'description' => 'Gemini 3.5 Flash — flagship; thinking_level dial'],
+                ['id' => 'gemini-3.1-pro-preview',       'description' => 'Gemini 3.1 Pro (preview)'],
+                ['id' => 'gemini-3.1-flash-lite',        'description' => 'Gemini 3.1 Flash-Lite — cheapest tier'],
+                ['id' => 'gemini-2.5-pro',               'description' => 'Gemini 2.5 Pro — long context'],
                 ['id' => 'gemini-1.5-flash',             'description' => 'Gemini 1.5 Flash'],
             ],
             'openrouter' => [

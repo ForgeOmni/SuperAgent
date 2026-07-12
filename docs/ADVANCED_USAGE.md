@@ -10991,3 +10991,64 @@ $agent->run('long-horizon task', ['model' => 'claude-fable-5', 'reasoning_effort
 
 `AnthropicProvider` implements `SupportsReasoningEffort` (→ `output_config.effort`) and drops `temperature`/`top_p`/`top_k` and trailing assistant prefills for both models (and Opus 4.7/4.8), since those 400 on this surface. Effort is emitted only for models that support it (Fable 5, Sonnet 5, Opus 4.5+, Sonnet 4.6); `off`/unknown yield no `output_config`. Tests: `Providers\AnthropicProviderTest`, `Thinking\ThinkingConfigTest`.
 
+---
+
+## 93. GPT-5.6 series — Sol / Terra / Luna (v1.1.6)
+
+GPT-5.6 (GA 2026-07-09) replaces GPT-5.5 as OpenAI's flagship line and retires the mini/nano naming — three tiers named **Sol** (frontier, `gpt-5.6` alias), **Terra** (balanced default) and **Luna** (high-throughput), all sharing a 1.05M context / 128K output and vision. Catalog pricing: Sol $5/$0.50 cached/$30, Terra $2.50/$0.25/$15, Luna $1/$0.10/$6 per M (2× in / 1.5× out beyond 272K input). `openai-responses` now defaults to `gpt-5.6-sol`.
+
+**New request surface** (all on `OpenAIResponsesProvider`):
+
+```php
+$provider->chat($messages, $tools, $system, [
+    'reasoning_effort'     => 'max',                  // dial: none|low|medium|high|xhigh|max
+    'reasoning_mode'       => 'pro',                  // Sol Pro — reasoning.mode
+    'reasoning_context'    => 'all_turns',            // persisted reasoning — reasoning.context
+    'prompt_cache_options' => ['mode' => 'explicit'], // 5.6 explicit caching (writes 1.25x, reads -90%)
+]);
+```
+
+Wire fragments: `reasoning: {effort, mode, context}`, `prompt_cache_options` top-level. Everything also passes through verbatim inside `options['reasoning']` (explicit keys win over the flat knobs); invalid `reasoning_mode` / `reasoning_context` values are dropped, never forwarded.
+
+**Effort normalisation** (`OpenAIResponsesProvider::normalizeEffortForModel()`): GPT-5.6 retired `minimal` and added `none` + `max`, so the provider keeps whatever you pass legal per generation — on `gpt-5.6*`: `minimal` → `low`, `off` → `none`, `highest` → `max`; on pre-5.6 ids: `max`/`highest` → `xhigh`, `none`/`off` → `minimal`. Unknown values pass through untouched (server-side additions keep working). The provider now implements `SupportsReasoningEffort`, so the cross-provider `reasoning_effort` option works the same as on Anthropic/GLM/Grok; `reasoningEffortFragment()` returns `{reasoning: {effort}}` and `[]` for unknown tiers.
+
+The Chat Completions `openai` provider keeps its `gpt-4o` default but resolves the three new ids (`getSupportedModels()`, structured outputs enabled for the whole `gpt-5*` line). Programmatic tool calling and the multi-agent beta remain reachable via `extra_body`. Tests: `Providers\OpenAIResponsesProviderTest`, `CostCalculatorTest`.
+
+---
+
+## 94. Grok 4.5 (v1.1.6)
+
+`grok-4.5` (released 2026-07-08) is xAI's new flagship — "smartest and fastest", default of Grok Build — and the new `grok` provider default (`GrokProvider::defaultModel()` + `ProviderRegistry`). 500K context (grok-4.3 keeps 1M as the value tier), vision, server-side tools + remote MCP. Pricing $2 in / $0.50 cached / $6 out per M (2× beyond 200K prompt); the `grok` alias now resolves to it.
+
+**Reasoning-effort dial** — Grok 4.5 reasons unconditionally (no off switch) with `reasoning_effort: low | medium | high` (server default `high`):
+
+```php
+$provider->chat($messages, $tools, $system, ['reasoning_effort' => 'medium']);
+// → {"reasoning_effort": "medium"}  (grok-4.5)
+```
+
+`GrokProvider::reasoningEffortFragment()` gating per model id: `grok-4.5*` → three-level dial (`max`/`xhigh` clamp to `high`, `off` sends nothing since reasoning can't be disabled); `*mini*` → the older two-level `low`/`high`; grok-4.3 / grok-4 / grok-3 → `[]` (they 400 on the param).
+
+**Cache pinning** — xAI recommends pinning a conversation to a server for reliable cache hits. Pass `conversation_id` (or `prompt_cache_key`) in the provider config; the Chat Completions surface sends it as the `x-grok-conv-id` header on every request:
+
+```php
+new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
+```
+
+Tests: `Providers\GrokProviderTest`.
+
+---
+
+## 95. Catalog refresh 2026-07 — Gemini 3.5 Flash + fleet-wide corrections (v1.1.6)
+
+One sweep across the rest of `resources/models.json` against official vendor pricing pages:
+
+- **Gemini (corrections):** `gemini-3.5-pro` / `gemini-3.5-flash-lite` never shipped publicly and were removed. **`gemini-3.5-flash`** (2026-05-19) is Google's de-facto flagship at the real price **$1.50 / $0.15 cached / $9** per M (1.05M ctx / 64K out); `gemini-3.1-pro-preview` corrected to **$2/$12** (≤200K); **`gemini-3.1-flash-lite`** (GA 2026-05-07, $0.25/$1.50) added. The whole Gemini 2.0 line retired 2026-06-01, so the `gemini` provider default and the `ModelResolver` seeds moved off `gemini-2.0-flash` onto `gemini-3.5-flash` (`gemini` / `gemini-3.5` / `gemini-flash-latest` aliases). `GeminiProvider` gains the 3.5-generation **`thinking_level`** control (`minimal|low|medium|high`, replaces `thinkingBudget` — mixing them 400s) plus the cross-provider `reasoning_effort` dial mapped onto it (`off` suppresses thinkingConfig). Tests: `Providers\GeminiProviderTest`.
+- **Kimi:** added **`kimi-k2.7-code`** (2026-06-12 coding flagship, 1T MoE / 32B active, open weights; $0.95 / $0.19 cache-hit / $4 per M, 262K ctx / 32K out, thinking forced on, image+video input) and `kimi-k2.7-code-highspeed` (~180 tok/s, 2× price).
+- **DeepSeek:** `deepseek-v4-flash` output price corrected **$0.55 → $0.28** per M (official), `cache_hit_input` $0.0028 and 384K max output recorded. Heads-up: V4 GA lands mid-July 2026 with **peak-hour 2× pricing** (9:00–12:00 / 14:00–18:00 Beijing); current prices become the off-peak base.
+- **MiniMax:** M3 moved to its permanent-50%-off tiered price — **$0.30 / $0.06 cache-read / $1.20** per M ≤512K input ($0.60/$0.12/$2.40 above); `service_tier: priority` (1.5×) reachable via `extra_body`.
+- **Qwen:** `qwen3.7-plus` GA'd multimodal (image+video) at the new tiered price **$0.40/$1.60** per M ≤256K ($1.20/$4.80 for 256K–1M).
+- **GLM:** `glm-5-turbo` / `glm-5v-turbo` corrected to the official **$1.20/$4** per M; no model newer than glm-5.2.
+- **Anthropic:** verified current — no changes (Sonnet 5 intro pricing still runs through 2026-08-31; Opus 4.1 retires 2026-08-05).
+
+Retired ids stay in the catalog with `replaced_by` markers so `ModelResolver::warnIfDeprecated()` can steer callers. Tests: `Providers\ModelCatalogTest`, `Providers\GeminiProviderTest`, `CostCalculatorTest`.

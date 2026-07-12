@@ -33,6 +33,8 @@ echo $result->text();
 - [OpenAI Responses API](#openai-responses-api)
 - [Cross-provider handoff](#cross-provider-handoff)
 - [Fable 5](#fable-5)
+- [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
+- [Grok 4.5](#grok-45)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -103,8 +105,8 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 | Registry key | Provider | Notes |
 |---|---|---|
 | `anthropic` | Anthropic | API key or stored Claude Code OAuth; `claude-fable-5` flagship + `claude-sonnet-5` — adaptive thinking + effort dial *(Fable 5 / Sonnet 5, v1.1.5)* |
-| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` |
-| `openai-responses` | OpenAI Responses API (`/v1/responses`) | [Dedicated section below](#openai-responses-api) |
+| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT`; GPT-5.6 Sol / Terra / Luna in catalog *(v1.1.6)* |
+| `openai-responses` | OpenAI Responses API (`/v1/responses`) | Default `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, explicit caching *(v1.1.6)*; [dedicated section below](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
 | `gemini` | Google Gemini | API key |
 | `kimi` | Moonshot Kimi | API key; regions `intl` / `cn` / `code` (OAuth) |
@@ -113,7 +115,7 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 | `glm` | BigModel GLM (GLM-5.2 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.2, v1.1.2)* |
 | `minimax` | MiniMax (M3 default) | API key; regions `intl` / `cn`; interleaved thinking + native image/video *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(since v0.9.6, multi-upstream v0.9.8)* |
-| `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.3` *(since v1.0.8)* |
+| `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.5` — reasoning-effort dial + cache pinning *(Grok 4.5, v1.1.6; since v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Local Ollama daemon | No auth — localhost:11434 by default |
 | `lmstudio` | Local LM Studio server | Placeholder auth — localhost:1234 by default *(since v0.9.1)* |
@@ -172,9 +174,10 @@ Dedicated provider at `provider: 'openai-responses'`. Hits `/v1/responses` with 
 | Feature | Responses | Chat Completions |
 |---|---|---|
 | `previous_response_id` continuation | ✅ — server holds state; new turn skips resending context | ❌ — must re-send `messages[]` every turn |
-| `reasoning.effort` (`minimal / low / medium / high / xhigh`) | ✅ native | ❌ requires model-id hacks for o-series |
+| `reasoning.effort` (`minimal…xhigh` pre-5.6; `none…max` on GPT-5.6, normalized per generation) | ✅ native | ❌ requires model-id hacks for o-series |
+| `reasoning.mode` (`standard / pro` — GPT-5.6 Sol Pro) + `reasoning.context` (`auto / all_turns / current_turn`) | ✅ native *(v1.1.6)* | ❌ |
 | `reasoning.summary` | ✅ native | ❌ |
-| `prompt_cache_key` (server-side cache pinning) | ✅ native | ❌ |
+| `prompt_cache_key` (server-side cache pinning) + `prompt_cache_options` (GPT-5.6 explicit caching) | ✅ native | ❌ |
 | `text.verbosity` (`low / medium / high`) | ✅ native | ❌ |
 | `service_tier` (`priority / default / flex / scale`) | ✅ native | ❌ |
 | Classified error types | ✅ via `response.failed` event codes | Pattern-matched on HTTP body |
@@ -182,7 +185,7 @@ Dedicated provider at `provider: 'openai-responses'`. Hits `/v1/responses` with 
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5',
+    'model'    => 'gpt-5.6-sol',   // default; `gpt-5.6` alias resolves here
 ]);
 
 $result = $agent->run('analyse this codebase and propose refactors', [
@@ -325,6 +328,69 @@ $agent->run('hard reasoning prompt', ['features' => ['thinking' => true]]);
 **Sonnet 5** (`claude-sonnet-5`, released 2026-06-30) ships alongside as the new `sonnet` flagship — Anthropic's most agentic Sonnet, close to Opus 4.8 at a lower price. Same Claude-5-generation adaptive surface (adaptive-only thinking, effort dial, no sampling params / prefill), 1M context (128K max output), **$3 in / $15 out** (intro **$2/$10 through 2026-08-31**). The `sonnet` / `claude-sonnet` / `sonnet-5` aliases now resolve to it.
 
 *Since v1.1.5*
+
+---
+
+## GPT-5.6 (Sol / Terra / Luna)
+
+GPT-5.6 (GA 2026-07-09) replaces GPT-5.5 as OpenAI's flagship line and retires the mini/nano suffixes — the family is three tiers sharing a **1.05M-token context** (128K max output) and vision:
+
+| Model | Positioning | $/M in · cached · out |
+|---|---|---|
+| `gpt-5.6-sol` (alias `gpt-5.6`, `sol`) | Frontier flagship for complex professional work | $5 · $0.50 · $30 |
+| `gpt-5.6-terra` (alias `terra`) | Balanced default tier (≈5.5 level, cheaper) | $2.50 · $0.25 · $15 |
+| `gpt-5.6-luna` (alias `luna`) | High-throughput low-cost tier | $1 · $0.10 · $6 |
+
+Inputs beyond 272K tokens bill at 2× in / 1.5× out. `openai-responses` now defaults to `gpt-5.6-sol`; the Chat Completions `openai` provider keeps its `gpt-4o` default but resolves all three ids.
+
+```php
+$agent = new Agent([
+    'provider' => 'openai-responses',
+    'model'    => 'gpt-5.6-sol',
+]);
+
+$result = $agent->run('design then implement the migration', [
+    'reasoning_effort'     => 'max',              // 5.6 dial: none|low|medium|high|xhigh|max
+    'reasoning_mode'       => 'pro',              // Sol Pro — same weights, more parallel compute
+    'reasoning_context'    => 'all_turns',        // persisted-reasoning reuse across turns
+    'prompt_cache_options' => ['mode' => 'explicit'],
+]);
+```
+
+- **Effort dial, normalized per generation.** GPT-5.6 retired `minimal` and added `none` + `max` (default `medium`). The provider normalizes whatever you pass to the target model's legal set — `minimal` → `low` on 5.6, `max` → `xhigh` on pre-5.6 — so cross-provider `reasoning_effort` calls keep working. `OpenAIResponsesProvider` now implements `SupportsReasoningEffort`.
+- **`reasoning.mode: pro`** is the API form of ChatGPT's Sol Pro (Sol only); **`reasoning.context`** controls reasoning persistence across turns. Both also pass through verbatim inside `options['reasoning']`.
+- **Explicit prompt caching.** `prompt_cache_options: {mode: explicit}` — cache writes bill at 1.25× uncached input, reads keep the 90% discount.
+- Programmatic tool calling / multi-agent beta stay reachable via `extra_body` until first-class knobs land.
+
+*Since v1.1.6*
+
+---
+
+## Grok 4.5
+
+Grok 4.5 (`grok-4.5`, released 2026-07-08) is xAI's new flagship and the `grok` provider default — "smartest and fastest", the model behind Grok Build, with a **500K context**, vision, server-side tools (web/X search, code execution) and remote MCP. Pricing is **$2 in / $0.50 cached / $6 out** per million (2× beyond a 200K prompt); `grok-4.3` (1M ctx, $1.25/$2.50, batch-eligible) stays in the catalog as the value tier.
+
+```php
+$agent = new Agent([
+    'provider' => 'grok',
+    'api_key'  => getenv('XAI_API_KEY'),
+    'model'    => 'grok-4.5',                    // or the `grok` alias
+]);
+```
+
+- **Reasoning-effort dial.** Grok 4.5 reasons unconditionally (no off switch) and takes `reasoning_effort: low | medium | high` (server default `high`); `max`/`xhigh` clamp to `high`, `off` sends nothing. grok-4.3 / grok-4 still reject the param, so the fragment stays gated per model id.
+
+```php
+$agent->run('deep agentic coding task', ['reasoning_effort' => 'medium']);
+```
+
+- **Prompt-cache pinning.** xAI recommends pinning a conversation to a server for reliable cache hits ($0.50/M vs $2/M). Pass `conversation_id` (or `prompt_cache_key`) in the provider config and the Chat Completions surface sends it as the `x-grok-conv-id` header on every request:
+
+```php
+new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
+```
+
+*Since v1.1.6*
 
 ---
 

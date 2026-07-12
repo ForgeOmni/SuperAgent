@@ -14,10 +14,11 @@ use SuperAgent\Tools\Builtin\WorkflowTool;
 
 /**
  * xAI Grok provider support: registry wiring, catalog pricing / alias
- * resolution (verified against docs.x.ai — grok-4.3 flagship at $1.25/$2.50,
- * api.x.ai/v1), OpenAI tool-format reuse, env discovery, reasoning_effort
- * gating. Also pins that Cursor Composer support was removed (it has no
- * official public API).
+ * resolution (verified against docs.x.ai — grok-4.5 flagship at $2/$6,
+ * 500K ctx, api.x.ai/v1), OpenAI tool-format reuse, env discovery,
+ * reasoning_effort gating (grok-4.5 three-level dial, mini two-level,
+ * everything else none) and x-grok-conv-id cache pinning. Also pins that
+ * Cursor Composer support was removed (it has no official public API).
  */
 class GrokProviderTest extends TestCase
 {
@@ -27,26 +28,32 @@ class GrokProviderTest extends TestCase
         $this->assertInstanceOf(GrokProvider::class, $p);
         $this->assertInstanceOf(ChatCompletionsProvider::class, $p);
         $this->assertSame('grok', $p->name());
-        $this->assertSame('grok-4.3', $p->getModel());
+        $this->assertSame('grok-4.5', $p->getModel());
     }
 
     public function test_provider_registered_with_capabilities(): void
     {
         $this->assertContains('grok', ProviderRegistry::getProviders());
-        $this->assertSame(1_000_000, ProviderRegistry::getCapabilities('grok')['max_context']);
+        // grok-4.5 flagship window (grok-4.3/grok-4-fast go higher per-model).
+        $this->assertSame(500_000, ProviderRegistry::getCapabilities('grok')['max_context']);
     }
 
     public function test_catalog_pricing_and_alias_resolution(): void
     {
+        $grok45 = ModelCatalog::pricing('grok-4.5');
+        $this->assertSame(2.00, $grok45['input']);
+        $this->assertSame(6.00, $grok45['output']);
         $this->assertSame(['input' => 1.25, 'output' => 2.50], ModelCatalog::pricing('grok-4.3'));
         $this->assertSame(['input' => 3.0, 'output' => 15.0], ModelCatalog::pricing('grok-4'));
-        // `grok` alias resolves to the newest in the grok family — grok-4.3.
-        $this->assertSame('grok-4.3', ModelCatalog::resolveAlias('grok'));
+        // `grok` alias resolves to the newest in the grok family — grok-4.5.
+        $this->assertSame('grok-4.5', ModelCatalog::resolveAlias('grok'));
+        $this->assertSame('grok-4.5', ModelCatalog::resolveAlias('grok-4.5-latest'));
     }
 
     public function test_cost_calculator_pricing(): void
     {
         $oneM = new Usage(1_000_000, 1_000_000);
+        $this->assertEqualsWithDelta(8.0, CostCalculator::calculate('grok-4.5', $oneM), 0.001);
         $this->assertEqualsWithDelta(3.75, CostCalculator::calculate('grok-4.3', $oneM), 0.001);
         $this->assertEqualsWithDelta(18.0, CostCalculator::calculate('grok-4', $oneM), 0.001);
         $this->assertEqualsWithDelta(0.70, CostCalculator::calculate('grok-4-fast', $oneM), 0.001);
@@ -73,16 +80,46 @@ class GrokProviderTest extends TestCase
         }
     }
 
-    public function test_reasoning_effort_only_emitted_for_mini(): void
+    public function test_reasoning_effort_three_level_dial_on_grok_45(): void
     {
-        // grok-3-mini accepts reasoning_effort; the flagship reasons natively
-        // and rejects the param, so the fragment must be empty there.
+        // grok-4.5 takes the low|medium|high dial (server default high);
+        // reasoning cannot be disabled, so `off` sends nothing.
+        $p = new GrokProvider(['api_key' => 'k', 'model' => 'grok-4.5']);
+        $this->assertSame(['reasoning_effort' => 'low'], $p->reasoningEffortFragment('low'));
+        $this->assertSame(['reasoning_effort' => 'medium'], $p->reasoningEffortFragment('medium'));
+        $this->assertSame(['reasoning_effort' => 'high'], $p->reasoningEffortFragment('high'));
+        // max/xhigh clamp down to xAI's top tier.
+        $this->assertSame(['reasoning_effort' => 'high'], $p->reasoningEffortFragment('max'));
+        $this->assertSame([], $p->reasoningEffortFragment('off'));
+    }
+
+    public function test_reasoning_effort_two_level_for_mini_and_none_for_other_flagships(): void
+    {
+        // grok-3-mini keeps the older two-level dial; grok-4.3/grok-4 reason
+        // natively and reject the param, so the fragment must be empty there.
         $mini = new GrokProvider(['api_key' => 'k', 'model' => 'grok-3-mini']);
         $this->assertSame(['reasoning_effort' => 'high'], $mini->reasoningEffortFragment('high'));
         $this->assertSame(['reasoning_effort' => 'low'], $mini->reasoningEffortFragment('low'));
+        $this->assertSame(['reasoning_effort' => 'low'], $mini->reasoningEffortFragment('medium'));
 
-        $flagship = new GrokProvider(['api_key' => 'k', 'model' => 'grok-4.3']);
-        $this->assertSame([], $flagship->reasoningEffortFragment('high'));
+        $previous = new GrokProvider(['api_key' => 'k', 'model' => 'grok-4.3']);
+        $this->assertSame([], $previous->reasoningEffortFragment('high'));
+    }
+
+    public function test_conversation_id_pins_cache_via_header(): void
+    {
+        // xAI cache routing: conversation_id (or prompt_cache_key) becomes
+        // the x-grok-conv-id header on the Chat Completions surface.
+        $p = new GrokProvider(['api_key' => 'k', 'conversation_id' => 'conv-123']);
+        $ref = new \ReflectionObject($p);
+        $prop = $ref->getProperty('client');
+        $prop->setAccessible(true);
+        $headers = $prop->getValue($p)->getConfig('headers');
+        $this->assertSame('conv-123', $headers['x-grok-conv-id'] ?? null);
+
+        $bare = new GrokProvider(['api_key' => 'k']);
+        $bareHeaders = $prop->getValue($bare)->getConfig('headers');
+        $this->assertArrayNotHasKey('x-grok-conv-id', $bareHeaders);
     }
 
     public function test_cursor_composer_support_removed(): void

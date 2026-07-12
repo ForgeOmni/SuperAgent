@@ -30,7 +30,7 @@ use SuperAgent\CLI\Commands\SwarmCommand;
  */
 class SuperAgentApplication
 {
-    private const VERSION = '1.1.1';
+    private const VERSION = '1.1.6';
     private const NAME = 'SuperAgent';
 
     public function run(): int

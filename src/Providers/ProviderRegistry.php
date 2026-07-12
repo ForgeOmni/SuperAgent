@@ -90,7 +90,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'openai-responses' => [
-            'model' => 'gpt-5',
+            'model' => 'gpt-5.6-sol',
             'max_tokens' => 4096,
             'max_retries' => 3,
             // Responses-native default — let the server store state so
@@ -124,7 +124,9 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'gemini' => [
-            'model' => 'gemini-2.0-flash',
+            // The 2.0 line was retired 2026-06-01; 3.5 Flash is the
+            // current de-facto flagship.
+            'model' => 'gemini-3.5-flash',
             'max_tokens' => 8192,
             'max_retries' => 3,
         ],
@@ -165,7 +167,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'grok' => [
-            'model' => 'grok-4.3',
+            'model' => 'grok-4.5',
             'region' => 'default',
             'max_tokens' => 8192,
             'max_retries' => 3,
@@ -874,7 +876,9 @@ class ProviderRegistry
                 'streaming' => true,
                 'tools' => true,
                 'vision' => true,
-                'max_context' => 1_000_000,
+                // grok-4.5 flagship window; grok-4.3 (1M) and grok-4-fast
+                // (2M) go higher — per-model values live in models.json.
+                'max_context' => 500_000,
                 'structured_output' => true,
                 'thinking' => true,
             ],

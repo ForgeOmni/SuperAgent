@@ -34,6 +34,7 @@ class CostCalculator
         'claude-3-haiku-20240307' => ['input' => 0.25, 'output' => 1.25],
 
         // xAI Grok
+        'grok-4.5'                     => ['input' => 2.00, 'output' => 6.00],
         'grok-4.3'                     => ['input' => 1.25, 'output' => 2.50],
         'grok-4.20-0309-reasoning'     => ['input' => 1.25, 'output' => 2.50],
         'grok-4.20-0309-non-reasoning' => ['input' => 1.25, 'output' => 2.50],
@@ -46,6 +47,14 @@ class CostCalculator
         'grok-3-mini'                  => ['input' => 0.30, 'output' => 0.50],
 
         // OpenAI GPT models
+        // (gpt-5.6-* before gpt-5 — the fuzzy prefix match walks insertion
+        // order, so dated 5.6 snapshots must hit the 5.6 rows first.)
+        'gpt-5.6-sol'   => ['input' => 5.00, 'output' => 30.0],
+        'gpt-5.6-terra' => ['input' => 2.50, 'output' => 15.0],
+        'gpt-5.6-luna'  => ['input' => 1.00, 'output' => 6.0],
+        'gpt-5-mini' => ['input' => 0.25, 'output' => 2.0],
+        'gpt-5-nano' => ['input' => 0.05, 'output' => 0.40],
+        'gpt-5' => ['input' => 1.25, 'output' => 10.0],
         'gpt-4o' => ['input' => 2.50, 'output' => 10.0],
         'gpt-4o-2024-11-20' => ['input' => 2.50, 'output' => 10.0],
         'gpt-4o-mini' => ['input' => 0.15, 'output' => 0.60],
