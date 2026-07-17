@@ -109,7 +109,7 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | Default `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, explicit caching *(v1.1.6)*; [dedicated section below](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
 | `gemini` | Google Gemini | API key |
-| `kimi` | Moonshot Kimi | API key; regions `intl` / `cn` / `code` (OAuth) |
+| `kimi` | Moonshot Kimi (Kimi K3 default) | API key; regions `intl` / `cn` / `code` (OAuth); default `kimi-k3` — 2.8T MoE, 1M ctx, always-on thinking, image/video *(Kimi K3, v1.1.7)* |
 | `qwen` | Alibaba Qwen (OpenAI-compat default) | API key; regions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) |
 | `qwen-native` | Alibaba Qwen (DashScope-native body) | Kept for `parameters.thinking_budget` callers |
 | `glm` | BigModel GLM (GLM-5.2 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.2, v1.1.2)* |
@@ -257,7 +257,7 @@ $agent = new Agent(['provider' => 'anthropic', 'api_key' => $key, 'model' => 'cl
 $agent->run('analyse this codebase');
 
 // Hand off to a cheaper / faster model for the next phase:
-$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k2-6'])
+$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k3'])
       ->run('write the unit tests');
 
 // Token-window check after switching — different tokenizers count

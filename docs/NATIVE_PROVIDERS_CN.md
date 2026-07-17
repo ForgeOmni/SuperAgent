@@ -59,10 +59,15 @@ $provider = ProviderRegistry::createWithRegion('qwen', 'us', ['api_key' => '...'
 
 | Provider | 默认模型 | 支持区域 → endpoint |
 |---|---|---|
-| **kimi** | `kimi-k2-6` | `intl` → api.moonshot.ai<br>`cn` → api.moonshot.cn |
+| **kimi** | `kimi-k3` | `intl` → api.moonshot.ai<br>`cn` → api.moonshot.cn |
 | **qwen** | `qwen3.6-max-preview` | `intl` → dashscope-intl.aliyuncs.com (Singapore)<br>`us` → dashscope-us.aliyuncs.com (Virginia)<br>`cn` → dashscope.aliyuncs.com (Beijing)<br>`hk` → cn-hongkong.dashscope.aliyuncs.com |
 | **glm** | `glm-4.6` | `intl` → api.z.ai/api/paas/v4<br>`cn` → open.bigmodel.cn/api/paas/v4 |
 | **minimax** | `MiniMax-M2.7` | `intl` → api.minimax.io<br>`cn` → api.minimaxi.com |
+
+> `kimi-k3`（2026-07-16）是当前 Kimi 旗舰兼默认模型：2.8T 开放权重多模态推理模型
+> （MoE，896 专家激活 16 个），1M token 上下文，thinking 常开，$3 输入 /
+> $0.30 缓存命中 / $15 输出 每 M。`kimi` 别名解析到它；`kimi-k2-6` 仍可通过
+> id 或 `k2` / `kimi-k2` 别名使用。
 
 全量模型清单：`superagent models list` 或查 `resources/models.json`。
 
@@ -70,7 +75,7 @@ $provider = ProviderRegistry::createWithRegion('qwen', 'us', ['api_key' => '...'
 
 ## 3. 各家原生能力
 
-### 3.1 Kimi K2.6
+### 3.1 Kimi K3 / K2.6
 
 | 能力 | 用法 |
 |---|---|

@@ -1,7 +1,7 @@
 {
   "_meta": {
     "schema_version": 2,
-    "updated": "2026-07-12",
+    "updated": "2026-07-17",
     "note": "Source of truth for model catalog + pricing. Per-million-token USD prices. Override at runtime via SUPERAGENT_MODELS_FILE env var or ModelCatalog::loadFromFile(). Each entry may set `family` (for alias resolution), `aliases`, `date` (YYYYMMDD; newest wins within a family), `input`/`output` pricing, and `description`."
   },
 
@@ -173,9 +173,10 @@
       "regions": ["intl", "cn"],
       "capabilities": {"streaming": true, "tools": true, "vision": true, "mcp": true},
       "models": [
+        {"id": "kimi-k3",                  "family": "k3",         "date": "20260716", "input": 3.00, "output": 15.00, "cache_hit_input": 0.30, "aliases": ["kimi", "k3", "kimi-k3"], "description": "Kimi K3 — 2.8T open-weight multimodal reasoning flagship (MoE, 16 of 896 experts active), 1M-token context, always-on thinking mode; agent swarm + skills, image + video input. $3 in / $0.30 cache-hit / $15 out per M", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "thinking": true, "swarm": true, "skills": true, "file_extract": true, "context_cache": "auto", "batch": true, "mcp": true, "max_context": 1048576}},
         {"id": "kimi-k2.7-code",           "family": "k2-code",    "date": "20260612", "input": 0.95, "output": 4.00, "cache_hit_input": 0.19, "aliases": ["kimi-code", "k2.7-code"], "description": "Kimi K2.7 Code — coding flagship (1T MoE / 32B active, open weights): +21.8% Kimi Code Bench v2 over K2.6, thinking forced on (thinking.type enabled, cannot disable; temperature/top_p pinned), image + video input. $0.95 in / $0.19 cache-hit / $4 out per M", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "thinking": true, "context_cache": "auto", "mcp": true, "max_context": 262144, "max_output": 32768}},
         {"id": "kimi-k2.7-code-highspeed", "family": "k2-code",    "date": "20260612", "input": 1.90, "output": 8.00, "cache_hit_input": 0.38, "description": "Kimi K2.7 Code high-speed (~180 tok/s) — same model, 2x price", "capabilities": {"streaming": true, "tools": true, "vision": true, "video": true, "thinking": true, "context_cache": "auto", "mcp": true, "max_context": 262144, "max_output": 32768}},
-        {"id": "kimi-k2-6",                "family": "k2",         "date": "20260420", "input": 0.95, "output": 4.00, "aliases": ["kimi", "k2", "kimi-k2"], "description": "Kimi K2.6 — 1T MoE general flagship, agent swarm, skills (cache-hit input $0.16/M); thinking via reasoning_effort + thinking.type", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "swarm": true, "skills": true, "file_extract": true, "context_cache": "auto", "batch": true, "mcp": true, "max_context": 262144}},
+        {"id": "kimi-k2-6",                "family": "k2",         "date": "20260420", "input": 0.95, "output": 4.00, "aliases": ["k2", "kimi-k2"], "description": "Kimi K2.6 — 1T MoE general flagship, agent swarm, skills (cache-hit input $0.16/M); thinking via reasoning_effort + thinking.type", "capabilities": {"streaming": true, "tools": true, "vision": true, "thinking": true, "swarm": true, "skills": true, "file_extract": true, "context_cache": "auto", "batch": true, "mcp": true, "max_context": 262144}},
         {"id": "kimi-k2-5",                "family": "k2",         "date": "20251001", "input": 0.95, "output": 4.00, "description": "Kimi K2.5 (previous)"},
         {"id": "kimi-latest",              "family": "kimi-latest","date": "20260301", "input": 0.95, "output": 4.00, "description": "Rolling latest"}
       ]

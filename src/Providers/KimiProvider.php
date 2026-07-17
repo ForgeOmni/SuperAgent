@@ -204,7 +204,7 @@ class KimiProvider extends ChatCompletionsProvider implements SupportsPromptCach
 
     protected function defaultModel(): string
     {
-        return 'kimi-k2-6';
+        return 'kimi-k3';
     }
 
     /**

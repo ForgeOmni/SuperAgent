@@ -109,7 +109,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | 默认 `gpt-5.6-sol` —— effort `none…max`、`reasoning.mode: pro`、显式缓存 *(v1.1.6)*；[下方专门小节](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
 | `gemini` | Google Gemini | API key |
-| `kimi` | Moonshot Kimi | API key；region `intl` / `cn` / `code`（OAuth）|
+| `kimi` | Moonshot Kimi（默认 Kimi K3）| API key；region `intl` / `cn` / `code`（OAuth）；默认 `kimi-k3` —— 2.8T MoE，1M ctx，thinking 常开，图像/视频 *(Kimi K3，v1.1.7)* |
 | `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）|
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
 | `glm` | BigModel GLM（默认 GLM-5.2）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.2，v1.1.2)* |
@@ -257,7 +257,7 @@ $agent = new Agent(['provider' => 'anthropic', 'api_key' => $key, 'model' => 'cl
 $agent->run('分析这个代码库');
 
 // 下一阶段切到更便宜/更快的模型：
-$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k2-6'])
+$agent->switchProvider('kimi', ['api_key' => $kimiKey, 'model' => 'kimi-k3'])
       ->run('补单元测试');
 
 // 切完查一下 token 预算 —— 不同 tokenizer 对同一段历史会差 20–30%

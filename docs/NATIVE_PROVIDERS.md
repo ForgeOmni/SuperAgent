@@ -64,7 +64,7 @@ $provider = ProviderRegistry::createWithRegion('qwen', 'us', ['api_key' => '...'
 
 | Provider | Default model | Supported regions → endpoint |
 |---|---|---|
-| **kimi** | `kimi-k2-6` | `intl` → api.moonshot.ai<br>`cn` → api.moonshot.cn |
+| **kimi** | `kimi-k3` | `intl` → api.moonshot.ai<br>`cn` → api.moonshot.cn |
 | **qwen** | `qwen3.6-max-preview` | `intl` → dashscope-intl.aliyuncs.com (Singapore)<br>`us` → dashscope-us.aliyuncs.com (Virginia)<br>`cn` → dashscope.aliyuncs.com (Beijing)<br>`hk` → cn-hongkong.dashscope.aliyuncs.com |
 | **glm** | `glm-4.6` | `intl` → api.z.ai/api/paas/v4<br>`cn` → open.bigmodel.cn/api/paas/v4 |
 | **minimax** | `MiniMax-M3` | `intl` → api.minimax.io<br>`cn` → api.minimaxi.com |
@@ -73,13 +73,19 @@ $provider = ProviderRegistry::createWithRegion('qwen', 'us', ['api_key' => '...'
 > The `minimax` alias resolves to it. `MiniMax-M2.7` stays reachable by id or
 > the `m2` / `minimax-m2` aliases.
 
+> `kimi-k3` (2026-07-16) is the current Kimi flagship and the provider default:
+> a 2.8T open-weight multimodal reasoning model (MoE, 16 of 896 experts active),
+> 1M-token context, always-on thinking, $3 in / $0.30 cache-hit / $15 out per M.
+> The `kimi` alias resolves to it; `kimi-k2-6` stays reachable by id or the
+> `k2` / `kimi-k2` aliases.
+
 Full model list: `superagent models list` or `resources/models.json`.
 
 ---
 
 ## 3. Per-provider native capabilities
 
-### 3.1 Kimi K2.6
+### 3.1 Kimi K3 / K2.6
 
 | Capability | How to use |
 |---|---|

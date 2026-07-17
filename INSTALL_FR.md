@@ -85,7 +85,7 @@ iwr -useb https://raw.githubusercontent.com/forgeomni/superagent/main/install.ps
 Vérifier :
 
 ```bash
-superagent --version    # SuperAgent v1.1.6
+superagent --version    # SuperAgent v1.1.7
 superagent --help
 ```
 

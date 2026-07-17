@@ -131,7 +131,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'kimi' => [
-            'model' => 'kimi-k2-6',
+            'model' => 'kimi-k3',
             'region' => 'intl',
             'max_tokens' => 8192,
             'max_retries' => 3,
@@ -835,7 +835,7 @@ class ProviderRegistry
                 'streaming' => true,
                 'tools' => true,
                 'vision' => true,
-                'max_context' => 262_144,
+                'max_context' => 1_048_576,
                 'structured_output' => true,
                 'regions' => ['intl', 'cn'],
             ],

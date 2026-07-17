@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-07-17
+
+### 💻 Summary
+
+**Kimi K3 lands as Moonshot's new general flagship and becomes the zero-config Kimi default.** Kimi K3 (released 2026-07-16) is a 2.8T open-weight multimodal reasoning model — MoE with 16 of 896 experts active per token, a 1M-token context window, and an always-on thinking mode — priced at $3 in / $0.30 cache-hit / $15 out per M. It carries the general-flagship capability set (agent swarm, skills, file extract, batch, context caching, image + video input). `KimiProvider` and the `ProviderRegistry` kimi defaults move from `kimi-k2-6` to `kimi-k3`, and the bare `kimi` / `k3` / `kimi-k3` aliases now resolve to it. Additive and non-breaking on top of 1.1.6 — every previously shipped id stays reachable, and `kimi-k2-6` is still selectable via its `k2` / `kimi-k2` aliases (the pricier flagship is opt-out by pinning the model explicitly).
+
+### Added
+
+- **Kimi K3** in the catalog (`resources/models.json`) — `kimi-k3` (family `k3`, aliases `kimi` / `k3` / `kimi-k3`), $3.00 in / $0.30 cache-hit / $15.00 out per M, 1M (`1048576`) max context; capabilities: streaming, tools, vision, video, thinking, swarm, skills, file_extract, context_cache (auto), batch, mcp.
+
+### Changed
+
+- **Kimi zero-config default** moves `kimi-k2-6` → `kimi-k3` in `KimiProvider::defaultModel()` and `ProviderRegistry` kimi defaults; the provider-level `max_context` fallback rises `262144` → `1048576` to match. The `kimi` alias is reassigned from `kimi-k2-6` to `kimi-k3`; `kimi-k2-6` keeps its `k2` / `kimi-k2` aliases.
+- `SuperAgentApplication::VERSION` `1.1.6` → `1.1.7`; catalog `_meta.updated` `2026-07-12` → `2026-07-17`.
+
 ## [1.1.6] - 2026-07-12
 
 ### 💻 Summary

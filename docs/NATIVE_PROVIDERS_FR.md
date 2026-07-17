@@ -66,10 +66,16 @@ $provider = ProviderRegistry::createWithRegion('qwen', 'us', ['api_key' => '...'
 
 | Fournisseur | Modèle par défaut | Régions prises en charge → point d'accès |
 |---|---|---|
-| **kimi** | `kimi-k2-6` | `intl` → api.moonshot.ai<br>`cn` → api.moonshot.cn |
+| **kimi** | `kimi-k3` | `intl` → api.moonshot.ai<br>`cn` → api.moonshot.cn |
 | **qwen** | `qwen3.6-max-preview` | `intl` → dashscope-intl.aliyuncs.com (Singapour)<br>`us` → dashscope-us.aliyuncs.com (Virginie)<br>`cn` → dashscope.aliyuncs.com (Pékin)<br>`hk` → cn-hongkong.dashscope.aliyuncs.com |
 | **glm** | `glm-4.6` | `intl` → api.z.ai/api/paas/v4<br>`cn` → open.bigmodel.cn/api/paas/v4 |
 | **minimax** | `MiniMax-M2.7` | `intl` → api.minimax.io<br>`cn` → api.minimaxi.com |
+
+> `kimi-k3` (2026-07-16) est le fleuron Kimi actuel et le modèle par défaut :
+> un modèle de raisonnement multimodal open-weight de 2,8 T (MoE, 16 experts
+> actifs sur 896), contexte 1M tokens, thinking permanent, 3 $ entrée /
+> 0,30 $ cache-hit / 15 $ sortie par M. L'alias `kimi` s'y résout ; `kimi-k2-6`
+> reste accessible par son id ou les alias `k2` / `kimi-k2`.
 
 Liste complète des modèles : `superagent models list` ou `resources/models.json`.
 
@@ -77,7 +83,7 @@ Liste complète des modèles : `superagent models list` ou `resources/models.jso
 
 ## 3. Capacités natives par fournisseur
 
-### 3.1 Kimi K2.6
+### 3.1 Kimi K3 / K2.6
 
 | Capacité | Utilisation |
 |---|---|

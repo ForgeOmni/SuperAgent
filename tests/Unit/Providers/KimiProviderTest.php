@@ -90,10 +90,10 @@ class KimiProviderTest extends TestCase
         $this->assertSame('kimi', $p->name());
     }
 
-    public function test_default_model_is_k2_6(): void
+    public function test_default_model_is_k3(): void
     {
         $p = new KimiProvider(['api_key' => 'sk-x']);
-        $this->assertSame('kimi-k2-6', $p->getModel());
+        $this->assertSame('kimi-k3', $p->getModel());
     }
 
     public function test_authorization_header_is_bearer_api_key(): void
