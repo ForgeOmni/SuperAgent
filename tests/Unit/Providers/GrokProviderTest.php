@@ -122,13 +122,17 @@ class GrokProviderTest extends TestCase
         $this->assertArrayNotHasKey('x-grok-conv-id', $bareHeaders);
     }
 
-    public function test_cursor_composer_support_removed(): void
+    public function test_cursor_is_catalog_reference_only_never_a_provider(): void
     {
-        // Cursor Composer has no official public OpenAI-compatible API, so it
-        // is intentionally not a provider.
+        // Cursor has no official public OpenAI-compatible API, so it is
+        // intentionally NOT a callable provider. Since 1.1.8 its managed
+        // models (composer-2.5, cursor-grok-4.5-high) exist as catalog-only
+        // reference entries — subscription-billed, dispatched via the
+        // cursor-agent CLI — but the registry must keep refusing 'cursor'.
         $this->assertNotContains('cursor', ProviderRegistry::getProviders());
         $this->assertNull(ModelCatalog::resolveAlias('cursor'));
-        $this->assertNull(ModelCatalog::resolveAlias('composer'));
+        $this->assertSame('composer-2.5', ModelCatalog::resolveAlias('composer'));
+        $this->assertNull(ModelCatalog::pricing('composer-2.5')); // no per-token price: subscription-only
         $this->assertNull(ModelCatalog::pricing('composer-1'));
 
         $this->expectException(ProviderException::class);

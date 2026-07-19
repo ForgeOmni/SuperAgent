@@ -42,6 +42,10 @@
         {"id": "gpt-5.4",             "family": "gpt-5.4",       "aliases": ["gpt5.4"], "capabilities": {"streaming": true, "tools": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true, "max_context": 272000}, "description": "GPT-5.4 — strong everyday-coding model (Codex CLI 0.144 + Copilot CLI both expose it). Effort dial low…xhigh + fast speed tier; pricing not published via local CLIs"},
         {"id": "gpt-5.4-mini",        "family": "gpt-5.4-mini",  "capabilities": {"streaming": true, "tools": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true, "max_context": 272000}, "description": "GPT-5.4 Mini — small, fast, cost-efficient tier for simpler coding tasks (Codex CLI 0.144). Effort dial low…xhigh; pricing not published via local CLIs"},
         {"id": "gpt-5.3-codex-spark", "family": "gpt-5.3-codex", "aliases": ["codex-spark"], "capabilities": {"streaming": true, "tools": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true, "max_context": 128000}, "description": "GPT-5.3-Codex-Spark — ultra-fast coding model, 128K ctx, default effort high (Codex CLI 0.144). Pricing not published via local CLIs"},
+        {"id": "gpt-5.3-codex",       "family": "gpt-5.3-codex", "date": "20260210", "capabilities": {"streaming": true, "tools": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true}, "description": "GPT-5.3-Codex — agentic coding flagship of the 5.3 line; effort low…xhigh + fast speed tiers. Attested via cursor-agent 2026.07.16; no longer listed by Codex CLI 0.144 (only the Spark variant remains there) — direct-API availability unverified. Pricing not published via local CLIs"},
+        {"id": "gpt-5.2",             "family": "gpt-5.2",       "aliases": ["gpt5.2"], "capabilities": {"streaming": true, "tools": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true}, "description": "GPT-5.2 — pre-5.4 general flagship, still exposed by cursor-agent 2026.07.16 (not in Codex CLI 0.144's current list) — direct-API availability unverified. Pricing not published via local CLIs"},
+        {"id": "gpt-5.2-codex",       "family": "gpt-5.2-codex", "capabilities": {"streaming": true, "tools": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true}, "description": "GPT-5.2-Codex — 5.2-line agentic coding model; effort low…xhigh + fast speed tiers via cursor-agent 2026.07.16 (not in Codex CLI 0.144) — direct-API availability unverified. Pricing not published via local CLIs"},
+        {"id": "gpt-5.1-codex-max",   "family": "gpt-5.1-codex", "capabilities": {"streaming": true, "tools": true, "thinking": true, "reasoning_effort": true, "effort_control": true, "mcp": true}, "description": "GPT-5.1-Codex-Max — long-horizon agentic coding (Max) tier of the 5.1 line; effort low…xhigh + fast speed tiers via cursor-agent 2026.07.16 (not in Codex CLI 0.144) — direct-API availability unverified. Pricing not published via local CLIs"},
 
         {"id": "gpt-5",         "family": "gpt-5",      "date": "20251101", "input": 1.25, "output": 10.0, "aliases": ["gpt5"], "description": "GPT-5 — previous flagship"},
         {"id": "gpt-5-mini",    "family": "gpt-5-mini", "date": "20251101", "input": 0.25, "output": 2.0,  "aliases": ["gpt5-mini"], "description": "GPT-5 mini"},
@@ -261,6 +265,15 @@
         {"id": "grok-code-fast-1",             "family": "grok-code",  "date": "20250825", "input": 0.20, "output": 1.50, "aliases": ["grok-code"], "capabilities": {"streaming": true, "tools": true, "max_context": 256000}, "description": "Grok Code Fast — agentic coding"},
         {"id": "grok-3",                       "family": "grok-3",     "date": "20250217", "input": 3.0,  "output": 15.0, "description": "Grok 3 (legacy)"},
         {"id": "grok-3-mini",                  "family": "grok-3-mini","date": "20250217", "input": 0.30, "output": 0.50, "capabilities": {"streaming": true, "tools": true, "thinking": true, "max_context": 131072}, "description": "Grok 3 mini — reasoning_effort dial (legacy)"}
+      ]
+    },
+
+    "cursor": {
+      "env": "CURSOR_API_KEY",
+      "capabilities": {"streaming": true, "tools": true},
+      "models": [
+        {"id": "composer-2.5",        "family": "composer",     "aliases": ["composer"], "capabilities": {"streaming": true, "tools": true, "mcp": true}, "description": "Composer 2.5 — Cursor's in-house agentic coding model (cursor-agent 2026.07.16). Subscription-billed, no per-token price. No native SuperAgent provider — dispatch via the cursor-agent CLI (e.g. superaicore)"},
+        {"id": "cursor-grok-4.5-high","family": "cursor-grok",  "capabilities": {"streaming": true, "tools": true, "thinking": true, "mcp": true, "max_context": 500000}, "description": "Cursor Grok 4.5 — xAI Grok 4.5 served through Cursor at high effort (plus a -fast speed variant). Subscription-billed. No native SuperAgent provider — dispatch via the cursor-agent CLI; for direct API use grok/grok-4.5"}
       ]
     }
   }
