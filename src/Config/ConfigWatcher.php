@@ -11,6 +11,9 @@ class ConfigWatcher
     private array $callbacks = [];
     private bool $watching = false;
     private ?int $watchInterval = null;
+
+    /** PID of the forked CLI watcher child, held by the parent only. */
+    private ?int $watcherPid = null;
     
     public function __construct(int $watchInterval = 1000)
     {
@@ -56,10 +59,32 @@ class ConfigWatcher
 
     /**
      * Stop watching for changes.
+     *
+     * The forked child polls a copy-on-write copy of `$this->watching`, so
+     * flipping the flag here can never reach it — the child's lifetime is
+     * managed by signal instead (and by the parent-death check in its loop).
      */
     public function stop(): void
     {
         $this->watching = false;
+
+        if ($this->watcherPid !== null) {
+            if (function_exists('posix_kill')) {
+                @posix_kill($this->watcherPid, SIGTERM);
+            }
+            if (function_exists('pcntl_waitpid')) {
+                @pcntl_waitpid($this->watcherPid, $status);
+            }
+            $this->watcherPid = null;
+        }
+    }
+
+    /**
+     * Last-resort cleanup so a dropped watcher never leaks its child process.
+     */
+    public function __destruct()
+    {
+        $this->stop();
     }
 
     /**
@@ -105,25 +130,31 @@ class ConfigWatcher
      */
     private function startCliWatcher(): void
     {
-        if (!function_exists('pcntl_fork')) {
-            // Fallback to simple checking
+        if (!function_exists('pcntl_fork') || !function_exists('posix_kill') || !function_exists('posix_getppid')) {
+            // Without fork + posix signalling we cannot manage the child's
+            // lifetime — fall back to manual check() polling by the caller.
             return;
         }
         
         $pid = pcntl_fork();
-        
+
         if ($pid == -1) {
             throw new \RuntimeException('Failed to fork watcher process');
         } elseif ($pid == 0) {
-            // Child process
-            while ($this->watching) {
+            // Child process. `$this->watching` is a copy-on-write copy the
+            // parent's stop() can never flip, so exit is driven by SIGTERM
+            // (sent by stop()) or by the parent dying — reparenting changes
+            // our ppid, which the loop condition detects.
+            $parentPid = posix_getppid();
+            while (posix_getppid() === $parentPid) {
                 $this->check();
                 usleep($this->watchInterval * 1000); // Convert to microseconds
             }
             exit(0);
         }
-        
-        // Parent process continues
+
+        // Parent process continues; remember the child so stop() can reap it.
+        $this->watcherPid = $pid;
     }
 
     /**
