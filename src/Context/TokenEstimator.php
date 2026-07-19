@@ -31,6 +31,9 @@ class TokenEstimator
         
         // OpenAI models
         'gpt-5.6' => 1_050_000,
+        'gpt-5.5' => 272_000,
+        'gpt-5.4' => 272_000,
+        'gpt-5.3-codex-spark' => 128_000,
         'gpt-5' => 400_000,
         'gpt-4' => 8_192,
         'gpt-4-32k' => 32_768,

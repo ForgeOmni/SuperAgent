@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-07-19
+
+### 💻 Summary
+
+**Catalog synced against the locally installed AI CLIs** (Claude Code 2.1.215, Codex CLI 0.144.6, Copilot CLI 1.0.71, kimi-cli 1.49.0, cursor-agent 2026.07.16, grok CLI 0.2.103). Codex CLI's authoritative `models_cache.json` shows OpenAI still serves four models the catalog was missing — `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark` — and that the GPT-5.6 Sol/Terra effort dial now tops out at `ultra` (max reasoning + automatic task delegation), not `max`. kimi-cli's zero-config default `kimi-for-coding` (the Kimi Code subscription model on the already-supported `code` region) is now a first-class catalog entry. Anthropic, Grok, and Kimi K3 defaults verified current against their CLIs — no changes needed. Additive and non-breaking on top of 1.1.7.
+
+### Added
+
+- **OpenAI still-served back-catalog** (`resources/models.json`, source: Codex CLI 0.144 model cache) — `gpt-5.5` (previous frontier flagship, effort low…xhigh + fast tier, 272K Codex window; Cursor exposes a 1M variant), `gpt-5.4` (everyday coding; also referenced by Copilot CLI), `gpt-5.4-mini`, and `gpt-5.3-codex-spark` (ultra-fast coding, 128K ctx, default effort high). Entries carry capabilities/context but no pricing — OpenAI has not re-published API prices for these since the 5.6 launch, so `CostCalculator` falls back to its `gpt-5` prefix rate. Mirrored in `OpenAIProvider::getSupportedModels()`, the `/model` picker fallback (`CommandRouter`), and `TokenEstimator` windows (`gpt-5.5`/`gpt-5.4` → 272K, `gpt-5.3-codex-spark` → 128K).
+- **`kimi-for-coding`** (`resources/models.json`) — the Kimi Code subscription model (region `code` → `api.kimi.com/coding`, OAuth bearer; `KimiProvider` has supported this surface since 1.1.4) and kimi-cli 1.49's zero-config default, displayed there as "Kimi-k2.6". 262K ctx, thinking + image + video input; subscription-billed, so no per-token pricing.
+
+### Changed
+
+- **GPT-5.6 Sol/Terra effort ceiling** — descriptions now record the `ultra` effort level (max reasoning with automatic task delegation) that Codex CLI 0.144 exposes on Sol and Terra (Luna still tops out at `max`).
+- `SuperAgentApplication::VERSION` `1.1.7` → `1.1.8`; catalog `_meta.updated` `2026-07-17` → `2026-07-19`.
+
 ## [1.1.7] - 2026-07-17
 
 ### 💻 Summary
