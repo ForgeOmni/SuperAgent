@@ -12161,3 +12161,28 @@ Une passe sur le reste de `resources/models.json` contre les pages de tarificati
 
 Les ids retirés restent au catalogue avec des marqueurs `replaced_by` pour que `ModelResolver::warnIfDeprecated()` puisse orienter les appelants. Tests : `Providers\ModelCatalogTest`, `Providers\GeminiProviderTest`, `CostCalculatorTest`.
 
+
+## 96. Synchronisation du catalogue avec les CLIs locaux — back-catalog OpenAI, kimi-for-coding, bloc cursor catalogue-seul (v1.1.8–v1.1.9)
+
+Au lieu des pages de tarification des vendeurs, cette synchronisation a audité les **CLIs IA installés localement** — Claude Code 2.1.215, Codex CLI 0.144.6, Copilot CLI 1.0.71, kimi-cli 1.49.0, cursor-agent 2026.07.16, grok CLI 0.2.103 — et réconcilié `resources/models.json` avec ce que ces clients first-party servent réellement.
+
+- **Back-catalog OpenAI encore servi (v1.1.8, source : `models_cache.json` du Codex CLI) :** `gpt-5.5` (précédent flagship frontier, effort `low…xhigh` + palier fast, fenêtre Codex 272K ; Cursor expose une variante 1M), `gpt-5.4` (référencé aussi par le Copilot CLI), `gpt-5.4-mini`, `gpt-5.3-codex-spark` (codage ultra-rapide, 128K ctx, effort par défaut `high`). Tous absents du catalogue depuis le lancement de la série 5.6 alors qu'ils sont encore servis. Répliqué dans `OpenAIProvider::getSupportedModels()`, la liste de repli du sélecteur `/model` et les fenêtres de `TokenEstimator`.
+- **Plafond d'effort GPT-5.6 corrigé :** le Codex CLI expose un niveau **`ultra`** (raisonnement maximal + délégation automatique de tâches) sur Sol et Terra ; Luna plafonne à `max`.
+- **`kimi-for-coding` (v1.1.8) :** le modèle d'abonnement Kimi Code — région `code` → `api.kimi.com/coding` avec bearer OAuth, une surface que `KimiProvider` supporte depuis la 1.1.4 — et le défaut zéro-config de kimi-cli 1.49 (affiché « Kimi-k2.6 »). 262K ctx, thinking + image + vidéo en entrée.
+- **Back-catalog attesté par Cursor (v1.1.9) :** `gpt-5.3-codex`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1-codex-max` sous `openai` — exposés par cursor-agent mais absents de la liste courante du Codex CLI ; leurs descriptions marquent la disponibilité API directe comme **non vérifiée**.
+- **Bloc `cursor` catalogue-seul (v1.1.9) :** `composer-2.5` (alias `composer`, le modèle de codage maison de Cursor) et `cursor-grok-4.5-high` (Grok 4.5 via Cursor). Données de référence facturées à l'abonnement, à dispatcher via le CLI cursor-agent. Cursor n'a **pas d'API publique** et reste volontairement hors du `ProviderRegistry` — `create('cursor')` continue de lever une exception, verrouillé par `GrokProviderTest::test_cursor_is_catalog_reference_only_never_a_provider`.
+
+**Sémantique des entrées sans tarif :** les entrées attestées uniquement via des CLIs par abonnement portent capabilities et fenêtres de contexte mais pas de tarif `input`/`output` — `ModelCatalog::pricing()` renvoie `null` et `CostCalculator` retombe sur sa table de préfixes de famille (p. ex. `gpt-5.5` est facturé au tarif `gpt-5`, 1,25 $/10 $) plutôt que d'inventer des chiffres. Vérifiés à jour, aucun changement : la gamme Anthropic (Fable 5 / Opus 4.8 / Sonnet 5 / Haiku 4.5 face à Claude Code 2.1.215) et le défaut `grok` `grok-4.5` (grok CLI).
+
+## 97. Cycle de vie du processus enfant de ConfigWatcher (v1.1.9)
+
+En CLI, `ConfigWatcher::start()` forke un poller d'arrière-plan. Avant la 1.1.9, cet enfant bouclait sur `$this->watching` — une **copie copy-on-write** que le `stop()` du parent ne pouvait jamais basculer — si bien que chaque cycle `start()`/`stop()` laissait fuir une boucle `usleep()` immortelle qui gardait aussi stdout ouvert (symptôme classique : `phpunit --testsuite Unit | tail` suspendu à jamais alors que tous les tests étaient passés, `tail` ne voyant jamais EOF).
+
+Sémantique depuis la 1.1.9 :
+
+- `stop()` envoie **SIGTERM** au PID enfant enregistré et le récolte via `pcntl_waitpid` — il arrête désormais réellement le poller, pas seulement le drapeau du parent.
+- Un nouveau `__destruct()` appelle `stop()` : un watcher abandonné nettoie son enfant.
+- L'enfant se termine de lui-même si le parent meurt : sa boucle revérifie `posix_getppid()` et sort dès qu'il est réadopté.
+- Si `posix_kill` / `posix_getppid` sont indisponibles, `start()` ne forke plus du tout — les appelants retombent sur un polling manuel via `check()`, car un enfant dont on ne peut gérer la vie est pire que pas d'enfant.
+
+Aucun changement d'API — les signatures de `watch()` / `start()` / `stop()` / `check()` sont inchangées.

@@ -105,11 +105,11 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 | Registry key | Provider | Notes |
 |---|---|---|
 | `anthropic` | Anthropic | API key or stored Claude Code OAuth; `claude-fable-5` flagship + `claude-sonnet-5` — adaptive thinking + effort dial *(Fable 5 / Sonnet 5, v1.1.5)* |
-| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT`; GPT-5.6 Sol / Terra / Luna in catalog *(v1.1.6)* |
+| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT`; GPT-5.6 Sol / Terra / Luna in catalog *(v1.1.6)*; still-served back-catalog GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | Default `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, explicit caching *(v1.1.6)*; [dedicated section below](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
 | `gemini` | Google Gemini | API key |
-| `kimi` | Moonshot Kimi (Kimi K3 default) | API key; regions `intl` / `cn` / `code` (OAuth); default `kimi-k3` — 2.8T MoE, 1M ctx, always-on thinking, image/video *(Kimi K3, v1.1.7)* |
+| `kimi` | Moonshot Kimi (Kimi K3 default) | API key; regions `intl` / `cn` / `code` (OAuth); default `kimi-k3` — 2.8T MoE, 1M ctx, always-on thinking, image/video *(Kimi K3, v1.1.7)*; `kimi-for-coding` (Kimi Code subscription, region `code`) in catalog *(v1.1.8)* |
 | `qwen` | Alibaba Qwen (OpenAI-compat default) | API key; regions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) |
 | `qwen-native` | Alibaba Qwen (DashScope-native body) | Kept for `parameters.thinking_budget` callers |
 | `glm` | BigModel GLM (GLM-5.2 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.2, v1.1.2)* |
@@ -160,6 +160,8 @@ superagent models refresh openai       # one provider
 superagent models list                 # show merged catalog
 superagent models status               # catalog source + age
 ```
+
+The bundled catalog is also synced against locally installed AI CLIs (Claude Code, Codex CLI, Copilot CLI, kimi-cli, cursor-agent, grok CLI). Entries attested only through a subscription CLI ship without per-token pricing — `CostCalculator` falls back to family-prefix rates — and the `cursor` block (`composer-2.5`, `cursor-grok-4.5-high`) is catalog-only reference data: Cursor has no public API and is deliberately not a callable provider. *(v1.1.8–1.1.9)*
 
 *Since v0.9.0*
 

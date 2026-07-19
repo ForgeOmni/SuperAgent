@@ -11608,3 +11608,28 @@ new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
 
 已退役 id 带 `replaced_by` 标记留在 catalog 中，供 `ModelResolver::warnIfDeprecated()` 引导调用方。测试：`Providers\ModelCatalogTest`、`Providers\GeminiProviderTest`、`CostCalculatorTest`。
 
+
+## 96. 本地 CLI catalog 对账 —— OpenAI 存量型号、kimi-for-coding、纯目录 cursor 块 (v1.1.8–v1.1.9)
+
+这次同步不看 vendor 定价页，而是审计**本机安装的各家 AI CLI** —— Claude Code 2.1.215、Codex CLI 0.144.6、Copilot CLI 1.0.71、kimi-cli 1.49.0、cursor-agent 2026.07.16、grok CLI 0.2.103 —— 把 `resources/models.json` 和这些第一方客户端实际在服务的型号对齐。
+
+- **OpenAI 仍在服务的存量型号（v1.1.8，来源：Codex CLI 的 `models_cache.json`）：** `gpt-5.5`（上一代旗舰，effort `low…xhigh` + fast 档，Codex 窗口 272K；Cursor 提供 1M 变体）、`gpt-5.4`（Copilot CLI 也引用）、`gpt-5.4-mini`、`gpt-5.3-codex-spark`（极速编码，128K ctx，默认 effort `high`）。5.6 上线后这些型号全部从 catalog 缺失但仍在服务。同步镜像到 `OpenAIProvider::getSupportedModels()`、`/model` 选择器回退列表和 `TokenEstimator` 窗口。
+- **GPT-5.6 effort 上限修正：** Codex CLI 在 Sol 和 Terra 上暴露 **`ultra`** 档（最大推理 + 自动任务委派）；Luna 上限仍是 `max`。
+- **`kimi-for-coding`（v1.1.8）：** Kimi Code 订阅模型 —— region `code` → `api.kimi.com/coding`，OAuth bearer（`KimiProvider` 自 1.1.4 起就支持该面）—— 也是 kimi-cli 1.49 的零配置默认（显示名 "Kimi-k2.6"）。262K ctx，thinking + 图像 + 视频输入。
+- **Cursor 证实的存量型号（v1.1.9）：** `openai` 下新增 `gpt-5.3-codex`、`gpt-5.2`、`gpt-5.2-codex`、`gpt-5.1-codex-max` —— cursor-agent 暴露但 Codex CLI 当前列表没有，描述中标注直连 API 可用性**未验证**。
+- **纯目录 `cursor` 块（v1.1.9）：** `composer-2.5`（别名 `composer`，Cursor 自研编码模型）和 `cursor-grok-4.5-high`（经 Cursor 的 Grok 4.5）。订阅计费的参考数据，经 cursor-agent CLI 派发。Cursor **没有公开 API**，有意保持在 `ProviderRegistry` 之外 —— `create('cursor')` 仍然抛异常，由 `GrokProviderTest::test_cursor_is_catalog_reference_only_never_a_provider` 锁定。
+
+**无定价条目语义：** 仅由订阅制 CLI 证实的条目带 capabilities 和上下文窗口，但不带 `input`/`output` 定价 —— `ModelCatalog::pricing()` 返回 `null`，`CostCalculator` 回退到系列前缀费率表（如 `gpt-5.5` 按 `gpt-5` 费率 $1.25/$10 计），而不是编造数字。核对无误、无需改动：Anthropic 全系（Fable 5 / Opus 4.8 / Sonnet 5 / Haiku 4.5，对照 Claude Code 2.1.215）和 `grok` 默认 `grok-4.5`（grok CLI）。
+
+## 97. ConfigWatcher 子进程生命周期 (v1.1.9)
+
+CLI 下 `ConfigWatcher::start()` 会 fork 一个后台轮询子进程。1.1.9 之前该子进程循环检查 `$this->watching` —— 这是 fork 后的**写时复制副本**，父进程的 `stop()` 永远改不到它 —— 于是每个 `start()`/`stop()` 周期都泄漏一个不死的 `usleep()` 循环，还握着 stdout 不放（经典症状：`phpunit --testsuite Unit | tail` 在全部测试通过后永远挂着，因为 `tail` 等不到 EOF）。
+
+1.1.9 起的语义：
+
+- `stop()` 向记录的子进程 PID 发 **SIGTERM** 并用 `pcntl_waitpid` 回收 —— 现在真的会停掉轮询器，而不只是改父进程的标志。
+- 新增 `__destruct()` 调用 `stop()`，watcher 被丢弃时自动清理子进程。
+- 子进程在父进程死亡时自行退出：循环里复查 `posix_getppid()`，一旦被重新收养就退出。
+- 若 `posix_kill` / `posix_getppid` 不可用，`start()` 干脆不 fork —— 调用方回退到手动 `check()` 轮询，因为管不住生命周期的子进程比没有子进程更糟。
+
+无 API 变化 —— `watch()` / `start()` / `stop()` / `check()` 签名不变。

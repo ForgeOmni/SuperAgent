@@ -11052,3 +11052,28 @@ One sweep across the rest of `resources/models.json` against official vendor pri
 - **Anthropic:** verified current — no changes (Sonnet 5 intro pricing still runs through 2026-08-31; Opus 4.1 retires 2026-08-05).
 
 Retired ids stay in the catalog with `replaced_by` markers so `ModelResolver::warnIfDeprecated()` can steer callers. Tests: `Providers\ModelCatalogTest`, `Providers\GeminiProviderTest`, `CostCalculatorTest`.
+
+## 96. Local-CLI catalog sync — OpenAI back-catalog, kimi-for-coding, catalog-only cursor block (v1.1.8–v1.1.9)
+
+Instead of vendor pricing pages, this sync audited the **locally installed AI CLIs** — Claude Code 2.1.215, Codex CLI 0.144.6, Copilot CLI 1.0.71, kimi-cli 1.49.0, cursor-agent 2026.07.16, grok CLI 0.2.103 — and reconciled `resources/models.json` with what those first-party clients actually serve.
+
+- **OpenAI still-served back-catalog (v1.1.8, source: Codex CLI's `models_cache.json`):** `gpt-5.5` (previous frontier flagship, effort `low…xhigh` + fast tier, 272K Codex window; Cursor exposes a 1M variant), `gpt-5.4` (also referenced by Copilot CLI), `gpt-5.4-mini`, `gpt-5.3-codex-spark` (ultra-fast coding, 128K ctx, default effort `high`). All were absent from the catalog after the 5.6 launch despite still being served. Mirrored in `OpenAIProvider::getSupportedModels()`, the `/model` picker fallback and `TokenEstimator` windows.
+- **GPT-5.6 effort ceiling corrected:** Codex CLI exposes an **`ultra`** effort level (max reasoning + automatic task delegation) on Sol and Terra; Luna tops out at `max`.
+- **`kimi-for-coding` (v1.1.8):** the Kimi Code subscription model — region `code` → `api.kimi.com/coding` with OAuth bearer, a surface `KimiProvider` has supported since 1.1.4 — and kimi-cli 1.49's zero-config default (displayed there as "Kimi-k2.6"). 262K ctx, thinking + image + video input.
+- **Cursor-attested back-catalog (v1.1.9):** `gpt-5.3-codex`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1-codex-max` under `openai` — exposed by cursor-agent but absent from Codex CLI's current list, so their descriptions flag direct-API availability as **unverified**.
+- **Catalog-only `cursor` block (v1.1.9):** `composer-2.5` (alias `composer`, Cursor's in-house coding model) and `cursor-grok-4.5-high` (Grok 4.5 through Cursor). Subscription-billed reference data for dispatch via the cursor-agent CLI. Cursor has **no public API** and deliberately remains outside `ProviderRegistry` — `create('cursor')` keeps throwing, pinned by `GrokProviderTest::test_cursor_is_catalog_reference_only_never_a_provider`.
+
+**Unpriced-entry semantics:** entries attested only through subscription CLIs carry capabilities and context windows but no `input`/`output` pricing — `ModelCatalog::pricing()` returns `null` and `CostCalculator` falls back to its family-prefix table (e.g. `gpt-5.5` bills at the `gpt-5` rate, $1.25/$10) rather than inventing numbers. Verified current with no changes needed: the Anthropic lineup (Fable 5 / Opus 4.8 / Sonnet 5 / Haiku 4.5 vs Claude Code 2.1.215) and the `grok` default `grok-4.5` (grok CLI).
+
+## 97. ConfigWatcher child lifecycle (v1.1.9)
+
+`ConfigWatcher::start()` on CLI forks a background poller. Before 1.1.9 that child looped on `$this->watching` — a **copy-on-write copy** the parent's `stop()` could never flip — so every `start()`/`stop()` cycle leaked an immortal `usleep()` loop that also held stdout open (the classic symptom: `phpunit --testsuite Unit | tail` hanging forever after all tests passed, because `tail` never saw EOF).
+
+Semantics since 1.1.9:
+
+- `stop()` sends **SIGTERM** to the recorded child PID and reaps it via `pcntl_waitpid` — it now actually stops the poller, not just the parent's flag.
+- A new `__destruct()` calls `stop()`, so a dropped watcher cleans up its child.
+- The child self-terminates when the parent dies: its loop re-checks `posix_getppid()` and exits once it is reparented.
+- If `posix_kill` / `posix_getppid` are unavailable, `start()` no longer forks at all — callers fall back to manual `check()` polling, because a child whose lifetime cannot be managed is worse than no child.
+
+No API changes — `watch()` / `start()` / `stop()` / `check()` signatures are untouched.

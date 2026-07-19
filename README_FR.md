@@ -105,11 +105,11 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | Clé de registre | Provider | Notes |
 |---|---|---|
 | `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké ; fleuron `claude-fable-5` + `claude-sonnet-5` — thinking adaptatif + molette effort *(Fable 5 / Sonnet 5, v1.1.5)* |
-| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` ; GPT-5.6 Sol / Terra / Luna au catalogue *(v1.1.6)* |
+| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` ; GPT-5.6 Sol / Terra / Luna au catalogue *(v1.1.6)* ; back-catalog encore servi GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | Défaut `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, cache explicite *(v1.1.6)* ; [section dédiée ci-dessous](#api-openai-responses) |
 | `openrouter` | OpenRouter | Clé API |
 | `gemini` | Google Gemini | Clé API |
-| `kimi` | Moonshot Kimi (défaut Kimi K3) | Clé API ; régions `intl` / `cn` / `code` (OAuth) ; défaut `kimi-k3` — MoE 2,8 T, 1M ctx, thinking permanent, image/vidéo *(Kimi K3, v1.1.7)* |
+| `kimi` | Moonshot Kimi (défaut Kimi K3) | Clé API ; régions `intl` / `cn` / `code` (OAuth) ; défaut `kimi-k3` — MoE 2,8 T, 1M ctx, thinking permanent, image/vidéo *(Kimi K3, v1.1.7)* ; `kimi-for-coding` (abonnement Kimi Code, région `code`) au catalogue *(v1.1.8)* |
 | `qwen` | Alibaba Qwen (OpenAI-compat par défaut) | Clé API ; régions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) |
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
 | `glm` | BigModel GLM (GLM-5.2 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(GLM-5.2, v1.1.2)* |
@@ -160,6 +160,8 @@ superagent models refresh openai       # un provider
 superagent models list                 # catalogue fusionné
 superagent models status               # source + ancienneté
 ```
+
+Le catalogue embarqué est aussi synchronisé avec les CLIs IA installés localement (Claude Code, Codex CLI, Copilot CLI, kimi-cli, cursor-agent, grok CLI). Les entrées attestées uniquement via un CLI par abonnement sont livrées sans tarif au token — `CostCalculator` retombe sur le tarif du préfixe de famille — et le bloc `cursor` (`composer-2.5`, `cursor-grok-4.5-high`) est une pure donnée de référence : Cursor n'a pas d'API publique et n'est volontairement pas un provider appelable. *(v1.1.8–1.1.9)*
 
 *Depuis v0.9.0*
 

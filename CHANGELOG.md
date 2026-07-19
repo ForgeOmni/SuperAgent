@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-07-19
+
+### 💻 Summary
+
+**The Unit-suite "hang" turns out to be a real production bug — `ConfigWatcher` leaked an immortal forked child on every `start()`/`stop()` cycle — and the local-CLI catalog sync is completed with the Cursor-attested back-catalog.** The watcher's forked poller looped on a copy-on-write `$this->watching` flag the parent's `stop()` could never flip, so orphaned `usleep()` loops accumulated and held stdout open (`phpunit --testsuite Unit | tail` hung forever even though all 3180 tests passed). The child's lifetime is now signal-managed and self-terminating. On the catalog side, the four ids only cursor-agent still exposes (`gpt-5.3-codex`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1-codex-max`) land under `openai` flagged as unverified-for-direct-API, plus a **catalog-only `cursor` block** (`composer-2.5`, `cursor-grok-4.5-high`) — reference data for dispatch via the cursor-agent CLI; Cursor deliberately remains impossible to instantiate as a provider. Docs (README / INSTALL / ADVANCED_USAGE, EN/中文/FR) refreshed for 1.1.8+1.1.9. Non-breaking on top of 1.1.8.
+
+### Added
+
+- **Cursor-attested back-catalog** — `gpt-5.3-codex`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1-codex-max` under `openai` (exposed by cursor-agent 2026.07.16 but absent from Codex CLI 0.144's current list; descriptions flag direct-API availability as unverified, no pricing), plus a **catalog-only `cursor` provider block** — `composer-2.5` (alias `composer`) and `cursor-grok-4.5-high`. Cursor still has no public API, so it remains intentionally absent from `ProviderRegistry` (`create('cursor')` keeps throwing) — the entries are reference data for dispatch via the cursor-agent CLI. `GrokProviderTest::test_cursor_composer_support_removed` renamed to `test_cursor_is_catalog_reference_only_never_a_provider` and updated to pin the catalog-only stance.
+
+### Fixed
+
+- **`ConfigWatcher` leaked an immortal child process** — `startCliWatcher()` forked a poller looping on `$this->watching`, but that flag is a copy-on-write copy the parent's `stop()` can never flip, so every `start()`/`stop()` cycle (including two Unit tests) left an orphaned `usleep()` loop holding stdout open — which is why `phpunit --testsuite Unit | tail` hung forever even though all 3180 tests passed. The parent now records the child PID and `stop()` (also invoked from a new `__destruct()`) sends SIGTERM + reaps via `pcntl_waitpid`; the child additionally exits on its own when the parent dies (ppid change check), and forking is skipped entirely when posix signalling is unavailable. Full Unit suite now completes cleanly with zero leftover processes (3180 tests, 12673 assertions, 8 pre-existing skips).
+
+### Changed
+
+- `SuperAgentApplication::VERSION` `1.1.8` → `1.1.9`; INSTALL (EN/中文/FR) version examples bumped.
+- READMEs (EN/中文/FR): `openai` / `kimi` provider-table rows note the still-served back-catalog and `kimi-for-coding`; the Model-catalog section documents the local-CLI sync + the catalog-only `cursor` block. `docs/ADVANCED_USAGE.*` gain §96 (local-CLI catalog sync, v1.1.8–1.1.9) and §97 (ConfigWatcher child lifecycle, v1.1.9).
+
 ## [1.1.8] - 2026-07-19
 
 ### 💻 Summary
@@ -17,11 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **OpenAI still-served back-catalog** (`resources/models.json`, source: Codex CLI 0.144 model cache) — `gpt-5.5` (previous frontier flagship, effort low…xhigh + fast tier, 272K Codex window; Cursor exposes a 1M variant), `gpt-5.4` (everyday coding; also referenced by Copilot CLI), `gpt-5.4-mini`, and `gpt-5.3-codex-spark` (ultra-fast coding, 128K ctx, default effort high). Entries carry capabilities/context but no pricing — OpenAI has not re-published API prices for these since the 5.6 launch, so `CostCalculator` falls back to its `gpt-5` prefix rate. Mirrored in `OpenAIProvider::getSupportedModels()`, the `/model` picker fallback (`CommandRouter`), and `TokenEstimator` windows (`gpt-5.5`/`gpt-5.4` → 272K, `gpt-5.3-codex-spark` → 128K).
 - **`kimi-for-coding`** (`resources/models.json`) — the Kimi Code subscription model (region `code` → `api.kimi.com/coding`, OAuth bearer; `KimiProvider` has supported this surface since 1.1.4) and kimi-cli 1.49's zero-config default, displayed there as "Kimi-k2.6". 262K ctx, thinking + image + video input; subscription-billed, so no per-token pricing.
-- **Cursor-attested back-catalog** — `gpt-5.3-codex`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1-codex-max` under `openai` (exposed by cursor-agent 2026.07.16 but absent from Codex CLI 0.144's current list; descriptions flag direct-API availability as unverified, no pricing), plus a **catalog-only `cursor` provider block** — `composer-2.5` (alias `composer`) and `cursor-grok-4.5-high`. Cursor still has no public API, so it remains intentionally absent from `ProviderRegistry` (`create('cursor')` keeps throwing) — the entries are reference data for dispatch via the cursor-agent CLI. `GrokProviderTest::test_cursor_composer_support_removed` renamed/updated to pin the catalog-only stance.
-
-### Fixed
-
-- **`ConfigWatcher` leaked an immortal child process** — `startCliWatcher()` forked a poller looping on `$this->watching`, but that flag is a copy-on-write copy the parent's `stop()` can never flip, so every `start()`/`stop()` cycle (including two Unit tests) left an orphaned `usleep()` loop holding stdout open — which is why `phpunit --testsuite Unit | tail` hung forever even though all 3180 tests passed. The parent now records the child PID and `stop()` (also invoked from a new `__destruct()`) sends SIGTERM + reaps via `pcntl_waitpid`; the child additionally exits on its own when the parent dies (ppid change check), and forking is skipped entirely when posix signalling is unavailable. Full Unit suite now completes cleanly with zero leftover processes.
 
 ### Changed
 

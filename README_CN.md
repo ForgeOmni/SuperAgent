@@ -105,11 +105,11 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | 注册表 key | Provider | 说明 |
 |---|---|---|
 | `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth；旗舰 `claude-fable-5` + `claude-sonnet-5` —— 自适应思考 + effort 档位 *(Fable 5 / Sonnet 5，v1.1.5)* |
-| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT`；catalog 收录 GPT-5.6 Sol / Terra / Luna *(v1.1.6)* |
+| `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT`；catalog 收录 GPT-5.6 Sol / Terra / Luna *(v1.1.6)*；仍在服务的存量型号 GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | 默认 `gpt-5.6-sol` —— effort `none…max`、`reasoning.mode: pro`、显式缓存 *(v1.1.6)*；[下方专门小节](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
 | `gemini` | Google Gemini | API key |
-| `kimi` | Moonshot Kimi（默认 Kimi K3）| API key；region `intl` / `cn` / `code`（OAuth）；默认 `kimi-k3` —— 2.8T MoE，1M ctx，thinking 常开，图像/视频 *(Kimi K3，v1.1.7)* |
+| `kimi` | Moonshot Kimi（默认 Kimi K3）| API key；region `intl` / `cn` / `code`（OAuth）；默认 `kimi-k3` —— 2.8T MoE，1M ctx，thinking 常开，图像/视频 *(Kimi K3，v1.1.7)*；catalog 收录 `kimi-for-coding`（Kimi Code 订阅，region `code`）*(v1.1.8)* |
 | `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）|
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
 | `glm` | BigModel GLM（默认 GLM-5.2）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.2，v1.1.2)* |
@@ -160,6 +160,8 @@ superagent models refresh openai       # 单个 provider
 superagent models list                 # 显示合并后的 catalog
 superagent models status               # catalog 来源 + age
 ```
+
+内置 catalog 还会和本机安装的各家 AI CLI（Claude Code、Codex CLI、Copilot CLI、kimi-cli、cursor-agent、grok CLI）对账同步。仅由订阅制 CLI 证实的条目不带单 token 定价 —— `CostCalculator` 回退到同系列前缀费率；`cursor` 块（`composer-2.5`、`cursor-grok-4.5-high`）是纯目录参考数据：Cursor 没有公开 API，有意不作为可调用的 provider。*(v1.1.8–1.1.9)*
 
 *v0.9.0 起*
 

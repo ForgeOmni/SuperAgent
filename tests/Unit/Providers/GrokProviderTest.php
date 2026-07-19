@@ -125,7 +125,7 @@ class GrokProviderTest extends TestCase
     public function test_cursor_is_catalog_reference_only_never_a_provider(): void
     {
         // Cursor has no official public OpenAI-compatible API, so it is
-        // intentionally NOT a callable provider. Since 1.1.8 its managed
+        // intentionally NOT a callable provider. Since 1.1.9 its managed
         // models (composer-2.5, cursor-grok-4.5-high) exist as catalog-only
         // reference entries — subscription-billed, dispatched via the
         // cursor-agent CLI — but the registry must keep refusing 'cursor'.
