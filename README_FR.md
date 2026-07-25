@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.8-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.1.10-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -33,6 +33,7 @@ echo $result->text();
 - [API OpenAI Responses](#api-openai-responses)
 - [Bascule inter-providers](#bascule-inter-providers)
 - [Fable 5](#fable-5)
+- [Opus 5](#opus-5)
 - [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
 - [Grok 4.5](#grok-45)
 - [DeepSeek V4](#deepseek-v4)
