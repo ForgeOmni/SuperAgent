@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`ModelResolver::resolve()` silently upgraded pinned model ids.** Step 3's fuzzy family match (`str_contains($id, 'opus')` → family `opus` → newest entry) applied to full model ids as well as shorthand, so `claude-opus-4-8` and `claude-opus-4-5` both resolved to `claude-opus-4-20250514` — a config pinned to a specific model ran a different one. A new exact-model-id guard (`isKnownModelId()`, checking the family registry and `ModelCatalog`) runs before family resolution: any id the resolver or catalog knows is returned unchanged, and only bare aliases track the newest release.
 
+### Security
+
+- **`guzzlehttp/guzzle` floor raised to `^7.15.1`** (was `^7.0`; lock 7.10.0 → 7.15.1) — clears the four advisories that failed `composer audit --no-dev`: URI fragments disclosed in redirect `Referer` headers (GHSA-h95v-h523-3mw8), host-only cookie scope not preserved (GHSA-wm3w-8rrp-j577), unbounded response cookies (GHSA-f283-ghqc-fg79), and `Proxy-Authorization` headers forwarded to origin servers (GHSA-94pj-82f3-465w). `guzzlehttp/promises` 2.5.1, `guzzlehttp/psr7` 2.13.0, and `symfony/deprecation-contracts` v3.7.1 come along as transitive updates. Raising the constraint (not just the lock) matters because consumers of the library resolve their own Guzzle version.
+
 ### Changed
 
 - **`anthropic` default → Opus 5** — `ProviderRegistry` default config and the `AnthropicProvider` constructor fallback resolve zero-config `anthropic` to `claude-opus-5` (was `claude-opus-4-8`), and the OAuth legacy-model rewrite now targets it too. Squad's **EXPERT** tier still routes to `claude-fable-5`; every id remains reachable by explicit config.
