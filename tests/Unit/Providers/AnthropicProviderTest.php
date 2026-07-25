@@ -65,6 +65,46 @@ class AnthropicProviderTest extends TestCase
         }
     }
 
+    public function test_opus_5_uses_the_adaptive_only_surface(): void
+    {
+        $body = $this->buildBody($this->provider('claude-opus-5'), [
+            'thinking' => ThinkingConfig::enabled(20_000),
+            'temperature' => 0.7,
+            'top_p' => 0.9,
+            'top_k' => 40,
+            'assistant_prefill' => 'Sure, here',
+            'reasoning_effort' => 'xhigh',
+        ]);
+
+        // budget_tokens 400s on Opus 5 — the fixed budget becomes adaptive.
+        $this->assertSame(['type' => 'adaptive'], $body['thinking']);
+        // Sampling params and the trailing prefill are removed (both 400).
+        $this->assertArrayNotHasKey('temperature', $body);
+        $this->assertArrayNotHasKey('top_p', $body);
+        $this->assertArrayNotHasKey('top_k', $body);
+        $this->assertSame('user', end($body['messages'])['role']);
+        // Full effort ladder is available.
+        $this->assertSame(['effort' => 'xhigh'], $body['output_config']);
+    }
+
+    public function test_opus_5_disabled_thinking_never_emits_a_thinking_key(): void
+    {
+        // `thinking: {type: disabled}` is rejected above `high` effort on Opus 5,
+        // so disabled must omit the key entirely rather than send `disabled`.
+        $body = $this->buildBody($this->provider('claude-opus-5'), [
+            'thinking' => ThinkingConfig::disabled(),
+            'reasoning_effort' => 'max',
+        ]);
+        $this->assertArrayNotHasKey('thinking', $body);
+        $this->assertSame(['effort' => 'max'], $body['output_config']);
+    }
+
+    public function test_default_model_is_opus_5(): void
+    {
+        $p = new AnthropicProvider(['api_key' => 'k']);
+        $this->assertSame('claude-opus-5', $p->getModel());
+    }
+
     public function test_effort_ignored_on_unsupported_model(): void
     {
         $body = $this->buildBody(

@@ -133,6 +133,7 @@ class ThinkingConfig
         $thinkingModels = [
             'claude-4', 'claude-opus-4', 'claude-sonnet-4',
             'claude-haiku-4', 'claude-fable', 'fable-5',
+            'claude-opus-5', 'opus-5',
             'claude-sonnet-5', 'sonnet-5',
         ];
 
@@ -154,21 +155,25 @@ class ThinkingConfig
      * Check if a model uses the adaptive-thinking surface.
      *
      * These models take `thinking: {type: "adaptive"}` and REJECT an explicit
-     * `budget_tokens` — Opus 4.7 / 4.8 and Fable 5 return a 400 if `budget_tokens`
-     * is sent, and it is deprecated on Opus 4.6 / Sonnet 4.6. On Fable 5 thinking
-     * is always on; passing `type:"disabled"` also 400s, so we simply omit the
-     * budget and let the server manage depth (steer via `output_config.effort`).
+     * `budget_tokens` — Opus 5, Opus 4.7 / 4.8 and Fable 5 return a 400 if
+     * `budget_tokens` is sent, and it is deprecated on Opus 4.6 / Sonnet 4.6. On
+     * Fable 5 thinking is always on; passing `type:"disabled"` also 400s, so we
+     * simply omit the budget and let the server manage depth (steer via
+     * `output_config.effort`). On Opus 5 thinking is ON by default and
+     * `type:"disabled"` is accepted only at effort ≤ high — `disabled()` emits no
+     * `thinking` key at all, so that pairing can never 400.
      */
     public static function modelSupportsAdaptiveThinking(string $model): bool
     {
         $model = strtolower($model);
 
-        // 4.6+ Opus/Sonnet and the Claude 5 generation (Fable 5, Sonnet 5) are
-        // adaptive-only.
+        // 4.6+ Opus/Sonnet and the Claude 5 generation (Fable 5, Opus 5,
+        // Sonnet 5) are adaptive-only.
         $adaptiveModels = [
             'opus-4-6', 'opus-4-7', 'opus-4-8',
             'sonnet-4-6',
             'claude-fable', 'fable-5',
+            'claude-opus-5', 'opus-5',
             'claude-sonnet-5', 'sonnet-5',
         ];
 

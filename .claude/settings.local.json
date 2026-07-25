@@ -159,7 +159,9 @@
       "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php)",
       "Bash(./vendor/bin/phpunit tests/Unit/AgentSwitchProviderTest.php tests/Unit/Conversation tests/Unit/Providers)",
       "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/MessageTest.php tests/Unit/ContentBlockTest.php tests/Unit/AnthropicProviderOAuthTest.php tests/Unit/Phase2ProvidersTest.php tests/Unit/AgentProviderResolutionTest.php tests/Unit/AgentSwitchProviderTest.php)",
-      "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/AgentSwitchProviderTest.php)"
+      "Bash(./vendor/bin/phpunit tests/Unit/Conversation tests/Unit/Providers tests/Unit/AgentSwitchProviderTest.php)",
+      "Skill(claude-api)",
+      "Bash(perl -0pi -e 's/\\\\$this->assertSame\\\\\\('\\\\''claude-opus-4-8'\\\\'', \\\\$body\\\\['\\\\''model'\\\\''\\\\]\\\\\\);/$this->assertSame\\('\\\\''claude-opus-5'\\\\'', $body['\\\\''model'\\\\'']\\);/; s/\\\\$this->assertSame\\\\\\('\\\\''claude-opus-4-8'\\\\'', \\\\$this->buildBody\\\\\\(\\\\$p\\\\\\)\\\\['\\\\''model'\\\\''\\\\]\\\\\\);/$this->assertSame\\('\\\\''claude-opus-5'\\\\'', $this->buildBody\\($p\\)['\\\\''model'\\\\'']\\);/' tests/Unit/AnthropicProviderOAuthTest.php)"
     ]
   }
 }

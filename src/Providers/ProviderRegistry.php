@@ -80,7 +80,7 @@ class ProviderRegistry
      */
     protected static array $defaultConfigs = [
         'anthropic' => [
-            'model' => 'claude-opus-4-8',
+            'model' => 'claude-opus-5',
             'max_tokens' => 4096,
             'max_retries' => 3,
         ],

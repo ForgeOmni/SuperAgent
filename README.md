@@ -104,7 +104,7 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 
 | Registry key | Provider | Notes |
 |---|---|---|
-| `anthropic` | Anthropic | API key or stored Claude Code OAuth; `claude-fable-5` flagship + `claude-sonnet-5` — adaptive thinking + effort dial *(Fable 5 / Sonnet 5, v1.1.5)* |
+| `anthropic` | Anthropic | API key or stored Claude Code OAuth; default `claude-opus-5` *(v1.1.10)*, `claude-fable-5` flagship + `claude-sonnet-5` — adaptive thinking + effort dial *(Fable 5 / Sonnet 5, v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT`; GPT-5.6 Sol / Terra / Luna in catalog *(v1.1.6)*; still-served back-catalog GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | Default `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, explicit caching *(v1.1.6)*; [dedicated section below](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
@@ -301,7 +301,7 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 
 ## Fable 5
 
-Fable 5 (`claude-fable-5`) is Anthropic's most capable model — for the most demanding reasoning and long-horizon agentic work. It runs on the standard `anthropic` provider (API key **or** Claude Code OAuth), with a **1M-token context** (128K max output) and **high-res vision**. PAYG pricing is **$10 in / $50 out** per million tokens — above the Opus tier (Opus 4.8 is $5/$25). It is the Squad **EXPERT**-tier model; the zero-config `anthropic` default remains **Claude Opus 4.8**. Refusals fall back to Opus 4.8.
+Fable 5 (`claude-fable-5`) is Anthropic's most capable model — for the most demanding reasoning and long-horizon agentic work. It runs on the standard `anthropic` provider (API key **or** Claude Code OAuth), with a **1M-token context** (128K max output) and **high-res vision**. PAYG pricing is **$10 in / $50 out** per million tokens — above the Opus tier (Opus 5 is $5/$25). It is the Squad **EXPERT**-tier model; the zero-config `anthropic` default is **Claude Opus 5**. Refusals fall back to Opus 4.8.
 
 ```php
 $agent = new Agent([
@@ -330,6 +330,33 @@ $agent->run('hard reasoning prompt', ['features' => ['thinking' => true]]);
 **Sonnet 5** (`claude-sonnet-5`, released 2026-06-30) ships alongside as the new `sonnet` flagship — Anthropic's most agentic Sonnet, close to Opus 4.8 at a lower price. Same Claude-5-generation adaptive surface (adaptive-only thinking, effort dial, no sampling params / prefill), 1M context (128K max output), **$3 in / $15 out** (intro **$2/$10 through 2026-08-31**). The `sonnet` / `claude-sonnet` / `sonnet-5` aliases now resolve to it.
 
 *Since v1.1.5*
+
+---
+
+## Opus 5
+
+**Opus 5** (`claude-opus-5`) is the current flagship Opus and the **zero-config `anthropic` default** — a drop-in upgrade over Opus 4.8 at the same **$5 in / $25 out** per million tokens, with a 1M context (128K max output) and fast mode. The `opus` / `claude-opus` / `opus-5` aliases resolve to it.
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('ANTHROPIC_API_KEY'),
+    // 'model' => 'claude-opus-5',   // implied — this is the zero-config default
+]);
+
+$agent->run('complex agentic coding task', ['reasoning_effort' => 'xhigh']);
+```
+
+It shares the Claude-5-generation request surface, which the SDK applies for you:
+
+- **Thinking is ON by default** and adaptive — `thinking: {type: "adaptive"}`; an explicit `budget_tokens` **400s**, so a fixed budget is silently upgraded to adaptive. `ThinkingConfig::disabled()` emits no `thinking` key at all, so it can never collide with Opus 5's rule that `type: "disabled"` is rejected above `high` effort.
+- **No sampling params, no prefill** — `temperature` / `top_p` / `top_k` and a trailing assistant prefill are dropped (they 400).
+- **Full effort dial** — `output_config.effort` accepts `low` … `high` … `xhigh` … `max`. Start at `xhigh` for coding/agentic work, then sweep down: `low`/`medium` are unusually strong on this model.
+- **512-token prompt-cache minimum** (down from 1024 on Opus 4.8), so shorter prefixes now cache.
+
+Pinned ids are never rewritten: a config on `claude-opus-4-8` (or any other explicit id) keeps running that exact model — only the bare family aliases track the newest release.
+
+*Since v1.1.10*
 
 ---
 

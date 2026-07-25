@@ -37,6 +37,20 @@ class ModelCatalogTest extends TestCase
         $this->assertSame(25.0, $p['output']);
     }
 
+    public function test_opus_5_is_in_the_catalog_with_official_pricing(): void
+    {
+        $p = ModelCatalog::pricing('claude-opus-5');
+        $this->assertNotNull($p);
+        $this->assertSame(5.0, $p['input']);
+        $this->assertSame(25.0, $p['output']);
+
+        $caps = ModelCatalog::capabilitiesFor('claude-opus-5');
+        $this->assertTrue($caps['adaptive_thinking'] ?? false);
+        $this->assertTrue($caps['effort_control'] ?? false);
+        $this->assertTrue($caps['fast_mode'] ?? false);
+        $this->assertSame(1_000_000, $caps['max_context'] ?? null);
+    }
+
     public function test_pricing_lookup_for_gemini_25_flash(): void
     {
         $p = ModelCatalog::pricing('gemini-2.5-flash');
@@ -56,9 +70,11 @@ class ModelCatalogTest extends TestCase
 
     public function test_resolve_alias_picks_newest_in_family(): void
     {
-        // "opus" alias should resolve to the newest Opus model (Opus 4.8 per bundled catalog)
-        $this->assertSame('claude-opus-4-8', ModelCatalog::resolveAlias('opus'));
-        $this->assertSame('claude-opus-4-8', ModelCatalog::resolveAlias('CLAUDE-OPUS'));
+        // "opus" alias should resolve to the newest Opus model (Opus 5 per bundled catalog)
+        $this->assertSame('claude-opus-5', ModelCatalog::resolveAlias('opus'));
+        $this->assertSame('claude-opus-5', ModelCatalog::resolveAlias('CLAUDE-OPUS'));
+        // Pinned-generation aliases keep pointing at their own generation.
+        $this->assertSame('claude-opus-4-8', ModelCatalog::resolveAlias('claude-opus-4-8'));
     }
 
     public function test_resolve_alias_returns_null_on_unknown(): void

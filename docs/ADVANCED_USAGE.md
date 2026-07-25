@@ -10977,7 +10977,7 @@ Two new `anthropic` models land on the **Claude 5 adaptive-only** request surfac
 - **`claude-fable-5`** — Anthropic's most capable model. 1M context / 128K output, high-res vision. Priced **$10 in / $50 out** per M (above the Opus tier — Opus 4.8 is $5/$25). Promoted to the Squad **EXPERT** tier (`Squad\ModelTierMap`). Requires 30-day data retention (ZDR orgs 400); refusals fall back to Opus 4.8 (`stop_reason: "refusal"`).
 - **`claude-sonnet-5`** — most agentic Sonnet yet (released 2026-06-30), close to Opus 4.8 at a lower price; the new `sonnet` flagship. 1M context / 128K output, **$3 in / $15 out** per M (intro **$2/$10 through 2026-08-31**). Registered as the newest entry of the `sonnet` family in the `ModelResolver` seed, so `sonnet` / `claude-sonnet` / `sonnet-5` resolve to it.
 
-The zero-config `anthropic` default is **`claude-opus-4-8`** (bumped from the retired `claude-3-5-sonnet-20241022`) — Fable 5 is opt-in by id/alias or via the EXPERT tier, not the blanket default.
+The zero-config `anthropic` default was **`claude-opus-4-8`** here (bumped from the retired `claude-3-5-sonnet-20241022`), and is **`claude-opus-5`** as of v1.1.10 (§98) — Fable 5 is opt-in by id/alias or via the EXPERT tier, not the blanket default.
 
 **Request surface** (handled automatically by `AnthropicProvider` + `ThinkingConfig`; details in §16 → Adaptive-only models):
 
@@ -11077,3 +11077,33 @@ Semantics since 1.1.9:
 - If `posix_kill` / `posix_getppid` are unavailable, `start()` no longer forks at all — callers fall back to manual `check()` polling, because a child whose lifetime cannot be managed is worse than no child.
 
 No API changes — `watch()` / `start()` / `stop()` / `check()` signatures are untouched.
+
+---
+
+## 98. Claude Opus 5 (v1.1.10)
+
+`claude-opus-5` joins the `anthropic` catalog as the current flagship Opus and the **zero-config default** (bumped from `claude-opus-4-8`). Same price tier as 4.8 — **$5 in / $25 out** per M — with a 1M context (128K max output), fast mode, and the full effort ladder. Mirrored on OpenRouter (`anthropic/claude-opus-5`) and Bedrock (`anthropic.claude-opus-5-v1:0`), and priced in the `CostCalculator` fallback table.
+
+It sits on the same Claude-5 adaptive-only request surface as Fable 5 / Sonnet 5 (§92), plus two Opus-5-specific rules the SDK absorbs:
+
+- **Thinking is ON by default.** `ThinkingConfig::modelSupportsAdaptiveThinking('claude-opus-5')` is `true`, so `thinking: {type: "adaptive"}` is emitted and an explicit `budget_tokens` is never sent (400). A caller-supplied fixed budget is upgraded to adaptive rather than dropped.
+- **`type: "disabled"` is rejected above `high` effort.** `ThinkingConfig::disabled()` emits *no* `thinking` key at all, so `['thinking' => ThinkingConfig::disabled(), 'reasoning_effort' => 'max']` can never produce that 400.
+- **Effort** — `output_config.effort` ∈ `low|medium|high|xhigh|max`. `xhigh` is the recommended start for coding/agentic work; `low`/`medium` remain strong and are the cost lever.
+- **Prompt cache minimum drops to 512 tokens** (1024 on Opus 4.8), recorded as `capabilities.cache_min_tokens` in the catalog.
+
+### Alias + pinning semantics
+
+`opus` / `claude-opus` / `opus-5` / `opus5` now resolve to `claude-opus-5` in **both** resolvers (`ModelCatalog::resolveAlias()` by newest-date-in-family, and the `ModelResolver` seed registry, where Opus 5 and Opus 4.8 are registered as the two newest entries of the `opus` family).
+
+`ModelResolver::resolve()` also gained an exact-model-id guard ahead of its fuzzy family match:
+
+```php
+ModelResolver::resolve('opus');             // claude-opus-5   (alias → newest)
+ModelResolver::resolve('claude-opus-5');    // claude-opus-5
+ModelResolver::resolve('claude-opus-4-8');  // claude-opus-4-8 (pinned, NOT upgraded)
+ModelResolver::resolve('claude-opus-4-5');  // claude-opus-4-5 (pinned)
+```
+
+Previously the fuzzy match (`str_contains($id, 'opus')` → family `opus` → newest) rewrote *every* explicit Opus id onto the family's newest entry — so a config pinned to `claude-opus-4-8` silently ran `claude-opus-4-20250514`. Any id known to the family registry or `ModelCatalog` is now returned unchanged; only bare aliases track releases.
+
+Squad's **EXPERT** tier still routes to `claude-fable-5` — Opus 5 sits below it in the tier map and is the general-purpose default.

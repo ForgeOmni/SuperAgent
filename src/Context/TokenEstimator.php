@@ -26,6 +26,7 @@ class TokenEstimator
         'claude-4-sonnet' => 1_000_000,
         'claude-opus-4' => 1_000_000,
         'claude-sonnet-4' => 1_000_000,
+        'claude-opus-5' => 1_000_000,
         'claude-sonnet-5' => 1_000_000,
         'claude-fable' => 1_000_000,
         

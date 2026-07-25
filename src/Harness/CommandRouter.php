@@ -756,8 +756,9 @@ class CommandRouter
 
         return match ($provider) {
             'anthropic' => [
-                ['id' => 'claude-opus-4-8',    'description' => 'Opus 4.8 — flagship reasoning + workflows (default)'],
+                ['id' => 'claude-opus-5',      'description' => 'Opus 5 — flagship Opus; thinking on by default + effort low…max (default)'],
                 ['id' => 'claude-fable-5',     'description' => 'Fable 5 — most capable; adaptive thinking + effort dial'],
+                ['id' => 'claude-opus-4-8',    'description' => 'Opus 4.8 — previous flagship reasoning + workflows'],
                 ['id' => 'claude-sonnet-5',    'description' => 'Sonnet 5 — next-gen balanced; adaptive thinking + effort dial'],
                 ['id' => 'claude-opus-4-5',    'description' => 'Opus 4.5'],
                 ['id' => 'claude-sonnet-4-5',  'description' => 'Sonnet 4.5 — balanced'],

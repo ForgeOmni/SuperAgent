@@ -25,6 +25,12 @@ class ThinkingConfigTest extends TestCase
         $this->assertTrue(ThinkingConfig::modelSupportsAdaptiveThinking('claude-opus-4-8'));
     }
 
+    public function test_opus_5_is_adaptive(): void
+    {
+        $this->assertTrue(ThinkingConfig::modelSupportsThinking('claude-opus-5'));
+        $this->assertTrue(ThinkingConfig::modelSupportsAdaptiveThinking('claude-opus-5'));
+    }
+
     public function test_sonnet_5_is_adaptive(): void
     {
         $this->assertTrue(ThinkingConfig::modelSupportsThinking('claude-sonnet-5'));
@@ -44,7 +50,7 @@ class ThinkingConfigTest extends TestCase
     {
         $cfg = ThinkingConfig::adaptive();
 
-        foreach (['claude-fable-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-4-6'] as $model) {
+        foreach (['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-4-6'] as $model) {
             $param = $cfg->toApiParameter($model);
             $this->assertSame(['type' => 'adaptive'], $param, "unexpected shape for {$model}");
             $this->assertArrayNotHasKey('budget_tokens', $param, "budget_tokens leaked for {$model}");

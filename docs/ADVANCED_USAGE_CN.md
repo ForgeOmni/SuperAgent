@@ -11532,7 +11532,7 @@ $provider->chat($messages, $tools, $system, ['features' => ['thinking' => ['budg
 - **`claude-fable-5`** —— Anthropic 最强模型。1M context / 128K 输出，高分辨率视觉。定价 **$10 输入 / $50 输出**（每 M，高于 Opus 档 —— Opus 4.8 为 $5/$25）。提升为 Squad **EXPERT** 档（`Squad\ModelTierMap`）。需 30 天数据保留（ZDR 组织 400）；触发拒绝时回退到 Opus 4.8（`stop_reason: "refusal"`）。
 - **`claude-sonnet-5`** —— 最具 agentic 能力的 Sonnet（2026-06-30 发布），性能接近 Opus 4.8 但价格更低；新的 `sonnet` 旗舰。1M context / 128K 输出，**$3 输入 / $15 输出**（每 M，限时 **$2/$10 至 2026-08-31**）。在 `ModelResolver` seed 中注册为 `sonnet` family 最新条目，因此 `sonnet` / `claude-sonnet` / `sonnet-5` 都解析到它。
 
-零配置 `anthropic` 默认是 **`claude-opus-4-8`**（由已退役的 `claude-3-5-sonnet-20241022` 升级而来）—— Fable 5 通过 id/别名或 EXPERT 档按需选用，而非一刀切默认。
+本版本中零配置 `anthropic` 默认是 **`claude-opus-4-8`**（由已退役的 `claude-3-5-sonnet-20241022` 升级而来）；自 v1.1.10 起改为 **`claude-opus-5`**（§98）—— Fable 5 通过 id/别名或 EXPERT 档按需选用，而非一刀切默认。
 
 **请求形态**（由 `AnthropicProvider` + `ThinkingConfig` 自动处理；详见 §16 → 仅自适应模型）：
 
@@ -11633,3 +11633,33 @@ CLI 下 `ConfigWatcher::start()` 会 fork 一个后台轮询子进程。1.1.9 �
 - 若 `posix_kill` / `posix_getppid` 不可用，`start()` 干脆不 fork —— 调用方回退到手动 `check()` 轮询，因为管不住生命周期的子进程比没有子进程更糟。
 
 无 API 变化 —— `watch()` / `start()` / `stop()` / `check()` 签名不变。
+
+---
+
+## 98. Claude Opus 5 (v1.1.10)
+
+`claude-opus-5` 作为当前 Opus 旗舰进入 `anthropic` catalog，并成为**零配置默认模型**（由 `claude-opus-4-8` 升级而来）。价格档与 4.8 相同 —— 每 M **$5 输入 / $25 输出** —— 1M context（最大输出 128K）、fast mode、完整 effort 阶梯。OpenRouter（`anthropic/claude-opus-5`）与 Bedrock（`anthropic.claude-opus-5-v1:0`）同步收录，`CostCalculator` 回退价表也已登记。
+
+它与 Fable 5 / Sonnet 5（§92）同属 Claude 5 仅自适应请求形态，另有两条 Opus 5 专属规则由 SDK 吸收：
+
+- **思考默认开启**：`ThinkingConfig::modelSupportsAdaptiveThinking('claude-opus-5')` 为 `true`，因此发送 `thinking: {type: "adaptive"}`，绝不发送 `budget_tokens`（会 400）。调用方给的固定预算会被升级为 adaptive，而不是丢弃。
+- **effort 高于 `high` 时拒绝 `type: "disabled"`**：`ThinkingConfig::disabled()` 完全不发 `thinking` 字段，所以 `['thinking' => ThinkingConfig::disabled(), 'reasoning_effort' => 'max']` 永远不会触发该 400。
+- **effort**：`output_config.effort` ∈ `low|medium|high|xhigh|max`。编码/agentic 任务建议从 `xhigh` 起步；`low`/`medium` 依然很强，是主要的成本杠杆。
+- **prompt cache 最小前缀降到 512 token**（Opus 4.8 为 1024），在 catalog 中记为 `capabilities.cache_min_tokens`。
+
+### 别名与 pin 语义
+
+`opus` / `claude-opus` / `opus-5` / `opus5` 现在在**两套**解析器中都指向 `claude-opus-5`：`ModelCatalog::resolveAlias()`（family 内取最新日期）与 `ModelResolver` seed 注册表（Opus 5 与 Opus 4.8 作为 `opus` family 最新的两个条目注册）。
+
+`ModelResolver::resolve()` 还在模糊 family 匹配之前新增了精确 model id 守卫：
+
+```php
+ModelResolver::resolve('opus');             // claude-opus-5   （别名 → 最新）
+ModelResolver::resolve('claude-opus-5');    // claude-opus-5
+ModelResolver::resolve('claude-opus-4-8');  // claude-opus-4-8（pin 住，不会被升级）
+ModelResolver::resolve('claude-opus-4-5');  // claude-opus-4-5（pin 住）
+```
+
+此前模糊匹配（`str_contains($id, 'opus')` → family `opus` → 最新）会把**所有**显式 Opus id 改写成 family 内最新条目 —— 配置里写死 `claude-opus-4-8` 实际却在跑 `claude-opus-4-20250514`。现在只要是 family 注册表或 `ModelCatalog` 已知的 id 就原样返回，只有裸别名会跟随新版本。
+
+Squad **EXPERT** 档仍然路由到 `claude-fable-5` —— Opus 5 在 tier map 中位于其下，作为通用默认模型。

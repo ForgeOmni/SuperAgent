@@ -13,7 +13,9 @@ class CostCalculator
     protected static array $pricing = [
         // Anthropic Fable 5 (most capable model — above the Opus tier)
         'claude-fable-5'             => ['input' => 10.0, 'output' => 50.0],
-        // Anthropic Claude 4.8 (flagship Opus — $5/$25)
+        // Anthropic Opus 5 (current flagship Opus — same $5/$25 as Opus 4.8)
+        'claude-opus-5'              => ['input' => 5.0, 'output' => 25.0],
+        // Anthropic Claude 4.8 (previous flagship Opus — $5/$25)
         'claude-opus-4-8'            => ['input' => 5.0, 'output' => 25.0],
         // Anthropic Sonnet 5 (next-gen balanced; intro $2/$10 through 2026-08-31)
         'claude-sonnet-5'            => ['input' => 3.0, 'output' => 15.0],
@@ -66,6 +68,7 @@ class CostCalculator
         
         // OpenRouter models (varied pricing)
         'anthropic/claude-fable-5' => ['input' => 10.0, 'output' => 50.0],
+        'anthropic/claude-opus-5' => ['input' => 5.0, 'output' => 25.0],
         'anthropic/claude-sonnet-5' => ['input' => 3.0, 'output' => 15.0],
         'anthropic/claude-opus-4-8' => ['input' => 5.0, 'output' => 25.0],
         'anthropic/claude-3-5-sonnet' => ['input' => 3.0, 'output' => 15.0],
@@ -99,6 +102,7 @@ class CostCalculator
         
         // AWS Bedrock models
         'anthropic.claude-fable-5-v1:0'             => ['input' => 10.0, 'output' => 50.0],
+        'anthropic.claude-opus-5-v1:0'              => ['input' => 5.0,  'output' => 25.0],
         'anthropic.claude-sonnet-5-v1:0'            => ['input' => 3.0, 'output' => 15.0],
         'anthropic.claude-opus-4-8-v1:0'            => ['input' => 5.0,  'output' => 25.0],
         'anthropic.claude-sonnet-4-6-20250627-v1:0' => ['input' => 3.0, 'output' => 15.0],

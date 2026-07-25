@@ -12085,7 +12085,7 @@ Deux nouveaux modèles `anthropic` arrivent sur la surface de requête **adaptat
 - **`claude-fable-5`** — le modèle le plus capable d'Anthropic. Contexte 1 M / sortie 128 K, vision haute résolution. Tarif **10 $ en entrée / 50 $ en sortie** par M (au-dessus de la gamme Opus — Opus 4.8 à 5 $/25 $). Promu au palier Squad **EXPERT** (`Squad\ModelTierMap`). Rétention de 30 jours requise (les orgs ZDR renvoient 400) ; les refus basculent vers Opus 4.8 (`stop_reason: "refusal"`).
 - **`claude-sonnet-5`** — le Sonnet le plus agentique (sorti le 2026-06-30), proche d'Opus 4.8 à tarif inférieur ; le nouveau fleuron `sonnet`. Contexte 1 M / sortie 128 K, **3 $ en entrée / 15 $ en sortie** par M (tarif de lancement **2 $/10 $ jusqu'au 2026-08-31**). Enregistré comme l'entrée la plus récente de la famille `sonnet` dans le seed `ModelResolver`, donc `sonnet` / `claude-sonnet` / `sonnet-5` s'y résolvent.
 
-Le défaut zéro-config d'`anthropic` est **`claude-opus-4-8`** (relevé depuis le `claude-3-5-sonnet-20241022` retiré) — Fable 5 s'active par id/alias ou via le palier EXPERT, pas comme défaut général.
+Le défaut zéro-config d'`anthropic` était ici **`claude-opus-4-8`** (relevé depuis le `claude-3-5-sonnet-20241022` retiré), et devient **`claude-opus-5`** en v1.1.10 (§98) — Fable 5 s'active par id/alias ou via le palier EXPERT, pas comme défaut général.
 
 **Surface de requête** (gérée automatiquement par `AnthropicProvider` + `ThinkingConfig` ; détails au §16 → Modèles adaptatifs uniquement) :
 
@@ -12186,3 +12186,33 @@ Sémantique depuis la 1.1.9 :
 - Si `posix_kill` / `posix_getppid` sont indisponibles, `start()` ne forke plus du tout — les appelants retombent sur un polling manuel via `check()`, car un enfant dont on ne peut gérer la vie est pire que pas d'enfant.
 
 Aucun changement d'API — les signatures de `watch()` / `start()` / `stop()` / `check()` sont inchangées.
+
+---
+
+## 98. Claude Opus 5 (v1.1.10)
+
+`claude-opus-5` rejoint le catalogue `anthropic` comme fleuron Opus actuel et **défaut zéro-config** (relevé depuis `claude-opus-4-8`). Même palier tarifaire que la 4.8 — **5 $ en entrée / 25 $ en sortie** par M — avec un contexte de 1 M (128 K de sortie max), le fast mode et l'échelle d'effort complète. Répliqué sur OpenRouter (`anthropic/claude-opus-5`) et Bedrock (`anthropic.claude-opus-5-v1:0`), et tarifé dans la table de repli du `CostCalculator`.
+
+Il partage la surface de requête adaptative-uniquement de Claude 5 avec Fable 5 / Sonnet 5 (§92), plus deux règles propres à Opus 5 que le SDK absorbe :
+
+- **Le thinking est actif par défaut.** `ThinkingConfig::modelSupportsAdaptiveThinking('claude-opus-5')` vaut `true` : `thinking: {type: "adaptive"}` est émis et un `budget_tokens` explicite n'est jamais envoyé (400). Un budget fixe fourni par l'appelant est converti en adaptatif plutôt que supprimé.
+- **`type: "disabled"` est refusé au-delà de l'effort `high`.** `ThinkingConfig::disabled()` n'émet *aucune* clé `thinking`, donc `['thinking' => ThinkingConfig::disabled(), 'reasoning_effort' => 'max']` ne peut jamais produire ce 400.
+- **Effort** — `output_config.effort` ∈ `low|medium|high|xhigh|max`. `xhigh` est le point de départ recommandé pour le codage/agentique ; `low`/`medium` restent solides et constituent le levier de coût.
+- **Le minimum de cache de prompt tombe à 512 tokens** (1024 sur Opus 4.8), enregistré comme `capabilities.cache_min_tokens` dans le catalogue.
+
+### Alias et épinglage
+
+`opus` / `claude-opus` / `opus-5` / `opus5` se résolvent désormais vers `claude-opus-5` dans les **deux** résolveurs : `ModelCatalog::resolveAlias()` (date la plus récente de la famille) et le registre seed de `ModelResolver` (Opus 5 et Opus 4.8 y sont enregistrés comme les deux entrées les plus récentes de la famille `opus`).
+
+`ModelResolver::resolve()` gagne aussi un garde d'identifiant exact placé avant son appariement flou de famille :
+
+```php
+ModelResolver::resolve('opus');             // claude-opus-5   (alias → le plus récent)
+ModelResolver::resolve('claude-opus-5');    // claude-opus-5
+ModelResolver::resolve('claude-opus-4-8');  // claude-opus-4-8 (épinglé, PAS relevé)
+ModelResolver::resolve('claude-opus-4-5');  // claude-opus-4-5 (épinglé)
+```
+
+Auparavant, l'appariement flou (`str_contains($id, 'opus')` → famille `opus` → le plus récent) réécrivait *tout* id Opus explicite vers l'entrée la plus récente de la famille — une config épinglée sur `claude-opus-4-8` exécutait donc silencieusement `claude-opus-4-20250514`. Tout id connu du registre de familles ou de `ModelCatalog` est maintenant renvoyé tel quel ; seuls les alias nus suivent les sorties.
+
+Le palier **EXPERT** de Squad route toujours vers `claude-fable-5` — Opus 5 se place en dessous dans la table des paliers et sert de défaut généraliste.

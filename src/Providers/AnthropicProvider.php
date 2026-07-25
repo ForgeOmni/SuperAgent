@@ -40,8 +40,8 @@ class AnthropicProvider implements LLMProvider, SupportsThinking, SupportsReason
 {
     public function thinkingRequestFragment(int $budgetTokens): array
     {
-        // Adaptive-only models (Opus 4.6/4.7/4.8, Sonnet 4.6, Fable 5) take
-        // `{type: adaptive}` and 400 on an explicit `budget_tokens`; older
+        // Adaptive-only models (Opus 5, Opus 4.6/4.7/4.8, Sonnet 5/4.6, Fable 5)
+        // take `{type: adaptive}` and 400 on an explicit `budget_tokens`; older
         // models take a fixed token budget.
         if (ThinkingConfig::modelSupportsAdaptiveThinking($this->model)) {
             return ['thinking' => ['type' => 'adaptive']];
@@ -84,12 +84,12 @@ class AnthropicProvider implements LLMProvider, SupportsThinking, SupportsReason
 
     /**
      * Models that accept the `output_config.effort` dial (GA, no beta header):
-     * Fable 5, Opus 4.5 / 4.6 / 4.7 / 4.8, and Sonnet 4.6.
+     * Fable 5, Opus 5, Opus 4.5 / 4.6 / 4.7 / 4.8, Sonnet 5 and Sonnet 4.6.
      */
     protected static function modelSupportsEffort(string $model): bool
     {
         $model = strtolower($model);
-        foreach (['claude-fable', 'fable-5', 'claude-sonnet-5', 'sonnet-5', 'opus-4-5', 'opus-4-6', 'opus-4-7', 'opus-4-8', 'sonnet-4-6'] as $needle) {
+        foreach (['claude-fable', 'fable-5', 'claude-opus-5', 'opus-5', 'claude-sonnet-5', 'sonnet-5', 'opus-4-5', 'opus-4-6', 'opus-4-7', 'opus-4-8', 'sonnet-4-6'] as $needle) {
             if (str_contains($model, $needle)) {
                 return true;
             }
@@ -99,15 +99,15 @@ class AnthropicProvider implements LLMProvider, SupportsThinking, SupportsReason
     }
 
     /**
-     * The Claude 5 generation (Fable 5, Sonnet 5) and the Opus 4.7 / 4.8 family
-     * reject `temperature`, `top_p`, and `top_k` with a 400 (sampling params were
-     * removed). Prefill and thinking `budget_tokens` are handled via
+     * The Claude 5 generation (Fable 5, Opus 5, Sonnet 5) and the Opus 4.7 / 4.8
+     * family reject `temperature`, `top_p`, and `top_k` with a 400 (sampling params
+     * were removed). Prefill and thinking `budget_tokens` are handled via
      * ThinkingConfig::modelSupportsAdaptiveThinking().
      */
     protected static function modelRejectsSamplingParams(string $model): bool
     {
         $model = strtolower($model);
-        foreach (['claude-fable', 'fable-5', 'claude-sonnet-5', 'sonnet-5', 'opus-4-7', 'opus-4-8'] as $needle) {
+        foreach (['claude-fable', 'fable-5', 'claude-opus-5', 'opus-5', 'claude-sonnet-5', 'sonnet-5', 'opus-4-7', 'opus-4-8'] as $needle) {
             if (str_contains($model, $needle)) {
                 return true;
             }
@@ -159,7 +159,7 @@ class AnthropicProvider implements LLMProvider, SupportsThinking, SupportsReason
         // 'https://host/prefix/' + 'v1/messages' => 'https://host/prefix/v1/messages'.
         $baseUrl = rtrim($config['base_url'] ?? 'https://api.anthropic.com', '/') . '/';
         $this->apiVersion = $config['api_version'] ?? '2023-06-01';
-        $this->model = $config['model'] ?? 'claude-opus-4-8';
+        $this->model = $config['model'] ?? 'claude-opus-5';
         $this->maxTokens = $config['max_tokens'] ?? 8192;
         $this->maxRetries = $config['max_retries'] ?? 3;
 
@@ -167,7 +167,7 @@ class AnthropicProvider implements LLMProvider, SupportsThinking, SupportsReason
         // legacy model ids (e.g. claude-3-5-sonnet-20241022) that the API will
         // reject with a confusing 429 "rate_limit_error".
         if ($authMode === 'oauth' && $this->isLegacyModel($this->model)) {
-            $this->model = 'claude-opus-4-8';
+            $this->model = 'claude-opus-5';
         }
 
         $headers = [

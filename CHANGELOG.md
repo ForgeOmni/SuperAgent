@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.10] - 2026-07-24
+
+### 💻 Summary
+
+**Claude Opus 5 lands as a first-class `anthropic` model and becomes the zero-config default, and pinned model ids stop being silently upgraded.** `claude-opus-5` is a drop-in upgrade over Opus 4.8 at the same **$5 in / $25 out** per M — 1M context (128K max output), fast mode, the full `low…max` effort ladder, and a 512-token prompt-cache minimum (down from 1024). It joins the Claude-5 adaptive-only request surface already used by Fable 5 / Sonnet 5, so `AnthropicProvider` + `ThinkingConfig` automatically emit `thinking: {type: "adaptive"}` (never `budget_tokens`, which 400s), drop `temperature` / `top_p` / `top_k` and trailing assistant prefills, and expose `output_config.effort`. Because `ThinkingConfig::disabled()` omits the `thinking` key entirely, Opus 5's rule that `type: "disabled"` is rejected above `high` effort can never be tripped. Alongside it, a latent resolver bug is fixed: the fuzzy family match in `ModelResolver` rewrote *every* explicit Opus id onto the family's newest entry, so a config pinned to `claude-opus-4-8` silently ran `claude-opus-4-20250514`. Additive and non-breaking apart from the two intentional default/alias moves below. Full Unit suite green (3188 tests).
+
+### Added
+
+- **`claude-opus-5`** in the catalog (`resources/models.json`, `anthropic` + `openrouter` + `bedrock` blocks) — current flagship Opus: 1M context / 128K max output, adaptive thinking on by default, effort dial `low…max`, fast mode, MCP, `cache_min_tokens: 512`. Carries the `opus` / `claude-opus` / `opus-5` aliases; official pricing **$5 in / $25 out** per M, mirrored as `anthropic/claude-opus-5` and `anthropic.claude-opus-5-v1:0`. `_meta.updated` bumped to 2026-07-24.
+- Opus 5 wired through `ThinkingConfig` (thinking + adaptive-only surfaces), `AnthropicProvider::modelSupportsEffort()` / `modelRejectsSamplingParams()`, the `CostCalculator` fallback table (native + OpenRouter + Bedrock), `TokenEstimator` (1M window), the interactive `/model` picker (`CommandRouter`, top/default pick), and the `ModelResolver` seed registry.
+- `ModelResolverTest` gains Opus 5 alias coverage and a pinned-id regression test; new `AnthropicProviderTest` cases for the Opus 5 adaptive-only surface, disabled-thinking-at-`max`-effort, and the default model; plus `ModelCatalogTest`, `ThinkingConfigTest`, and `CostCalculatorTest` rows for Opus 5.
+
+### Fixed
+
+- **`ModelResolver::resolve()` silently upgraded pinned model ids.** Step 3's fuzzy family match (`str_contains($id, 'opus')` → family `opus` → newest entry) applied to full model ids as well as shorthand, so `claude-opus-4-8` and `claude-opus-4-5` both resolved to `claude-opus-4-20250514` — a config pinned to a specific model ran a different one. A new exact-model-id guard (`isKnownModelId()`, checking the family registry and `ModelCatalog`) runs before family resolution: any id the resolver or catalog knows is returned unchanged, and only bare aliases track the newest release.
+
+### Changed
+
+- **`anthropic` default → Opus 5** — `ProviderRegistry` default config and the `AnthropicProvider` constructor fallback resolve zero-config `anthropic` to `claude-opus-5` (was `claude-opus-4-8`), and the OAuth legacy-model rewrite now targets it too. Squad's **EXPERT** tier still routes to `claude-fable-5`; every id remains reachable by explicit config.
+- **`opus` / `claude-opus` aliases → Opus 5** in both resolvers. `claude-opus-4` / `claude-opus-4-8` stay on Opus 4.8; `ModelResolver` also registers `claude-opus-4-8` in the `opus` family so the generation ordering is complete.
+- `SuperAgentApplication::VERSION` `1.1.9` → `1.1.10`; INSTALL (EN/中文/FR) version examples bumped.
+- READMEs (EN/中文/FR): `anthropic` provider-table row notes the new default, the Fable 5 section is re-anchored against Opus 5 pricing, and a new **Opus 5** section documents the model, its request surface, and the pinning semantics. `docs/ADVANCED_USAGE.*` gain §98 (Claude Opus 5).
+
 ## [1.1.9] - 2026-07-19
 
 ### 💻 Summary

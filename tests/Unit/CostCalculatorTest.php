@@ -35,6 +35,15 @@ class CostCalculatorTest extends TestCase
         $this->assertEqualsWithDelta(60.0, $cost, 0.001);
     }
 
+    public function test_opus_5_pricing(): void
+    {
+        $usage = new Usage(1_000_000, 1_000_000);
+        $cost = CostCalculator::calculate('claude-opus-5', $usage);
+
+        // $5/M input + $25/M output = $30 (same tier as Opus 4.8)
+        $this->assertEqualsWithDelta(30.0, $cost, 0.001);
+    }
+
     public function test_small_usage(): void
     {
         $usage = new Usage(100, 50);

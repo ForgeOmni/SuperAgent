@@ -88,20 +88,28 @@ class ModelResolver
             return static::$customAliases[$key];
         }
 
-        // 2. Family alias lookup — resolve to latest in family
+        // 2. Exact model id — never rewrite an id the registry or the catalog
+        //    already knows. Without this the fuzzy family match below collapses
+        //    every pinned id onto the newest model in the family (e.g. a config
+        //    pinned to `claude-opus-4-8` would silently run `claude-opus-5`).
+        if (static::isKnownModelId($key)) {
+            return $model;
+        }
+
+        // 3. Family alias lookup — resolve to latest in family
         if (isset(static::$aliasToFamily[$key])) {
             $family = static::$aliasToFamily[$key];
 
             return static::latestInFamily($family) ?? $model;
         }
 
-        // 3. Fuzzy match: check if input is a substring of any family key
+        // 4. Fuzzy match: check if input is a substring of any family key
         $matched = static::fuzzyMatchFamily($key);
         if ($matched !== null) {
             return static::latestInFamily($matched) ?? $model;
         }
 
-        // 4. Dynamic catalog — picks up families shipped in resources/models.json
+        // 5. Dynamic catalog — picks up families shipped in resources/models.json
         //    and any user override fetched via `superagent models update`.
         $fromCatalog = ModelCatalog::resolveAlias($key);
         if ($fromCatalog !== null) {
@@ -192,6 +200,23 @@ class ModelResolver
         foreach ($aliases as $alias => $canonicalModel) {
             static::$customAliases[strtolower($alias)] = $canonicalModel;
         }
+    }
+
+    /**
+     * Is `$key` (lowercased) a full model id we already know — either registered
+     * in the family registry or shipped in the catalog?
+     */
+    protected static function isKnownModelId(string $key): bool
+    {
+        foreach (static::$families as $models) {
+            foreach ($models as $entry) {
+                if (strtolower($entry['id']) === $key) {
+                    return true;
+                }
+            }
+        }
+
+        return ModelCatalog::model($key) !== null;
     }
 
     /**
@@ -306,6 +331,10 @@ class ModelResolver
         // ── Anthropic Claude ──────────────────────────────────────
 
         // Opus family
+        static::register('claude-opus-5', 'opus', [
+            'opus-5', 'opus5',
+        ], 20260715);
+        static::register('claude-opus-4-8', 'opus', [], 20260528);
         static::register('claude-opus-4-20250514', 'opus', [
             'claude-opus', 'claude-opus-4',
         ], 20250514);

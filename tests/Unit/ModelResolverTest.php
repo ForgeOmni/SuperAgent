@@ -38,7 +38,24 @@ class ModelResolverTest extends TestCase
     {
         $resolved = ModelResolver::resolve('claude-opus');
         $this->assertStringContains('opus', $resolved);
-        $this->assertStringContains('20250514', $resolved);
+        // Bare family aliases track the current flagship — Opus 5.
+        $this->assertSame('claude-opus-5', $resolved);
+    }
+
+    public function test_resolves_opus_5_aliases(): void
+    {
+        $this->assertSame('claude-opus-5', ModelResolver::resolve('claude-opus-5'));
+        $this->assertSame('claude-opus-5', ModelResolver::resolve('opus-5'));
+        $this->assertSame('claude-opus-5', ModelResolver::resolve('OPUS5'));
+    }
+
+    public function test_pinned_model_id_is_not_upgraded_to_family_latest(): void
+    {
+        // A config pinned to an older id must keep running that id, even though
+        // a newer model exists in the same family.
+        $this->assertSame('claude-opus-4-8', ModelResolver::resolve('claude-opus-4-8'));
+        $this->assertSame('claude-opus-4-5', ModelResolver::resolve('claude-opus-4-5'));
+        $this->assertSame('claude-sonnet-4-6', ModelResolver::resolve('claude-sonnet-4-6'));
     }
 
     public function test_passes_through_full_model_id(): void
@@ -63,18 +80,18 @@ class ModelResolverTest extends TestCase
     public function test_latest_in_family_returns_newest(): void
     {
         $latest = ModelResolver::latestInFamily('opus');
-        $this->assertSame('claude-opus-4-20250514', $latest);
+        $this->assertSame('claude-opus-5', $latest);
     }
 
     public function test_register_new_model_updates_latest(): void
     {
         // Register a newer opus model
-        ModelResolver::register('claude-opus-4-20260101', 'opus', [], 20260101);
+        ModelResolver::register('claude-opus-6-20270101', 'opus', [], 20270101);
         $latest = ModelResolver::latestInFamily('opus');
-        $this->assertSame('claude-opus-4-20260101', $latest);
+        $this->assertSame('claude-opus-6-20270101', $latest);
 
         // Resolve alias should now return the new one
-        $this->assertSame('claude-opus-4-20260101', ModelResolver::resolve('opus'));
+        $this->assertSame('claude-opus-6-20270101', ModelResolver::resolve('opus'));
     }
 
     public function test_family_models_sorted_newest_first(): void
@@ -82,7 +99,7 @@ class ModelResolverTest extends TestCase
         $models = ModelResolver::familyModels('opus');
         $this->assertNotEmpty($models);
         // First should be newest
-        $this->assertSame('claude-opus-4-20250514', $models[0]);
+        $this->assertSame('claude-opus-5', $models[0]);
     }
 
     public function test_is_alias_returns_true_for_known(): void

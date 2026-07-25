@@ -104,7 +104,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 
 | 注册表 key | Provider | 说明 |
 |---|---|---|
-| `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth；旗舰 `claude-fable-5` + `claude-sonnet-5` —— 自适应思考 + effort 档位 *(Fable 5 / Sonnet 5，v1.1.5)* |
+| `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth；默认 `claude-opus-5` *(v1.1.10)*，旗舰 `claude-fable-5` + `claude-sonnet-5` —— 自适应思考 + effort 档位 *(Fable 5 / Sonnet 5，v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT`；catalog 收录 GPT-5.6 Sol / Terra / Luna *(v1.1.6)*；仍在服务的存量型号 GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | 默认 `gpt-5.6-sol` —— effort `none…max`、`reasoning.mode: pro`、显式缓存 *(v1.1.6)*；[下方专门小节](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
@@ -301,7 +301,7 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 
 ## Fable 5
 
-Fable 5（`claude-fable-5`）是 Anthropic 最强模型 —— 面向最艰深的推理与长时程 agentic 任务。走标准 `anthropic` provider（API key **或** Claude Code OAuth），**1M token context**（最大输出 128K），支持**高分辨率视觉**。按量计费 **$10 输入 / $50 输出**（每百万 token，高于 Opus 档 —— Opus 4.8 为 $5/$25）。它是 Squad **EXPERT** 档模型；零配置 `anthropic` 默认仍是 **Claude Opus 4.8**。触发拒绝时回退到 Opus 4.8。
+Fable 5（`claude-fable-5`）是 Anthropic 最强模型 —— 面向最艰深的推理与长时程 agentic 任务。走标准 `anthropic` provider（API key **或** Claude Code OAuth），**1M token context**（最大输出 128K），支持**高分辨率视觉**。按量计费 **$10 输入 / $50 输出**（每百万 token，高于 Opus 档 —— Opus 5 为 $5/$25）。它是 Squad **EXPERT** 档模型；零配置 `anthropic` 默认为 **Claude Opus 5**。触发拒绝时回退到 Opus 4.8。
 
 ```php
 $agent = new Agent([
@@ -330,6 +330,33 @@ $agent->run('高难推理', ['features' => ['thinking' => true]]);
 **Sonnet 5**（`claude-sonnet-5`，2026-06-30 发布）作为新的 `sonnet` 旗舰一同发布 —— Anthropic 最具 agentic 能力的 Sonnet，性能接近 Opus 4.8 但价格更低。同为 Claude 5 代的自适应形态（仅自适应思考、effort 档位、不发采样参数/prefill），1M context（最大输出 128K），**$3 输入 / $15 输出**（限时价 **$2/$10 至 2026-08-31**）。`sonnet` / `claude-sonnet` / `sonnet-5` 别名现解析到它。
 
 *v1.1.5 起*
+
+---
+
+## Opus 5
+
+**Opus 5**（`claude-opus-5`）是当前 Opus 旗舰，也是**零配置 `anthropic` 默认模型** —— 相对 Opus 4.8 是同价平替升级，仍为 **$5 输入 / $25 输出**（每百万 token），1M context（最大输出 128K），支持 fast mode。`opus` / `claude-opus` / `opus-5` 别名解析到它。
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('ANTHROPIC_API_KEY'),
+    // 'model' => 'claude-opus-5',   // 可省略 —— 这就是零配置默认值
+]);
+
+$agent->run('复杂 agentic 编码任务', ['reasoning_effort' => 'xhigh']);
+```
+
+它沿用 Claude 5 代的请求形态，SDK 已自动处理：
+
+- **思考默认开启**且自适应 —— 发送 `thinking: {type: "adaptive"}`；显式 `budget_tokens` 会 **400**，因此固定预算会被自动改写为 adaptive。`ThinkingConfig::disabled()` 完全不发 `thinking` 字段，因此永远不会撞上 Opus 5「effort 高于 `high` 时拒绝 `type: "disabled"`」的规则。
+- **不发采样参数、不发 prefill** —— `temperature` / `top_p` / `top_k` 与末尾 assistant prefill 会被丢弃（发了会 400）。
+- **完整 effort 档位** —— `output_config.effort` 支持 `low` … `high` … `xhigh` … `max`。编码/agentic 任务建议从 `xhigh` 起步，再向下试：该模型在 `low`/`medium` 上表现同样出色。
+- **prompt cache 最小前缀降到 512 token**（Opus 4.8 为 1024），更短的前缀现在也能命中缓存。
+
+显式写死的模型 id 不会被改写：配置里固定 `claude-opus-4-8`（或任何其他完整 id）就跑该模型，只有裸别名会跟随最新版本。
+
+*v1.1.10 起*
 
 ---
 

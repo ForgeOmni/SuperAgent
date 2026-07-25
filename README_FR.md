@@ -104,7 +104,7 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 
 | Clé de registre | Provider | Notes |
 |---|---|---|
-| `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké ; fleuron `claude-fable-5` + `claude-sonnet-5` — thinking adaptatif + molette effort *(Fable 5 / Sonnet 5, v1.1.5)* |
+| `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké ; défaut `claude-opus-5` *(v1.1.10)*, fleuron `claude-fable-5` + `claude-sonnet-5` — thinking adaptatif + molette effort *(Fable 5 / Sonnet 5, v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` ; GPT-5.6 Sol / Terra / Luna au catalogue *(v1.1.6)* ; back-catalog encore servi GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | Défaut `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, cache explicite *(v1.1.6)* ; [section dédiée ci-dessous](#api-openai-responses) |
 | `openrouter` | OpenRouter | Clé API |
@@ -302,7 +302,7 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 
 ## Fable 5
 
-Fable 5 (`claude-fable-5`) est le modèle le plus capable d'Anthropic — pour le raisonnement le plus exigeant et le travail agentique de long horizon. Il passe par le provider standard `anthropic` (clé API **ou** OAuth Claude Code), avec un **contexte de 1 M de tokens** (128 K de sortie max) et la **vision haute résolution**. Tarif pay-as-you-go : **10 $ en entrée / 50 $ en sortie** par million de tokens — au-dessus de la gamme Opus (Opus 4.8 est à 5 $/25 $). C'est le modèle du palier Squad **EXPERT** ; le défaut zéro-config d'`anthropic` reste **Claude Opus 4.8**. Les refus basculent vers Opus 4.8.
+Fable 5 (`claude-fable-5`) est le modèle le plus capable d'Anthropic — pour le raisonnement le plus exigeant et le travail agentique de long horizon. Il passe par le provider standard `anthropic` (clé API **ou** OAuth Claude Code), avec un **contexte de 1 M de tokens** (128 K de sortie max) et la **vision haute résolution**. Tarif pay-as-you-go : **10 $ en entrée / 50 $ en sortie** par million de tokens — au-dessus de la gamme Opus (Opus 5 est à 5 $/25 $). C'est le modèle du palier Squad **EXPERT** ; le défaut zéro-config d'`anthropic` est **Claude Opus 5**. Les refus basculent vers Opus 4.8.
 
 ```php
 $agent = new Agent([
@@ -331,6 +331,33 @@ $agent->run('prompt de raisonnement difficile', ['features' => ['thinking' => tr
 **Sonnet 5** (`claude-sonnet-5`, sorti le 2026-06-30) est livré en parallèle comme nouveau fleuron `sonnet` — le Sonnet le plus agentique d'Anthropic, proche d'Opus 4.8 à un tarif inférieur. La même surface adaptative de la génération Claude 5 (thinking adaptatif uniquement, molette effort, ni paramètres d'échantillonnage ni prefill), contexte de 1 M (128 K de sortie max), **3 $ en entrée / 15 $ en sortie** (tarif de lancement **2 $/10 $ jusqu'au 2026-08-31**). Les alias `sonnet` / `claude-sonnet` / `sonnet-5` s'y résolvent désormais.
 
 *Depuis v1.1.5*
+
+---
+
+## Opus 5
+
+**Opus 5** (`claude-opus-5`) est le fleuron Opus actuel et le **défaut zéro-config d'`anthropic`** — une montée de version transparente depuis Opus 4.8, au même tarif **5 $ en entrée / 25 $ en sortie** par million de tokens, avec un contexte de 1 M (128 K de sortie max) et le fast mode. Les alias `opus` / `claude-opus` / `opus-5` s'y résolvent.
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('ANTHROPIC_API_KEY'),
+    // 'model' => 'claude-opus-5',   // implicite — c'est le défaut zéro-config
+]);
+
+$agent->run('tâche de codage agentique complexe', ['reasoning_effort' => 'xhigh']);
+```
+
+Il partage la surface de requête de la génération Claude 5, que le SDK applique pour vous :
+
+- **Le thinking est actif PAR DÉFAUT** et adaptatif — `thinking: {type: "adaptive"}` ; un `budget_tokens` explicite renvoie **400**, donc un budget fixe est automatiquement converti en adaptatif. `ThinkingConfig::disabled()` n'émet aucune clé `thinking`, ce qui évite définitivement la règle d'Opus 5 refusant `type: "disabled"` au-delà de l'effort `high`.
+- **Ni paramètres d'échantillonnage, ni prefill** — `temperature` / `top_p` / `top_k` et un prefill assistant final sont retirés (ils renvoient 400).
+- **Molette effort complète** — `output_config.effort` accepte `low` … `high` … `xhigh` … `max`. Commencez à `xhigh` pour le codage/agentique, puis descendez : `low`/`medium` sont étonnamment solides sur ce modèle.
+- **Minimum de cache de prompt à 512 tokens** (contre 1024 sur Opus 4.8) : les préfixes courts se mettent désormais en cache.
+
+Les identifiants épinglés ne sont jamais réécrits : une config sur `claude-opus-4-8` (ou tout autre id complet) continue d'exécuter ce modèle exact — seuls les alias de famille suivent la dernière sortie.
+
+*Depuis v1.1.10*
 
 ---
 
