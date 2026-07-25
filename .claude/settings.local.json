@@ -164,7 +164,10 @@
       "Bash(perl -0pi -e 's/\\\\$this->assertSame\\\\\\('\\\\''claude-opus-4-8'\\\\'', \\\\$body\\\\['\\\\''model'\\\\''\\\\]\\\\\\);/$this->assertSame\\('\\\\''claude-opus-5'\\\\'', $body['\\\\''model'\\\\'']\\);/; s/\\\\$this->assertSame\\\\\\('\\\\''claude-opus-4-8'\\\\'', \\\\$this->buildBody\\\\\\(\\\\$p\\\\\\)\\\\['\\\\''model'\\\\''\\\\]\\\\\\);/$this->assertSame\\('\\\\''claude-opus-5'\\\\'', $this->buildBody\\($p\\)['\\\\''model'\\\\'']\\);/' tests/Unit/AnthropicProviderOAuthTest.php)",
       "Bash(composer update *)",
       "Bash(composer audit *)",
-      "Bash(composer validate *)"
+      "Bash(composer validate *)",
+      "Bash(git tag -a v1.1.10 -m 'SuperAgent v1.1.10 — Claude Opus 5 as first-class model + zero-config anthropic default *)",
+      "Bash(git tag *)",
+      "Bash(git ls-remote *)"
     ]
   }
 }
