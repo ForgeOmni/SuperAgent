@@ -39,8 +39,6 @@ use SuperAgent\Tools\Builtin\VerifyPlanExecutionTool;
 use SuperAgent\Tools\Builtin\WorkflowTool;
 use SuperAgent\Tools\Builtin\SkillTool;
 use SuperAgent\Tools\Builtin\DiscoverSkillsTool;
-use SuperAgent\Tools\Builtin\ScheduleCronTool;
-use SuperAgent\Tools\Builtin\RemoteTriggerTool;
 
 // Code and snippet tools
 use SuperAgent\Tools\Builtin\SnipTool;
@@ -50,36 +48,18 @@ use SuperAgent\Tools\Builtin\LSPTool;
 use SuperAgent\Tools\Builtin\MonitorTool;
 use SuperAgent\Tools\Builtin\TerminalCaptureTool;
 use SuperAgent\Tools\Builtin\CtxInspectTool;
-use SuperAgent\Tools\Builtin\OverflowTestTool;
+use SuperAgent\Tools\Builtin\SpillReadTool;
+use SuperAgent\Tools\Builtin\SessionQueryTool;
 
 // Agent and team tools
 use SuperAgent\Tools\Builtin\AgentTool;
 use SuperAgent\Tools\Builtin\SendMessageTool;
-use SuperAgent\Tools\Builtin\TeamCreateTool;
-use SuperAgent\Tools\Builtin\TeamDeleteTool;
-use SuperAgent\Tools\Builtin\ListPeersTool;
 
 // MCP tools
-use SuperAgent\Tools\Builtin\MCPTool;
 use SuperAgent\Tools\Builtin\ListMcpResourcesTool;
-use SuperAgent\Tools\Builtin\ReadMcpResourceTool;
-use SuperAgent\Tools\Builtin\McpAuthTool;
-
-// Git and review tools
-use SuperAgent\Tools\Builtin\EnterWorktreeTool;
-use SuperAgent\Tools\Builtin\ExitWorktreeTool;
-use SuperAgent\Tools\Builtin\SubscribePRTool;
-use SuperAgent\Tools\Builtin\SuggestBackgroundPRTool;
-use SuperAgent\Tools\Builtin\ReviewArtifactTool;
 
 // Other tools
-use SuperAgent\Tools\Builtin\PowerShellTool;
-use SuperAgent\Tools\Builtin\SendUserFileTool;
-use SuperAgent\Tools\Builtin\SyntheticOutputTool;
 use SuperAgent\Tools\Builtin\ToolSearchTool;
-use SuperAgent\Tools\Builtin\TungstenTool;
-use SuperAgent\Tools\Builtin\WebBrowserTool;
-use SuperAgent\Tools\Builtin\PushNotificationTool;
 
 class BuiltinToolRegistry
 {
@@ -89,9 +69,10 @@ class BuiltinToolRegistry
      * This is the single source of truth consumed by ToolLoader for lazy
      * registration. No instantiation happens here.
      *
-     * Experimental tools (gated by feature flags) are included in the map
-     * so that ToolLoader can register them; the flag check is deferred to
-     * ToolLoader::load() time or left to the caller.
+     * Every entry here MUST be a real implementation. Placeholder tools that
+     * returned `status: simulated` were removed in v1.1.11 — a registered
+     * tool that lies about executing is worse than an absent tool
+     * (deepseek-harness discipline: registered capability must be real).
      *
      * @return array<string, class-string<Tool>>
      */
@@ -102,7 +83,6 @@ class BuiltinToolRegistry
             'bash'                  => BashTool::class,
             'repl'                  => REPLTool::class,
             'sleep'                 => SleepTool::class,
-            'powershell'            => PowerShellTool::class,
 
             // File
             'read_file'             => ReadFileTool::class,
@@ -110,7 +90,6 @@ class BuiltinToolRegistry
             'file_edit'             => FileEditTool::class,
             'multi_edit'            => MultiEditTool::class,
             'notebook_edit'         => NotebookEditTool::class,
-            'send_user_file'        => SendUserFileTool::class,
 
             // Search
             'glob'                  => GlobTool::class,
@@ -124,7 +103,6 @@ class BuiltinToolRegistry
             'http_request'          => HttpRequestTool::class,
             'web_search'            => WebSearchTool::class,
             'web_fetch'             => WebFetchTool::class,
-            'web_browser'           => WebBrowserTool::class,
 
             // Task management
             'task_create'           => TaskCreateTool::class,
@@ -144,8 +122,6 @@ class BuiltinToolRegistry
             'workflow'              => WorkflowTool::class,
             'skill'                 => SkillTool::class,
             'discover_skills'       => DiscoverSkillsTool::class,
-            'schedule_cron'         => ScheduleCronTool::class,   // exp: agent_triggers
-            'remote_trigger'        => RemoteTriggerTool::class,  // exp: agent_triggers_remote
 
             // Code / snippet
             'snip'                  => SnipTool::class,
@@ -155,78 +131,56 @@ class BuiltinToolRegistry
             'monitor'               => MonitorTool::class,
             'terminal_capture'      => TerminalCaptureTool::class,
             'ctx_inspect'           => CtxInspectTool::class,
-            'overflow_test'         => OverflowTestTool::class,
+            'spill_read'            => SpillReadTool::class,
+            'session_query'         => SessionQueryTool::class,
 
             // Agent & team
             'agent'                 => AgentTool::class,
             'send_message'          => SendMessageTool::class,
-            'list_peers'            => ListPeersTool::class,
-            'team_create'           => TeamCreateTool::class,     // exp: team_memory
-            'team_delete'           => TeamDeleteTool::class,     // exp: team_memory
 
             // MCP
-            'mcp'                   => MCPTool::class,
             'list_mcp_resources'    => ListMcpResourcesTool::class,
-            'read_mcp_resource'     => ReadMcpResourceTool::class,
-            'mcp_auth'              => McpAuthTool::class,
-
-            // Git & review
-            'enter_worktree'        => EnterWorktreeTool::class,
-            'exit_worktree'         => ExitWorktreeTool::class,
-            'subscribe_pr'          => SubscribePRTool::class,
-            'suggest_background_pr' => SuggestBackgroundPRTool::class,
-            'review_artifact'       => ReviewArtifactTool::class,
 
             // System / control
             'config'                => ConfigTool::class,
             'brief'                 => BriefTool::class,
 
-            // Interaction & notification
+            // Interaction
             'ask_user'              => AskUserQuestionTool::class,
-            'push_notification'     => PushNotificationTool::class,
-            'synthetic_output'      => SyntheticOutputTool::class,
-
-            // Special
-            'tungsten'              => TungstenTool::class,
         ];
     }
 
     /**
-     * Get all built-in tools, respecting experimental feature flags.
-     *
-     * Core tools are always available. Experimental tools require their
-     * corresponding feature flag to be enabled in config.
+     * Get all built-in tools.
      *
      * @return array<string, Tool>
      */
     public static function all(): array
     {
-        $tools = [
-            // Execution tools (4) — always available
+        return [
+            // Execution tools — always available
             'bash' => new BashTool(),
             'repl' => new REPLTool(),
             'sleep' => new SleepTool(),
-            'powershell' => new PowerShellTool(),
 
-            // File tools (6) — always available
+            // File tools — always available
             'read_file' => new ReadFileTool(),
             'write_file' => new WriteFileTool(),
             'file_edit' => new FileEditTool(),
             'multi_edit' => new MultiEditTool(),
             'notebook_edit' => new NotebookEditTool(),
-            'send_user_file' => new SendUserFileTool(),
 
-            // Search tools (3) — always available
+            // Search tools — always available
             'glob' => new GlobTool(),
             'grep' => new GrepTool(),
             'tool_search' => new ToolSearchTool(),
 
-            // Network tools (3) — always available
+            // Network tools — always available
             'http_request' => new HttpRequestTool(),
             'web_search' => new WebSearchTool(),
             'web_fetch' => new WebFetchTool(),
 
-            // Task management tools (7) — always available
+            // Task management tools — always available
             'task_create' => new TaskCreateTool(),
             'task_get' => new TaskGetTool(),
             'task_list' => new TaskListTool(),
@@ -235,79 +189,41 @@ class BuiltinToolRegistry
             'task_output' => new TaskOutputTool(),
             'todo_write' => new TodoWriteTool(),
 
-            // Planning tools (3) — always available
+            // Planning tools — always available
             'enter_plan_mode' => new EnterPlanModeTool(),
             'exit_plan_mode' => new ExitPlanModeTool(),
             'verify_plan_execution' => new VerifyPlanExecutionTool(),
 
-            // Core automation tools (4) — always available
+            // Automation tools — always available
             'workflow' => new WorkflowTool(),
             'skill' => new SkillTool(),
             'discover_skills' => new DiscoverSkillsTool(),
-            'web_browser' => new WebBrowserTool(),
 
-            // Code and snippet tools (2) — always available
+            // Code and snippet tools — always available
             'snip' => new SnipTool(),
             'lsp' => new LSPTool(),
 
-            // Monitoring and debugging tools (4) — always available
+            // Monitoring and debugging tools — always available
             'monitor' => new MonitorTool(),
             'terminal_capture' => new TerminalCaptureTool(),
             'ctx_inspect' => new CtxInspectTool(),
-            'overflow_test' => new OverflowTestTool(),
+            'spill_read' => new SpillReadTool(),
+            'session_query' => new SessionQueryTool(),
 
-            // Agent and team tools (3) — always available
+            // Agent and team tools — always available
             'agent' => new AgentTool(),
             'send_message' => new SendMessageTool(),
-            'list_peers' => new ListPeersTool(),
 
-            // MCP tools (4) — always available
-            'mcp' => new MCPTool(),
+            // MCP tools — always available
             'list_mcp_resources' => new ListMcpResourcesTool(),
-            'read_mcp_resource' => new ReadMcpResourceTool(),
-            'mcp_auth' => new McpAuthTool(),
 
-            // Git and review tools (5) — always available
-            'enter_worktree' => new EnterWorktreeTool(),
-            'exit_worktree' => new ExitWorktreeTool(),
-            'subscribe_pr' => new SubscribePRTool(),
-            'suggest_background_pr' => new SuggestBackgroundPRTool(),
-            'review_artifact' => new ReviewArtifactTool(),
-
-            // System/Control tools (2) — always available
+            // System/Control tools — always available
             'config' => new ConfigTool(),
             'brief' => new BriefTool(),
 
-            // Interaction and notification tools (3) — always available
+            // Interaction tools — always available
             'ask_user' => new AskUserQuestionTool(),
-            'push_notification' => new PushNotificationTool(),
-            'synthetic_output' => new SyntheticOutputTool(),
-
-            // Special tools (1) — always available
-            'tungsten' => new TungstenTool(),
         ];
-
-        // --- Experimental tools (gated by feature flags) ---
-
-        $exp = \SuperAgent\Config\ExperimentalFeatures::class;
-
-        // Agent triggers: local cron scheduling
-        if ($exp::enabled('agent_triggers')) {
-            $tools['schedule_cron'] = new ScheduleCronTool();
-        }
-
-        // Agent triggers remote: API-based remote agent tasks
-        if ($exp::enabled('agent_triggers_remote')) {
-            $tools['remote_trigger'] = new RemoteTriggerTool();
-        }
-
-        // Team memory: team create/delete tools
-        if ($exp::enabled('team_memory')) {
-            $tools['team_create'] = new TeamCreateTool();
-            $tools['team_delete'] = new TeamDeleteTool();
-        }
-
-        return $tools;
     }
 
     /**
@@ -339,7 +255,7 @@ class BuiltinToolRegistry
     public static function get(string $name): ?Tool
     {
         $tools = static::all();
-        
+
         return $tools[$name] ?? null;
     }
 
@@ -380,7 +296,7 @@ class BuiltinToolRegistry
         }
 
         sort($categories);
-        
+
         return $categories;
     }
 

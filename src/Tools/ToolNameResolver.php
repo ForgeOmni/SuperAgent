@@ -36,8 +36,6 @@ class ToolNameResolver
         'Agent'             => 'agent',
         'Task'              => 'agent',  // Legacy CC name
         'SendMessage'       => 'send_message',
-        'TeamCreate'        => 'TeamCreateTool',
-        'TeamDelete'        => 'TeamDeleteTool',
 
         // Task management
         'TaskCreate'        => 'task_create',
@@ -52,20 +50,13 @@ class ToolNameResolver
         'EnterPlanMode'     => 'enter_plan_mode',
         'ExitPlanMode'      => 'exit_plan_mode',
 
-        // Worktree
-        'EnterWorktree'     => 'EnterWorktreeTool',
-        'ExitWorktree'      => 'ExitWorktreeTool',
-
         // Web & network
         'WebSearch'         => 'web_search',
         'WebFetch'          => 'web_fetch',
         'HttpRequest'       => 'http_request',
 
         // MCP
-        'MCPTool'           => 'mcp',
         'ListMcpResourcesTool' => 'list_mcp_resources',
-        'ReadMcpResourceTool'  => 'ReadMcpResourceTool',
-        'McpAuthTool'       => 'McpAuthTool',
 
         // Utility
         'ToolSearch'        => 'ToolSearch',
@@ -76,14 +67,6 @@ class ToolNameResolver
         'Sleep'             => 'sleep',
         'REPL'              => 'repl',
         'LSP'               => 'LSPTool',
-        'PowerShell'        => 'PowerShellTool',
-
-        // Triggers
-        'RemoteTrigger'     => 'RemoteTriggerTool',
-        'CronCreate'        => 'ScheduleCronTool',
-        'CronDelete'        => 'ScheduleCronTool',
-        'CronList'          => 'ScheduleCronTool',
-        'SendUserMessage'   => 'SendUserFileTool',
     ];
 
     /** SuperAgent name → Claude Code name (reverse mapping, built lazily) */
