@@ -38,6 +38,7 @@ class ContextManager
         private ?ProviderInterface $provider = null,
         private ?HookRegistry $hookRegistry = null,
         private LoggerInterface $logger = new NullLogger(),
+        private ?CompactionShadowStore $shadowStore = null,
     ) {
         $this->initializeStrategies();
     }
@@ -48,7 +49,7 @@ class ContextManager
     private function initializeStrategies(): void
     {
         // Add micro compressor (priority 1 - fastest, tried first)
-        $this->strategies[] = new MicroCompressor($this->tokenEstimator, $this->config);
+        $this->strategies[] = new MicroCompressor($this->tokenEstimator, $this->config, $this->shadowStore);
 
         if ($this->provider !== null) {
             // Add session memory compressor (priority 5 - structured summary with boundary protection)
@@ -65,6 +66,7 @@ class ContextManager
                 $this->tokenEstimator,
                 $this->config,
                 $this->provider,
+                $this->shadowStore,
             );
         }
 

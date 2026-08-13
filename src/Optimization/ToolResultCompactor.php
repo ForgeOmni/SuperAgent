@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Optimization;
 
+use SuperAgent\Context\CompactionShadowStore;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\ToolResultMessage;
@@ -14,12 +15,13 @@ class ToolResultCompactor
         private bool $enabled = true,
         private int $preserveRecentTurns = 2,
         private int $maxResultLength = 200,
+        private ?CompactionShadowStore $shadowStore = null,
     ) {}
 
     /**
      * Create an instance from the application config.
      */
-    public static function fromConfig(): self
+    public static function fromConfig(?string $sessionId = null): self
     {
         try {
             $config = function_exists('config') ? (config('superagent.optimization.tool_result_compaction') ?? []) : [];
@@ -32,6 +34,7 @@ class ToolResultCompactor
             enabled: $config['enabled'] ?? true,
             preserveRecentTurns: $config['preserve_recent_turns'] ?? 2,
             maxResultLength: $config['max_result_length'] ?? 200,
+            shadowStore: CompactionShadowStore::fromConfig($sessionId),
         );
     }
 
@@ -140,6 +143,19 @@ class ToolResultCompactor
             $toolName = $toolNameMap[$block->toolUseId] ?? 'unknown';
             $truncated = mb_substr($contentStr, 0, $this->maxResultLength);
             $compactedContent = "[Compacted] {$toolName}: {$truncated}...";
+
+            // Lossless compaction (dsh-borrowed): shadow the full content
+            // before dropping it, and tell the model how to get it back.
+            $shadowId = $this->shadowStore?->record(
+                source: 'tool_result_compactor',
+                reason: 'old_tool_result_truncation',
+                content: $contentStr,
+                toolUseId: $block->toolUseId,
+                toolName: $toolName,
+            );
+            if ($shadowId !== null) {
+                $compactedContent .= " [full output shadowed — session_query get id={$shadowId}]";
+            }
 
             $newBlocks[] = ContentBlock::toolResult(
                 $block->toolUseId,

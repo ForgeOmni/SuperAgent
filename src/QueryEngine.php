@@ -30,6 +30,7 @@ use SuperAgent\Traits\ErrorRecoveryTrait;
 use SuperAgent\Optimization\ToolResultCompactor;
 use SuperAgent\Optimization\ToolSchemaFilter;
 use SuperAgent\Tools\Compression\RtkPipeline;
+use SuperAgent\Spill\SpillPolicy;
 use SuperAgent\Optimization\ModelRouter;
 use SuperAgent\Optimization\ResponsePrefill;
 use SuperAgent\Optimization\PromptCachePinning;
@@ -116,6 +117,14 @@ class QueryEngine
      */
     protected ?RtkPipeline $rtkPipeline = null;
 
+    /**
+     * deepseek-harness-borrowed spill seam: oversized tool output is
+     * persisted to session-private storage and replaced inline by a
+     * head/tail preview + spill:// locator retrievable via spill_read.
+     * Opt out per call via options['disable_spill'] = true.
+     */
+    protected ?SpillPolicy $spillPolicy = null;
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -174,13 +183,17 @@ class QueryEngine
         }
 
         // ── Initialize token optimizations (v0.7.0) ─────────────────
-        $this->toolResultCompactor = ToolResultCompactor::fromConfig();
+        $this->toolResultCompactor = ToolResultCompactor::fromConfig($this->options['session_id'] ?? null);
         $this->toolSchemaFilter = ToolSchemaFilter::fromConfig();
         $this->modelRouter = ModelRouter::fromConfig(
             $this->options['model'] ?? $this->provider->getModel(),
         );
         $this->responsePrefill = ResponsePrefill::fromConfig();
         $this->promptCachePinning = PromptCachePinning::fromConfig();
+
+        if (empty($this->options['disable_spill'])) {
+            $this->spillPolicy = SpillPolicy::fromConfig($this->options['session_id'] ?? null);
+        }
 
         // ── Initialize execution performance (v0.7.1) ───────────────
         $this->parallelExecutor = ParallelToolExecutor::fromConfig();
@@ -647,6 +660,11 @@ class QueryEngine
                     $content = $this->rtkPipeline->compress($toolName, $content);
                 }
 
+                // --- Step 6.6: Spill oversized output to storage ---
+                if (!$isError && $this->spillPolicy?->isEnabled()) {
+                    $content = $this->spillPolicy->apply($toolName, $toolUseId, $content);
+                }
+
                 // --- Step 7: PostToolUse hooks ---
                 $postResult = $this->runPostToolUseHooks($toolName, $toolUseId, $toolInput, $content, $isError);
 
@@ -754,6 +772,11 @@ class QueryEngine
                     $this->rtkPipeline = new RtkPipeline();
                 }
                 $content = $this->rtkPipeline->compress($toolName, $content);
+            }
+
+            // Spill oversized output — same as the sequential path.
+            if (!$isError && $this->spillPolicy?->isEnabled()) {
+                $content = $this->spillPolicy->apply($toolName, $toolUseId, $content);
             }
 
             // Zero-copy: cache result for subsequent tools

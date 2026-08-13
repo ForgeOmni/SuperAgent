@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Harness;
 
+use SuperAgent\Context\CompactionShadowStore;
 use SuperAgent\Context\ContextManager;
 use SuperAgent\Context\TokenEstimator;
 use SuperAgent\Messages\Message;
@@ -59,6 +60,7 @@ class AutoCompactor
         int $preserveRecentResults = 5,
         int $truncateLength = 200,
         int $maxFailures = 3,
+        private ?CompactionShadowStore $shadowStore = null,
     ) {
         $this->estimator = $estimator ?? new TokenEstimator();
         $this->contextManager = $contextManager;
@@ -93,6 +95,7 @@ class AutoCompactor
             preserveRecentResults: (int) ($overrides['preserve_recent_results'] ?? $config['preserve_recent_results'] ?? 5),
             truncateLength: (int) ($overrides['truncate_length'] ?? $config['truncate_length'] ?? 200),
             maxFailures: (int) ($overrides['max_failures'] ?? $config['max_failures'] ?? 3),
+            shadowStore: CompactionShadowStore::fromConfig($overrides['session_id'] ?? null),
         );
     }
 
@@ -208,9 +211,19 @@ class AutoCompactor
                 continue;
             }
 
+            // Lossless compaction (dsh-borrowed): shadow before clearing.
+            $shadowId = $this->shadowStore?->record(
+                source: 'auto_compactor',
+                reason: 'micro_compact_truncation',
+                content: $fullContent,
+                toolUseId: $this->extractToolUseId($msg),
+            );
+
             // Truncate and replace
             $truncated = mb_substr($fullContent, 0, $this->truncateLength)
-                . "\n[...content cleared by auto-compact...]";
+                . ($shadowId !== null
+                    ? "\n[...content cleared by auto-compact — retrievable via session_query get id={$shadowId}...]"
+                    : "\n[...content cleared by auto-compact...]");
 
             $messages[$i] = ToolResultMessage::fromResults([
                 [

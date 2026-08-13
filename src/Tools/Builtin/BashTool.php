@@ -2,16 +2,22 @@
 
 namespace SuperAgent\Tools\Builtin;
 
+use SuperAgent\Sandbox\SandboxManager;
+use SuperAgent\Sandbox\SandboxUnavailableException;
 use SuperAgent\Tools\Tool;
 use SuperAgent\Tools\ToolResult;
 
 class BashTool extends Tool
 {
+    private ?SandboxManager $sandbox;
+
     public function __construct(
         protected readonly ?string $workingDirectory = null,
         protected readonly int $timeout = 120,
         protected readonly array $envVars = [],
+        ?SandboxManager $sandbox = null,
     ) {
+        $this->sandbox = $sandbox;
     }
 
     public function name(): string
@@ -64,6 +70,19 @@ class BashTool extends Tool
 
         $env = array_merge($_ENV, $this->envVars);
         $cwd = $this->workingDirectory ?? getcwd();
+
+        // OS-level sandbox seam (dsh-borrowed): opt-in via
+        // superagent.sandbox.mode = auto|require. Static checks screen
+        // intent; this confines actual runtime behavior. mode=require is
+        // fail-closed: no backend ⇒ the command does not run.
+        $sandbox = $this->sandbox ?? SandboxManager::fromConfig();
+        if ($sandbox->isActive()) {
+            try {
+                $command = $sandbox->wrapCommand($command, $cwd ?: null);
+            } catch (SandboxUnavailableException $e) {
+                return ToolResult::error('Sandbox required but unavailable: ' . $e->getMessage());
+            }
+        }
 
         $process = proc_open($command, $descriptors, $pipes, $cwd, $env);
 

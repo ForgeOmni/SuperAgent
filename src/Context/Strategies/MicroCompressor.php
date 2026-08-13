@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Context\Strategies;
 
+use SuperAgent\Context\CompactionShadowStore;
 use SuperAgent\Context\CompressionConfig;
 use SuperAgent\Context\Message;
 use SuperAgent\Context\MessageRole;
@@ -14,6 +15,7 @@ class MicroCompressor implements CompressionStrategy
     public function __construct(
         private TokenEstimator $tokenEstimator,
         private CompressionConfig $config,
+        private ?CompactionShadowStore $shadowStore = null,
     ) {}
     
     public function getPriority(): int
@@ -154,7 +156,20 @@ class MicroCompressor implements CompressionStrategy
      */
     private function clearMessageContent(Message $message): Message
     {
-        $clearedContent = $this->clearContent($message->content);
+        // Lossless compaction (dsh-borrowed): shadow the full content before
+        // clearing so the model can recover it via session_query.
+        $original = is_string($message->content)
+            ? $message->content
+            : (json_encode($message->content, JSON_UNESCAPED_UNICODE) ?: '');
+        $shadowId = $this->shadowStore?->record(
+            source: 'micro_compressor',
+            reason: 'tool_result_cleared',
+            content: $original,
+            toolUseId: $message->id,
+            toolName: $message->getToolName(),
+        );
+
+        $clearedContent = $this->clearContent($message->content, $shadowId);
         
         return new Message(
             role: $message->role,
@@ -172,10 +187,12 @@ class MicroCompressor implements CompressionStrategy
     /**
      * Clear content while preserving structure
      */
-    private function clearContent(mixed $content): mixed
+    private function clearContent(mixed $content, ?string $shadowId = null): mixed
     {
+        $hint = $shadowId !== null ? " — retrievable via session_query get id={$shadowId}" : '';
+
         if (is_string($content)) {
-            return '[Content cleared for space]';
+            return "[Content cleared for space{$hint}]";
         }
         
         if (!is_array($content)) {
@@ -194,13 +211,13 @@ class MicroCompressor implements CompressionStrategy
             if ($type === 'tool_result') {
                 // Clear tool result content
                 $cleared[] = array_merge($part, [
-                    'content' => '[Tool result cleared for space]',
+                    'content' => "[Tool result cleared for space{$hint}]",
                     'is_cleared' => true,
                 ]);
             } elseif ($type === 'text' && strlen($part['text'] ?? '') > 1000) {
                 // Clear long text content
                 $cleared[] = array_merge($part, [
-                    'text' => '[Long text cleared for space]',
+                    'text' => "[Long text cleared for space{$hint}]",
                     'is_cleared' => true,
                 ]);
             } else {

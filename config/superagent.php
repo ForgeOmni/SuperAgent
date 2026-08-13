@@ -207,6 +207,53 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Spill (deepseek-harness-borrowed)
+    |--------------------------------------------------------------------------
+    | Oversized tool output is persisted to session-private storage instead of
+    | being lost to truncation. The model receives a head/tail preview plus a
+    | spill:// locator it can read back in chunks via the spill_read tool.
+    | Forked sessions inherit parent locators copy-free.
+    */
+    'spill' => [
+        'enabled' => env('SUPERAGENT_SPILL', true),
+        'dir' => env('SUPERAGENT_SPILL_DIR'), // default: ~/.superagent/spill
+        'threshold_chars' => (int) env('SUPERAGENT_SPILL_THRESHOLD', 30000),
+        'preview_head_chars' => (int) env('SUPERAGENT_SPILL_PREVIEW_HEAD', 2000),
+        'preview_tail_chars' => (int) env('SUPERAGENT_SPILL_PREVIEW_TAIL', 500),
+        'skip_tools' => ['spill_read'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | OS-Level Sandbox (deepseek-harness-borrowed seam)
+    |--------------------------------------------------------------------------
+    | Confines bash commands at the OS level: macOS sandbox-exec (Seatbelt)
+    | or Linux bubblewrap. Complements the static BashSecurityValidator.
+    | Modes: off (default) | auto (best-effort) | require (fail-closed —
+    | no backend means the command does not run).
+    */
+    'sandbox' => [
+        'mode' => env('SUPERAGENT_SANDBOX', 'off'),
+        'allow_network' => env('SUPERAGENT_SANDBOX_NETWORK', true),
+        'writable_paths' => [], // extra RW paths beyond workspace + tmp
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Compaction Shadow Store (deepseek-harness-borrowed)
+    |--------------------------------------------------------------------------
+    | Content removed from model context by compaction (truncated tool
+    | results, LLM-summarized transcript spans) is recorded here so it stays
+    | retrievable via the session_query tool — lossless compaction.
+    */
+    'shadow' => [
+        'enabled' => env('SUPERAGENT_SHADOW', true),
+        'dir' => env('SUPERAGENT_SHADOW_DIR'), // default: ~/.superagent/shadow
+        'min_content_bytes' => (int) env('SUPERAGENT_SHADOW_MIN_BYTES', 500),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Performance Optimization
     |--------------------------------------------------------------------------
     | Five optimization strategies that reduce token consumption, lower cost,

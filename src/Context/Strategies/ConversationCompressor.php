@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Context\Strategies;
 
+use SuperAgent\Context\CompactionShadowStore;
 use SuperAgent\Context\CompressionConfig;
 use SuperAgent\Context\Message;
 use SuperAgent\Context\MessageRole;
@@ -16,6 +17,7 @@ class ConversationCompressor implements CompressionStrategy
         private TokenEstimator $tokenEstimator,
         private CompressionConfig $config,
         private ProviderInterface $provider,
+        private ?CompactionShadowStore $shadowStore = null,
     ) {}
     
     public function getPriority(): int
@@ -108,6 +110,14 @@ class ConversationCompressor implements CompressionStrategy
         // Format: strip <analysis> scratchpad, extract <summary>
         $summary = $this->formatCompactSummary($rawSummary);
 
+        // Lossless compaction (dsh-borrowed): shadow the full pre-summary
+        // transcript chunk so summarized-away detail stays retrievable.
+        $shadowId = $this->shadowStore?->record(
+            source: 'conversation_compressor',
+            reason: 'llm_summary',
+            content: $this->formatMessagesForSummary($messagesToCompress),
+        );
+
         // Calculate token savings
         $originalTokens = $this->tokenEstimator->estimateMessagesTokens(
             array_map(fn($m) => $m->toArray(), $messagesToCompress)
@@ -140,11 +150,16 @@ class ConversationCompressor implements CompressionStrategy
             $boundaryMeta['split_turn_turn_id'] = $oversizedSplit['turnId'];
         }
 
+        if ($shadowId !== null) {
+            $boundaryMeta['shadow_id'] = $shadowId;
+        }
+
         // Create boundary message
         $boundaryMessage = Message::boundary(
             content: $this->createBoundaryContent(
                 count($messagesToCompress),
-                $tokensSaved
+                $tokensSaved,
+                $shadowId,
             ),
             metadata: $boundaryMeta,
         );
@@ -501,9 +516,9 @@ PROMPT;
     /**
      * Create boundary message content
      */
-    private function createBoundaryContent(int $messagesCompressed, int $tokensSaved): string
+    private function createBoundaryContent(int $messagesCompressed, int $tokensSaved, ?string $shadowId = null): string
     {
-        return sprintf(
+        $content = sprintf(
             "--- Conversation Summary ---\n" .
             "Compressed %d messages into a summary.\n" .
             "Tokens saved: %d\n" .
@@ -511,5 +526,11 @@ PROMPT;
             $messagesCompressed,
             $tokensSaved
         );
+
+        if ($shadowId !== null) {
+            $content .= "\nThe full pre-summary transcript is shadowed — retrievable via session_query get id={$shadowId}.";
+        }
+
+        return $content;
     }
 }
