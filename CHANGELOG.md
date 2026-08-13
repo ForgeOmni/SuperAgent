@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.11] - 2026-08-13
+
+### 💻 Summary
+
+**The deepseek-harness wave: tool output stops being destroyed, compaction becomes lossless, bash gains an OS-level sandbox, and 20 placeholder tools are purged.** Four ideas borrowed from [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) land at once. (1) **Spill seam** — tool output above ~30K chars is persisted to session-private storage instead of truncated; the model receives a head/tail preview plus an opaque `spill://` locator it can read back in chunks via the new `spill_read` tool; forked sessions inherit parent locators copy-free. (2) **Lossless compaction** — every compactor (ToolResultCompactor, AutoCompactor micro-compact, MicroCompressor, ConversationCompressor) now records the content it removes into a `CompactionShadowStore` before truncating/summarizing, and the new `session_query` tool lets the model search and re-read shadowed content (plus FTS5 full-text search over saved sessions) — dsh's "shadowed surface" idea: compaction markers carry `session_query get id=…` so summarized-away detail stays reachable. (3) **OS-level sandbox seam** — `SandboxManager` with macOS Seatbelt (`sandbox-exec`, deny-write-by-default profile) and Linux bubblewrap backends confines bash at the kernel level, complementing the static 23-check `BashSecurityValidator`; `mode=require` is fail-closed (no backend ⇒ the command does not run), default stays `off`. (4) **Honesty purge** — the 20 registered placeholder tools that returned `status: simulated` are deleted along with the `implement_remaining.php` generator; a registered tool that lies about executing is worse than an absent tool. A phpcpd **duplication gate** (whole-file/large-block copy-paste fails CI) rounds out the wave. Additive and non-breaking apart from the intentional tool removals below. Full suite green (3357 tests), real Seatbelt enforcement verified on macOS.
+
+### Added
+
+- **`src/Spill/`** — `SpillStoreInterface` / `LocalSpillStore` / `SpillPolicy` / `SpillRef`. Session-private 0700 dirs under `~/.superagent/spill`, random filenames, exclusive-create 0600 writes, strict locator grammar (traversal impossible by construction), symlink refusal on read; save failure keeps the full inline result (best-effort — never lose data to spilling). Wired into both QueryEngine tool-execution paths after RTK compression; per-call opt-out `options['disable_spill']`. New builtin **`spill_read`** tool (chunked retrieval with offset/limit + remaining-bytes hint). Config: `superagent.spill.*` (`SUPERAGENT_SPILL*` envs).
+- **`Context\CompactionShadowStore`** — JSONL-per-session shadow log under `~/.superagent/shadow`, per-process dedup (same tool_use_id + content records once even though ToolResultCompactor re-compacts fresh copies every provider call), min-content threshold, cross-session substring search, chunked `get()`. Config: `superagent.shadow.*`.
+- **`session_query`** builtin tool — `action=search` queries shadowed compaction content across sessions AND (when the SQLite session backend is enabled) FTS5 full-text session history with snippets; `action=get` re-reads one shadowed entry by id.
+- **`src/Sandbox/`** — `SandboxInterface` (consumers hand over the exact command; the backend wraps per-call and reports enforcement), `SeatbeltSandbox` (generated SBPL profile: `(deny file-write*)` + workspace/tmp/`/dev` allow-list, optional `(deny network*)`; profiles are private 0600 exclusive-create files), `BubblewrapSandbox` (`--ro-bind / /` + per-spec `--bind` + optional `--unshare-net`, `--die-with-parent`), `NullSandbox`, `SandboxSpec` (single shared home for workspace root + writable paths + network policy, realpath-resolved for macOS's symlinked /tmp), `SandboxManager` (modes `off`/`auto`/`require`), `SandboxUnavailableException`. BashTool integration returns a fail-closed error result in `require` mode when no backend exists. Config: `superagent.sandbox.*` (`SUPERAGENT_SANDBOX*`).
+- **Duplication gate** — `systemsdk/phpcpd` dev dependency; `composer run duplication` (min-lines 100 / min-tokens 700 — the whole-file copy-paste class fails the build) + `composer run duplication:report` (fine-grained informational view); wired into CI before the test steps.
+- Tests: `tests/Unit/Spill/SpillTest` (14), `tests/Unit/Context/CompactionShadowStoreTest` (12, incl. compactor-wiring round-trips), `tests/Unit/Sandbox/SandboxTest` (13, incl. a real macOS Seatbelt test proving writes outside the workspace are denied by the kernel).
+
+### Changed
+
+- `ToolResultCompactor::fromConfig()` accepts `?string $sessionId` and wires a shadow store; compacted markers gain ` [full output shadowed — session_query get id=…]`. QueryEngine passes `options['session_id']` through.
+- `AutoCompactor` constructor + `fromConfig()` accept a shadow store; micro-compact markers carry the retrieval hint.
+- `ContextManager` constructor gains an optional `CompactionShadowStore` (passed through to `MicroCompressor` and `ConversationCompressor`); `ConversationCompressor` shadows the full pre-summary transcript chunk and stamps `shadow_id` into boundary metadata + boundary text; `MicroCompressor` cleared-content markers carry the hint.
+- `BashTool` constructor gains an optional `SandboxManager` (default resolves from config; the `off` default keeps byte-identical legacy behavior).
+- `SuperAgentApplication::VERSION` `1.1.10` → `1.1.11`.
+
+### Removed
+
+- **20 placeholder builtin tools** (registered, but every one returned `status: 'simulated'` without doing anything): `overflow_test` (superseded by the real spill seam), `powershell`, `web_browser`, `send_user_file`, `schedule_cron`, `remote_trigger`, `team_create`, `team_delete`, `list_peers`, `enter_worktree`, `exit_worktree`, `subscribe_pr`, `suggest_background_pr`, `review_artifact`, `push_notification`, `synthetic_output`, `tungsten`, plus the fake `mcp` / `read_mcp_resource` / `mcp_auth` trio that shadowed the real `MCP\MCPTool`. Registry entries, `ToolNameResolver` aliases (`TeamCreate/Delete`, `EnterWorktree/ExitWorktree`, `CronCreate/Delete/List`, `PowerShell`, `RemoteTrigger`, `SendUserMessage`, `MCPTool`, `McpAuthTool`, `ReadMcpResourceTool`), and the now-empty experimental gating block go with them. The Squad/Swarm engines behind the team/peer stubs are untouched — only the lying tool-facing surface is gone; real model-facing entry points can return when they actually execute.
+- `src/Tools/implement_remaining.php` — the checked-in code generator that produced the stubs (it lived inside the PSR-4 autoload root).
+- Root scratch scripts `test.php` / `test_glob.php`.
+
 ## [1.1.10] - 2026-07-24
 
 ### 💻 Summary

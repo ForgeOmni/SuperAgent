@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "f36371a276e1c005da11a3406e2ab271",
+    "content-hash": "a7f1096948be59ae4c2bb0a3b3a9bdd3",
     "packages": [
         {
             "name": "guzzlehttp/guzzle",
@@ -7870,6 +7870,63 @@
                 }
             ],
             "time": "2026-05-13T08:26:06+00:00"
+        },
+        {
+            "name": "systemsdk/phpcpd",
+            "version": "v7.0.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/systemsdk/phpcpd.git",
+                "reference": "8b092cf6c37dcc3cb4a7af61135868b7dc824eae"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/systemsdk/phpcpd/zipball/8b092cf6c37dcc3cb4a7af61135868b7dc824eae",
+                "reference": "8b092cf6c37dcc3cb4a7af61135868b7dc824eae",
+                "shasum": ""
+            },
+            "require": {
+                "ext-dom": "*",
+                "ext-mbstring": "*",
+                "php": ">=8.1",
+                "phpunit/php-file-iterator": "^4.0",
+                "phpunit/php-timer": "^6.0",
+                "sebastian/cli-parser": "^2.0",
+                "sebastian/version": "^4.0"
+            },
+            "bin": [
+                "phpcpd"
+            ],
+            "type": "library",
+            "autoload": {
+                "classmap": [
+                    "src/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "BSD-3-Clause"
+            ],
+            "authors": [
+                {
+                    "name": "Sebastian Bergmann",
+                    "email": "sebastian@phpunit.de",
+                    "role": "lead"
+                },
+                {
+                    "name": "Dmitriy Kravtsov",
+                    "email": "dmitriy.kravtsov@systemsdk.com",
+                    "homepage": "https://github.com/dimadeush",
+                    "role": "Developer"
+                }
+            ],
+            "description": "Copy/Paste Detector (CPD) for PHP code.",
+            "homepage": "https://github.com/systemsdk/phpcpd",
+            "support": {
+                "issues": "https://github.com/systemsdk/phpcpd/issues",
+                "source": "https://github.com/systemsdk/phpcpd/tree/v7.0.1"
+            },
+            "time": "2024-01-12T20:11:06+00:00"
         },
         {
             "name": "theseer/tokenizer",

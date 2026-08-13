@@ -1,7 +1,15 @@
 {
     "name": "forgeomni/superagent",
     "description": "AI Agent SDK — standalone CLI or Laravel integration. Run the full agentic loop in-process with tool use support.",
-    "keywords": ["agent", "ai", "anthropic", "llm", "tool-use", "cli", "laravel"],
+    "keywords": [
+        "agent",
+        "ai",
+        "anthropic",
+        "llm",
+        "tool-use",
+        "cli",
+        "laravel"
+    ],
     "license": "MIT",
     "type": "library",
     "require": {
@@ -13,7 +21,8 @@
         "illuminate/support": "^10.0|^11.0|^12.0",
         "orchestra/testbench": "^8.0|^9.0|^10.0",
         "phpunit/phpunit": "^10.0|^11.0",
-        "symfony/console": "^6.0|^7.0"
+        "symfony/console": "^6.0|^7.0",
+        "systemsdk/phpcpd": "^7.0"
     },
     "suggest": {
         "illuminate/support": "Required for Laravel service provider, facades, and Artisan commands",
@@ -47,5 +56,9 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "scripts": {
+        "duplication": "phpcpd src --min-lines 100 --min-tokens 700",
+        "duplication:report": "phpcpd src --min-lines 10 --min-tokens 100 || true"
+    }
 }
