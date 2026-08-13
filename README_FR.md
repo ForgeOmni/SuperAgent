@@ -35,7 +35,7 @@ echo $result->text();
 - [Fable 5](#fable-5)
 - [Opus 5](#opus-5)
 - [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
-- [Grok 4.5](#grok-45)
+- [Grok 4.6](#grok-46)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -116,7 +116,7 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | `glm` | BigModel GLM (GLM-5.2 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(GLM-5.2, v1.1.2)* |
 | `minimax` | MiniMax (M3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking entrelacé + image/vidéo natives *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
-| `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.5` — molette reasoning-effort + pinning de cache *(Grok 4.5, v1.1.6 ; depuis v1.0.8)* |
+| `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.6` — molette reasoning-effort (incl. `xhigh`) + pinning de cache *(Grok 4.6, v1.1.12 ; depuis v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Ollama local | Aucune auth — localhost:11434 par défaut |
 | `lmstudio` | Serveur LM Studio local | Auth placeholder — localhost:1234 par défaut *(depuis v0.9.1)* |
@@ -397,19 +397,19 @@ $result = $agent->run('conçois puis implémente la migration', [
 
 ---
 
-## Grok 4.5
+## Grok 4.6
 
-Grok 4.5 (`grok-4.5`, sorti le 2026-07-08) est le nouveau fleuron de xAI et le défaut du provider `grok` — « smartest and fastest », le modèle derrière Grok Build, avec un **contexte de 500 K**, la vision, les outils côté serveur (recherche web/X, exécution de code) et le MCP distant. Tarif : **2 $ en entrée / 0,50 $ en cache / 6 $ en sortie** par million (2× au-delà d'un prompt de 200 K) ; `grok-4.3` (1 M de contexte, 1,25 $/2,50 $, éligible batch) reste au catalogue comme palier économique.
+Grok 4.6 (`grok-4.6`, sorti le 2026-08-12) est le fleuron frontière de xAI pour les agents longue durée, le codage et le travail visuel, et le défaut du provider `grok` — **contexte de 500 K**, entrée texte+image, vision, outils côté serveur (recherche web/X, exécution de code) et MCP distant. Tarif : **2 $ en entrée / 0,50 $ en cache / 6 $ en sortie** par million (la requête entière passe à 2× — 4 $/1 $/12 $ — dès que le prompt atteint 200 K). `grok-4.5` (2026-07-08) reste actif comme fleuron précédent (entrée en cache désormais à 0,30 $/M) et `grok-4.3` (1 M de contexte, 1,25 $/2,50 $, éligible batch) reste le palier économique.
 
 ```php
 $agent = new Agent([
     'provider' => 'grok',
     'api_key'  => getenv('XAI_API_KEY'),
-    'model'    => 'grok-4.5',                    // ou l'alias `grok`
+    'model'    => 'grok-4.6',                    // ou l'alias `grok`
 ]);
 ```
 
-- **Molette reasoning-effort.** Grok 4.5 raisonne inconditionnellement (pas d'interrupteur off) et accepte `reasoning_effort: low | medium | high` (défaut serveur `high`) ; `max`/`xhigh` sont ramenés à `high`, `off` n'envoie rien. grok-4.3 / grok-4 rejettent toujours le paramètre, donc le fragment reste conditionné par id de modèle.
+- **Molette reasoning-effort.** Grok 4.6 raisonne inconditionnellement (pas d'interrupteur off) et accepte `reasoning_effort: low | medium | high | xhigh` (défaut serveur `high`) — `max` est mappé sur le nouveau palier supérieur `xhigh`. Grok 4.5 garde la molette à trois niveaux (`max`/`xhigh` ramenés à `high`) ; `off` n'envoie rien sur l'un comme l'autre. grok-4.3 / grok-4 rejettent toujours le paramètre, donc le fragment reste conditionné par id de modèle.
 
 ```php
 $agent->run('tâche de codage agentique profonde', ['reasoning_effort' => 'medium']);
@@ -427,7 +427,7 @@ new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
 
 ## DeepSeek V4
 
-DeepSeek V4 (sorti le 2026-04-24) propose deux modèles MoE — `deepseek-v4-pro` (1,6 T total / 49 B actifs) et `deepseek-v4-flash` (284 B / 13 B actifs) — avec **1 M de contexte** par défaut et un **bascule thinking / non-thinking** dans le même modèle. Le même backend expose deux wires en parallèle (OpenAI et Anthropic) ; le SDK supporte les deux chemins :
+DeepSeek V4 propose deux modèles MoE — `deepseek-v4-pro` (1,6 T total / 49 B actifs ; **GA depuis le 2026-08-13** en version `DeepSeek-V4-Pro-0813`, même id) et `deepseek-v4-flash` (284 B / 13 B actifs ; bêta publique 0731 ré-post-entraînée) — avec **1 M de contexte** par défaut, un **bascule thinking / non-thinking** dans le même modèle et une molette reasoning-effort `low | high | max` (le palier `low` est nouveau avec la GA). La tarification passe à un modèle heures pleines/creuses le 2026-08-16 (heures pleines 01-04 + 06-10 UTC à 2× la base heures creuses : Pro 0,66 $/1,98 $, Flash 0,22 $/0,66 $ par million). Le même backend expose deux wires en parallèle (OpenAI et Anthropic) ; le SDK supporte les deux chemins :
 
 ```php
 // Wire OpenAI : DeepSeekProvider natif

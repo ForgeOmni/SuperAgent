@@ -14,11 +14,12 @@ use SuperAgent\Tools\Builtin\WorkflowTool;
 
 /**
  * xAI Grok provider support: registry wiring, catalog pricing / alias
- * resolution (verified against docs.x.ai — grok-4.5 flagship at $2/$6,
+ * resolution (verified against docs.x.ai — grok-4.6 flagship at $2/$6,
  * 500K ctx, api.x.ai/v1), OpenAI tool-format reuse, env discovery,
- * reasoning_effort gating (grok-4.5 three-level dial, mini two-level,
- * everything else none) and x-grok-conv-id cache pinning. Also pins that
- * Cursor Composer support was removed (it has no official public API).
+ * reasoning_effort gating (grok-4.6 four-level dial with xhigh, grok-4.5
+ * three-level, mini two-level, everything else none) and x-grok-conv-id
+ * cache pinning. Also pins that Cursor Composer support was removed (it
+ * has no official public API).
  */
 class GrokProviderTest extends TestCase
 {
@@ -28,31 +29,37 @@ class GrokProviderTest extends TestCase
         $this->assertInstanceOf(GrokProvider::class, $p);
         $this->assertInstanceOf(ChatCompletionsProvider::class, $p);
         $this->assertSame('grok', $p->name());
-        $this->assertSame('grok-4.5', $p->getModel());
+        $this->assertSame('grok-4.6', $p->getModel());
     }
 
     public function test_provider_registered_with_capabilities(): void
     {
         $this->assertContains('grok', ProviderRegistry::getProviders());
-        // grok-4.5 flagship window (grok-4.3/grok-4-fast go higher per-model).
+        // grok-4.6 flagship window (grok-4.3/grok-4-fast go higher per-model).
         $this->assertSame(500_000, ProviderRegistry::getCapabilities('grok')['max_context']);
     }
 
     public function test_catalog_pricing_and_alias_resolution(): void
     {
+        $grok46 = ModelCatalog::pricing('grok-4.6');
+        $this->assertSame(2.00, $grok46['input']);
+        $this->assertSame(6.00, $grok46['output']);
         $grok45 = ModelCatalog::pricing('grok-4.5');
         $this->assertSame(2.00, $grok45['input']);
         $this->assertSame(6.00, $grok45['output']);
         $this->assertSame(['input' => 1.25, 'output' => 2.50], ModelCatalog::pricing('grok-4.3'));
         $this->assertSame(['input' => 3.0, 'output' => 15.0], ModelCatalog::pricing('grok-4'));
-        // `grok` alias resolves to the newest in the grok family — grok-4.5.
-        $this->assertSame('grok-4.5', ModelCatalog::resolveAlias('grok'));
+        // `grok` alias resolves to the newest in the grok family — grok-4.6;
+        // the pinned `-latest` aliases stay on their own version.
+        $this->assertSame('grok-4.6', ModelCatalog::resolveAlias('grok'));
+        $this->assertSame('grok-4.6', ModelCatalog::resolveAlias('grok-4.6-latest'));
         $this->assertSame('grok-4.5', ModelCatalog::resolveAlias('grok-4.5-latest'));
     }
 
     public function test_cost_calculator_pricing(): void
     {
         $oneM = new Usage(1_000_000, 1_000_000);
+        $this->assertEqualsWithDelta(8.0, CostCalculator::calculate('grok-4.6', $oneM), 0.001);
         $this->assertEqualsWithDelta(8.0, CostCalculator::calculate('grok-4.5', $oneM), 0.001);
         $this->assertEqualsWithDelta(3.75, CostCalculator::calculate('grok-4.3', $oneM), 0.001);
         $this->assertEqualsWithDelta(18.0, CostCalculator::calculate('grok-4', $oneM), 0.001);
@@ -78,6 +85,20 @@ class GrokProviderTest extends TestCase
         } finally {
             $prev === false ? putenv('XAI_API_KEY') : putenv('XAI_API_KEY=' . $prev);
         }
+    }
+
+    public function test_reasoning_effort_four_level_dial_on_grok_46(): void
+    {
+        // grok-4.6 adds the xhigh tier on top of 4.5's low|medium|high;
+        // reasoning cannot be disabled, so `off` sends nothing.
+        $p = new GrokProvider(['api_key' => 'k', 'model' => 'grok-4.6']);
+        $this->assertSame(['reasoning_effort' => 'low'], $p->reasoningEffortFragment('low'));
+        $this->assertSame(['reasoning_effort' => 'medium'], $p->reasoningEffortFragment('medium'));
+        $this->assertSame(['reasoning_effort' => 'high'], $p->reasoningEffortFragment('high'));
+        // max/xhigh land on the new xhigh top tier.
+        $this->assertSame(['reasoning_effort' => 'xhigh'], $p->reasoningEffortFragment('max'));
+        $this->assertSame(['reasoning_effort' => 'xhigh'], $p->reasoningEffortFragment('xhigh'));
+        $this->assertSame([], $p->reasoningEffortFragment('off'));
     }
 
     public function test_reasoning_effort_three_level_dial_on_grok_45(): void

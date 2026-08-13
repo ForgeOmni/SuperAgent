@@ -35,7 +35,7 @@ echo $result->text();
 - [Fable 5](#fable-5)
 - [Opus 5](#opus-5)
 - [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
-- [Grok 4.5](#grok-45)
+- [Grok 4.6](#grok-46)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -116,7 +116,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `glm` | BigModel GLM（默认 GLM-5.2）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.2，v1.1.2)* |
 | `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
-| `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.5` —— reasoning-effort 档位 + cache 绑定 *（Grok 4.5，v1.1.6；v1.0.8 起）* |
+| `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.6` —— reasoning-effort 档位（含 `xhigh`）+ cache 绑定 *（Grok 4.6，v1.1.12；v1.0.8 起）* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | 本地 Ollama daemon | 无需 auth — 默认 localhost:11434 |
 | `lmstudio` | 本地 LM Studio server | 占位 auth — 默认 localhost:1234 *（v0.9.1 起）* |
@@ -396,19 +396,19 @@ $result = $agent->run('先设计再实现这次迁移', [
 
 ---
 
-## Grok 4.5
+## Grok 4.6
 
-Grok 4.5（`grok-4.5`，2026-07-08 发布）是 xAI 新旗舰，也是 `grok` provider 的新默认 —— "最聪明也最快"，Grok Build 背后的模型，**500K context**、视觉、服务端工具（web/X 搜索、代码执行）与远程 MCP。定价 **$2 输入 / $0.50 缓存 / $6 输出**（每百万 token，prompt 超 200K 部分 2×）；`grok-4.3`（1M ctx，$1.25/$2.50，可用 batch）作为性价比档留在 catalog。
+Grok 4.6（`grok-4.6`，2026-08-12 发布）是 xAI 面向长时 agent、编码与视觉工作的前沿旗舰，也是 `grok` provider 的新默认 —— **500K context**、文本+图像输入、视觉、服务端工具（web/X 搜索、代码执行）与远程 MCP。定价 **$2 输入 / $0.50 缓存 / $6 输出**（每百万 token；prompt 达到 200K 后整个请求按 2× 计费，即 $4/$1/$12）。`grok-4.5`（2026-07-08）作为上一代旗舰继续可用（缓存输入降至 $0.30/M）；`grok-4.3`（1M ctx，$1.25/$2.50，可用 batch）仍是性价比档。
 
 ```php
 $agent = new Agent([
     'provider' => 'grok',
     'api_key'  => getenv('XAI_API_KEY'),
-    'model'    => 'grok-4.5',                    // 或 `grok` 别名
+    'model'    => 'grok-4.6',                    // 或 `grok` 别名
 ]);
 ```
 
-- **reasoning-effort 档位。** Grok 4.5 无条件推理（没有关闭开关），接受 `reasoning_effort: low | medium | high`（服务端默认 `high`）；`max`/`xhigh` 收敛到 `high`，`off` 不发送任何内容。grok-4.3 / grok-4 仍会拒绝该参数，所以 fragment 按 model id 门控。
+- **reasoning-effort 档位。** Grok 4.6 无条件推理（没有关闭开关），接受 `reasoning_effort: low | medium | high | xhigh`（服务端默认 `high`）—— `max` 映射到新的 `xhigh` 最高档。Grok 4.5 保持三档（`max`/`xhigh` 收敛到 `high`）；两者的 `off` 都不发送任何内容。grok-4.3 / grok-4 仍会拒绝该参数，所以 fragment 按 model id 门控。
 
 ```php
 $agent->run('深度 agentic 编码任务', ['reasoning_effort' => 'medium']);
@@ -426,7 +426,7 @@ new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
 
 ## DeepSeek V4
 
-DeepSeek V4（2026-04-24 发布）推出两个 MoE 模型 —— `deepseek-v4-pro`（1.6T 总参 / 49B 激活）和 `deepseek-v4-flash`（284B / 13B 激活），默认 **1M context**，单模型 **thinking / non-thinking 切换**。同一后端同时暴露 OpenAI-wire 和 Anthropic-wire 两种接口，SDK 两条路径都支持：
+DeepSeek V4 推出两个 MoE 模型 —— `deepseek-v4-pro`（1.6T 总参 / 49B 激活；**2026-08-13 起 GA**，模型版本 `DeepSeek-V4-Pro-0813`，id 不变）和 `deepseek-v4-flash`（284B / 13B 激活；0731 重新后训练公测版），默认 **1M context**，单模型 **thinking / non-thinking 切换**，外加 `low | high | max` 三档 reasoning-effort（`low` 档随 GA 新增）。2026-08-16 起改为峰谷计价（峰时 01-04 + 06-10 UTC 按谷时基准 2× 计费；谷时基准 Pro $0.66/$1.98、Flash $0.22/$0.66 每百万 token）。同一后端同时暴露 OpenAI-wire 和 Anthropic-wire 两种接口，SDK 两条路径都支持：
 
 ```php
 // OpenAI-wire：原生 DeepSeekProvider

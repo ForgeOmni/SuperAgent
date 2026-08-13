@@ -35,7 +35,7 @@ echo $result->text();
 - [Fable 5](#fable-5)
 - [Opus 5](#opus-5)
 - [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
-- [Grok 4.5](#grok-45)
+- [Grok 4.6](#grok-46)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.2](#glm-52)
@@ -116,7 +116,7 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 | `glm` | BigModel GLM (GLM-5.2 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.2, v1.1.2)* |
 | `minimax` | MiniMax (M3 default) | API key; regions `intl` / `cn`; interleaved thinking + native image/video *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(since v0.9.6, multi-upstream v0.9.8)* |
-| `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.5` — reasoning-effort dial + cache pinning *(Grok 4.5, v1.1.6; since v1.0.8)* |
+| `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.6` — reasoning-effort dial (incl. `xhigh`) + cache pinning *(Grok 4.6, v1.1.12; since v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Local Ollama daemon | No auth — localhost:11434 by default |
 | `lmstudio` | Local LM Studio server | Placeholder auth — localhost:1234 by default *(since v0.9.1)* |
@@ -396,19 +396,19 @@ $result = $agent->run('design then implement the migration', [
 
 ---
 
-## Grok 4.5
+## Grok 4.6
 
-Grok 4.5 (`grok-4.5`, released 2026-07-08) is xAI's new flagship and the `grok` provider default — "smartest and fastest", the model behind Grok Build, with a **500K context**, vision, server-side tools (web/X search, code execution) and remote MCP. Pricing is **$2 in / $0.50 cached / $6 out** per million (2× beyond a 200K prompt); `grok-4.3` (1M ctx, $1.25/$2.50, batch-eligible) stays in the catalog as the value tier.
+Grok 4.6 (`grok-4.6`, released 2026-08-12) is xAI's frontier flagship for long-running agents, coding and visual work, and the `grok` provider default — **500K context**, text+image input, vision, server-side tools (web/X search, code execution) and remote MCP. Pricing is **$2 in / $0.50 cached / $6 out** per million (the whole request bills 2× — $4/$1/$12 — once the prompt reaches 200K). `grok-4.5` (2026-07-08) stays active as the previous flagship (cached input now $0.30/M) and `grok-4.3` (1M ctx, $1.25/$2.50, batch-eligible) remains the value tier.
 
 ```php
 $agent = new Agent([
     'provider' => 'grok',
     'api_key'  => getenv('XAI_API_KEY'),
-    'model'    => 'grok-4.5',                    // or the `grok` alias
+    'model'    => 'grok-4.6',                    // or the `grok` alias
 ]);
 ```
 
-- **Reasoning-effort dial.** Grok 4.5 reasons unconditionally (no off switch) and takes `reasoning_effort: low | medium | high` (server default `high`); `max`/`xhigh` clamp to `high`, `off` sends nothing. grok-4.3 / grok-4 still reject the param, so the fragment stays gated per model id.
+- **Reasoning-effort dial.** Grok 4.6 reasons unconditionally (no off switch) and takes `reasoning_effort: low | medium | high | xhigh` (server default `high`) — `max` maps to the new `xhigh` top tier. Grok 4.5 keeps the three-level dial (`max`/`xhigh` clamp to `high`); `off` sends nothing on either. grok-4.3 / grok-4 still reject the param, so the fragment stays gated per model id.
 
 ```php
 $agent->run('deep agentic coding task', ['reasoning_effort' => 'medium']);
@@ -426,7 +426,7 @@ new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
 
 ## DeepSeek V4
 
-DeepSeek V4 (released 2026-04-24) ships two MoE models — `deepseek-v4-pro` (1.6T total / 49B active) and `deepseek-v4-flash` (284B / 13B active) — with **1M context** as the default and a single-model **thinking / non-thinking toggle**. The same backend exposes both an OpenAI-wire and an Anthropic-wire endpoint, so the SDK supports two routes:
+DeepSeek V4 ships two MoE models — `deepseek-v4-pro` (1.6T total / 49B active; **GA since 2026-08-13** as model version `DeepSeek-V4-Pro-0813`, same id) and `deepseek-v4-flash` (284B / 13B active; re-post-trained 0731 public beta) — with **1M context** as the default and a single-model **thinking / non-thinking toggle** plus a `low | high | max` reasoning-effort dial (the `low` tier is new with GA). Pricing moves to a peak/off-peak model on 2026-08-16 (peak 01-04 + 06-10 UTC bills 2× the off-peak base of $0.66/$1.98 Pro, $0.22/$0.66 Flash per M). The same backend exposes both an OpenAI-wire and an Anthropic-wire endpoint, so the SDK supports two routes:
 
 ```php
 // OpenAI-wire: native DeepSeekProvider

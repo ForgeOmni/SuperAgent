@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Grok 4.6** (`grok-4.6`, released 2026-08-12) — xAI's new frontier flagship for long-running agents, coding and visual work; now the `grok` provider default and the `grok` alias target. 500K ctx, text+image in, always-on reasoning with a new four-level `reasoning_effort` dial (`low|medium|high|xhigh` — `max`/`xhigh` map to the new `xhigh` top tier; 4.5 keeps its three-level dial). Same $2 in / $0.50 cached / $6 out per M as 4.5 (whole request 2x once prompt ≥200K). `grok-4.5` stays active as previous flagship; its cached-input price drops to $0.30/M per docs.x.ai.
+- **DeepSeek V4 Pro GA** (model version `DeepSeek-V4-Pro-0813`, GA 2026-08-13; same `deepseek-v4-pro` id) and **V4 Flash 0731** (re-post-trained public beta). GA adds a genuine `low` reasoning-effort tier — `DeepSeekProvider::reasoningEffortFragment('low')` now emits `reasoning_effort: low` instead of collapsing to `high` (documented mapping low→low, medium/high→high, xhigh/max→max), on both the native and NVIDIA NIM shapes. Catalog pricing moves to DeepSeek's peak/off-peak model (effective 2026-08-16 16:00 UTC): off-peak base $0.66/$0.022/$1.98 (Pro) and $0.22/$0.007/$0.66 (Flash) per M with peak hours (01-04 + 06-10 UTC) at 2x; flat catalog rates use the off-peak base.
+
 ## [1.1.11] - 2026-08-13
 
 ### 💻 Summary

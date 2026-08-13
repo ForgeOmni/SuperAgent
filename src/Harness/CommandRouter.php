@@ -779,7 +779,8 @@ class CommandRouter
                 ['id' => 'o4-mini',            'description' => 'o4-mini — reasoning'],
             ],
             'grok' => [
-                ['id' => 'grok-4.5',           'description' => 'Grok 4.5 — flagship; reasoning_effort low|medium|high (default)'],
+                ['id' => 'grok-4.6',           'description' => 'Grok 4.6 — flagship; reasoning_effort low|medium|high|xhigh (default high)'],
+                ['id' => 'grok-4.5',           'description' => 'Grok 4.5 — previous flagship; reasoning_effort low|medium|high'],
                 ['id' => 'grok-4.3',           'description' => 'Grok 4.3 — previous flagship, 1M ctx'],
                 ['id' => 'grok-4-fast',        'description' => 'Grok 4 Fast — cheap 2M-context tier'],
                 ['id' => 'grok-code-fast-1',   'description' => 'Grok Code Fast — agentic coding'],

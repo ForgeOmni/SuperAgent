@@ -325,6 +325,18 @@ class DeepSeekProviderTest extends TestCase
         );
     }
 
+    public function test_reasoning_effort_low_emits_low_band(): void
+    {
+        // V4 GA (0813) introduced a genuine `low` tier — the preview
+        // collapsed low onto high. medium still maps to high per the
+        // documented low→low / medium,high→high / xhigh,max→max table.
+        $p = new DeepSeekProvider(['api_key' => 'k']);
+        $frag = $p->reasoningEffortFragment('low');
+        $this->assertSame('low', $frag['reasoning_effort']);
+        $this->assertSame(['type' => 'enabled'], $frag['thinking']);
+        $this->assertSame('high', $p->reasoningEffortFragment('medium')['reasoning_effort']);
+    }
+
     public function test_reasoning_effort_high_emits_thinking_enabled(): void
     {
         $p = new DeepSeekProvider(['api_key' => 'k']);

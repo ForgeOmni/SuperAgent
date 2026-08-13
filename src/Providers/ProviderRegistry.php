@@ -167,7 +167,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'grok' => [
-            'model' => 'grok-4.5',
+            'model' => 'grok-4.6',
             'region' => 'default',
             'max_tokens' => 8192,
             'max_retries' => 3,
@@ -876,7 +876,7 @@ class ProviderRegistry
                 'streaming' => true,
                 'tools' => true,
                 'vision' => true,
-                // grok-4.5 flagship window; grok-4.3 (1M) and grok-4-fast
+                // grok-4.6/4.5 flagship window; grok-4.3 (1M) and grok-4-fast
                 // (2M) go higher — per-model values live in models.json.
                 'max_context' => 500_000,
                 'structured_output' => true,

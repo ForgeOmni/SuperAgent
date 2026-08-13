@@ -44,6 +44,7 @@ class TokenEstimator
         'gpt-3.5-turbo' => 16_385,
 
         // xAI Grok
+        'grok-4.6' => 500_000,
         'grok-4.5' => 500_000,
         'grok-4.3' => 1_000_000,
         'grok-4-fast' => 2_000_000,

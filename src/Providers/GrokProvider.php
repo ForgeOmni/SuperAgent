@@ -8,10 +8,11 @@ use SuperAgent\Exceptions\ProviderException;
 use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
 
 /**
- * xAI — Grok family. Current lineup: grok-4.5 (flagship, 500K ctx),
- * grok-4.3 (previous flagship, 1M ctx), the grok-4.20 reasoning /
- * non-reasoning / multi-agent SKUs, grok-build-0.1, plus grok-4 /
- * grok-4-fast / grok-code-fast-1 / grok-3 / grok-3-mini.
+ * xAI — Grok family. Current lineup: grok-4.6 (flagship, 500K ctx,
+ * 2026-08-12), grok-4.5 (previous flagship, still active), grok-4.3
+ * (1M ctx), the grok-4.20 reasoning / non-reasoning / multi-agent SKUs,
+ * grok-build-0.1, plus grok-4 / grok-4-fast / grok-code-fast-1 /
+ * grok-3 / grok-3-mini.
  *
  * Wire format is OpenAI-compatible at `https://api.x.ai/v1/chat/completions`,
  * so this is a thin {@see ChatCompletionsProvider} subclass — tool calling,
@@ -19,12 +20,13 @@ use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
  *
  * Auth: `XAI_API_KEY` (or `GROK_API_KEY`), passed as a Bearer token.
  *
- * Reasoning: grok-4.5 reasons unconditionally (no off switch) and takes the
- * three-level `reasoning_effort` dial (`low` | `medium` | `high`, server
- * default `high`); grok-3-mini exposes the older two-level dial
- * (`low` | `high`). grok-4 / grok-4.3 / grok-3 (non-mini) do NOT accept
- * `reasoning_effort` and 400 if it is sent, so the effort fragment is only
- * emitted for ids that actually support it.
+ * Reasoning: grok-4.6 and grok-4.5 reason unconditionally (no off switch)
+ * and take the `reasoning_effort` dial — 4.6 adds a fourth `xhigh` tier
+ * on top of 4.5's `low` | `medium` | `high` (server default `high` on
+ * both); grok-3-mini exposes the older two-level dial (`low` | `high`).
+ * grok-4 / grok-4.3 / grok-3 (non-mini) do NOT accept `reasoning_effort`
+ * and 400 if it is sent, so the effort fragment is only emitted for ids
+ * that actually support it.
  *
  * Prompt caching: xAI recommends pinning a conversation to a server for
  * reliable cache hits. On Chat Completions that is the `x-grok-conv-id`
@@ -57,9 +59,9 @@ class GrokProvider extends ChatCompletionsProvider implements SupportsReasoningE
 
     protected function defaultModel(): string
     {
-        // grok-4.5 is xAI's recommended primary model for chat + coding
-        // (also the default of Grok Build).
-        return 'grok-4.5';
+        // grok-4.6 is xAI's frontier flagship (2026-08-12) for chat,
+        // coding and long-running agents — same $2/$6 pricing as 4.5.
+        return 'grok-4.6';
     }
 
     /**
@@ -76,19 +78,31 @@ class GrokProvider extends ChatCompletionsProvider implements SupportsReasoningE
     }
 
     /**
-     * `grok-4.5` and `grok-3-mini` (plus the `-mini` reasoning SKUs) accept
-     * the `reasoning_effort` field. grok-4 / grok-4.3 reason unconditionally
-     * and reject the param; the non-mini grok-3 has no reasoning channel —
-     * for those the fragment is empty.
+     * `grok-4.6`, `grok-4.5` and `grok-3-mini` (plus the `-mini` reasoning
+     * SKUs) accept the `reasoning_effort` field. grok-4 / grok-4.3 reason
+     * unconditionally and reject the param; the non-mini grok-3 has no
+     * reasoning channel — for those the fragment is empty.
      *
-     * grok-4.5 takes the three-level dial (`low` | `medium` | `high`,
-     * server default `high`) and its reasoning cannot be disabled, so `off`
+     * grok-4.6 takes the four-level dial (`low` | `medium` | `high` |
+     * `xhigh`, server default `high`); grok-4.5 the three-level dial
+     * without `xhigh`. Reasoning cannot be disabled on either, so `off`
      * maps to "send nothing". The mini SKUs keep xAI's older two-level
      * `low` / `high` mapping.
      */
     public function reasoningEffortFragment(string $effort): array
     {
         $tier = strtolower(trim($effort));
+
+        if ($this->isGrok46($this->model)) {
+            return match ($tier) {
+                'off', 'disabled', 'none', 'false' => [],
+                'low', 'minimal' => ['reasoning_effort' => 'low'],
+                'medium', 'mid' => ['reasoning_effort' => 'medium'],
+                'high', 'highest', '' => ['reasoning_effort' => 'high'],
+                'max', 'xhigh' => ['reasoning_effort' => 'xhigh'],
+                default => [],
+            };
+        }
 
         if ($this->isGrok45($this->model)) {
             return match ($tier) {
@@ -113,9 +127,9 @@ class GrokProvider extends ChatCompletionsProvider implements SupportsReasoningE
     }
 
     /**
-     * Grok 4.5 cache routing — xAI recommends pinning the conversation to a
+     * Grok cache routing — xAI recommends pinning the conversation to a
      * server via the `x-grok-conv-id` header on Chat Completions so prompt
-     * cache hits are reliable ($0.50/M cached vs $2/M fresh input).
+     * cache hits are reliable ($0.50/M cached vs $2/M fresh input on 4.6).
      *
      * @param array<string, mixed> $config
      */
@@ -147,7 +161,12 @@ class GrokProvider extends ChatCompletionsProvider implements SupportsReasoningE
     private function modelSupportsReasoningEffort(string $model): bool
     {
         $m = strtolower($model);
-        return $this->isGrok45($m) || str_contains($m, 'mini');
+        return $this->isGrok46($m) || $this->isGrok45($m) || str_contains($m, 'mini');
+    }
+
+    private function isGrok46(string $model): bool
+    {
+        return str_starts_with(strtolower($model), 'grok-4.6');
     }
 
     private function isGrok45(string $model): bool

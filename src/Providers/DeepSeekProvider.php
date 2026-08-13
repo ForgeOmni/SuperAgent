@@ -15,7 +15,15 @@ use SuperAgent\Providers\Capabilities\SupportsThinking;
 
 /**
  * DeepSeek — V4 family (deepseek-v4-pro / deepseek-v4-flash) and the
- * legacy V3 / R1 ids that retire 2026-07-24.
+ * legacy V3 / R1 ids that retired 2026-07-24.
+ *
+ * V4-Pro went GA 2026-08-13 (model version DeepSeek-V4-Pro-0813; same
+ * `deepseek-v4-pro` endpoint id) and V4-Flash was re-post-trained
+ * 2026-07-31 (public beta, same id). GA adds a genuine three-level
+ * `reasoning_effort` dial (`low` | `high` | `max`) and Responses-API
+ * support upstream (this provider stays on the Chat Completions shape).
+ * Pricing moves to a peak / off-peak model 2026-08-16 16:00 UTC (peak
+ * 01:00-04:00 + 06:00-10:00 UTC at 2x the off-peak base).
  *
  * Wire format is OpenAI-compatible at `/v1/chat/completions`. The same
  * endpoint exposes an Anthropic-compatible mode at `/anthropic/...` —
@@ -120,10 +128,12 @@ class DeepSeekProvider extends ChatCompletionsProvider implements SupportsThinki
     }
 
     /**
-     * Three tiers, normalised:
+     * Four tiers, normalised per the V4 GA thinking-mode docs
+     * (requested efforts map low→low, medium/high→high, xhigh/max→max):
      *
      *   off  → disable thinking outright
-     *   high → standard thinking budget
+     *   low  → shallow CoT (new with V4 GA; preview collapsed it to high)
+     *   high → standard thinking budget (server default)
      *   max  → V4-Pro "think harder"; expensive, deepest CoT
      *
      * NVIDIA NIM nests its switches under `chat_template_kwargs`;
@@ -140,7 +150,10 @@ class DeepSeekProvider extends ChatCompletionsProvider implements SupportsThinki
             'off', 'disabled', 'none', 'false' => $isNim
                 ? ['chat_template_kwargs' => ['thinking' => false]]
                 : ['thinking' => ['type' => 'disabled']],
-            'low', 'minimal', 'medium', 'mid', 'high', '' => $isNim
+            'low', 'minimal' => $isNim
+                ? ['chat_template_kwargs' => ['thinking' => true, 'reasoning_effort' => 'low']]
+                : ['reasoning_effort' => 'low', 'thinking' => ['type' => 'enabled']],
+            'medium', 'mid', 'high', '' => $isNim
                 ? ['chat_template_kwargs' => ['thinking' => true, 'reasoning_effort' => 'high']]
                 : ['reasoning_effort' => 'high', 'thinking' => ['type' => 'enabled']],
             'max', 'xhigh', 'highest' => $isNim

@@ -36,6 +36,7 @@ class CostCalculator
         'claude-3-haiku-20240307' => ['input' => 0.25, 'output' => 1.25],
 
         // xAI Grok
+        'grok-4.6'                     => ['input' => 2.00, 'output' => 6.00],
         'grok-4.5'                     => ['input' => 2.00, 'output' => 6.00],
         'grok-4.3'                     => ['input' => 1.25, 'output' => 2.50],
         'grok-4.20-0309-reasoning'     => ['input' => 1.25, 'output' => 2.50],
