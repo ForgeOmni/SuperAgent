@@ -377,11 +377,14 @@ class ModelResolver
 
         // ── Google Gemini ─────────────────────────────────────────
 
-        // 3.5 Flash is Google's de-facto flagship (3.5 Pro still limited
-        // preview); the 2.0 line was retired 2026-06-01, so the bare
-        // `gemini` alias must land on a live model even without a catalog.
+        // 3.7 Flash (GA 2026-08-13) is the coding/agent flagship and the
+        // bare `gemini` alias target; the 2.0 line was retired 2026-06-01,
+        // so `gemini` must land on a live model even without a catalog.
+        static::register('gemini-3.7-flash', 'gemini-flash', [
+            'gemini', 'gemini-3.7', 'gemini-flash-latest',
+        ], 20260813);
         static::register('gemini-3.5-flash', 'gemini-flash', [
-            'gemini', 'gemini-3.5', 'gemini-flash-latest',
+            'gemini-3.5',
         ], 20260519);
         static::register('gemini-2.0-flash', 'gemini-flash', [
             'gemini-flash', 'gemini-2', 'gemini-2-flash',

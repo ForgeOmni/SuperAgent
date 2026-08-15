@@ -11663,3 +11663,25 @@ ModelResolver::resolve('claude-opus-4-5');  // claude-opus-4-5（pin 住）
 此前模糊匹配（`str_contains($id, 'opus')` → family `opus` → 最新）会把**所有**显式 Opus id 改写成 family 内最新条目 —— 配置里写死 `claude-opus-4-8` 实际却在跑 `claude-opus-4-20250514`。现在只要是 family 注册表或 `ModelCatalog` 已知的 id 就原样返回，只有裸别名会跟随新版本。
 
 Squad **EXPERT** 档仍然路由到 `claude-fable-5` —— Opus 5 在 tier map 中位于其下，作为通用默认模型。
+
+## 99. 2026-08 模型潮 — Grok 4.6 · DeepSeek V4 Pro GA · Qwen3.8-Max · Gemini 3.7 Flash · GLM-5.3 (v1.1.11)
+
+五家 provider 旗舰在同一波刷新。目录（`resources/models.json`，`_meta.updated` 2026-08-14）、`CostCalculator` 静态表、`TokenEstimator`、`ProviderRegistry` 默认值与能力窗口、`ModelResolver` seed、`/model` 选单同步更新。
+
+- **Grok 4.6**（`grok-4.6`，2026-08-12）—— 新的 `grok` 默认模型与 `grok` 别名目标。500K ctx、图文输入、常开推理，四档 `reasoning_effort`：`low|medium|high|xhigh`（`max`/`xhigh` → `xhigh`；4.5 仍为三档）。$2 / 缓存 $0.50 / $6 每 M，prompt 达 200K 后整个请求按 2 倍计费。
+- **DeepSeek V4 Pro GA**（`DeepSeek-V4-Pro-0813`，id 仍为 `deepseek-v4-pro`）+ **V4 Flash 0731** —— GA 新增真实的 `low` effort 档（映射 low→low、medium/high→high、xhigh/max→max，native 与 NIM 两种 shape 同步）。峰谷计价 2026-08-16 16:00 UTC 生效；目录平价取谷时基价（Pro $0.66/$0.022/$1.98，Flash $0.22/$0.007/$0.66）。
+- **Qwen3.8-Max**（`qwen3.8-max`，2026-08-03 GA）—— 新的 `qwen` / `qwen-anthropic` 默认模型与 `qwen` / `qwen-max` 别名目标。2.4T MoE（~95B 激活）、多模态推理、1M ctx / 131K 输出、$2/$6 每 M（低于 3.7-Max 的 $2.50/$7.50）。`QwenProvider::isVisionModel()` 现在会匹配它，自动带上 `vl_high_resolution_images`；`qwen3.7-max` 保留为纯文本上一代旗舰（别名 `qwen3.7`）。
+- **Gemini 3.7 Flash**（`gemini-3.7-flash`，2026-08-13 GA）—— 新的 `gemini` 默认模型与 `gemini` / `gemini-flash-latest` 别名目标。1M ctx / 64K 输出；`thinking_level` 档位收窄为 `low|medium|high`（默认 `medium`，取消 `minimal`）；该档位上 `temperature`/`top_p`/`top_k`/`thinking_budget` 已弃用。intro 价 $0.75 / 缓存 $0.075 / $3.75 每 M 至 2026-12-31，之后 $1.50/$7.50。`GeminiProvider::modelSupportsThinking()` 本就匹配 `gemini-3.x-flash`，只需切默认。
+- **GLM-5.3**（`glm-5.3`，2026-08-14；1M 路由 `glm-5.3[1m]`，别名 `glm5.3`）—— 基于 5.2 底座的编码 + 网络防御 post-train。`GlmProvider::reasoningEffortFragment()` 现按模型分支：5.3 上是真实的 `low|high|max` 三档（服务端默认 `max`），且 thinking 强制开启 —— `off` 降级为 `low` 而不是发送 `thinking: {type: disabled}`，与 Z.ai 自家 Coding Plan 适配器一致。独立 API 分阶段开放、计价未公布，因此 **`glm-5.2` 仍是 provider 默认**；成本统计暂经 `CostCalculator` 静态表按 5.2 费率计。
+
+```php
+// GLM-5.3 档位（按模型分支）：
+$p = new GlmProvider(['api_key' => env('GLM_API_KEY'), 'model' => 'glm-5.3']);
+$p->reasoningEffortFragment('off');  // → {reasoning_effort: low, thinking: {type: enabled}}
+$p->reasoningEffortFragment('max');  // → {reasoning_effort: max, thinking: {type: enabled}}
+
+// Qwen3.8-Max 是多模态 —— 高清图标志自动带上：
+$agent = new Agent(['provider' => 'qwen']);   // → qwen3.8-max，vl_high_resolution_images: true
+```
+
+测试：`GrokProviderTest`（4.6 档位）、`DeepSeekProviderTest`（low 档）、`QwenProviderTest`（默认模型 + vision 标志）、`GeminiProviderTest`（默认模型 + thinking gate）、`GlmProviderTest`（5.3 档位，含 `[1m]` 路由）。全量测试通过（3362）。

@@ -85,6 +85,7 @@ class CostCalculator
         // Google Gemini native API (per-token prices are USD per million tokens).
         // Values reflect Google AI Studio public pricing as of 2026-04; `register()`
         // can override any row if pricing shifts.
+        'gemini-3.7-flash'             => ['input' => 0.75, 'output' => 3.75],
         'gemini-2.0-flash'             => ['input' => 0.10, 'output' => 0.40],
         'gemini-2.0-flash-001'         => ['input' => 0.10, 'output' => 0.40],
         'gemini-2.0-flash-lite'        => ['input' => 0.075, 'output' => 0.30],
@@ -100,7 +101,17 @@ class CostCalculator
         'meta-llama/llama-3-8b-instruct' => ['input' => 0.10, 'output' => 0.10],
         'mistralai/mistral-large' => ['input' => 8.0, 'output' => 24.0],
         'mistralai/mixtral-8x7b-instruct' => ['input' => 0.60, 'output' => 0.60],
-        
+
+        // Alibaba Qwen (DashScope). Explicit row needed: the Ollama 'qwen'
+        // => $0 row below would otherwise win the prefix fuzzy-match.
+        'qwen3.8-max' => ['input' => 2.00, 'output' => 6.00],
+
+        // Z.AI GLM. glm-5.3 API pricing is unpublished as of 2026-08-14 —
+        // the 5.2 rate is a provisional stand-in (better than the $3/$15
+        // sonnet default fallback) until z.ai posts a 5.3 pricing row.
+        'glm-5.3' => ['input' => 1.40, 'output' => 4.40],
+        'glm-5.2' => ['input' => 1.40, 'output' => 4.40],
+
         // AWS Bedrock models
         'anthropic.claude-fable-5-v1:0'             => ['input' => 10.0, 'output' => 50.0],
         'anthropic.claude-opus-5-v1:0'              => ['input' => 5.0,  'output' => 25.0],

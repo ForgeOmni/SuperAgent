@@ -7,9 +7,10 @@ namespace SuperAgent\Providers;
 /**
  * Qwen 3.7 Max via Anthropic-protocol-compatible endpoint.
  *
- * Qwen 3.7 Max (released 2026-05-21) ships native Anthropic API protocol
+ * Qwen 3.7 Max (released 2026-05-21) shipped native Anthropic API protocol
  * support — the `/v1/messages` wire is byte-compatible with Anthropic's
- * canonical shape. This lets Claude Code-shaped clients (including
+ * canonical shape — and Qwen 3.8 Max (GA 2026-08-03) inherits the same
+ * endpoint. This lets Claude Code-shaped clients (including
  * SuperAgent's AnthropicProvider) point at DashScope's Anthropic endpoint
  * and use Qwen as a drop-in for Claude.
  *
@@ -17,7 +18,7 @@ namespace SuperAgent\Providers;
  * base_url override (like the DeepSeek pattern documented in
  * AnthropicProvider's class docblock)?
  *
- *   1. Default model differs (`qwen3.7-max` vs Claude's `claude-opus-*`)
+ *   1. Default model differs (`qwen3.8-max` vs Claude's `claude-opus-*`)
  *      so callers don't have to spell it on every request.
  *   2. Default base_url targets DashScope, not api.anthropic.com.
  *   3. Skips the Anthropic-OAuth "You are Claude Code" system-prompt
@@ -51,7 +52,7 @@ namespace SuperAgent\Providers;
  *     $agent = new Agent([
  *         'provider' => 'qwen-anthropic',
  *         'api_key'  => env('DASHSCOPE_API_KEY'),
- *         'model'    => 'qwen3.7-max',
+ *         'model'    => 'qwen3.8-max',
  *         // base_url override if the default suspected URL doesn't work
  *     ]);
  */
@@ -63,7 +64,7 @@ final class QwenAnthropicProvider extends AnthropicProvider
      */
     public const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/anthropic-mode/v1';
 
-    public const DEFAULT_MODEL = 'qwen3.7-max';
+    public const DEFAULT_MODEL = 'qwen3.8-max';
 
     public function __construct(array $config)
     {

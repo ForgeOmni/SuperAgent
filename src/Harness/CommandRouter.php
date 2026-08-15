@@ -786,7 +786,8 @@ class CommandRouter
                 ['id' => 'grok-code-fast-1',   'description' => 'Grok Code Fast — agentic coding'],
             ],
             'gemini' => [
-                ['id' => 'gemini-3.5-flash',             'description' => 'Gemini 3.5 Flash — flagship; thinking_level dial'],
+                ['id' => 'gemini-3.7-flash',             'description' => 'Gemini 3.7 Flash — GA coding/agent flagship; thinking_level low|medium|high'],
+                ['id' => 'gemini-3.5-flash',             'description' => 'Gemini 3.5 Flash — previous flagship'],
                 ['id' => 'gemini-3.1-pro-preview',       'description' => 'Gemini 3.1 Pro (preview)'],
                 ['id' => 'gemini-3.1-flash-lite',        'description' => 'Gemini 3.1 Flash-Lite — cheapest tier'],
                 ['id' => 'gemini-2.5-pro',               'description' => 'Gemini 2.5 Pro — long context'],

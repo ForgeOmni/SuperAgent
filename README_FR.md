@@ -38,7 +38,7 @@ echo $result->text();
 - [Grok 4.6](#grok-46)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
-- [GLM-5.2](#glm-52)
+- [GLM-5.2 / 5.3](#glm-52--53)
 - [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
 - [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
@@ -109,14 +109,14 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` ; GPT-5.6 Sol / Terra / Luna au catalogue *(v1.1.6)* ; back-catalog encore servi GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | Défaut `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, cache explicite *(v1.1.6)* ; [section dédiée ci-dessous](#api-openai-responses) |
 | `openrouter` | OpenRouter | Clé API |
-| `gemini` | Google Gemini | Clé API |
+| `gemini` | Google Gemini | Clé API ; défaut `gemini-3.7-flash` — molette thinking_level + grounding *(Gemini 3.7 Flash, v1.1.11)* |
 | `kimi` | Moonshot Kimi (défaut Kimi K3) | Clé API ; régions `intl` / `cn` / `code` (OAuth) ; défaut `kimi-k3` — MoE 2,8 T, 1M ctx, thinking permanent, image/vidéo *(Kimi K3, v1.1.7)* ; `kimi-for-coding` (abonnement Kimi Code, région `code`) au catalogue *(v1.1.8)* |
-| `qwen` | Alibaba Qwen (OpenAI-compat par défaut) | Clé API ; régions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) |
+| `qwen` | Alibaba Qwen (OpenAI-compat par défaut) | Clé API ; régions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) ; défaut `qwen3.8-max` — fleuron GA multimodal *(Qwen3.8-Max, v1.1.11)* |
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
-| `glm` | BigModel GLM (GLM-5.2 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(GLM-5.2, v1.1.2)* |
+| `glm` | BigModel GLM (GLM-5.2 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(GLM-5.2, v1.1.2 ; molette GLM-5.3, v1.1.11)* |
 | `minimax` | MiniMax (M3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking entrelacé + image/vidéo natives *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
-| `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.6` — molette reasoning-effort (incl. `xhigh`) + pinning de cache *(Grok 4.6, v1.1.12 ; depuis v1.0.8)* |
+| `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.6` — molette reasoning-effort (incl. `xhigh`) + pinning de cache *(Grok 4.6, v1.1.11 ; depuis v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Ollama local | Aucune auth — localhost:11434 par défaut |
 | `lmstudio` | Serveur LM Studio local | Auth placeholder — localhost:1234 par défaut *(depuis v0.9.1)* |
@@ -604,9 +604,11 @@ $agent->run('prompt de raisonnement difficile', ['features' => ['thinking' => ['
 
 ---
 
-## GLM-5.2
+## GLM-5.2 / 5.3
 
 GLM-5.2 (le modèle par défaut de `glm` depuis v1.1.2) est le fleuron agentique coding-first de Z.ai : un **contexte de 1 M de tokens** (128 K de sortie max), des E/S **texte uniquement** et — nouveauté de la série 5.2 — une **molette reasoning-effort** par-dessus le bascule thinking binaire. Tarif pay-as-you-go officiel : **1,40 $ en entrée / 4,40 $ en sortie** par million de tokens, avec **0,26 $ en entrée cache-hit** (stockage du cache actuellement gratuit, pour une durée limitée). `glm-5.1` (200 K de contexte, même tarif) est livré en parallèle, et chaque id `glm-5` / `glm-4.x` antérieur reste accessible.
+
+**GLM-5.3** (sorti le 2026-08-14, « Built to Code. Ready for Cyber Defense ») est un post-train codage + cyberdéfense de la même base 5.2, accessible sous `glm-5.3` (alias `glm5.3` ; route 1 M de contexte `glm-5.3[1m]`). Il élargit la molette d'effort à un véritable **`low | high | max`** (défaut serveur `max`) et rend le **thinking obligatoire** — `thinking.type` ne peut pas être désactivé, donc `reasoning_effort: off` se replie sur le palier `low` (comme les adaptateurs Coding Plan de Z.ai). Il est disponible dans le GLM Coding Plan tandis que l'API autonome se déploie par étapes ; le tarif au token n'est **pas encore publié** (le suivi des coûts utilise provisoirement le tarif 5.2), donc `glm-5.2` reste le défaut du provider pour l'instant. Les poids ouverts sont promis ~2 semaines après le lancement.
 
 ```php
 $agent = new Agent([

@@ -38,7 +38,7 @@ echo $result->text();
 - [Grok 4.6](#grok-46)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
-- [GLM-5.2](#glm-52)
+- [GLM-5.2 / 5.3](#glm-52--53)
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
@@ -109,14 +109,14 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT`；catalog 收录 GPT-5.6 Sol / Terra / Luna *(v1.1.6)*；仍在服务的存量型号 GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | 默认 `gpt-5.6-sol` —— effort `none…max`、`reasoning.mode: pro`、显式缓存 *(v1.1.6)*；[下方专门小节](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
-| `gemini` | Google Gemini | API key |
+| `gemini` | Google Gemini | API key；默认 `gemini-3.7-flash` —— thinking_level 档位 + grounding *(Gemini 3.7 Flash，v1.1.11)* |
 | `kimi` | Moonshot Kimi（默认 Kimi K3）| API key；region `intl` / `cn` / `code`（OAuth）；默认 `kimi-k3` —— 2.8T MoE，1M ctx，thinking 常开，图像/视频 *(Kimi K3，v1.1.7)*；catalog 收录 `kimi-for-coding`（Kimi Code 订阅，region `code`）*(v1.1.8)* |
-| `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）|
+| `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）；默认 `qwen3.8-max` —— 多模态 GA 旗舰 *(Qwen3.8-Max，v1.1.11)* |
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
-| `glm` | BigModel GLM（默认 GLM-5.2）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.2，v1.1.2)* |
+| `glm` | BigModel GLM（默认 GLM-5.2）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.2，v1.1.2；GLM-5.3 档位，v1.1.11)* |
 | `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
-| `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.6` —— reasoning-effort 档位（含 `xhigh`）+ cache 绑定 *（Grok 4.6，v1.1.12；v1.0.8 起）* |
+| `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.6` —— reasoning-effort 档位（含 `xhigh`）+ cache 绑定 *（Grok 4.6，v1.1.11；v1.0.8 起）* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | 本地 Ollama daemon | 无需 auth — 默认 localhost:11434 |
 | `lmstudio` | 本地 LM Studio server | 占位 auth — 默认 localhost:1234 *（v0.9.1 起）* |
@@ -603,9 +603,11 @@ $agent->run('需要推理的复杂提示', ['features' => ['thinking' => ['budge
 
 ---
 
-## GLM-5.2
+## GLM-5.2 / 5.3
 
 GLM-5.2（自 v1.1.2 起为 `glm` 默认模型）是 Z.ai 面向编码的 agentic 旗舰：**1M token context**（最大输出 128K）、**纯文本**输入输出，并且 —— 5.2 系列新增 —— 在二元 thinking 开关之上多了一个 **reasoning-effort 档位**。官方按量计费 **$1.40 输入 / $4.40 输出**（每百万 token），**缓存命中输入 $0.26**（缓存存储目前限时免费）。`glm-5.1`（200K context，同价）一同发布，此前的每一个 `glm-5` / `glm-4.x` id 仍可继续使用。
+
+**GLM-5.3**（2026-08-14 发布，"Built to Code. Ready for Cyber Defense"）是基于 5.2 底座的编码 + 网络防御 post-train，id 为 `glm-5.3`（别名 `glm5.3`；1M 上下文路由 `glm-5.3[1m]`）。effort 档位扩展为真正的 **`low | high | max`**（服务端默认 `max`），并且 **thinking 强制开启** —— `thinking.type` 无法关闭，`reasoning_effort: off` 会降级到 `low` 档（与 Z.ai 自家 Coding Plan 适配器一致）。目前已进入 GLM Coding Plan，独立 API 分阶段开放，按 token 计价**尚未公布**（成本统计暂按 5.2 费率计），因此 provider 默认模型暂维持 `glm-5.2`。开放权重承诺在发布后约两周放出。
 
 ```php
 $agent = new Agent([

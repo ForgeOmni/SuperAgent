@@ -9,7 +9,8 @@ use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
 use SuperAgent\Providers\Capabilities\SupportsThinking;
 
 /**
- * Z.AI / BigModel — GLM family (GLM-5.2, GLM-5, GLM-4.x, GLM-5V-Turbo).
+ * Z.AI / BigModel — GLM family (GLM-5.3, GLM-5.2, GLM-5, GLM-4.x,
+ * GLM-5V-Turbo).
  *
  * Wire format is OpenAI-compatible at `/chat/completions`, but the base URL
  * includes the `/api/paas/v4/` path prefix so the completions path is
@@ -19,7 +20,11 @@ use SuperAgent\Providers\Capabilities\SupportsThinking;
  *   - `thinking: {type: enabled|disabled}` — binary on/off, opted into via
  *     `$options['thinking'] = true` or the generic `features.thinking` spec.
  *   - `reasoning_effort: "high"|"max"` — GLM-5.2's effort dial, surfaced
- *     through `SupportsReasoningEffort`. Streamed reasoning arrives as
+ *     through `SupportsReasoningEffort`. GLM-5.3 (2026-08-14) widens the
+ *     dial to `low|high|max` (server default `max`) and makes thinking
+ *     mandatory — `thinking.type` must stay enabled, so "off" degrades to
+ *     the `low` tier instead of disabling (matching Z.AI's own Coding
+ *     Plan adapters). Streamed reasoning arrives as
  *     `delta.reasoning_content` and is captured by the base class.
  *
  * Regions:
@@ -37,21 +42,47 @@ class GlmProvider extends ChatCompletionsProvider implements SupportsThinking, S
     }
 
     /**
-     * GLM-5.2 effort dial. The OpenAI-compat endpoint accepts top-level
-     * `reasoning_effort` paired with `thinking: {type: enabled}`; "off"
-     * disables thinking outright. Unknown values return [] so a
-     * misconfigured caller never poisons the request.
+     * GLM effort dial. The OpenAI-compat endpoint accepts top-level
+     * `reasoning_effort` paired with `thinking: {type: enabled}`.
+     *
+     * GLM-5.3 takes the three-level dial `low|high|max` (server default
+     * `max`) and its thinking cannot be disabled — "off" maps to the `low`
+     * tier, mirroring Z.AI's Coding Plan adapters. On GLM-5.2 and earlier
+     * the dial is `high|max` (low collapses onto high) and "off" disables
+     * thinking outright. Unknown values return [] so a misconfigured
+     * caller never poisons the request.
      *
      * @return array<string, mixed>
      */
     public function reasoningEffortFragment(string $effort): array
     {
-        return match (strtolower(trim($effort))) {
+        $tier = strtolower(trim($effort));
+
+        if ($this->isGlm53($this->model)) {
+            return match ($tier) {
+                // Thinking is mandatory on 5.3 — degrade to low, don't disable.
+                'off', 'disabled', 'none', 'false',
+                'low', 'minimal' => ['reasoning_effort' => 'low', 'thinking' => ['type' => 'enabled']],
+                'medium', 'mid', 'high', '' => ['reasoning_effort' => 'high', 'thinking' => ['type' => 'enabled']],
+                'max', 'xhigh', 'highest' => ['reasoning_effort' => 'max', 'thinking' => ['type' => 'enabled']],
+                default => [],
+            };
+        }
+
+        return match ($tier) {
             'off', 'disabled', 'none', 'false' => ['thinking' => ['type' => 'disabled']],
             'low', 'minimal', 'medium', 'mid', 'high', '' => ['reasoning_effort' => 'high', 'thinking' => ['type' => 'enabled']],
             'max', 'xhigh', 'highest' => ['reasoning_effort' => 'max', 'thinking' => ['type' => 'enabled']],
             default => [],
         };
+    }
+
+    /**
+     * GLM-5.3 ids, including the `glm-5.3[1m]` 1M-context route.
+     */
+    private function isGlm53(string $modelId): bool
+    {
+        return str_starts_with(strtolower($modelId), 'glm-5.3');
     }
 
     protected function providerName(): string

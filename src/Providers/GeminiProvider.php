@@ -49,7 +49,9 @@ class GeminiProvider implements LLMProvider
         $this->apiKey = $apiKey;
 
         $baseUrl = rtrim($config['base_url'] ?? 'https://generativelanguage.googleapis.com', '/') . '/';
-        $this->model = $config['model'] ?? 'gemini-3.5-flash';
+        // 3.7 Flash is the GA coding/agent flagship (2026-08-13) and
+        // Google's recommended migration target from 3.5 Flash / 3.1 Pro.
+        $this->model = $config['model'] ?? 'gemini-3.7-flash';
         $this->maxTokens = $config['max_tokens'] ?? 8192;
         $this->maxRetries = $config['max_retries'] ?? 3;
 
@@ -275,6 +277,10 @@ class GeminiProvider implements LLMProvider
      * thinkingLevel enum (wire values are uppercase). Returns 'off' when the
      * caller asked for no thinking, null when neither option is set or the
      * value is unrecognised.
+     *
+     * Note: 3.7 Flash drops the `minimal` tier (dial is low|medium|high,
+     * server default medium); we still pass MINIMAL through for the 3.5
+     * generation, where it remains valid.
      *
      * @param array<string, mixed> $options
      */

@@ -44,6 +44,9 @@ class GlmProviderTest extends TestCase
 
     public function test_default_model_is_glm_5_2(): void
     {
+        // glm-5.3 (2026-08-14) is reachable via the glm5.3 alias but stays
+        // off the default until z.ai publishes standalone API pricing and
+        // finishes the staged rollout.
         $p = new GlmProvider(['api_key' => 'k']);
         $this->assertSame('glm-5.2', $p->getModel());
     }
@@ -102,6 +105,42 @@ class GlmProviderTest extends TestCase
         // Unknown values yield an empty fragment so a misconfigured caller
         // never poisons the request body.
         $this->assertSame([], $p->reasoningEffortFragment('bogus'));
+
+        // Pre-5.3 dial has no genuine low tier — low collapses onto high.
+        $this->assertSame(
+            ['reasoning_effort' => 'high', 'thinking' => ['type' => 'enabled']],
+            $p->reasoningEffortFragment('low'),
+        );
+    }
+
+    public function test_glm_5_3_reasoning_effort_dial(): void
+    {
+        // GLM-5.3 widens the dial to low|high|max and makes thinking
+        // mandatory: "off" degrades to the low tier instead of disabling,
+        // matching Z.AI's Coding Plan adapters. Applies to the [1m] route too.
+        foreach (['glm-5.3', 'glm-5.3[1m]'] as $id) {
+            $p = new GlmProvider(['api_key' => 'k', 'model' => $id]);
+
+            $this->assertSame(
+                ['reasoning_effort' => 'low', 'thinking' => ['type' => 'enabled']],
+                $p->reasoningEffortFragment('low'),
+                "{$id}: low must stay low (genuine tier on 5.3)",
+            );
+            $this->assertSame(
+                ['reasoning_effort' => 'low', 'thinking' => ['type' => 'enabled']],
+                $p->reasoningEffortFragment('off'),
+                "{$id}: off degrades to low — thinking cannot be disabled",
+            );
+            $this->assertSame(
+                ['reasoning_effort' => 'high', 'thinking' => ['type' => 'enabled']],
+                $p->reasoningEffortFragment('high'),
+            );
+            $this->assertSame(
+                ['reasoning_effort' => 'max', 'thinking' => ['type' => 'enabled']],
+                $p->reasoningEffortFragment('max'),
+            );
+            $this->assertSame([], $p->reasoningEffortFragment('bogus'));
+        }
     }
 
     public function test_base_path_is_api_paas_v4(): void

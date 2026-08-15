@@ -12216,3 +12216,25 @@ ModelResolver::resolve('claude-opus-4-5');  // claude-opus-4-5 (épinglé)
 Auparavant, l'appariement flou (`str_contains($id, 'opus')` → famille `opus` → le plus récent) réécrivait *tout* id Opus explicite vers l'entrée la plus récente de la famille — une config épinglée sur `claude-opus-4-8` exécutait donc silencieusement `claude-opus-4-20250514`. Tout id connu du registre de familles ou de `ModelCatalog` est maintenant renvoyé tel quel ; seuls les alias nus suivent les sorties.
 
 Le palier **EXPERT** de Squad route toujours vers `claude-fable-5` — Opus 5 se place en dessous dans la table des paliers et sert de défaut généraliste.
+
+## 99. Vague de modèles 2026-08 — Grok 4.6 · DeepSeek V4 Pro GA · Qwen3.8-Max · Gemini 3.7 Flash · GLM-5.3 (v1.1.11)
+
+Cinq fleurons de providers rafraîchis d'un coup. Le catalogue (`resources/models.json`, `_meta.updated` 2026-08-14), la table statique `CostCalculator`, `TokenEstimator`, les défauts + fenêtres de capacités du `ProviderRegistry`, les seeds `ModelResolver` et le sélecteur `/model` bougent ensemble.
+
+- **Grok 4.6** (`grok-4.6`, 2026-08-12) — nouveau défaut `grok` et cible de l'alias `grok`. 500K de contexte, texte+image, raisonnement permanent avec la molette `reasoning_effort` à quatre niveaux `low|medium|high|xhigh` (`max`/`xhigh` → `xhigh` ; 4.5 garde trois niveaux). 2 $ / 0,50 $ en cache / 6 $ par M, requête entière facturée 2× dès 200K de prompt.
+- **DeepSeek V4 Pro GA** (`DeepSeek-V4-Pro-0813`, même id `deepseek-v4-pro`) + **V4 Flash 0731** — la GA ajoute un vrai palier `low` (mapping low→low, medium/high→high, xhigh/max→max, sur les formes native et NIM). Tarification heures pleines/creuses effective le 2026-08-16 16:00 UTC ; les tarifs plats du catalogue prennent la base heures creuses (Pro 0,66/0,022/1,98 $, Flash 0,22/0,007/0,66 $).
+- **Qwen3.8-Max** (`qwen3.8-max`, GA 2026-08-03) — nouveau défaut `qwen` / `qwen-anthropic` et cible des alias `qwen` / `qwen-max`. MoE de 2,4T (~95B actifs), raisonnement multimodal, 1M de contexte / 131K de sortie, 2 $/6 $ par M (contre 2,50/7,50 $ pour 3.7-Max). `QwenProvider::isVisionModel()` le reconnaît désormais, donc `vl_high_resolution_images` est posé automatiquement ; `qwen3.7-max` reste le fleuron précédent texte uniquement (alias `qwen3.7`).
+- **Gemini 3.7 Flash** (`gemini-3.7-flash`, GA 2026-08-13) — nouveau défaut `gemini` et cible des alias `gemini` / `gemini-flash-latest`. 1M de contexte / 64K de sortie ; la molette `thinking_level` se resserre à `low|medium|high` (défaut `medium`, plus de `minimal`) ; `temperature`/`top_p`/`top_k`/`thinking_budget` sont dépréciés sur ce palier. Tarif de lancement 0,75 $ / 0,075 $ en cache / 3,75 $ par M jusqu'au 2026-12-31, puis 1,50/7,50 $. `GeminiProvider::modelSupportsThinking()` couvrait déjà `gemini-3.x-flash` — seul le défaut bouge.
+- **GLM-5.3** (`glm-5.3`, 2026-08-14 ; route 1M `glm-5.3[1m]`, alias `glm5.3`) — post-train codage + cyberdéfense de la base 5.2. `GlmProvider::reasoningEffortFragment()` distingue désormais le modèle : sur les ids 5.3 la molette est un vrai `low|high|max` (défaut serveur `max`) et le thinking est obligatoire — `off` se replie sur `low` au lieu d'envoyer `thinking: {type: disabled}`, comme les adaptateurs Coding Plan de Z.ai. L'API autonome se déploie par étapes, tarif non publié, donc **`glm-5.2` reste le défaut du provider** ; le suivi des coûts facture provisoirement 5.3 au tarif 5.2 via la table statique du `CostCalculator`.
+
+```php
+// Molette GLM-5.3 (sensible au modèle) :
+$p = new GlmProvider(['api_key' => env('GLM_API_KEY'), 'model' => 'glm-5.3']);
+$p->reasoningEffortFragment('off');  // → {reasoning_effort: low, thinking: {type: enabled}}
+$p->reasoningEffortFragment('max');  // → {reasoning_effort: max, thinking: {type: enabled}}
+
+// Qwen3.8-Max est multimodal — le flag HD est posé automatiquement :
+$agent = new Agent(['provider' => 'qwen']);   // → qwen3.8-max, vl_high_resolution_images: true
+```
+
+Tests : `GrokProviderTest` (molette 4.6), `DeepSeekProviderTest` (palier low), `QwenProviderTest` (défaut + flag vision), `GeminiProviderTest` (défaut + gate thinking), `GlmProviderTest` (molette 5.3, route `[1m]` incluse). Suite complète verte (3362).

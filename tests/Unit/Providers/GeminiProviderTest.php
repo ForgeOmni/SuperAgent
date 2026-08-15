@@ -32,8 +32,23 @@ class GeminiProviderTest extends TestCase
 
     public function test_default_model_is_gemini_flash(): void
     {
+        // 3.7 Flash is the GA coding/agent flagship (2026-08-13).
         $p = new GeminiProvider(['api_key' => 'k']);
-        $this->assertSame('gemini-3.5-flash', $p->getModel());
+        $this->assertSame('gemini-3.7-flash', $p->getModel());
+    }
+
+    public function test_default_model_supports_thinking_level(): void
+    {
+        // gemini-3.7-flash must pass the thinking gate — the dial is
+        // low|medium|high on this tier (no minimal).
+        $p = new GeminiProvider(['api_key' => 'k']);
+        $body = $this->invokeBuild($p, [new UserMessage('hi')], [
+            'thinking_level' => 'low',
+        ]);
+        $this->assertSame(
+            ['thinkingLevel' => 'LOW', 'includeThoughts' => true],
+            $body['generationConfig']['thinkingConfig'],
+        );
     }
 
     public function test_set_model_roundtrip(): void
@@ -236,7 +251,7 @@ class GeminiProviderTest extends TestCase
 
     public function test_thinking_level_option_maps_to_thinking_config(): void
     {
-        $p = new GeminiProvider(['api_key' => 'k']); // gemini-3.5-flash default
+        $p = new GeminiProvider(['api_key' => 'k']); // gemini-3.7-flash default
         $body = $this->invokeBuild($p, [new UserMessage('hi')], [
             'thinking_level' => 'medium',
         ]);

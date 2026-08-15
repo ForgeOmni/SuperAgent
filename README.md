@@ -38,7 +38,7 @@ echo $result->text();
 - [Grok 4.6](#grok-46)
 - [DeepSeek V4](#deepseek-v4)
 - [MiniMax M3](#minimax-m3)
-- [GLM-5.2](#glm-52)
+- [GLM-5.2 / 5.3](#glm-52--53)
 - [Goal mode (codex `/goal` parity)](#goal-mode-codex-goal-parity-v098)
 - [Operational guardrails](#operational-guardrails-v098)
 - [Companion tools (jcode-inspired)](#companion-tools-jcode-inspired)
@@ -109,14 +109,14 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT`; GPT-5.6 Sol / Terra / Luna in catalog *(v1.1.6)*; still-served back-catalog GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
 | `openai-responses` | OpenAI Responses API (`/v1/responses`) | Default `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, explicit caching *(v1.1.6)*; [dedicated section below](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
-| `gemini` | Google Gemini | API key |
+| `gemini` | Google Gemini | API key; default `gemini-3.7-flash` — thinking_level dial + grounding *(Gemini 3.7 Flash, v1.1.11)* |
 | `kimi` | Moonshot Kimi (Kimi K3 default) | API key; regions `intl` / `cn` / `code` (OAuth); default `kimi-k3` — 2.8T MoE, 1M ctx, always-on thinking, image/video *(Kimi K3, v1.1.7)*; `kimi-for-coding` (Kimi Code subscription, region `code`) in catalog *(v1.1.8)* |
-| `qwen` | Alibaba Qwen (OpenAI-compat default) | API key; regions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) |
+| `qwen` | Alibaba Qwen (OpenAI-compat default) | API key; regions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE); default `qwen3.8-max` — multimodal GA flagship *(Qwen3.8-Max, v1.1.11)* |
 | `qwen-native` | Alibaba Qwen (DashScope-native body) | Kept for `parameters.thinking_budget` callers |
-| `glm` | BigModel GLM (GLM-5.2 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.2, v1.1.2)* |
+| `glm` | BigModel GLM (GLM-5.2 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.2, v1.1.2; GLM-5.3 dial, v1.1.11)* |
 | `minimax` | MiniMax (M3 default) | API key; regions `intl` / `cn`; interleaved thinking + native image/video *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(since v0.9.6, multi-upstream v0.9.8)* |
-| `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.6` — reasoning-effort dial (incl. `xhigh`) + cache pinning *(Grok 4.6, v1.1.12; since v1.0.8)* |
+| `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.6` — reasoning-effort dial (incl. `xhigh`) + cache pinning *(Grok 4.6, v1.1.11; since v1.0.8)* |
 | `bedrock` | AWS Bedrock | AWS SigV4 |
 | `ollama` | Local Ollama daemon | No auth — localhost:11434 by default |
 | `lmstudio` | Local LM Studio server | Placeholder auth — localhost:1234 by default *(since v0.9.1)* |
@@ -626,9 +626,11 @@ $agent->run('hard reasoning prompt', ['features' => ['thinking' => ['budget' => 
 
 ---
 
-## GLM-5.2
+## GLM-5.2 / 5.3
 
 GLM-5.2 (the `glm` default as of v1.1.2) is Z.ai's coding-first agentic flagship: a **1M-token context** (128K max output), **text-only** I/O, and — new for the 5.2 line — a **reasoning-effort dial** on top of the binary thinking toggle. Official pay-as-you-go pricing is **$1.40 in / $4.40 out** per million tokens, with **$0.26 cache-hit input** (cache storage currently free, limited-time). `glm-5.1` (200K context, same pricing) ships alongside, and every prior `glm-5` / `glm-4.x` id stays reachable.
+
+**GLM-5.3** (released 2026-08-14, "Built to Code. Ready for Cyber Defense") is a coding + cyber-defense post-train of the same 5.2 base, reachable as `glm-5.3` (alias `glm5.3`; 1M-context route `glm-5.3[1m]`). It widens the effort dial to a genuine **`low | high | max`** (server default `max`) and makes **thinking mandatory** — `thinking.type` cannot be disabled, so `reasoning_effort: off` degrades to the `low` tier instead (matching Z.ai's own Coding Plan adapters). It is live in the GLM Coding Plan while the standalone API rolls out in stages; per-token pricing is **not yet published** (cost tracking provisionally uses the 5.2 rate), so `glm-5.2` stays the provider default for now. Open weights are promised ~2 weeks post-launch.
 
 ```php
 $agent = new Agent([
@@ -646,6 +648,8 @@ $agent = new Agent([
 $agent->run('hard reasoning prompt', ['thinking' => true]);
 
 // 2. Reasoning-effort dial — off → disabled, low…high → high, max → max
+//    (on glm-5.3: off/low → low, medium/high → high, max → max — thinking
+//    cannot be disabled there)
 $agent->run('hard reasoning prompt', ['reasoning_effort' => 'max']);
 
 // 3. Cross-provider features API

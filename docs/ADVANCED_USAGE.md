@@ -11107,3 +11107,25 @@ ModelResolver::resolve('claude-opus-4-5');  // claude-opus-4-5 (pinned)
 Previously the fuzzy match (`str_contains($id, 'opus')` → family `opus` → newest) rewrote *every* explicit Opus id onto the family's newest entry — so a config pinned to `claude-opus-4-8` silently ran `claude-opus-4-20250514`. Any id known to the family registry or `ModelCatalog` is now returned unchanged; only bare aliases track releases.
 
 Squad's **EXPERT** tier still routes to `claude-fable-5` — Opus 5 sits below it in the tier map and is the general-purpose default.
+
+## 99. Model wave 2026-08 — Grok 4.6 · DeepSeek V4 Pro GA · Qwen3.8-Max · Gemini 3.7 Flash · GLM-5.3 (v1.1.11)
+
+Five provider flagships refreshed in one wave. Catalog (`resources/models.json`, `_meta.updated` 2026-08-14), `CostCalculator` static table, `TokenEstimator`, `ProviderRegistry` defaults + capability windows, `ModelResolver` seeds, and the `/model` picker all move together.
+
+- **Grok 4.6** (`grok-4.6`, 2026-08-12) — new `grok` default and `grok` alias target. 500K ctx, text+image, always-on reasoning with the four-level `reasoning_effort` dial `low|medium|high|xhigh` (`max`/`xhigh` → `xhigh`; 4.5 keeps three levels). $2 / $0.50 cached / $6 per M, whole request 2× once the prompt reaches 200K.
+- **DeepSeek V4 Pro GA** (`DeepSeek-V4-Pro-0813`, same `deepseek-v4-pro` id) + **V4 Flash 0731** — GA adds a genuine `low` effort tier (mapping low→low, medium/high→high, xhigh/max→max on native + NIM shapes). Peak/off-peak pricing effective 2026-08-16 16:00 UTC; flat catalog rates use the off-peak base ($0.66/$0.022/$1.98 Pro, $0.22/$0.007/$0.66 Flash).
+- **Qwen3.8-Max** (`qwen3.8-max`, GA 2026-08-03) — new `qwen` / `qwen-anthropic` default and `qwen` / `qwen-max` alias target. 2.4T MoE (~95B active), multimodal reasoning, 1M ctx / 131K out, $2/$6 per M (down from 3.7-Max's $2.50/$7.50). `QwenProvider::isVisionModel()` now matches it, so `vl_high_resolution_images` is auto-set; `qwen3.7-max` stays as the text-only previous flagship (alias `qwen3.7`).
+- **Gemini 3.7 Flash** (`gemini-3.7-flash`, GA 2026-08-13) — new `gemini` default and `gemini` / `gemini-flash-latest` alias target. 1M ctx / 64K out; `thinking_level` dial narrows to `low|medium|high` (default `medium`, no `minimal`); `temperature`/`top_p`/`top_k`/`thinking_budget` are deprecated on this tier. Intro $0.75 / $0.075 cached / $3.75 per M through 2026-12-31, then $1.50/$7.50. `GeminiProvider::modelSupportsThinking()` already matched `gemini-3.x-flash`, so only the default moved.
+- **GLM-5.3** (`glm-5.3`, 2026-08-14; 1M route `glm-5.3[1m]`, alias `glm5.3`) — coding + cyber-defense post-train of the 5.2 base. `GlmProvider::reasoningEffortFragment()` is now model-aware: on 5.3 ids the dial is a genuine `low|high|max` (server default `max`) and thinking is mandatory — `off` degrades to `low` instead of sending `thinking: {type: disabled}`, matching Z.ai's Coding Plan adapters. Standalone API is in staged rollout with pricing unpublished, so **`glm-5.2` stays the provider default**; cost tracking provisionally bills 5.3 at the 5.2 rate via the `CostCalculator` static table.
+
+```php
+// GLM-5.3 dial (model-aware):
+$p = new GlmProvider(['api_key' => env('GLM_API_KEY'), 'model' => 'glm-5.3']);
+$p->reasoningEffortFragment('off');  // → {reasoning_effort: low, thinking: {type: enabled}}
+$p->reasoningEffortFragment('max');  // → {reasoning_effort: max, thinking: {type: enabled}}
+
+// Qwen3.8-Max is multimodal — the HD-image flag rides along automatically:
+$agent = new Agent(['provider' => 'qwen']);   // → qwen3.8-max, vl_high_resolution_images: true
+```
+
+Tests: `GrokProviderTest` (4.6 dial), `DeepSeekProviderTest` (low tier), `QwenProviderTest` (default + vision flag), `GeminiProviderTest` (default + thinking gate), `GlmProviderTest` (5.3 dial incl. the `[1m]` route). Full suite green (3362).

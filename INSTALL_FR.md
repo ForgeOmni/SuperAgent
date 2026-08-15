@@ -589,14 +589,14 @@ Référence complète (cycle de vie de ModeContext, installation SPI, détection
 
 ### Gemini 3.5 *(v1.0.5)*
 
-Rien à installer au-delà du paquet standard — `gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` sont déjà dans le `resources/models.json` livré. Définir la clé :
+Rien à installer au-delà du paquet standard — `gemini-3.7-flash` / `gemini-3.5-flash` / `gemini-3.1-flash-lite` sont déjà dans le `resources/models.json` livré. Définir la clé :
 
 ```bash
 export GEMINI_API_KEY=AIzaSy…    # clé AI Studio, ou VERTEX_* pour OAuth/Vertex
 superagent --provider gemini --model gemini-3.5-pro "explique ce fichier" ./src/Foo.php
 ```
 
-Le modèle par défaut du provider est maintenant `gemini-3.5-flash` ; passer `--model gemini-3.5-pro` pour les tâches les plus dures ou `--model gemini-3.5-flash-lite` pour le moins cher.
+Le modèle par défaut du provider est maintenant `gemini-3.7-flash` (GA 2026-08-13, tarif de lancement $0.75/$3.75 par 1M jusqu'au 2026-12-31) ; passer `--model gemini-3.1-pro-preview` pour les tâches les plus dures ou `--model gemini-3.1-flash-lite` pour le moins cher.
 
 ### Serveurs LSP *(v1.0.5)*
 
@@ -738,7 +738,7 @@ Voir [ADVANCED_USAGE §83](docs/ADVANCED_USAGE_FR.md) pour le registre complet e
 
 ### Qwen 3.7 / Qwen-Anthropic *(v1.0.6)*
 
-Le modèle Qwen par défaut est maintenant `qwen3.7-max` (1M ctx, $2.50 / $7.50 par 1M tokens, support natif du protocole Anthropic). Trois clés provider accèdent à Qwen :
+Le modèle Qwen par défaut est maintenant `qwen3.8-max` (GA 2026-08-03 : 1M ctx, $2 / $6 par 1M tokens, multimodal, support natif du protocole Anthropic ; `qwen3.7-max` reste accessible). Trois clés provider accèdent à Qwen :
 
 ```php
 // Endpoint OpenAI-compat (recommandé pour la parité avec le reste du SDK)

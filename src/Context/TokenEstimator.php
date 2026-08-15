@@ -49,6 +49,15 @@ class TokenEstimator
         'grok-4.3' => 1_000_000,
         'grok-4-fast' => 2_000_000,
 
+        // Google Gemini
+        'gemini-3.7-flash' => 1_048_576,
+
+        // Alibaba Qwen
+        'qwen3.8-max' => 1_000_000,
+
+        // Z.AI GLM
+        'glm-5.3' => 1_000_000,
+
         // Default fallback
         'default' => 200_000,
     ];

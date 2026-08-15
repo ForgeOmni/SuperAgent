@@ -124,9 +124,9 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'gemini' => [
-            // The 2.0 line was retired 2026-06-01; 3.5 Flash is the
-            // current de-facto flagship.
-            'model' => 'gemini-3.5-flash',
+            // 3.7 Flash (GA 2026-08-13) is the coding/agent flagship and
+            // Google's recommended migration target from 3.5 Flash.
+            'model' => 'gemini-3.7-flash',
             'max_tokens' => 8192,
             'max_retries' => 3,
         ],
@@ -137,7 +137,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'qwen' => [
-            'model' => 'qwen3.6-max-preview',
+            'model' => 'qwen3.8-max',
             'region' => 'intl',
             'max_tokens' => 8192,
             'max_retries' => 3,
@@ -843,7 +843,9 @@ class ProviderRegistry
                 'streaming' => true,
                 'tools' => true,
                 'vision' => true,
-                'max_context' => 260_000,
+                // qwen3.8-max flagship window; per-model values live in
+                // models.json (qwen-long goes to 10M via file reference).
+                'max_context' => 1_000_000,
                 'structured_output' => true,
                 'regions' => ['intl', 'us', 'cn', 'hk'],
             ],
@@ -851,7 +853,9 @@ class ProviderRegistry
                 'streaming' => true,
                 'tools' => true,
                 'vision' => true,
-                'max_context' => 200_000,
+                // glm-5.2 / glm-5.3 flagship window; 200K tiers (glm-5.1,
+                // 5-turbo, 4.x) carry per-model values in models.json.
+                'max_context' => 1_000_000,
                 'structured_output' => true,
                 'regions' => ['intl', 'cn'],
             ],

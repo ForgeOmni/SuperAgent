@@ -588,14 +588,14 @@ SUPERAGENT_MODE_ESCALATE_TO=smart
 
 ### Gemini 3.5 *(v1.0.5)*
 
-无需额外安装 —— `gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` 已经在内置 `resources/models.json` 里。配好 key 即可：
+无需额外安装 —— `gemini-3.7-flash` / `gemini-3.5-flash` / `gemini-3.1-flash-lite` 已经在内置 `resources/models.json` 里。配好 key 即可：
 
 ```bash
 export GEMINI_API_KEY=AIzaSy…    # AI Studio key，或 VERTEX_* 用 OAuth/Vertex
 superagent --provider gemini --model gemini-3.5-pro "解释这个文件" ./src/Foo.php
 ```
 
-Provider 默认模型现在是 `gemini-3.5-flash`；最难的任务用 `--model gemini-3.5-pro`，最便宜的用 `--model gemini-3.5-flash-lite`。
+Provider 默认模型现在是 `gemini-3.7-flash`（2026-08-13 GA，intro 价 $0.75/$3.75 每 1M，至 2026-12-31）；最难的任务用 `--model gemini-3.1-pro-preview`，最便宜的用 `--model gemini-3.1-flash-lite`。
 
 ### LSP servers *(v1.0.5)*
 
@@ -737,7 +737,7 @@ $pipeline->register('my_custom_tool', new MyCompressor());
 
 ### Qwen 3.7 / Qwen-Anthropic *(v1.0.6)*
 
-Qwen 默认模型现在是 `qwen3.7-max`（1M ctx、$2.50 / $7.50 每 1M token、原生 Anthropic 协议支持）。三种 provider key 可访问 Qwen：
+Qwen 默认模型现在是 `qwen3.8-max`（2026-08-03 GA：1M ctx、$2 / $6 每 1M token、多模态、原生 Anthropic 协议支持；`qwen3.7-max` 仍可使用）。三种 provider key 可访问 Qwen：
 
 ```php
 // OpenAI-compat 端点（建议默认走这个，与 SDK 其他部分一致）

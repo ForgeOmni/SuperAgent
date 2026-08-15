@@ -69,13 +69,14 @@ class QwenProviderTest extends TestCase
         $this->assertSame('qwen', $p->name());
     }
 
-    public function test_default_model_is_qwen3_7_max(): void
+    public function test_default_model_is_qwen3_8_max(): void
     {
-        // Bumped 2026-05-21: 1M context, $2.50/$7.50 per 1M tokens. The
-        // 3.6-max-preview default lives on QwenNativeProvider where the
-        // thinking-budget knob is still actively used.
+        // Bumped 2026-08-03 (GA): 1M context, $2/$6 per 1M tokens,
+        // multimodal reasoning. The 3.6-max-preview default lives on
+        // QwenNativeProvider where the thinking-budget knob is still
+        // actively used.
         $p = new QwenProvider(['api_key' => 'k']);
-        $this->assertSame('qwen3.7-max', $p->getModel());
+        $this->assertSame('qwen3.8-max', $p->getModel());
     }
 
     public function test_authorization_header_is_bearer_api_key(): void
@@ -107,7 +108,7 @@ class QwenProviderTest extends TestCase
         $this->assertArrayHasKey('messages', $body);
         $this->assertArrayNotHasKey('input', $body, 'Native input.messages key must NOT appear on chat-completions path');
         $this->assertArrayNotHasKey('parameters', $body, 'Native parameters.* key must NOT appear on chat-completions path');
-        $this->assertSame('qwen3.7-max', $body['model']);
+        $this->assertSame('qwen3.8-max', $body['model']);
         // Role normalization — system prompt is set as plain string,
         // UserMessage emits Role enum.
         // Role can be a string (literal system prompt) or a backed enum
@@ -188,15 +189,16 @@ class QwenProviderTest extends TestCase
     public function test_vision_models_get_high_res_image_flag(): void
     {
         // Match qwen-code's detection: qwen-vl* / qwen3-vl* /
-        // qwen3.5-plus* / qwen3-omni*. Default qwen3.6-max-preview is
-        // NOT vision-capable.
-        foreach (['qwen-vl-plus', 'qwen-vl-ocr', 'qwen3-vl-plus', 'qwen3.5-plus', 'qwen3-omni'] as $id) {
+        // qwen3.5-plus* / qwen3-omni*, plus the multimodal 3.7-plus and
+        // 3.8-max. Text-only 3.7-max / 3.6-max-preview are NOT
+        // vision-capable.
+        foreach (['qwen-vl-plus', 'qwen-vl-ocr', 'qwen3-vl-plus', 'qwen3.5-plus', 'qwen3-omni', 'qwen3.7-plus', 'qwen3.8-max'] as $id) {
             $this->assertTrue(
                 QwenProvider::isVisionModel($id),
                 "{$id} should be classed as vision-capable",
             );
         }
-        foreach (['qwen3.6-max-preview', 'qwen3-max', 'qwen-plus', 'qwen-turbo'] as $id) {
+        foreach (['qwen3.7-max', 'qwen3.6-max-preview', 'qwen3-max', 'qwen-plus', 'qwen-turbo'] as $id) {
             $this->assertFalse(
                 QwenProvider::isVisionModel($id),
                 "{$id} must NOT be classed as vision-capable (would force unwanted HD downsampling)",
@@ -216,9 +218,22 @@ class QwenProviderTest extends TestCase
 
     public function test_vision_flag_absent_for_non_vision_model(): void
     {
+        // Default qwen3.8-max is multimodal, so pin a text-only id here.
         $p = new QwenProvider(['api_key' => 'k']);
-        $body = $this->buildBody($p, [new UserMessage('hi')], [], null, []);
+        $body = $this->buildBody(
+            $p, [new UserMessage('hi')], [], null,
+            ['model' => 'qwen3.7-max'],
+        );
         $this->assertArrayNotHasKey('vl_high_resolution_images', $body);
+    }
+
+    public function test_vision_flag_lands_for_default_qwen3_8_max(): void
+    {
+        // qwen3.8-max is the multimodal GA flagship — the HD-image flag
+        // must ride along on the default model too.
+        $p = new QwenProvider(['api_key' => 'k']);
+        $body = $this->buildBody($p, [new UserMessage('describe')], [], null, []);
+        $this->assertTrue($body['vl_high_resolution_images']);
     }
 
     // ── Phase 4: code region (OAuth) + resource_url dynamic base URL ─

@@ -567,14 +567,14 @@ Full reference (ModeContext lifecycle, SPI installation, cycle detection, Review
 
 ### Gemini 3.5 *(v1.0.5)*
 
-Nothing to install beyond the standard package — `gemini-3.5-pro` / `gemini-3.5-flash` / `gemini-3.5-flash-lite` already live in the bundled `resources/models.json`. Set the key once:
+Nothing to install beyond the standard package — `gemini-3.7-flash` / `gemini-3.5-flash` / `gemini-3.1-flash-lite` already live in the bundled `resources/models.json`. Set the key once:
 
 ```bash
 export GEMINI_API_KEY=AIzaSy…    # AI Studio key, or VERTEX_* for OAuth/Vertex
 superagent --provider gemini --model gemini-3.5-pro "explain this file" ./src/Foo.php
 ```
 
-The provider default is now `gemini-3.5-flash`; pass `--model gemini-3.5-pro` for hardest tasks or `--model gemini-3.5-flash-lite` for cheapest.
+The provider default is now `gemini-3.7-flash` (GA 2026-08-13, intro $0.75/$3.75 per 1M through 2026-12-31); pass `--model gemini-3.1-pro-preview` for hardest tasks or `--model gemini-3.1-flash-lite` for cheapest.
 
 ### LSP servers *(v1.0.5)*
 
@@ -716,7 +716,7 @@ See [ADVANCED_USAGE §83](docs/ADVANCED_USAGE.md) for the full registry and per-
 
 ### Qwen 3.7 / Qwen-Anthropic *(v1.0.6)*
 
-The default Qwen model is now `qwen3.7-max` (1M context, $2.50/$7.50 per 1M tokens, native Anthropic protocol on the side). Three provider keys access Qwen:
+The default Qwen model is now `qwen3.8-max` (GA 2026-08-03: 1M context, $2/$6 per 1M tokens, multimodal, native Anthropic protocol on the side; `qwen3.7-max` stays reachable). Three provider keys access Qwen:
 
 ```php
 // OpenAI-compat endpoint (recommended for parity with the rest of the SDK)
