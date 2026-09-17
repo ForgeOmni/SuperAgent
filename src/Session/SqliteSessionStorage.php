@@ -8,6 +8,7 @@ use PDO;
 use PDOException;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use SuperAgent\Session\Contracts\SessionStore;
 
 /**
  * SQLite-backed session storage with WAL mode and FTS5 full-text search.
@@ -19,7 +20,7 @@ use Psr\Log\NullLogger;
  *   - Passive WAL checkpointing to prevent unbounded growth
  *   - Schema versioning with forward migrations
  */
-class SqliteSessionStorage
+class SqliteSessionStorage implements SessionStore
 {
     private const SCHEMA_VERSION = 1;
     private const WAL_CHECKPOINT_THRESHOLD = 50;

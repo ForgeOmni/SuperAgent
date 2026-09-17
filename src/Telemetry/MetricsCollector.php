@@ -2,6 +2,8 @@
 
 namespace SuperAgent\Telemetry;
 
+use SuperAgent\Support\Config;
+
 use Illuminate\Support\Collection;
 
 class MetricsCollector
@@ -19,8 +21,8 @@ class MetricsCollector
         $this->counters = collect();
         $this->gauges = collect();
         $this->histograms = collect();
-        $this->enabled = config('superagent.telemetry.enabled', false)
-            && config('superagent.telemetry.metrics.enabled', false);
+        $this->enabled = Config::get('superagent.telemetry.enabled', false)
+            && Config::get('superagent.telemetry.metrics.enabled', false);
     }
 
     /**
@@ -320,7 +322,7 @@ class MetricsCollector
             return;
         }
 
-        $exporters = config('superagent.telemetry.metrics.exporters', []);
+        $exporters = Config::get('superagent.telemetry.metrics.exporters', []);
 
         foreach ($exporters as $exporter) {
             try {

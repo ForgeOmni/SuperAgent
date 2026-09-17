@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-17
+
+### 💻 Summary
+
+**Wave 4 of the embedded-host plan: what a long-lived multi-tenant process needs that a CLI never did.** Every static in this SDK assumed one process, one person, one workspace, and an exit when they are done — a queue worker breaks all four, and the statics keep whatever they accumulated about the last tenant. This wave adds one call to clear exactly that (`RuntimeState::resetPerTenant()`), keeps credentials out of the arrays that get logged and spawned, and lets a host keep session transcripts in its own storage instead of on the application server's disk. Nothing is automatic and nothing changes for a CLI.
+
+### Added
+
+- **`SuperAgent\Support\RuntimeState`** — `resetPerTenant()` clears the accumulating statics (cached provider instances and their credentials, the cost / metrics / event singletons, shared plan-mode tool state, the trace buffer) and deliberately keeps the catalogue ones (model prices, aliases, feature flags). `inventory()` lists both sides so a host can assert against it when this SDK adds a static.
+- **Callable credentials** — `api_key` and `access_token` accept a closure, resolved once when the agent is built: `fn () => $vault->keyFor($tenantId)`. The key never sits in the configuration array that gets copied into spawn configs, log context and telemetry payloads.
+- **`SuperAgent\Support\Secrets`** — `redact()` for any array, matching key names regardless of case or separators (`api_key`, `apiKey`, `X-Api-Key`, `ANTHROPIC_API_KEY`), plus `fingerprint()` for the rare "which key is configured" question.
+- **`SuperAgent\Session\Contracts\SessionStore`** — a host implements it and injects it into `SessionManager`, and session snapshots go to its own storage. `SqliteSessionStorage` implements it and stays the default; when a host injects its own, the bundled SQLite file is never opened. `SessionManager::getSessionStore()` replaces `getSqliteStorage()`, now deprecated.
+- **`ProviderRegistry::setMaxCachedInstances()` / `cachedInstanceCount()`** — the instance cache is bounded (32 by default) and evicts oldest-first.
+
+### Fixed
+
+- **`AgentSpawnConfig::toArray()` serialised the parent agent's API key in clear text.** That array is what gets logged, traced and sent over a wire; it is redacted now, and `toArrayWithCredentials()` is the one path that still carries credentials, for authenticating a child process.
+- **The telemetry singletons fataled outside a booted Laravel application.** `CostTracker`, `MetricsCollector`, `EventDispatcher` and `StructuredLogger` read `config()` unguarded in their constructors, and the bundled polyfill stands aside whenever Illuminate is merely on the autoloader — so in a plain worker or CLI, constructing any of them threw `Class "config" does not exist`. They read through `SuperAgent\Support\Config` now, which falls back to the default.
+- **The provider instance cache was unbounded**, holding one client — and its credential — per distinct tenant config for the life of the process.
+
+### Notes
+
+- `RuntimeState::resetPerTenant()` is never called automatically: only the host knows where one tenant's work ends, and a CLI would pay for it every turn to solve a problem it does not have.
+
 ## [1.4.0] - 2026-09-17
 
 ### 💻 Summary

@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-1.4.0-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-1.5.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -43,6 +43,7 @@ echo $result->text();
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
 - [Profile 与工具策略](#profile-与工具策略-v130)
 - [延迟工具结果](#延迟工具结果-v140)
+- [在一个进程里服务多个租户](#在一个进程里服务多个租户-v150)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
 - [Agent 循环](#agent-循环)
@@ -812,6 +813,61 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 任何把用户文本注入 system-role 消息的地方都建议用一下 —— goals、skills、memory 导入。
 
 ---
+
+## 在一个进程里服务多个租户 *(v1.5.0)*
+
+这个 SDK 里所有静态状态都是按 CLI 写的：一个进程、一个人、一个工作区，人做完了进程就退出。
+而一个服务多租户的队列 worker 把这四条假设全破了——静态状态活了下来，它攒的上一个租户的东西也活了下来。
+
+### 任务之间
+
+```php
+use SuperAgent\Support\RuntimeState;
+
+RuntimeState::resetPerTenant();
+$result = $agent->run($prompt);
+```
+
+它清掉「攒起来的东西」：缓存的 provider 实例（每个都攥着构造时用的凭据）、成本/指标/事件这三个单例、
+工具间共享的 plan 模式状态、trace 环形缓冲；同时**故意保留**对所有租户都一样的东西：模型价目、别名表、
+特性开关。`RuntimeState::inventory()` 把两边都列出来，建议在你自己的测试里断言它——这样 SDK 升级引入的
+新静态状态就不会悄悄进错名单。
+
+它不会自动执行。CLI 每轮都付这个代价只是为了解决一个它根本没有的问题，而且只有宿主知道
+一个租户的工作在哪里结束。
+
+### 每轮现取凭据
+
+`api_key`（以及 `access_token`）可以传可调用对象，在 agent 构建时解析一次：
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => fn (): string => $vault->keyFor($tenantId),
+]);
+```
+
+关键在于**不会发生的事**：密钥不会躺在一个会被复制进子 agent spawn 配置、日志上下文和遥测负载的配置数组里。
+从 1.5.0 起 `AgentSpawnConfig::toArray()` 会脱敏凭据——`toArrayWithCredentials()` 是唯一仍然携带凭据的路径，
+供子进程认证用——而 `SuperAgent\Support\Secrets::redact()` 对你自己的任何数组做同样的事，
+键名匹配忽略大小写和分隔符（`api_key`、`apiKey`、`X-Api-Key`、`ANTHROPIC_API_KEY` 都认）。
+
+provider 实例缓存现在有上限（`ProviderRegistry::setMaxCachedInstances()`），服务上千租户的 worker
+不会把上千个客户端——连同它们的密钥——留在内存里直到进程结束。
+
+### 会话存进你自己的库
+
+`SessionManager` 会把每个会话在本地磁盘上写两份：JSON 快照，外加旁边一个 SQLite 数据库。在一个产品里，
+那是别人的对话落在应用服务器的磁盘上，而按租户保留、导出、删除这些数据的宿主却够不着它们。
+实现 `SuperAgent\Session\Contracts\SessionStore` 并注入即可：
+
+```php
+$manager = new SessionManager($storageDir, $logger, 50, 90, $myStore);
+```
+
+自带的 SQLite 存储仍然是默认；宿主注入了自己的实现时，那个本地数据库根本不会被打开。
+
+*自 v1.5.0 起。*
 
 ## 延迟工具结果 *(v1.4.0)*
 

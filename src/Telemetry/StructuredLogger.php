@@ -2,6 +2,8 @@
 
 namespace SuperAgent\Telemetry;
 
+use SuperAgent\Support\Config;
+
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use SuperAgent\Support\DateTime as Carbon;
@@ -17,8 +19,8 @@ class StructuredLogger
 
     public function __construct(?LoggerInterface $logger = null)
     {
-        $this->enabled = config('superagent.telemetry.enabled', false)
-            && config('superagent.telemetry.logging.enabled', false);
+        $this->enabled = Config::get('superagent.telemetry.enabled', false)
+            && Config::get('superagent.telemetry.logging.enabled', false);
         $this->sessionId = uniqid('session_');
         $this->requestId = uniqid('request_');
         $this->logger = $logger ?? $this->resolveLogger();

@@ -81,6 +81,13 @@ class Agent
     public function __construct(array $config = [])
     {
         $config = Profile::apply($config);
+
+        // Once, here: a credential resolver is a call to a vault, and the
+        // config array is read again further down for the provider and for
+        // sub-agent spawn configs. `resolveCredentials()` is idempotent on a
+        // plain string, so those later passes cost nothing.
+        $config = $this->resolveCredentials($config);
+
         $this->profile = $config['profile'];
         $this->toolPolicy = $this->resolveToolPolicy($config);
 
@@ -125,6 +132,8 @@ class Agent
         // Collect only the scalar keys needed to reconstruct a provider in
         // a child process.  The 'provider' key might be an LLMProvider object
         // (not JSON-serializable) — replace it with the provider's string name.
+        $config = $this->resolveCredentials($config);
+
         $providerConfig = array_intersect_key($config, array_flip([
             'provider', 'driver', 'api_key', 'model', 'base_url', 'max_tokens',
             'api_version', 'organization', 'app_name', 'site_url',
@@ -954,8 +963,46 @@ class Agent
         return $engine;
     }
 
+    /**
+     * Credentials may be a callable, resolved when the agent is built rather
+     * than held in the caller's configuration array.
+     *
+     * A host serving many tenants has one key per tenant, and the array that
+     * carries it gets copied into sub-agent spawn configs, log context and
+     * telemetry payloads. A closure keeps the value out of those copies until
+     * something actually needs to authenticate, and lets the host fetch it
+     * from a vault per turn instead of holding thousands in memory.
+     *
+     *     new Agent([
+     *         'provider' => 'anthropic',
+     *         'api_key'  => fn (): string => $vault->keyFor($tenantId),
+     *     ]);
+     *
+     * @since 1.5.0
+     */
+    protected function resolveCredentials(array $config): array
+    {
+        foreach (['api_key', 'access_token'] as $key) {
+            if (isset($config[$key]) && ! is_string($config[$key]) && is_callable($config[$key])) {
+                $resolved = ($config[$key])();
+
+                if (! is_string($resolved) || $resolved === '') {
+                    throw new \InvalidArgumentException(
+                        "The {$key} resolver must return a non-empty string."
+                    );
+                }
+
+                $config[$key] = $resolved;
+            }
+        }
+
+        return $config;
+    }
+
     protected function resolveProvider(array $config): LLMProvider
     {
+        $config = $this->resolveCredentials($config);
+
         if (isset($config['provider']) && $config['provider'] instanceof LLMProvider) {
             $provider = $config['provider'];
 

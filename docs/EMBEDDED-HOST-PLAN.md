@@ -237,7 +237,7 @@ is not Superroute-specific.
 
 ---
 
-## Wave 4 — v1.5.0 · Tenant hygiene (A4, A6, A8)
+## Wave 4 — v1.5.0 · Tenant hygiene (A4, A6, A8) — **shipped**
 
 Three changes that only matter once many tenants share one long-lived process.
 
@@ -256,6 +256,42 @@ Three changes that only matter once many tenants share one long-lived process.
    many tenants. Document which statics hold request-scoped data, add `reset()`
    where one does, and add a test that runs two agents for two tenants in one
    process and asserts nothing bleeds between them.
+
+**What it actually took**
+
+Item 1 came out differently than the plan assumed. `SessionStorage` (file
+paths, atomic writes, directory scans) and `SqliteSessionStorage` (save / load
+/ search / prune) are not two implementations of one concept, so "extract an
+interface with both as implementations" was not a thing that could be done.
+The useful seam is the semantic one: `SessionStore`, which `SqliteSessionStorage`
+already implemented in all but name, injected into `SessionManager` — and when
+a host injects one, the bundled SQLite file is not opened at all, since writing
+a second copy of other people's conversations to local disk is the thing the
+injection exists to prevent.
+
+Item 3 was investigation, as expected, and produced an inventory rather than a
+sweep: the statics split cleanly into *catalogue* (model prices, aliases,
+feature flags — identical for every tenant, deliberately kept) and
+*accumulated* (provider instances with their credentials, cost / metrics /
+event singletons, shared plan-mode state — cleared). `RuntimeState::inventory()`
+publishes both lists so a host can assert against them.
+
+Three defects the work exposed:
+
+- **`AgentSpawnConfig::toArray()` serialised the parent's API key in clear
+  text.** Nothing in this repo calls it today, which is why nobody had noticed;
+  it is the array a host logs or ships over a wire.
+- **The telemetry singletons fataled outside a booted Laravel app.**
+  `CostTracker` and three siblings read `config()` unguarded in their
+  constructors, and the bundled polyfill stands aside whenever Illuminate is
+  merely on the autoloader — so a plain worker got
+  `Class "config" does not exist`. Found because the two-tenant test
+  constructed one.
+- **The provider instance cache was unbounded**, keeping one client and its
+  credential per tenant config for the life of the process.
+
+3488 tests (13 new) green on PHP 8.1 / PHPUnit 10 and on Laravel 13 / PHPUnit
+12 / PHP 8.5.
 
 **Size:** small each; item 3 is investigation more than code.
 

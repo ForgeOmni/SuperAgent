@@ -2,6 +2,8 @@
 
 namespace SuperAgent\Telemetry;
 
+use SuperAgent\Support\Config;
+
 use Illuminate\Support\Collection;
 use SuperAgent\Support\DateTime as Carbon;
 
@@ -17,8 +19,8 @@ class CostTracker
     {
         $this->costs = collect();
         $this->sessionCosts = collect();
-        $this->enabled = config('superagent.telemetry.enabled', false)
-            && config('superagent.telemetry.cost_tracking.enabled', false);
+        $this->enabled = Config::get('superagent.telemetry.enabled', false)
+            && Config::get('superagent.telemetry.cost_tracking.enabled', false);
         $this->loadModelPricing();
     }
 
@@ -39,7 +41,7 @@ class CostTracker
     private function loadModelPricing(): void
     {
         // Default pricing per 1M tokens (in USD)
-        $this->modelPricing = config('superagent.telemetry.model_pricing', [
+        $this->modelPricing = Config::get('superagent.telemetry.model_pricing', [
             'claude-3-opus' => ['input' => 15.0, 'output' => 75.0],
             'claude-3-sonnet' => ['input' => 3.0, 'output' => 15.0],
             'claude-3-haiku' => ['input' => 0.25, 'output' => 1.25],
@@ -183,7 +185,7 @@ class CostTracker
     private function calculateToolCost(string $toolName, float $executionTime, array $metadata): float
     {
         // Tool-specific costs (e.g., external API calls)
-        $toolCosts = config('superagent.telemetry.tool_costs', [
+        $toolCosts = Config::get('superagent.telemetry.tool_costs', [
             'web_search' => 0.001, // Per search
             'web_fetch' => 0.0005, // Per fetch
             'mcp_*' => 0.0001, // Per MCP call

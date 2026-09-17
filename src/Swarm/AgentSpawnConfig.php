@@ -6,6 +6,7 @@ namespace SuperAgent\Swarm;
 
 use SuperAgent\Agent\ForkContext;
 use SuperAgent\Permissions\PermissionMode;
+use SuperAgent\Support\Secrets;
 
 /**
  * Configuration for spawning an agent.
@@ -44,8 +45,29 @@ class AgentSpawnConfig
 
     /**
      * Serialize to array for cross-process/network transport.
+     *
+     * The provider config is redacted: this array is what gets logged, traced
+     * and sent over a wire, and it carried the parent agent's API key in
+     * clear text. Use {@see toArrayWithCredentials()} at the one place that
+     * genuinely has to hand credentials to a child process.
+     *
+     * @since 1.5.0 redacted by default
      */
     public function toArray(): array
+    {
+        $data = $this->toArrayWithCredentials();
+        $data['provider_config'] = Secrets::redact($this->providerConfig);
+
+        return $data;
+    }
+
+    /**
+     * The same array with credentials intact — for spawning a child that has
+     * to authenticate, and for nothing else.
+     *
+     * @since 1.5.0
+     */
+    public function toArrayWithCredentials(): array
     {
         return [
             'name' => $this->name,

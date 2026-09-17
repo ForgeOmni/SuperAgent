@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.5.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -43,6 +43,7 @@ echo $result->text();
 - [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
 - [Profils et politique d'outils](#profils-et-politique-doutils-v130)
 - [Résultats d'outils différés](#résultats-doutils-différés-v140)
+- [Servir plusieurs locataires dans un seul processus](#servir-plusieurs-locataires-dans-un-seul-processus-v150)
 - [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
 - [Boucle d'agent](#boucle-dagent)
@@ -813,6 +814,78 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 Recommandé partout où du texte fourni par l'utilisateur est injecté dans un message de rôle système — goals, skills, imports mémoire.
 
 ---
+
+## Servir plusieurs locataires dans un seul processus *(v1.5.0)*
+
+Tout ce qui est statique dans ce SDK a été écrit pour une CLI : un processus,
+une personne, un espace de travail, et le processus se termine quand elle a
+fini. Un worker de file qui sert plusieurs locataires casse ces quatre
+hypothèses — les statiques survivent, et ce qu'elles ont accumulé sur le
+locataire précédent aussi.
+
+### Entre deux jobs
+
+```php
+use SuperAgent\Support\RuntimeState;
+
+RuntimeState::resetPerTenant();
+$result = $agent->run($prompt);
+```
+
+Cela vide ce qui s'accumule — instances de fournisseurs en cache (chacune
+détenant l'identifiant avec lequel elle a été construite), les singletons de
+coût / métriques / événements, l'état de mode plan partagé entre outils, le
+tampon de traces — et conserve délibérément ce qui est identique pour tout le
+monde : prix des modèles, alias, indicateurs de fonctionnalités.
+`RuntimeState::inventory()` énumère les deux listes ; l'affirmer dans votre
+propre suite de tests empêche qu'une nouvelle statique, ajoutée par une mise à
+jour, rejoigne discrètement la mauvaise.
+
+Ce n'est pas automatique : une CLI le paierait à chaque tour pour un problème
+qu'elle n'a pas, et seul l'hôte sait où s'arrête le travail d'un locataire.
+
+### Identifiants récupérés à chaque tour
+
+`api_key` (et `access_token`) acceptent un callable, résolu une fois à la
+construction de l'agent :
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => fn (): string => $vault->keyFor($tenantId),
+]);
+```
+
+L'intérêt est ce qui *n'arrive pas* : la clé ne traîne pas dans un tableau de
+configuration recopié dans les configs de sous-agents, le contexte de logs et
+les charges utiles de télémétrie. Depuis la 1.5.0, `AgentSpawnConfig::toArray()`
+masque les identifiants — `toArrayWithCredentials()` est le seul chemin qui les
+transporte encore, pour authentifier un processus enfant — et
+`SuperAgent\Support\Secrets::redact()` fait de même pour n'importe quel
+tableau, en reconnaissant les noms de clés quelles que soient la casse et les
+séparateurs (`api_key`, `apiKey`, `X-Api-Key`, `ANTHROPIC_API_KEY`).
+
+Le cache d'instances de fournisseurs est borné
+(`ProviderRegistry::setMaxCachedInstances()`) : un worker qui sert des milliers
+de locataires ne garde pas des milliers de clients — et leurs clés — en mémoire
+pour toute sa durée de vie.
+
+### Les sessions dans votre propre stockage
+
+`SessionManager` écrit chaque session deux fois sur le disque local : des
+instantanés JSON et une base SQLite à côté. Dans un produit, ce sont les
+conversations d'autres personnes sur un serveur d'application, que l'hôte doit
+conserver, exporter et supprimer par locataire sans pouvoir les atteindre.
+Implémentez `SuperAgent\Session\Contracts\SessionStore` et injectez-le :
+
+```php
+$manager = new SessionManager($storageDir, $logger, 50, 90, $myStore);
+```
+
+Le stockage SQLite fourni reste le défaut, et quand un hôte injecte le sien, la
+base locale n'est jamais ouverte.
+
+*Depuis la v1.5.0.*
 
 ## Résultats d'outils différés *(v1.4.0)*
 

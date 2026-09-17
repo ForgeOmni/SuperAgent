@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.4.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.5.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Docs**: [Installation](INSTALL.md) · [安装](INSTALL_CN.md) · [Installation FR](INSTALL_FR.md) · [Advanced usage](docs/ADVANCED_USAGE.md) · [API docs](docs/)
@@ -43,6 +43,7 @@ echo $result->text();
 - [Goal mode (codex `/goal` parity)](#goal-mode-codex-goal-parity-v098)
 - [Profiles and tool policy](#profiles-and-tool-policy-v130)
 - [Deferred tool results](#deferred-tool-results-v140)
+- [Running many tenants in one process](#running-many-tenants-in-one-process-v150)
 - [Operational guardrails](#operational-guardrails-v098)
 - [Companion tools (jcode-inspired)](#companion-tools-jcode-inspired)
 - [Agent Loop](#agent-loop)
@@ -846,6 +847,74 @@ Recommended at every site that injects user-supplied text into a
 system-role message — goals, skills, memory imports.
 
 ---
+
+## Running many tenants in one process *(v1.5.0)*
+
+Everything static in this SDK was written for a CLI: one process, one person,
+one workspace, and the process exits when they are done. A queue worker that
+serves many tenants breaks all four assumptions — the statics survive, and so
+does what they accumulated about the last tenant.
+
+### Between jobs
+
+```php
+use SuperAgent\Support\RuntimeState;
+
+RuntimeState::resetPerTenant();
+$result = $agent->run($prompt);
+```
+
+It clears what accumulated — cached provider instances (each holding the
+credential it was built with), the cost / metrics / event singletons, shared
+plan-mode tool state, the trace buffer — and deliberately keeps what is the
+same for everyone: model prices, aliases, feature flags.
+`RuntimeState::inventory()` lists both sides, and is worth asserting against in
+your own test suite so a new static in an upgrade cannot quietly join the wrong
+list.
+
+It is not automatic. A CLI would pay for it every turn to solve a problem it
+does not have, and only the host knows where one tenant's work ends.
+
+### Credentials fetched per turn
+
+`api_key` (and `access_token`) accept a callable, resolved once when the agent
+is built:
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => fn (): string => $vault->keyFor($tenantId),
+]);
+```
+
+The point is what does *not* happen: the key is not sitting in a configuration
+array that gets copied into sub-agent spawn configs, log context and telemetry
+payloads. `AgentSpawnConfig::toArray()` redacts credentials as of 1.5.0 —
+`toArrayWithCredentials()` is the one path that still carries them, for
+authenticating a child process — and `SuperAgent\Support\Secrets::redact()`
+does the same for any array of your own, matching key names regardless of case
+or separators (`api_key`, `apiKey`, `X-Api-Key`, `ANTHROPIC_API_KEY`).
+
+The provider instance cache is bounded (`ProviderRegistry::setMaxCachedInstances()`),
+so a worker serving thousands of tenants does not keep thousands of clients —
+and their keys — alive for its whole lifetime.
+
+### Sessions in your own storage
+
+`SessionManager` writes every session to local disk twice: JSON snapshots and a
+SQLite database beside them. Inside a product those are other people's
+conversations on an application server, to be retained, exported and deleted per
+tenant by a host that cannot reach them. Implement
+`SuperAgent\Session\Contracts\SessionStore` and inject it:
+
+```php
+$manager = new SessionManager($storageDir, $logger, 50, 90, $myStore);
+```
+
+The bundled SQLite store stays the default, and when a host injects its own the
+local database is never opened.
+
+*Since v1.5.0.*
 
 ## Deferred tool results *(v1.4.0)*
 

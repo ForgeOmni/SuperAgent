@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Session;
 
+use SuperAgent\Session\Contracts\SessionStore;
+
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -27,7 +29,13 @@ class SessionManager
     private SessionStorage $storage;
     private SessionPruner $pruner;
     private LoggerInterface $logger;
-    private ?SqliteSessionStorage $sqlite = null;
+    /**
+     * Where snapshots are stored for search / listing. Defaults to the
+     * bundled SQLite file beside the JSON snapshots; a host that injects its
+     * own keeps sessions in its own storage instead, and no local database is
+     * opened at all.
+     */
+    private ?SessionStore $store = null;
     private int $maxSessions;
     private int $pruneAfterDays;
 
@@ -36,6 +44,7 @@ class SessionManager
         ?LoggerInterface $logger = null,
         int $maxSessions = 50,
         int $pruneAfterDays = 90,
+        ?SessionStore $store = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
         $this->storage = new SessionStorage($storageDir);
@@ -43,10 +52,20 @@ class SessionManager
         $this->maxSessions = $maxSessions;
         $this->pruneAfterDays = $pruneAfterDays;
 
+        // A host that brought its own store keeps sessions there; opening the
+        // bundled SQLite file anyway would write a second copy of other
+        // people's conversations to local disk, which is the thing the
+        // injection exists to avoid. (1.5.0)
+        if ($store !== null) {
+            $this->store = $store;
+
+            return;
+        }
+
         // Initialize SQLite backend (with FTS5 search support)
         try {
             $dbPath = rtrim($storageDir, '/') . '/sessions.db';
-            $this->sqlite = new SqliteSessionStorage($dbPath, $this->logger);
+            $this->store = new SqliteSessionStorage($dbPath, $this->logger);
         } catch (\Throwable $e) {
             $this->logger->warning('SQLite session storage unavailable, using file fallback', [
                 'error' => $e->getMessage(),
@@ -144,12 +163,12 @@ class SessionManager
             'project_dir' => $projectDir,
         ]);
 
-        // Mirror to SQLite for search support
-        if ($this->sqlite !== null) {
+        // Mirror to the session store (search / listing support)
+        if ($this->store !== null) {
             try {
-                $this->sqlite->save($sessionId, $snapshot);
+                $this->store->save($sessionId, $snapshot);
             } catch (\Throwable $e) {
-                $this->logger->warning('SQLite session save failed', ['error' => $e->getMessage()]);
+                $this->logger->warning('Session store save failed', ['error' => $e->getMessage()]);
             }
         }
 
@@ -319,12 +338,12 @@ class SessionManager
      */
     public function search(string $query, int $limit = 10): array
     {
-        if ($this->sqlite === null) {
+        if ($this->store === null) {
             return [];
         }
 
         try {
-            return $this->sqlite->search($query, $limit);
+            return $this->store->search($query, $limit);
         } catch (\Throwable $e) {
             $this->logger->warning('Session search failed', ['error' => $e->getMessage()]);
             return [];
@@ -332,11 +351,24 @@ class SessionManager
     }
 
     /**
-     * Get the SQLite storage backend (if available).
+     * Get the SQLite storage backend, when that is what is in use.
+     *
+     * @deprecated 1.5.0 Use {@see getSessionStore()}; a host may have injected
+     *             a store that is not SQLite, and this returns null for it.
      */
     public function getSqliteStorage(): ?SqliteSessionStorage
     {
-        return $this->sqlite;
+        return $this->store instanceof SqliteSessionStorage ? $this->store : null;
+    }
+
+    /**
+     * The store snapshots are written to, or null when none is available.
+     *
+     * @since 1.5.0
+     */
+    public function getSessionStore(): ?SessionStore
+    {
+        return $this->store;
     }
 
     // ── Delete ─────────────────────────────────────────────────────

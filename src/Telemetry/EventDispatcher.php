@@ -2,6 +2,8 @@
 
 namespace SuperAgent\Telemetry;
 
+use SuperAgent\Support\Config;
+
 use Illuminate\Support\Collection;
 
 class EventDispatcher
@@ -16,8 +18,8 @@ class EventDispatcher
     {
         $this->listeners = collect();
         $this->eventHistory = collect();
-        $this->enabled = config('superagent.telemetry.enabled', false)
-            && config('superagent.telemetry.events.enabled', false);
+        $this->enabled = Config::get('superagent.telemetry.enabled', false)
+            && Config::get('superagent.telemetry.events.enabled', false);
     }
 
     /**

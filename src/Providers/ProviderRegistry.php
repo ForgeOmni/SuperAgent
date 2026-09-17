@@ -62,6 +62,16 @@ class ProviderRegistry
     protected static ?CredentialPool $credentialPool = null;
 
     /**
+     * Upper bound on the instance cache above. Provider objects hold the
+     * credentials they were constructed with, so an unbounded cache on a
+     * multi-tenant worker is both a memory leak and a pile of other people's
+     * keys.
+     *
+     * @since 1.5.0
+     */
+    protected static int $maxCachedInstances = 32;
+
+    /**
      * Host-config adapters — translate a normalized host-shape config
      * (api_key / base_url / model / max_tokens / region / credentials / extra)
      * into each provider's concrete constructor shape.
@@ -431,16 +441,51 @@ class ProviderRegistry
 
     /**
      * Get or create a cached provider instance.
+     *
+     * The cache key includes the config, so two tenants with two keys never
+     * share an instance. It is bounded because they do not share an entry
+     * either: on a worker serving many tenants this map would otherwise grow
+     * one provider object — each holding the credential it was built with —
+     * per tenant, for the life of the process. Oldest entries are dropped
+     * first; a dropped entry costs one object construction, not a request.
+     *
+     * {@see \SuperAgent\Support\RuntimeState::resetPerTenant()} clears it
+     * between jobs.
      */
     public static function get(string $name, array $config = []): LLMProvider
     {
         $cacheKey = $name . ':' . md5(serialize($config));
-        
-        if (!isset(self::$instances[$cacheKey])) {
-            self::$instances[$cacheKey] = self::create($name, $config);
+
+        if (isset(self::$instances[$cacheKey])) {
+            return self::$instances[$cacheKey];
         }
 
-        return self::$instances[$cacheKey];
+        if (count(self::$instances) >= self::$maxCachedInstances) {
+            array_shift(self::$instances);
+        }
+
+        return self::$instances[$cacheKey] = self::create($name, $config);
+    }
+
+    /**
+     * How many provider instances stay cached. Lower it on a worker that
+     * serves many tenants and wants credentials out of memory sooner.
+     *
+     * @since 1.5.0
+     */
+    public static function setMaxCachedInstances(int $max): void
+    {
+        self::$maxCachedInstances = max(1, $max);
+
+        while (count(self::$instances) > self::$maxCachedInstances) {
+            array_shift(self::$instances);
+        }
+    }
+
+    /** @since 1.5.0 */
+    public static function cachedInstanceCount(): int
+    {
+        return count(self::$instances);
     }
 
     /**
