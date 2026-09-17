@@ -16,7 +16,7 @@ class EnhancedProviderTest extends TestCase
 {
     private function mockProvider(AssistantMessage $response): LLMProvider
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('chat')->willReturnCallback(
             function () use ($response): Generator {
                 yield $response;
@@ -68,7 +68,7 @@ class EnhancedProviderTest extends TestCase
         };
 
         $capturedPrompt = null;
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('chat')->willReturnCallback(
             function ($messages, $tools, $systemPrompt) use ($response, &$capturedPrompt): Generator {
                 $capturedPrompt = $systemPrompt;
@@ -138,7 +138,7 @@ class EnhancedProviderTest extends TestCase
         };
 
         $capturedPrompt = null;
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('chat')->willReturnCallback(
             function ($messages, $tools, $systemPrompt) use ($response, &$capturedPrompt): Generator {
                 $capturedPrompt = $systemPrompt;
@@ -156,7 +156,7 @@ class EnhancedProviderTest extends TestCase
 
     public function test_name_prefixed_with_enhanced(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('name')->willReturn('openai');
 
         $enhanced = new EnhancedProvider($provider);
@@ -166,13 +166,13 @@ class EnhancedProviderTest extends TestCase
 
     public function test_add_enhancer(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('name')->willReturn('mock');
 
         $enhanced = new EnhancedProvider($provider);
         $this->assertCount(0, $enhanced->getEnhancers());
 
-        $enhancer = $this->createMock(EnhancerInterface::class);
+        $enhancer = $this->createStub(EnhancerInterface::class);
         $enhanced->addEnhancer($enhancer);
         $this->assertCount(1, $enhanced->getEnhancers());
     }

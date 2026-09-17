@@ -97,7 +97,7 @@ class MCPTest extends TestCase
             args: ['test'],
         );
 
-        $transport = $this->createMock(Transport::class);
+        $transport = $this->createStub(Transport::class);
         $client = new Client($config, $transport);
 
         $this->assertInstanceOf(Client::class, $client);
@@ -117,7 +117,7 @@ class MCPTest extends TestCase
             ],
         );
 
-        $mockClient = $this->createMock(Client::class);
+        $mockClient = $this->createStub(Client::class);
         $mcpTool = new MCPTool($mockClient, 'test-server', $tool);
 
         $this->assertStringContainsString('test_tool', $mcpTool->name());
@@ -268,7 +268,7 @@ class MCPTest extends TestCase
             ],
         );
 
-        $mockClient = $this->createMock(Client::class);
+        $mockClient = $this->createStub(Client::class);
         $mcpTool = new MCPTool($mockClient, 'test-server', $tool);
 
         // Mock execution would be handled by the MCP client

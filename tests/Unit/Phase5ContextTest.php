@@ -214,7 +214,7 @@ class Phase5ContextTest extends TestCase
             keepRecentMessages: 2,
         );
         
-        $provider = $this->createMock(ProviderInterface::class);
+        $provider = $this->createStub(ProviderInterface::class);
         $provider->method('generateResponse')
             ->willReturn(new Response(
                 content: 'Summary: User asked about files and received information.',
@@ -280,7 +280,7 @@ class Phase5ContextTest extends TestCase
     
     public function testContextManagerAutoCompact(): void
     {
-        $estimator = $this->createMock(TokenEstimator::class);
+        $estimator = $this->createStub(TokenEstimator::class);
         $estimator->method('estimateMessagesTokens')->willReturn(150_000);
         $estimator->method('estimateMessageTokens')->willReturn(100);
         $estimator->method('estimateTokens')->willReturn(50);
@@ -292,7 +292,7 @@ class Phase5ContextTest extends TestCase
             keepRecentMessages: 1,
         );
         
-        $provider = $this->createMock(ProviderInterface::class);
+        $provider = $this->createStub(ProviderInterface::class);
         $provider->method('generateResponse')
             ->willReturn(new Response(
                 content: 'Summary of conversation',

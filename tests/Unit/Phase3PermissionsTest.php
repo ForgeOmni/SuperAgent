@@ -176,11 +176,11 @@ class Phase3PermissionsTest extends TestCase
     
     public function testPermissionEngine(): void
     {
-        $callback = $this->createMock(PermissionCallbackInterface::class);
+        $callback = $this->createStub(PermissionCallbackInterface::class);
         $context = new PermissionContext(PermissionMode::DEFAULT);
         $engine = new PermissionEngine($callback, $context);
         
-        $tool = $this->createMock(Tool::class);
+        $tool = $this->createStub(Tool::class);
         $tool->method('getName')->willReturn('Bash');
         $tool->method('requiresUserInteraction')->willReturn(false);
         
@@ -218,11 +218,11 @@ class Phase3PermissionsTest extends TestCase
     
     public function testPermissionEngineWithDontAskMode(): void
     {
-        $callback = $this->createMock(PermissionCallbackInterface::class);
+        $callback = $this->createStub(PermissionCallbackInterface::class);
         $context = new PermissionContext(PermissionMode::DONT_ASK);
         $engine = new PermissionEngine($callback, $context);
         
-        $tool = $this->createMock(Tool::class);
+        $tool = $this->createStub(Tool::class);
         $tool->method('getName')->willReturn('Read');
         $tool->method('requiresUserInteraction')->willReturn(false);
         
@@ -233,7 +233,7 @@ class Phase3PermissionsTest extends TestCase
     
     public function testPermissionEngineWithPlanMode(): void
     {
-        $callback = $this->createMock(PermissionCallbackInterface::class);
+        $callback = $this->createStub(PermissionCallbackInterface::class);
         $context = new PermissionContext(PermissionMode::PLAN);
         
         // Add an allow rule
@@ -245,7 +245,7 @@ class Phase3PermissionsTest extends TestCase
         
         $engine = new PermissionEngine($callback, $context);
         
-        $tool = $this->createMock(Tool::class);
+        $tool = $this->createStub(Tool::class);
         $tool->method('getName')->willReturn('Read');
         $tool->method('requiresUserInteraction')->willReturn(false);
         
@@ -256,11 +256,11 @@ class Phase3PermissionsTest extends TestCase
     
     public function testDangerousPathDetection(): void
     {
-        $callback = $this->createMock(PermissionCallbackInterface::class);
+        $callback = $this->createStub(PermissionCallbackInterface::class);
         $context = new PermissionContext(PermissionMode::DEFAULT);
         $engine = new PermissionEngine($callback, $context);
         
-        $tool = $this->createMock(Tool::class);
+        $tool = $this->createStub(Tool::class);
         $tool->method('getName')->willReturn('Read');
         $tool->method('requiresUserInteraction')->willReturn(false);
         
@@ -282,11 +282,11 @@ class Phase3PermissionsTest extends TestCase
     
     public function testAcceptEditsMode(): void
     {
-        $callback = $this->createMock(PermissionCallbackInterface::class);
+        $callback = $this->createStub(PermissionCallbackInterface::class);
         $context = new PermissionContext(PermissionMode::ACCEPT_EDITS);
         $engine = new PermissionEngine($callback, $context);
         
-        $editTool = $this->createMock(Tool::class);
+        $editTool = $this->createStub(Tool::class);
         $editTool->method('getName')->willReturn('Edit');
         $editTool->method('requiresUserInteraction')->willReturn(false);
         
@@ -294,7 +294,7 @@ class Phase3PermissionsTest extends TestCase
         $decision = $engine->checkPermission($editTool, ['file_path' => 'src/file.php']);
         $this->assertEquals(PermissionBehavior::ALLOW, $decision->behavior);
         
-        $bashTool = $this->createMock(Tool::class);
+        $bashTool = $this->createStub(Tool::class);
         $bashTool->method('getName')->willReturn('Bash');
         $bashTool->method('requiresUserInteraction')->willReturn(false);
         

@@ -420,7 +420,7 @@ class ChannelTest extends TestCase
         $bus = new MessageBus();
         $manager = new ChannelManager($bus);
 
-        $channel = $this->createMock(ChannelInterface::class);
+        $channel = $this->createStub(ChannelInterface::class);
         $channel->method('getName')->willReturn('broken');
         $channel->method('isEnabled')->willReturn(true);
         $channel->method('start')->willThrowException(new \RuntimeException('fail'));

@@ -63,7 +63,7 @@ class ToolSchemaEnhancerTest extends TestCase
     {
         $enhancer = new ToolSchemaEnhancer();
 
-        $mockTool = $this->createMock(\SuperAgent\Contracts\ToolInterface::class);
+        $mockTool = $this->createStub(\SuperAgent\Contracts\ToolInterface::class);
 
         $tools = [$mockTool];
         $messages = [];

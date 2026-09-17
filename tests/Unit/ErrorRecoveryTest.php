@@ -281,7 +281,7 @@ class ErrorRecoveryTest extends TestCase
      */
     public function testModelFallback()
     {
-        $provider = $this->createMock(\SuperAgent\Contracts\LLMProvider::class);
+        $provider = $this->createStub(\SuperAgent\Contracts\LLMProvider::class);
         $provider->method('getModel')->willReturn('claude-3-opus-20240229');
         
         $manager = new ErrorRecoveryManager([

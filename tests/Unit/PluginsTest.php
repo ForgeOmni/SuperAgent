@@ -60,7 +60,7 @@ class PluginsTest extends TestCase
 
     public function testPluginRegistrationThrowsOnDuplicate()
     {
-        $plugin = $this->createMock(PluginInterface::class);
+        $plugin = $this->createStub(PluginInterface::class);
         $plugin->method('name')->willReturn('duplicate-plugin');
         $plugin->method('dependencies')->willReturn([]);
 
@@ -74,11 +74,11 @@ class PluginsTest extends TestCase
 
     public function testPluginDependencyCheck()
     {
-        $dependency = $this->createMock(PluginInterface::class);
+        $dependency = $this->createStub(PluginInterface::class);
         $dependency->method('name')->willReturn('dependency-plugin');
         $dependency->method('dependencies')->willReturn([]);
 
-        $plugin = $this->createMock(PluginInterface::class);
+        $plugin = $this->createStub(PluginInterface::class);
         $plugin->method('name')->willReturn('dependent-plugin');
         $plugin->method('dependencies')->willReturn(['dependency-plugin']);
 
@@ -93,7 +93,7 @@ class PluginsTest extends TestCase
 
     public function testPluginDependencyMissingThrows()
     {
-        $plugin = $this->createMock(PluginInterface::class);
+        $plugin = $this->createStub(PluginInterface::class);
         $plugin->method('name')->willReturn('dependent-plugin');
         $plugin->method('dependencies')->willReturn(['missing-plugin']);
 
@@ -119,7 +119,7 @@ class PluginsTest extends TestCase
 
     public function testPluginEnablingWithAgent()
     {
-        $agent = $this->createMock(Agent::class);
+        $agent = $this->createStub(Agent::class);
 
         $plugin = $this->createMock(PluginInterface::class);
         $plugin->method('name')->willReturn('agent-plugin');
@@ -135,9 +135,9 @@ class PluginsTest extends TestCase
 
     public function testPluginCompatibilityCheck()
     {
-        $agent = $this->createMock(Agent::class);
+        $agent = $this->createStub(Agent::class);
 
-        $plugin = $this->createMock(PluginInterface::class);
+        $plugin = $this->createStub(PluginInterface::class);
         $plugin->method('name')->willReturn('incompatible-plugin');
         $plugin->method('dependencies')->willReturn([]);
         $plugin->method('isCompatible')->willReturn(false);
@@ -168,7 +168,7 @@ class PluginsTest extends TestCase
     {
         $config = ['api_key' => 'test_key', 'enabled' => true];
 
-        $plugin = $this->createMock(PluginInterface::class);
+        $plugin = $this->createStub(PluginInterface::class);
         $plugin->method('name')->willReturn('config-plugin');
         $plugin->method('dependencies')->willReturn([]);
 
@@ -202,12 +202,12 @@ class PluginsTest extends TestCase
         $this->assertEquals('1.0.0', $basePlugin->version());
         $this->assertEquals('Test base plugin', $basePlugin->description());
         $this->assertEmpty($basePlugin->dependencies());
-        $this->assertTrue($basePlugin->isCompatible($this->createMock(Agent::class)));
+        $this->assertTrue($basePlugin->isCompatible($this->createStub(Agent::class)));
     }
 
     public function testPluginToolRegistration()
     {
-        $tool = $this->createMock(ToolInterface::class);
+        $tool = $this->createStub(ToolInterface::class);
 
         $plugin = new class($tool) extends BasePlugin {
             private $tool;
@@ -357,11 +357,11 @@ class SamplePlugin extends BasePlugin
 
     public function testPluginPriority()
     {
-        $lowPriority = $this->createMock(PluginInterface::class);
+        $lowPriority = $this->createStub(PluginInterface::class);
         $lowPriority->method('name')->willReturn('low-priority');
         $lowPriority->method('dependencies')->willReturn([]);
 
-        $highPriority = $this->createMock(PluginInterface::class);
+        $highPriority = $this->createStub(PluginInterface::class);
         $highPriority->method('name')->willReturn('high-priority');
         $highPriority->method('dependencies')->willReturn([]);
 

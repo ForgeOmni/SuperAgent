@@ -118,7 +118,7 @@ class ConfigTest extends TestCase
     
     public function testHotReloadCanEnableForAgent()
     {
-        $agent = $this->createMock(\SuperAgent\Agent::class);
+        $agent = $this->createStub(\SuperAgent\Agent::class);
         $hotReload = new HotReload();
         
         // This should not throw an exception

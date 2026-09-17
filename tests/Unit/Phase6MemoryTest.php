@@ -224,7 +224,7 @@ class Phase6MemoryTest extends TestCase
         $storage = new MemoryStorage($this->testPath);
         $config = new MemoryConfig(minimumTokensBetweenUpdate: 100);
         
-        $provider = $this->createMock(ProviderInterface::class);
+        $provider = $this->createStub(ProviderInterface::class);
         $provider->method('generateResponse')
             ->willReturn(new Response(
                 content: "TYPE: user\nNAME: User Role\nDESCRIPTION: User is a developer\nCONTENT: User is a senior backend developer with Go experience\n---",
@@ -261,7 +261,7 @@ class Phase6MemoryTest extends TestCase
             $storage->save($memory);
         }
         
-        $provider = $this->createMock(ProviderInterface::class);
+        $provider = $this->createStub(ProviderInterface::class);
         $provider->method('generateResponse')
             ->willReturn(new Response(content: "go_expert\ntesting_policy"));
         
@@ -313,7 +313,7 @@ class Phase6MemoryTest extends TestCase
             autoDreamMinSessions: 1,
         );
         
-        $provider = $this->createMock(ProviderInterface::class);
+        $provider = $this->createStub(ProviderInterface::class);
         $provider->method('generateResponse')
             ->willReturn(new Response(content: "TYPE: user\nNAME: Consolidated\nCONTENT: Consolidated memory"));
         

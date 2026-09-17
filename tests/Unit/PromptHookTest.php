@@ -38,7 +38,7 @@ class PromptHookTest extends TestCase
         $message = new AssistantMessage();
         $message->content = [ContentBlock::text($responseText)];
 
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
 
         $provider->method('chat')
             ->willReturnCallback(function () use ($message): Generator {
@@ -118,7 +118,7 @@ class PromptHookTest extends TestCase
         $message = new AssistantMessage();
         $message->content = [ContentBlock::text('{"ok": true}')];
 
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('chat')
             ->willReturnCallback(function (array $messages) use ($message, &$capturedPrompt): Generator {
                 $capturedPrompt = $messages[0]->content ?? '';
@@ -141,7 +141,7 @@ class PromptHookTest extends TestCase
 
     public function testPromptHookBlockOnFailureStopsOnException(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('chat')
             ->willThrowException(new \RuntimeException('API timeout'));
         $provider->method('getModel')->willReturn('test-model');
@@ -161,7 +161,7 @@ class PromptHookTest extends TestCase
 
     public function testPromptHookNoBlockOnFailureContinuesOnException(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('chat')
             ->willThrowException(new \RuntimeException('API timeout'));
         $provider->method('getModel')->willReturn('test-model');
@@ -335,7 +335,7 @@ class PromptHookTest extends TestCase
 
     public function testAgentHookBlocksOnException(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('chat')
             ->willThrowException(new \RuntimeException('Network error'));
         $provider->method('getModel')->willReturn('test-model');
@@ -349,7 +349,7 @@ class PromptHookTest extends TestCase
 
     public function testAgentHookContinuesOnExceptionWhenNotBlocking(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('chat')
             ->willThrowException(new \RuntimeException('Network error'));
         $provider->method('getModel')->willReturn('test-model');

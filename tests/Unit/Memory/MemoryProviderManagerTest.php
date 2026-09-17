@@ -10,7 +10,7 @@ class MemoryProviderManagerTest extends TestCase
 {
     public function test_builtin_only_returns_context(): void
     {
-        $builtin = $this->createMock(MemoryProviderInterface::class);
+        $builtin = $this->createStub(MemoryProviderInterface::class);
         $builtin->method('getName')->willReturn('builtin');
         $builtin->method('onTurnStart')->willReturn('Memory: user prefers short answers');
 
@@ -24,7 +24,7 @@ class MemoryProviderManagerTest extends TestCase
 
     public function test_no_context_returns_null(): void
     {
-        $builtin = $this->createMock(MemoryProviderInterface::class);
+        $builtin = $this->createStub(MemoryProviderInterface::class);
         $builtin->method('getName')->willReturn('builtin');
         $builtin->method('onTurnStart')->willReturn(null);
 
@@ -34,11 +34,11 @@ class MemoryProviderManagerTest extends TestCase
 
     public function test_external_provider_combined_with_builtin(): void
     {
-        $builtin = $this->createMock(MemoryProviderInterface::class);
+        $builtin = $this->createStub(MemoryProviderInterface::class);
         $builtin->method('getName')->willReturn('builtin');
         $builtin->method('onTurnStart')->willReturn('Builtin context');
 
-        $external = $this->createMock(MemoryProviderInterface::class);
+        $external = $this->createStub(MemoryProviderInterface::class);
         $external->method('getName')->willReturn('vector');
         $external->method('onTurnStart')->willReturn('Vector context');
 
@@ -52,14 +52,15 @@ class MemoryProviderManagerTest extends TestCase
 
     public function test_setting_external_shuts_down_previous(): void
     {
-        $builtin = $this->createMock(MemoryProviderInterface::class);
+        $builtin = $this->createStub(MemoryProviderInterface::class);
         $builtin->method('getName')->willReturn('builtin');
 
+        // Only this one is a mock: the test asserts it is shut down.
         $first = $this->createMock(MemoryProviderInterface::class);
         $first->method('getName')->willReturn('first');
         $first->expects($this->once())->method('shutdown');
 
-        $second = $this->createMock(MemoryProviderInterface::class);
+        $second = $this->createStub(MemoryProviderInterface::class);
         $second->method('getName')->willReturn('second');
 
         $manager = new MemoryProviderManager($builtin);
@@ -71,13 +72,13 @@ class MemoryProviderManagerTest extends TestCase
 
     public function test_search_combines_results(): void
     {
-        $builtin = $this->createMock(MemoryProviderInterface::class);
+        $builtin = $this->createStub(MemoryProviderInterface::class);
         $builtin->method('getName')->willReturn('builtin');
         $builtin->method('search')->willReturn([
             ['content' => 'builtin result', 'relevance' => 0.8, 'source' => 'memory.md'],
         ]);
 
-        $external = $this->createMock(MemoryProviderInterface::class);
+        $external = $this->createStub(MemoryProviderInterface::class);
         $external->method('getName')->willReturn('vector');
         $external->method('search')->willReturn([
             ['content' => 'vector result', 'relevance' => 0.9, 'source' => 'embedding'],
@@ -117,11 +118,11 @@ class MemoryProviderManagerTest extends TestCase
 
     public function test_external_provider_error_does_not_crash(): void
     {
-        $builtin = $this->createMock(MemoryProviderInterface::class);
+        $builtin = $this->createStub(MemoryProviderInterface::class);
         $builtin->method('getName')->willReturn('builtin');
         $builtin->method('onTurnStart')->willReturn('safe context');
 
-        $external = $this->createMock(MemoryProviderInterface::class);
+        $external = $this->createStub(MemoryProviderInterface::class);
         $external->method('getName')->willReturn('broken');
         $external->method('onTurnStart')->willThrowException(new \RuntimeException('connection failed'));
 

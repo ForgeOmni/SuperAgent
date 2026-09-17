@@ -24,7 +24,7 @@ class AgentTest extends TestCase
 
     public function test_construct_with_provider_instance(): void
     {
-        $mockProvider = $this->createMockProvider('test-provider', 'test-model');
+        $mockProvider = $this->createStubProvider('test-provider', 'test-model');
 
         $agent = new Agent(['provider' => $mockProvider]);
 
@@ -41,7 +41,7 @@ class AgentTest extends TestCase
 
     public function test_construct_default_max_turns(): void
     {
-        $agent = new Agent(['provider' => $this->createMockProvider()]);
+        $agent = new Agent(['provider' => $this->createStubProvider()]);
 
         // Default max_turns is 50 (from Agent.php line 57)
         $ref = new \ReflectionProperty(Agent::class, 'maxTurns');
@@ -51,7 +51,7 @@ class AgentTest extends TestCase
     public function test_construct_custom_max_turns(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'max_turns' => 10,
         ]);
 
@@ -62,7 +62,7 @@ class AgentTest extends TestCase
     public function test_construct_max_budget(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'max_budget_usd' => 5.0,
         ]);
 
@@ -73,7 +73,7 @@ class AgentTest extends TestCase
     public function test_construct_system_prompt(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'system_prompt' => 'You are a helpful assistant.',
         ]);
 
@@ -84,7 +84,7 @@ class AgentTest extends TestCase
     public function test_construct_with_allowed_tools(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'allowed_tools' => ['read', 'grep'],
             'load_tools' => 'none',
         ]);
@@ -96,7 +96,7 @@ class AgentTest extends TestCase
     public function test_construct_with_denied_tools(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'denied_tools' => ['bash'],
             'load_tools' => 'none',
         ]);
@@ -108,7 +108,7 @@ class AgentTest extends TestCase
     public function test_construct_no_tools_loaded(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -118,10 +118,10 @@ class AgentTest extends TestCase
 
     public function test_construct_explicit_tools(): void
     {
-        $tool = $this->createMockTool('my_tool');
+        $tool = $this->createStubTool('my_tool');
 
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'tools' => [$tool],
         ]);
 
@@ -136,7 +136,7 @@ class AgentTest extends TestCase
         $handler = new StreamingHandler();
 
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'streaming_handler' => $handler,
             'load_tools' => 'none',
         ]);
@@ -152,7 +152,7 @@ class AgentTest extends TestCase
     public function test_with_system_prompt(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -182,7 +182,7 @@ class AgentTest extends TestCase
     public function test_with_max_turns(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -196,7 +196,7 @@ class AgentTest extends TestCase
     public function test_with_max_budget(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -210,7 +210,7 @@ class AgentTest extends TestCase
     public function test_with_options_merges(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'options' => ['a' => 1],
             'load_tools' => 'none',
         ]);
@@ -226,7 +226,7 @@ class AgentTest extends TestCase
     public function test_with_allowed_tools(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -240,7 +240,7 @@ class AgentTest extends TestCase
     public function test_with_denied_tools(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -253,7 +253,7 @@ class AgentTest extends TestCase
     public function test_with_auto_mode(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -271,11 +271,11 @@ class AgentTest extends TestCase
     public function test_add_tool(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
-        $tool = $this->createMockTool('custom_tool');
+        $tool = $this->createStubTool('custom_tool');
         $result = $agent->addTool($tool);
 
         $this->assertSame($agent, $result);
@@ -288,12 +288,12 @@ class AgentTest extends TestCase
     public function test_add_multiple_tools(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
-        $agent->addTool($this->createMockTool('tool_a'));
-        $agent->addTool($this->createMockTool('tool_b'));
+        $agent->addTool($this->createStubTool('tool_a'));
+        $agent->addTool($this->createStubTool('tool_b'));
 
         $ref = new \ReflectionProperty(Agent::class, 'tools');
         $this->assertCount(2, $ref->getValue($agent));
@@ -302,7 +302,7 @@ class AgentTest extends TestCase
     public function test_load_tools_false_gives_empty(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => false,
         ]);
 
@@ -317,7 +317,7 @@ class AgentTest extends TestCase
     public function test_get_messages_initially_empty(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -327,7 +327,7 @@ class AgentTest extends TestCase
     public function test_clear_returns_self(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -342,7 +342,7 @@ class AgentTest extends TestCase
 
     public function test_get_provider(): void
     {
-        $mockProvider = $this->createMockProvider('my-provider');
+        $mockProvider = $this->createStubProvider('my-provider');
 
         $agent = new Agent(['provider' => $mockProvider, 'load_tools' => 'none']);
 
@@ -358,7 +358,7 @@ class AgentTest extends TestCase
     public function test_create_engine_returns_query_engine(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -375,7 +375,7 @@ class AgentTest extends TestCase
     public function test_auto_mode_default_disabled(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -386,7 +386,7 @@ class AgentTest extends TestCase
     public function test_auto_mode_enabled_via_config(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'auto_mode' => true,
             'load_tools' => 'none',
         ]);
@@ -401,7 +401,7 @@ class AgentTest extends TestCase
 
     public function test_provider_config_injection_into_agent_tools(): void
     {
-        $mockProvider = $this->createMockProvider('anthropic', 'claude-sonnet-4-6');
+        $mockProvider = $this->createStubProvider('anthropic', 'claude-sonnet-4-6');
 
         // Create a mock AgentTool
         $agentTool = $this->createMock(\SuperAgent\Tools\Builtin\AgentTool::class);
@@ -430,7 +430,7 @@ class AgentTest extends TestCase
 
     public function test_anthropic_provider_not_wrapped_with_bridge(): void
     {
-        $mockProvider = $this->createMockProvider('anthropic');
+        $mockProvider = $this->createStubProvider('anthropic');
 
         $agent = new Agent([
             'provider' => $mockProvider,
@@ -448,7 +448,7 @@ class AgentTest extends TestCase
     public function test_run_options_merge_into_agent_options(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
             'options' => ['existing' => 'kept'],
         ]);
@@ -482,7 +482,7 @@ class AgentTest extends TestCase
     public function test_fluent_chaining(): void
     {
         $agent = new Agent([
-            'provider' => $this->createMockProvider(),
+            'provider' => $this->createStubProvider(),
             'load_tools' => 'none',
         ]);
 
@@ -501,20 +501,45 @@ class AgentTest extends TestCase
     // HELPERS
     // ========================================================================
 
+    /**
+     * A provider that answers, and records nothing. Almost every test here
+     * wants this: a stand-in with canned answers, not an assertion about how
+     * often it was called.
+     */
+    private function createStubProvider(string $name = 'anthropic', string $model = 'test-model'): LLMProvider
+    {
+        $stub = $this->createStub(LLMProvider::class);
+        $this->primeProvider($stub, $name, $model);
+
+        return $stub;
+    }
+
+    /**
+     * A provider a test can set expectations on. Only for tests that assert
+     * about the calls themselves — a mock whose expectations are never
+     * configured is a stub with extra bookkeeping, which is what PHPUnit's
+     * "no expectations were configured" notice says.
+     */
     private function createMockProvider(string $name = 'anthropic', string $model = 'test-model'): LLMProvider
     {
         $mock = $this->createMock(LLMProvider::class);
-        $mock->method('name')->willReturn($name);
-        $mock->method('getModel')->willReturn($model);
-        $mock->method('setModel')->willReturnCallback(function () {});
-        $mock->method('formatMessages')->willReturn([]);
-        $mock->method('formatTools')->willReturn([]);
+        $this->primeProvider($mock, $name, $model);
+
         return $mock;
     }
 
-    private function createMockTool(string $name): ToolInterface
+    private function primeProvider(object $double, string $name, string $model): void
     {
-        $mock = $this->createMock(ToolInterface::class);
+        $double->method('name')->willReturn($name);
+        $double->method('getModel')->willReturn($model);
+        $double->method('setModel')->willReturnCallback(function () {});
+        $double->method('formatMessages')->willReturn([]);
+        $double->method('formatTools')->willReturn([]);
+    }
+
+    private function createStubTool(string $name): ToolInterface
+    {
+        $mock = $this->createStub(ToolInterface::class);
         $mock->method('name')->willReturn($name);
         $mock->method('description')->willReturn("Mock tool: {$name}");
         $mock->method('inputSchema')->willReturn(['type' => 'object', 'properties' => []]);

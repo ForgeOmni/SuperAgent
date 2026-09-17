@@ -230,7 +230,7 @@ class AutoCompactorTest extends TestCase
         $emitter = new StreamEventEmitter(recordHistory: true);
 
         // Create a compactor with a mocked estimator that always says "compact needed"
-        $mockEstimator = $this->createMock(TokenEstimator::class);
+        $mockEstimator = $this->createStub(TokenEstimator::class);
         $mockEstimator->method('shouldAutoCompact')->willReturn(true);
         $mockEstimator->method('estimateMessagesTokens')->willReturn(200000);
 

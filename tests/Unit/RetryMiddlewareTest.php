@@ -520,7 +520,7 @@ class RetryMiddlewareTest extends TestCase
     public function test_wrap_factory_creates_instance(): void
     {
         // Use an anonymous class implementing LLMProvider interface (or duck type)
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $mw = TestableRetryMiddleware::wrap($provider, [
             'maxRetries' => 5,
             'baseDelay' => 0.5,
@@ -533,7 +533,7 @@ class RetryMiddlewareTest extends TestCase
 
     public function test_wrap_factory_uses_defaults(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $mw = RetryMiddleware::wrap($provider);
 
         $this->assertInstanceOf(RetryMiddleware::class, $mw);
@@ -542,7 +542,7 @@ class RetryMiddlewareTest extends TestCase
 
     public function test_execute_passes_provider_to_callable(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $mw = TestableRetryMiddleware::wrap($provider);
 
         $received = null;
