@@ -80,21 +80,24 @@ class CostCalculatorTest extends TestCase
         $this->assertEqualsWithDelta(3.0, $cost, 0.001);
     }
 
-    public function test_deepseek_v4_flash_pricing(): void
+    public function test_deepseek_flash_pricing(): void
     {
-        // V4 Flash 0731: $0.22/M input + $0.66/M output off-peak base per
-        // the catalog (official api-docs.deepseek.com pricing eff. 2026-08-16).
+        // V4.1 Flash (GA 2026-09-10, served as `deepseek-flash`): $0.15/M
+        // input + $0.60/M output off-peak base per api-docs.deepseek.com.
+        // The retired `deepseek-v4-flash` id routes here and bills the same.
         $usage = new Usage(1_000_000, 1_000_000);
-        $cost = CostCalculator::calculate('deepseek-v4-flash', $usage);
-        $this->assertEqualsWithDelta(0.22 + 0.66, $cost, 0.001);
+        $this->assertEqualsWithDelta(0.15 + 0.60, CostCalculator::calculate('deepseek-flash', $usage), 0.001);
+        $this->assertEqualsWithDelta(0.15 + 0.60, CostCalculator::calculate('deepseek-v4-flash', $usage), 0.001);
     }
 
     public function test_gpt_56_and_grok_45_pricing(): void
     {
         $usage = new Usage(1_000_000, 1_000_000);
-        $this->assertEqualsWithDelta(35.0, CostCalculator::calculate('gpt-5.6-sol', $usage), 0.001);
-        $this->assertEqualsWithDelta(17.5, CostCalculator::calculate('gpt-5.6-terra', $usage), 0.001);
-        $this->assertEqualsWithDelta(7.0, CostCalculator::calculate('gpt-5.6-luna', $usage), 0.001);
+        // Repriced at the GPT-6 Astra launch (2026-09-03).
+        $this->assertEqualsWithDelta(60.0, CostCalculator::calculate('gpt-6-astra', $usage), 0.001);
+        $this->assertEqualsWithDelta(24.0, CostCalculator::calculate('gpt-5.6-sol', $usage), 0.001);
+        $this->assertEqualsWithDelta(14.0, CostCalculator::calculate('gpt-5.6-terra', $usage), 0.001);
+        $this->assertEqualsWithDelta(1.4, CostCalculator::calculate('gpt-5.6-luna', $usage), 0.001);
         $this->assertEqualsWithDelta(8.0, CostCalculator::calculate('grok-4.6', $usage), 0.001);
         $this->assertEqualsWithDelta(8.0, CostCalculator::calculate('grok-4.5', $usage), 0.001);
     }
@@ -110,18 +113,18 @@ class CostCalculatorTest extends TestCase
 
     public function test_cache_read_billed_at_one_tenth_input_price(): void
     {
-        // 800 cache hits + 200 uncached input + 50 output, V4 Flash @ $0.22/M in.
-        // Expected:
-        //   uncached input: 200 * 0.22/1M  = 0.000044
-        //   cached read   : 800 * 0.022/1M = 0.0000176
-        //   output        : 50  * 0.66/1M  = 0.000033
-        // Total ≈ 0.0000946
+        // 800 cache hits + 200 uncached input + 50 output, V4.1 Flash @
+        // $0.15/M in. Expected:
+        //   uncached input: 200 * 0.15/1M  = 0.00003
+        //   cached read   : 800 * 0.015/1M = 0.000012
+        //   output        : 50  * 0.60/1M  = 0.00003
+        // Total ≈ 0.000072
         $usage = new Usage(
             inputTokens: 200,
             outputTokens: 50,
             cacheReadInputTokens: 800,
         );
-        $cost = CostCalculator::calculate('deepseek-v4-flash', $usage);
-        $this->assertEqualsWithDelta(0.0000946, $cost, 0.000001);
+        $cost = CostCalculator::calculate('deepseek-flash', $usage);
+        $this->assertEqualsWithDelta(0.000072, $cost, 0.000001);
     }
 }

@@ -104,6 +104,43 @@ class AnthropicProvider implements LLMProvider, SupportsThinking, SupportsReason
      * were removed). Prefill and thinking `budget_tokens` are handled via
      * ThinkingConfig::modelSupportsAdaptiveThinking().
      */
+    /**
+     * Models that removed forced tool use: `tool_choice` of type `any` or
+     * `tool` returns 400 (`tool_choice: type "tool" and "any" are not
+     * supported for this model.`). Fable 5.1 and Mythos 5.1 — Fable 5 and
+     * the Opus / Sonnet families still accept it.
+     */
+    protected static function modelRejectsForcedToolChoice(string $model): bool
+    {
+        $model = strtolower($model);
+        foreach (['fable-5-1', 'fable-5.1', 'mythos-5-1', 'mythos-5.1'] as $needle) {
+            if (str_contains($model, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Downgrade a forced `tool_choice` to `auto` on models that reject it.
+     * Callers who relied on forcing a call should pair `auto` with an
+     * explicit instruction naming the tool, or use structured outputs.
+     *
+     * @param  array<string, mixed> $choice
+     * @return array<string, mixed>
+     */
+    protected static function normalizeToolChoice(array $choice, string $model): array
+    {
+        $type = strtolower((string) ($choice['type'] ?? ''));
+        if (in_array($type, ['any', 'tool'], true)
+            && self::modelRejectsForcedToolChoice($model)) {
+            return ['type' => 'auto'];
+        }
+
+        return $choice;
+    }
+
     protected static function modelRejectsSamplingParams(string $model): bool
     {
         $model = strtolower($model);
@@ -382,6 +419,18 @@ class AnthropicProvider implements LLMProvider, SupportsThinking, SupportsReason
 
         if (! empty($tools)) {
             $body['tools'] = $this->formatTools($tools);
+
+            // `tool_choice` is only sent when the caller asked for one.
+            // Fable 5.1 / Mythos 5.1 removed forced tool use — `any` and
+            // `tool` return a 400 there (on count_tokens and Batches too),
+            // so a forced choice is downgraded to `auto` rather than
+            // failing the request. `none` is unaffected.
+            if (isset($options['tool_choice']) && is_array($options['tool_choice'])) {
+                $body['tool_choice'] = self::normalizeToolChoice(
+                    $options['tool_choice'],
+                    (string) ($body['model']),
+                );
+            }
         }
 
         $model = $body['model'];

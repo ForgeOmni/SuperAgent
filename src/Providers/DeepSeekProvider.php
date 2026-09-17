@@ -14,12 +14,16 @@ use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
 use SuperAgent\Providers\Capabilities\SupportsThinking;
 
 /**
- * DeepSeek — V4 family (deepseek-v4-pro / deepseek-v4-flash) and the
+ * DeepSeek — V4.1 / V4 family (deepseek-flash / deepseek-v4-pro) and the
  * legacy V3 / R1 ids that retired 2026-07-24.
  *
- * V4-Pro went GA 2026-08-13 (model version DeepSeek-V4-Pro-0813; same
- * `deepseek-v4-pro` endpoint id) and V4-Flash was re-post-trained
- * 2026-07-31 (public beta, same id). GA adds a genuine three-level
+ * `deepseek-flash` (V4.1 Flash, GA 2026-09-10) is the first model of
+ * DeepSeek's new architecture family and the provider default: native
+ * multimodal visual understanding, 1M ctx / 384K max output. It retires
+ * V4 Flash and V4 Flash Vision Exp, whose ids are temporarily routed to
+ * it for compatibility. V4-Pro went GA 2026-08-13 (model version
+ * DeepSeek-V4-Pro-0813; same `deepseek-v4-pro` endpoint id) and keeps
+ * serving past its announced 2026-09-14 sunset at unchanged billing. GA adds a genuine three-level
  * `reasoning_effort` dial (`low` | `high` | `max`) and Responses-API
  * support upstream (this provider stays on the Chat Completions shape).
  * Pricing moves to a peak / off-peak model 2026-08-16 16:00 UTC (peak
@@ -212,7 +216,8 @@ class DeepSeekProvider extends ChatCompletionsProvider implements SupportsThinki
      */
     protected function defaultModel(): string
     {
-        return 'deepseek-v4-flash';
+        // V4.1 Flash — `deepseek-v4-flash` now merely routes here.
+        return 'deepseek-flash';
     }
 
     /**
@@ -350,6 +355,7 @@ class DeepSeekProvider extends ChatCompletionsProvider implements SupportsThinki
         $lower = strtolower($model);
         if (strpos($lower, 'deepseek-v3.2') !== false) return true;
         if (strpos($lower, 'deepseek-v4') !== false) return true;
+        if (strpos($lower, 'deepseek-flash') !== false) return true;
         if (strpos($lower, 'reasoner') !== false) return true;
         if (strpos($lower, '-reasoning') !== false) return true;
         if (strpos($lower, '-thinking') !== false) return true;

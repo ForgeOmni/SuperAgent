@@ -51,10 +51,10 @@ class DeepSeekProviderTest extends TestCase
         $this->assertSame('deepseek', $p->name());
     }
 
-    public function test_default_model_is_v4_flash(): void
+    public function test_default_model_is_v41_flash(): void
     {
         $p = new DeepSeekProvider(['api_key' => 'k']);
-        $this->assertSame('deepseek-v4-flash', $p->getModel());
+        $this->assertSame('deepseek-flash', $p->getModel());
     }
 
     public function test_implements_supports_thinking(): void

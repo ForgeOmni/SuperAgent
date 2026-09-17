@@ -142,12 +142,13 @@ class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
 
     protected function defaultModel(): string
     {
-        // Bumped to 3.8-max (GA 2026-08-03): 1M context, $2/$6 per 1M,
-        // multimodal reasoning flagship (successor to the 3.8-Max preview).
-        // For thinking-budget control opt into provider=qwen-native (3.6 is
-        // still the latest there). For Anthropic-protocol drop-in mode use
-        // provider=qwen-anthropic.
-        return 'qwen3.8-max';
+        // Bumped to the 3.8-Max-0902 snapshot (2026-09-02): same 1M context
+        // and $2/$6 per 1M as the 2026-08-03 GA build, with markedly stronger
+        // engineering-scale coding, long-horizon autonomous development and
+        // collaborative-agent behaviour. For thinking-budget control opt into
+        // provider=qwen-native (3.6 is still the latest there). For
+        // Anthropic-protocol drop-in mode use provider=qwen-anthropic.
+        return 'qwen3.8-max-0902';
     }
 
     /**
@@ -245,8 +246,10 @@ class QwenProvider extends ChatCompletionsProvider implements SupportsThinking
             // qwen3.7-plus is the 3.7 multimodal variant (vision-capable).
             // qwen3.7-max is text-only — explicitly NOT in this match.
             || str_starts_with($id, 'qwen3.7-plus')
-            // qwen3.8-max is multimodal (vision) unlike its 3.7 predecessor.
-            || str_starts_with($id, 'qwen3.8-max');
+            // qwen3.8-max (incl. the -0902 snapshot) is multimodal (vision)
+            // unlike its 3.7 predecessor; so are 3.8-flash and 3.8-27b, which
+            // are vision-language models by construction.
+            || str_starts_with($id, 'qwen3.8-');
     }
 
     /**

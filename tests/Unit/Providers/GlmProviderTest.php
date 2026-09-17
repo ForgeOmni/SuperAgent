@@ -42,13 +42,12 @@ class GlmProviderTest extends TestCase
         $this->assertSame('glm', $p->name());
     }
 
-    public function test_default_model_is_glm_5_2(): void
+    public function test_default_model_is_glm_5_3(): void
     {
-        // glm-5.3 (2026-08-14) is reachable via the glm5.3 alias but stays
-        // off the default until z.ai publishes standalone API pricing and
-        // finishes the staged rollout.
+        // glm-5.3's standalone API is GA with published per-token pricing
+        // ($1.40/$0.26/$4.40 — the 5.2 rate), so it is now the default.
         $p = new GlmProvider(['api_key' => 'k']);
-        $this->assertSame('glm-5.2', $p->getModel());
+        $this->assertSame('glm-5.3', $p->getModel());
     }
 
     public function test_thinking_option_injects_body_field(): void
@@ -80,7 +79,9 @@ class GlmProviderTest extends TestCase
 
     public function test_reasoning_effort_option_merges_into_body(): void
     {
-        $p = new GlmProvider(['api_key' => 'k']);
+        // Pinned to 5.2: the default (5.3) makes thinking mandatory, which
+        // is covered by test_glm_5_3_reasoning_effort_dial().
+        $p = new GlmProvider(['api_key' => 'k', 'model' => 'glm-5.2']);
         $body = $this->buildBody($p, [new UserMessage('hi')], [], null, ['reasoning_effort' => 'max']);
         $this->assertSame('max', $body['reasoning_effort']);
         $this->assertSame(['type' => 'enabled'], $body['thinking']);
@@ -92,7 +93,8 @@ class GlmProviderTest extends TestCase
 
     public function test_reasoning_effort_fragment_tiers(): void
     {
-        $p = new GlmProvider(['api_key' => 'k']);
+        // Pre-5.3 dial (5.3 is covered separately below).
+        $p = new GlmProvider(['api_key' => 'k', 'model' => 'glm-5.2']);
         $this->assertSame(['thinking' => ['type' => 'disabled']], $p->reasoningEffortFragment('off'));
         $this->assertSame(
             ['reasoning_effort' => 'high', 'thinking' => ['type' => 'enabled']],
@@ -110,6 +112,18 @@ class GlmProviderTest extends TestCase
         $this->assertSame(
             ['reasoning_effort' => 'high', 'thinking' => ['type' => 'enabled']],
             $p->reasoningEffortFragment('low'),
+        );
+    }
+
+    public function test_glm_5_3_flash_keeps_the_ordinary_dial(): void
+    {
+        // glm-5.3-flash is a separate natively-multimodal model, not the
+        // coding post-train — Z.ai never documented mandatory thinking for
+        // it, so `off` must still disable thinking.
+        $p = new GlmProvider(['api_key' => 'k', 'model' => 'glm-5.3-flash']);
+        $this->assertSame(
+            ['thinking' => ['type' => 'disabled']],
+            $p->reasoningEffortFragment('off'),
         );
     }
 

@@ -32,13 +32,13 @@ echo $result->text();
 - [Provider 与认证](#provider-与认证)
 - [OpenAI Responses API](#openai-responses-api)
 - [跨 Provider 切换](#跨-provider-切换)
-- [Fable 5](#fable-5)
+- [Fable 5.1](#fable-51)
 - [Opus 5](#opus-5)
-- [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
+- [GPT-6 Astra / GPT-5.6](#gpt-6-astra--gpt-56-sol--terra--luna)
 - [Grok 4.6](#grok-46)
-- [DeepSeek V4](#deepseek-v4)
+- [DeepSeek V4.1 / V4](#deepseek-v41--v4)
 - [MiniMax M3](#minimax-m3)
-- [GLM-5.2 / 5.3](#glm-52--53)
+- [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
@@ -105,15 +105,15 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 
 | 注册表 key | Provider | 说明 |
 |---|---|---|
-| `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth；默认 `claude-opus-5` *(v1.1.10)*，旗舰 `claude-fable-5` + `claude-sonnet-5` —— 自适应思考 + effort 档位 *(Fable 5 / Sonnet 5，v1.1.5)* |
+| `anthropic` | Anthropic | API key 或已存的 Claude Code OAuth；默认 `claude-opus-5` *(v1.1.10)*，旗舰 `claude-fable-5-1` *(Fable 5.1，v1.1.12)* + `claude-sonnet-5` —— 自适应思考 + effort 档位 *(Fable 5 / Sonnet 5，v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key、`OPENAI_ORGANIZATION` / `OPENAI_PROJECT`；catalog 收录 GPT-5.6 Sol / Terra / Luna *(v1.1.6)*；仍在服务的存量型号 GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
-| `openai-responses` | OpenAI Responses API (`/v1/responses`) | 默认 `gpt-5.6-sol` —— effort `none…max`、`reasoning.mode: pro`、显式缓存 *(v1.1.6)*；[下方专门小节](#openai-responses-api) |
+| `openai-responses` | OpenAI Responses API (`/v1/responses`) | 默认 `gpt-6-astra` —— effort `low…max`（无 `none`）、异步工具、`reasoning.mode: pro`、显式缓存 *(GPT-6 Astra，v1.1.12)*；[下方专门小节](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
-| `gemini` | Google Gemini | API key；默认 `gemini-3.7-flash` —— thinking_level 档位 + grounding *(Gemini 3.7 Flash，v1.1.11)* |
+| `gemini` | Google Gemini | API key；默认 `gemini-3.8-flash` —— thinking_level 档位 + grounding *(Gemini 3.8 Flash，v1.1.12)* |
 | `kimi` | Moonshot Kimi（默认 Kimi K3）| API key；region `intl` / `cn` / `code`（OAuth）；默认 `kimi-k3` —— 2.8T MoE，1M ctx，thinking 常开，图像/视频 *(Kimi K3，v1.1.7)*；catalog 收录 `kimi-for-coding`（Kimi Code 订阅，region `code`）*(v1.1.8)* |
-| `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）；默认 `qwen3.8-max` —— 多模态 GA 旗舰 *(Qwen3.8-Max，v1.1.11)* |
+| `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）；默认 `qwen3.8-max-0902` —— 多模态旗舰快照 *(Qwen3.8-Max-0902，v1.1.12)* |
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
-| `glm` | BigModel GLM（默认 GLM-5.2）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.2，v1.1.2；GLM-5.3 档位，v1.1.11)* |
+| `glm` | BigModel GLM（默认 GLM-5.3）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.3 默认 + GLM-5.3-Flash，v1.1.12；GLM-5.3 档位，v1.1.11)* |
 | `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
 | `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.6` —— reasoning-effort 档位（含 `xhigh`）+ cache 绑定 *（Grok 4.6，v1.1.11；v1.0.8 起）* |
@@ -188,7 +188,7 @@ superagent models status               # catalog 来源 + age
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5.6-sol',   // 默认；`gpt-5.6` 别名解析到此
+    'model'    => 'gpt-6-astra',   // 默认；`gpt-6` / `astra` 别名解析到此
 ]);
 
 $result = $agent->run('分析这个代码库并提出重构建议', [
@@ -300,15 +300,15 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 
 ---
 
-## Fable 5
+## Fable 5.1
 
-Fable 5（`claude-fable-5`）是 Anthropic 最强模型 —— 面向最艰深的推理与长时程 agentic 任务。走标准 `anthropic` provider（API key **或** Claude Code OAuth），**1M token context**（最大输出 128K），支持**高分辨率视觉**。按量计费 **$10 输入 / $50 输出**（每百万 token，高于 Opus 档 —— Opus 5 为 $5/$25）。它是 Squad **EXPERT** 档模型；零配置 `anthropic` 默认为 **Claude Opus 5**。触发拒绝时回退到 Opus 4.8。
+Fable 5.1（`claude-fable-5-1`，2026-09-01 发布）是 Anthropic 目前公开发布的最强模型 —— 面向最艰深的推理与长时程 agentic 任务。走标准 `anthropic` provider（API key **或** Claude Code OAuth），**1M token context**（最大输出 128K），支持**高分辨率视觉**。按量计费 **$10 输入 / $50 输出**（每百万 token，与 Fable 5 持平），**缓存读取降价 75% 至 $0.25/M**。它是 Squad **EXPERT** 档模型，也是 `fable` 别名的落点；零配置 `anthropic` 默认仍为 **Claude Opus 5**。上一代 Fable 5（`claude-fable-5`）继续可用。
 
 ```php
 $agent = new Agent([
     'provider' => 'anthropic',
     'api_key'  => getenv('ANTHROPIC_API_KEY'),
-    'model'    => 'claude-fable-5',             // 或 `fable` 别名
+    'model'    => 'claude-fable-5-1',           // 或 `fable` 别名
 ]);
 ```
 
@@ -317,6 +317,8 @@ $agent = new Agent([
 - **思考始终开启且自适应**：provider 发送 `thinking: {type: "adaptive"}`，绝不发送 `budget_tokens`（Fable 5 / Opus 4.7 / 4.8 收到会 **400**）。思考深度由 effort 档位控制，而非 token 预算。
 - **不发采样参数、不发 prefill**：`temperature` / `top_p` / `top_k` 与末尾的 assistant prefill 在 Fable 5 上会被丢弃（发了会 400）；改用提示词 + effort 引导。
 - **effort 档位**：`AnthropicProvider` 实现 `SupportsReasoningEffort` → Anthropic GA 的 `output_config.effort`（`low` … `high` … `xhigh` … `max`），Opus 4.5+/Sonnet 4.6 也可用。
+- **不支持强制工具调用（仅 5.1）**：`tool_choice: {type: "any"}` 与 `{type: "tool", name: …}` 在 Fable 5.1 上会 **400**；provider 会自动把强制档降级为 `auto`。确需保证调用时，请用 `auto` + 在提示词中点名工具，或改用结构化输出。`none` / `auto` 原样透传；Fable 5 / Opus / Sonnet 仍支持强制调用。
+- **thinking 块绑定模型（仅 5.1）**：thinking 块与产出它的模型绑定，改写历史轮次会使其失效 —— 请保持会话记录只追加。
 
 ```php
 // effort 档位 → output_config.effort
@@ -326,11 +328,11 @@ $agent->run('长时程 agentic 任务', ['reasoning_effort' => 'xhigh']);
 $agent->run('高难推理', ['features' => ['thinking' => true]]);
 ```
 
-> ⚠️ **需要 30 天数据保留**：Fable 5 不支持零数据保留（ZDR）—— 组织若配置低于 30 天保留，每个请求都会 `400`。安全分类器还可能返回 `stop_reason: "refusal"`。
+> ⚠️ **Covered Model —— 需要 30 天数据保留**：除非获得 Anthropic 明确授权，Fable 5.1 不支持零数据保留（ZDR）—— 组织若配置低于 30 天保留，每个请求都会 `400`，且不提供 Priority Tier。安全分类器还可能返回 `stop_reason: "refusal"` —— 可开启服务端 `fallbacks` 自动绕开。
 
-**Sonnet 5**（`claude-sonnet-5`，2026-06-30 发布）作为新的 `sonnet` 旗舰一同发布 —— Anthropic 最具 agentic 能力的 Sonnet，性能接近 Opus 4.8 但价格更低。同为 Claude 5 代的自适应形态（仅自适应思考、effort 档位、不发采样参数/prefill），1M context（最大输出 128K），**$3 输入 / $15 输出**（限时价 **$2/$10 至 2026-08-31**）。`sonnet` / `claude-sonnet` / `sonnet-5` 别名现解析到它。
+**Sonnet 5**（`claude-sonnet-5`，2026-06-30 发布）作为新的 `sonnet` 旗舰一同发布 —— Anthropic 最具 agentic 能力的 Sonnet，性能接近 Opus 4.8 但价格更低。同为 Claude 5 代的自适应形态（仅自适应思考、effort 档位、不发采样参数/prefill），1M context（最大输出 128K），**$2 输入 / $10 输出** —— 首发限时价已转为长期价，原定 2026-09-01 涨到 $3/$15 的计划已取消。`sonnet` / `claude-sonnet` / `sonnet-5` 别名现解析到它。
 
-*v1.1.5 起*
+*v1.1.5 起；Fable 5.1 自 v1.1.12 起*
 
 ---
 
@@ -361,22 +363,23 @@ $agent->run('复杂 agentic 编码任务', ['reasoning_effort' => 'xhigh']);
 
 ---
 
-## GPT-5.6 (Sol / Terra / Luna)
+## GPT-6 Astra / GPT-5.6 (Sol / Terra / Luna)
 
 GPT-5.6（2026-07-09 GA）取代 GPT-5.5 成为 OpenAI 旗舰线，并弃用 mini/nano 后缀 —— 家族分三档，共享 **1.05M token context**（最大输出 128K）与视觉能力：
 
 | 模型 | 定位 | $/M 输入 · 缓存 · 输出 |
 |---|---|---|
-| `gpt-5.6-sol`（别名 `gpt-5.6`、`sol`）| 面向复杂专业工作的前沿旗舰 | $5 · $0.50 · $30 |
+| `gpt-6-astra`（别名 `gpt-6`、`astra`）| 前沿旗舰；异步工具 + 轮内插话 | $10 · $1 · $50 |
+| `gpt-5.6-sol`（别名 `gpt-5.6`、`sol`）| 上一代前沿旗舰，面向复杂专业工作 | $4 · $0.40 · $20 |
 | `gpt-5.6-terra`（别名 `terra`）| 均衡默认档（≈5.5 水平，更便宜）| $2.50 · $0.25 · $15 |
 | `gpt-5.6-luna`（别名 `luna`）| 高吞吐低成本档 | $1 · $0.10 · $6 |
 
-输入超过 272K token 的部分按 2× 输入 / 1.5× 输出计费。`openai-responses` 现默认 `gpt-5.6-sol`；Chat Completions 的 `openai` provider 保持 `gpt-4o` 默认，但三个 id 都能解析。
+5.6 线上输入超过 272K token 的部分按 2× 输入 / 1.5× 输出计费。`openai-responses` 现默认 `gpt-6-astra`；Chat Completions 的 `openai` provider 保持 `gpt-4o` 默认，但上述 id 都能解析。
 
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5.6-sol',
+    'model'    => 'gpt-6-astra',
 ]);
 
 $result = $agent->run('先设计再实现这次迁移', [
@@ -387,7 +390,9 @@ $result = $agent->run('先设计再实现这次迁移', [
 ]);
 ```
 
-- **按代归一化的 effort 档位。** GPT-5.6 弃用了 `minimal`，新增 `none` + `max`（默认 `medium`）。provider 会把你传的任何值归一化到目标模型的合法集合 —— 5.6 上 `minimal` → `low`，5.6 之前 `max` → `xhigh` —— 因此跨 provider 的 `reasoning_effort` 调用继续可用。`OpenAIResponsesProvider` 现已实现 `SupportsReasoningEffort`。
+- **按代归一化的 effort 档位。** GPT-5.6 弃用了 `minimal`，新增 `none` + `max`（默认 `medium`）；**GPT-6 Astra 又去掉了 `none`**（`low` … `max`）。provider 会把你传的任何值归一化到目标模型的合法集合 —— Astra 上 `none`/`minimal` → `low`，5.6 上 `minimal` → `low`，5.6 之前 `max` → `xhigh` —— 因此跨 provider 的 `reasoning_effort` 调用继续可用，且永远不会发出模型拒收的值。`OpenAIResponsesProvider` 已实现 `SupportsReasoningEffort`。
+- **异步工具（Astra）。** 传 `async_tools: true`（全部工具）或 `async_tools: ['name', …]`，对应工具定义会带上 `async: true`：工具执行期间 Astra 可以继续推理、调用其他工具或先回答请求中无关的部分，结果稍后按原 `call_id` 返回。在 GPT-6 之前的模型上该字段会被静默丢弃（在那里属于校验错误）。
+- **轮内插话（Astra）。** 通过 WebSocket 连接，Responses API 允许在模型工作过程中追加用户指令，并在续写中保留已完成的工作。
 - **`reasoning.mode: pro`** 是 ChatGPT 版 Sol Pro 的 API 形态（仅 Sol）；**`reasoning.context`** 控制推理在轮次间的持久化。两者也都可以原样放进 `options['reasoning']` 透传。
 - **显式 prompt 缓存。** `prompt_cache_options: {mode: explicit}` —— 缓存写入按未缓存输入的 1.25× 计费，读取保持 90% 折扣。
 - Programmatic tool calling / 多 agent beta 在一等 knob 落地前仍可经 `extra_body` 使用。
@@ -424,16 +429,16 @@ new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
 
 ---
 
-## DeepSeek V4
+## DeepSeek V4.1 / V4
 
-DeepSeek V4 推出两个 MoE 模型 —— `deepseek-v4-pro`（1.6T 总参 / 49B 激活；**2026-08-13 起 GA**，模型版本 `DeepSeek-V4-Pro-0813`，id 不变）和 `deepseek-v4-flash`（284B / 13B 激活；0731 重新后训练公测版），默认 **1M context**，单模型 **thinking / non-thinking 切换**，外加 `low | high | max` 三档 reasoning-effort（`low` 档随 GA 新增）。2026-08-16 起改为峰谷计价（峰时 01-04 + 06-10 UTC 按谷时基准 2× 计费；谷时基准 Pro $0.66/$1.98、Flash $0.22/$0.66 每百万 token）。同一后端同时暴露 OpenAI-wire 和 Anthropic-wire 两种接口，SDK 两条路径都支持：
+DeepSeek 现提供 `deepseek-flash`（**V4.1 Flash**，2026-09-10 GA —— 新架构家族的首个模型，原生多模态，也是 provider 默认）与 `deepseek-v4-pro`（1.6T 总参 / 49B 激活；2026-08-13 GA，模型版本 `DeepSeek-V4-Pro-0813`；原定 2026-09-14 下线后继续提供服务，计费不变）。两者均为 **1M context / 384K 最大输出**，单模型 **thinking / non-thinking 切换**，外加 `low | high | max` 三档 reasoning-effort。V4 Flash 与 V4 Flash Vision Exp 已退役 —— `deepseek-v4-flash` 暂时路由到 V4.1 Flash 以兼容旧配置，新代码请改用 `deepseek-flash`。计价为峰谷模式（峰时 01-04 + 06-10 UTC 周一至周五按谷时基准 2× 计费；谷时基准 Pro $0.66/$1.98、Flash $0.15/$0.60 每百万 token）。同一后端同时暴露 OpenAI-wire 和 Anthropic-wire 两种接口，SDK 两条路径都支持：
 
 ```php
 // OpenAI-wire：原生 DeepSeekProvider
 $agent = new Agent([
     'provider' => 'deepseek',
     'api_key'  => getenv('DEEPSEEK_API_KEY'),
-    'model'    => 'deepseek-v4-pro',           // 或 'deepseek-v4-flash'
+    'model'    => 'deepseek-v4-pro',           // 或 'deepseek-flash'（默认）
 ]);
 
 // Anthropic-wire：复用 AnthropicProvider，自定义 base_url 即可
@@ -459,7 +464,7 @@ foreach ($result->message()->content as $block) {
 }
 ```
 
-**退役提醒**。`deepseek-chat` 和 `deepseek-reasoner` **2026-07-24 退役**。catalog 给两者打上了 `deprecated_until` 和 `replaced_by` 字段；`ModelResolver` 会按进程发一次警告，建议切到 `deepseek-v4-flash` / `deepseek-v4-pro`。设置 `SUPERAGENT_SUPPRESS_DEPRECATION=1` 可以静音。
+**退役提醒**。`deepseek-chat` 和 `deepseek-reasoner` **2026-07-24 退役**。catalog 给两者打上了 `deprecated_until` 和 `replaced_by` 字段；`ModelResolver` 会按进程发一次警告，建议切到 `deepseek-flash` / `deepseek-v4-pro`。设置 `SUPERAGENT_SUPPRESS_DEPRECATION=1` 可以静音。
 
 **Cache 感知计费**。OpenAI-compat 后端报告的 `prompt_tokens` 是 gross（缓存命中 + 未命中之和）。解析器现在会先从 `prompt_tokens` 里减掉缓存命中部分再写入 `Usage::inputTokens`，让缓存折扣正确生效 —— `CostCalculator` 给读命中按 input 价的 10% 计费，而不是事实上的 110%。所有支持缓存的 OpenAI-compat 后端都受益（DeepSeek、Kimi、OpenAI 自己）。
 
@@ -538,7 +543,7 @@ use SuperAgent\Routing\AutoModelStrategy;
 
 $strategy = new AutoModelStrategy();
 $model    = $strategy->select($messages, $systemPrompt, $options);
-// → 'deepseek-v4-pro' 或 'deepseek-v4-flash'
+// → 'deepseek-v4-pro' 或 'deepseek-flash'
 
 $agent = new Agent([
     'provider' => 'deepseek',
@@ -603,17 +608,19 @@ $agent->run('需要推理的复杂提示', ['features' => ['thinking' => ['budge
 
 ---
 
-## GLM-5.2 / 5.3
+## GLM-5.3 / 5.3-Flash
 
-GLM-5.2（自 v1.1.2 起为 `glm` 默认模型）是 Z.ai 面向编码的 agentic 旗舰：**1M token context**（最大输出 128K）、**纯文本**输入输出，并且 —— 5.2 系列新增 —— 在二元 thinking 开关之上多了一个 **reasoning-effort 档位**。官方按量计费 **$1.40 输入 / $4.40 输出**（每百万 token），**缓存命中输入 $0.26**（缓存存储目前限时免费）。`glm-5.1`（200K context，同价）一同发布，此前的每一个 `glm-5` / `glm-4.x` id 仍可继续使用。
+GLM-5.2（`glm` 别名落点；v1.1.12 之前为 provider 默认）是 Z.ai 面向编码的 agentic 旗舰：**1M token context**（最大输出 128K）、**纯文本**输入输出，并且 —— 5.2 系列新增 —— 在二元 thinking 开关之上多了一个 **reasoning-effort 档位**。官方按量计费 **$1.40 输入 / $4.40 输出**（每百万 token），**缓存命中输入 $0.26**（缓存存储目前限时免费）。`glm-5.1`（200K context，同价）一同发布，此前的每一个 `glm-5` / `glm-4.x` id 仍可继续使用。
 
-**GLM-5.3**（2026-08-14 发布，"Built to Code. Ready for Cyber Defense"）是基于 5.2 底座的编码 + 网络防御 post-train，id 为 `glm-5.3`（别名 `glm5.3`；1M 上下文路由 `glm-5.3[1m]`）。effort 档位扩展为真正的 **`low | high | max`**（服务端默认 `max`），并且 **thinking 强制开启** —— `thinking.type` 无法关闭，`reasoning_effort: off` 会降级到 `low` 档（与 Z.ai 自家 Coding Plan 适配器一致）。目前已进入 GLM Coding Plan，独立 API 分阶段开放，按 token 计价**尚未公布**（成本统计暂按 5.2 费率计），因此 provider 默认模型暂维持 `glm-5.2`。开放权重承诺在发布后约两周放出。
+**GLM-5.3**（2026-08-14 发布，"Built to Code. Ready for Cyber Defense"）是基于 5.2 底座的编码 + 网络防御 post-train，id 为 `glm-5.3`（别名 `glm5.3`；1M 上下文路由 `glm-5.3[1m]`）。effort 档位扩展为真正的 **`low | high | max`**（服务端默认 `max`），并且 **thinking 强制开启** —— `thinking.type` 无法关闭，`reasoning_effort: off` 会降级到 `low` 档（与 Z.ai 自家 Coding Plan 适配器一致）。独立 API 现已 GA，按 token 计价与 5.2 一致（**$1.40 输入 / $0.26 缓存 / $4.40 输出** 每百万 token），因此自 v1.1.12 起 **`glm-5.3` 成为 provider 默认**。开放权重已在发布后放出。
+
+**GLM-5.3-Flash**（`glm-5.3-flash`，2026-08-26 发布）是 GLM-5 家族首个*原生多模态*模型 —— 320B MoE / 18B 激活，支持图像**与视频**输入，1M context，MIT 开放权重，计价 **$0.15 输入 / $0.03 缓存 / $0.50 输出** 每百万 token（50% 首发促销已于 2026-09-09 结束）。它是独立模型而非 5.3 post-train，因此保留常规档位 —— `reasoning_effort: off` 会真正关闭 thinking。
 
 ```php
 $agent = new Agent([
     'provider' => 'glm',
     'api_key'  => getenv('GLM_API_KEY'),
-    'model'    => 'glm-5.2',                    // or the `glm` alias
+    'model'    => 'glm-5.3',                    // 默认；或用 `glm` 别名
     'region'   => 'intl',                       // intl | cn
 ]);
 ```

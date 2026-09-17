@@ -78,11 +78,17 @@ class GlmProvider extends ChatCompletionsProvider implements SupportsThinking, S
     }
 
     /**
-     * GLM-5.3 ids, including the `glm-5.3[1m]` 1M-context route.
+     * GLM-5.3 ids whose thinking cannot be switched off — the coding /
+     * cyber-defense post-train, including the `glm-5.3[1m]` 1M-context
+     * route. `glm-5.3-flash` is deliberately excluded: it is a separate
+     * natively-multimodal model (320B MoE / 18B active, MIT weights) and
+     * Z.ai never documented mandatory thinking for it, so it keeps the
+     * ordinary dial where `off` really disables thinking.
      */
     private function isGlm53(string $modelId): bool
     {
-        return str_starts_with(strtolower($modelId), 'glm-5.3');
+        $id = strtolower($modelId);
+        return str_starts_with($id, 'glm-5.3') && ! str_starts_with($id, 'glm-5.3-flash');
     }
 
     protected function providerName(): string
@@ -109,7 +115,11 @@ class GlmProvider extends ChatCompletionsProvider implements SupportsThinking, S
 
     protected function defaultModel(): string
     {
-        return 'glm-5.2';
+        // GLM-5.3's standalone API is GA with published per-token pricing
+        // ($1.40 / $0.26 cached / $4.40 per M — identical to 5.2), so the
+        // default moves up from 5.2. Thinking is mandatory on 5.3 ids; see
+        // reasoningEffortFragment().
+        return 'glm-5.3';
     }
 
     /**

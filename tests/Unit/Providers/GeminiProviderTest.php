@@ -34,7 +34,7 @@ class GeminiProviderTest extends TestCase
     {
         // 3.7 Flash is the GA coding/agent flagship (2026-08-13).
         $p = new GeminiProvider(['api_key' => 'k']);
-        $this->assertSame('gemini-3.7-flash', $p->getModel());
+        $this->assertSame('gemini-3.8-flash', $p->getModel());
     }
 
     public function test_default_model_supports_thinking_level(): void
@@ -268,7 +268,13 @@ class GeminiProviderTest extends TestCase
         $body = $this->invokeBuild($p, [new UserMessage('hi')], ['reasoning_effort' => 'max']);
         $this->assertSame('HIGH', $body['generationConfig']['thinkingConfig']['thinkingLevel']);
 
+        // 3.7+ Flash removed the MINIMAL tier — asking for it lands on LOW
+        // rather than 400ing. (MINIMAL is still emitted for the 3.5 line.)
         $body = $this->invokeBuild($p, [new UserMessage('hi')], ['reasoning_effort' => 'minimal']);
+        $this->assertSame('LOW', $body['generationConfig']['thinkingConfig']['thinkingLevel']);
+
+        $legacy = new GeminiProvider(['api_key' => 'k', 'model' => 'gemini-3.5-flash']);
+        $body = $this->invokeBuild($legacy, [new UserMessage('hi')], ['reasoning_effort' => 'minimal']);
         $this->assertSame('MINIMAL', $body['generationConfig']['thinkingConfig']['thinkingLevel']);
 
         // `off` suppresses the thinkingConfig entirely.

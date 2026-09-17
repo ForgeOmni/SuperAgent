@@ -589,14 +589,14 @@ Référence complète (cycle de vie de ModeContext, installation SPI, détection
 
 ### Gemini 3.5 *(v1.0.5)*
 
-Rien à installer au-delà du paquet standard — `gemini-3.7-flash` / `gemini-3.5-flash` / `gemini-3.1-flash-lite` sont déjà dans le `resources/models.json` livré. Définir la clé :
+Rien à installer au-delà du paquet standard — `gemini-3.8-flash` / `gemini-3.7-flash` / `gemini-3.1-flash-lite` sont déjà dans le `resources/models.json` livré. Définir la clé :
 
 ```bash
 export GEMINI_API_KEY=AIzaSy…    # clé AI Studio, ou VERTEX_* pour OAuth/Vertex
 superagent --provider gemini --model gemini-3.5-pro "explique ce fichier" ./src/Foo.php
 ```
 
-Le modèle par défaut du provider est maintenant `gemini-3.7-flash` (GA 2026-08-13, tarif de lancement $0.75/$3.75 par 1M jusqu'au 2026-12-31) ; passer `--model gemini-3.1-pro-preview` pour les tâches les plus dures ou `--model gemini-3.1-flash-lite` pour le moins cher.
+Le modèle par défaut du provider est maintenant `gemini-3.8-flash` (GA 2026-09-02, tarif de lancement $0.75/$3.75 par 1M jusqu'au 2026-12-31, puis $1.50/$7.50 ; `thinking_level` vaut `low|medium|high` — `minimal` y est refusé et le SDK le ramène à `low`) ; passer `--model gemini-3.1-pro-preview` pour les tâches les plus dures ou `--model gemini-3.1-flash-lite` pour le moins cher.
 
 ### Serveurs LSP *(v1.0.5)*
 
@@ -738,7 +738,7 @@ Voir [ADVANCED_USAGE §83](docs/ADVANCED_USAGE_FR.md) pour le registre complet e
 
 ### Qwen 3.7 / Qwen-Anthropic *(v1.0.6)*
 
-Le modèle Qwen par défaut est maintenant `qwen3.8-max` (GA 2026-08-03 : 1M ctx, $2 / $6 par 1M tokens, multimodal, support natif du protocole Anthropic ; `qwen3.7-max` reste accessible). Trois clés provider accèdent à Qwen :
+Le modèle Qwen par défaut est maintenant `qwen3.8-max-0902` (instantané du 2026-09-02 : 1M ctx, $2 / $6 par 1M tokens, multimodal, codage à l'échelle d'un projet et agents collaboratifs nettement renforcés ; `qwen3.8-max` et `qwen3.7-max` restent accessibles, et les paliers moins chers `qwen3.8-flash` / `qwen3.8-27b` sont au catalogue). Trois clés provider accèdent à Qwen :
 
 ```php
 // Endpoint OpenAI-compat (recommandé pour la parité avec le reste du SDK)

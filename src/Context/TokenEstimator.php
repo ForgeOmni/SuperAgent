@@ -29,8 +29,10 @@ class TokenEstimator
         'claude-opus-5' => 1_000_000,
         'claude-sonnet-5' => 1_000_000,
         'claude-fable' => 1_000_000,
+        'claude-haiku-4-5' => 200_000,
         
         // OpenAI models
+        'gpt-6' => 1_050_000,
         'gpt-5.6' => 1_050_000,
         'gpt-5.5' => 272_000,
         'gpt-5.4' => 272_000,
@@ -50,13 +52,21 @@ class TokenEstimator
         'grok-4-fast' => 2_000_000,
 
         // Google Gemini
+        'gemini-3.8-flash' => 1_048_576,
         'gemini-3.7-flash' => 1_048_576,
 
         // Alibaba Qwen
-        'qwen3.8-max' => 1_000_000,
+        'qwen3.8' => 1_000_000,
 
         // Z.AI GLM
+        'glm-5.3-flash' => 1_048_576,
         'glm-5.3' => 1_000_000,
+
+        // DeepSeek / Moonshot / MiniMax
+        'deepseek-flash' => 1_048_576,
+        'deepseek-v4' => 1_048_576,
+        'kimi-k3' => 1_048_576,
+        'MiniMax-M3' => 1_048_576,
 
         // Default fallback
         'default' => 200_000,

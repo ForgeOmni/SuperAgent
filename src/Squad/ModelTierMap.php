@@ -49,10 +49,10 @@ final class ModelTierMap
     {
         return [
             DifficultyClass::TRIVIAL->value  => ['provider' => 'anthropic', 'model' => 'claude-haiku-4-5-20251001'],
-            DifficultyClass::EASY->value     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-flash'],
+            DifficultyClass::EASY->value     => ['provider' => 'deepseek',  'model' => 'deepseek-flash'],
             DifficultyClass::MODERATE->value => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6'],
             DifficultyClass::HARD->value     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-pro'],
-            DifficultyClass::EXPERT->value   => ['provider' => 'anthropic', 'model' => 'claude-fable-5'],
+            DifficultyClass::EXPERT->value   => ['provider' => 'anthropic', 'model' => 'claude-fable-5-1'],
         ];
     }
 

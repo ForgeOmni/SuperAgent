@@ -69,14 +69,14 @@ class QwenProviderTest extends TestCase
         $this->assertSame('qwen', $p->name());
     }
 
-    public function test_default_model_is_qwen3_8_max(): void
+    public function test_default_model_is_qwen3_8_max_0902(): void
     {
         // Bumped 2026-08-03 (GA): 1M context, $2/$6 per 1M tokens,
         // multimodal reasoning. The 3.6-max-preview default lives on
         // QwenNativeProvider where the thinking-budget knob is still
         // actively used.
         $p = new QwenProvider(['api_key' => 'k']);
-        $this->assertSame('qwen3.8-max', $p->getModel());
+        $this->assertSame('qwen3.8-max-0902', $p->getModel());
     }
 
     public function test_authorization_header_is_bearer_api_key(): void
@@ -108,7 +108,7 @@ class QwenProviderTest extends TestCase
         $this->assertArrayHasKey('messages', $body);
         $this->assertArrayNotHasKey('input', $body, 'Native input.messages key must NOT appear on chat-completions path');
         $this->assertArrayNotHasKey('parameters', $body, 'Native parameters.* key must NOT appear on chat-completions path');
-        $this->assertSame('qwen3.8-max', $body['model']);
+        $this->assertSame('qwen3.8-max-0902', $body['model']);
         // Role normalization — system prompt is set as plain string,
         // UserMessage emits Role enum.
         // Role can be a string (literal system prompt) or a backed enum
@@ -192,7 +192,7 @@ class QwenProviderTest extends TestCase
         // qwen3.5-plus* / qwen3-omni*, plus the multimodal 3.7-plus and
         // 3.8-max. Text-only 3.7-max / 3.6-max-preview are NOT
         // vision-capable.
-        foreach (['qwen-vl-plus', 'qwen-vl-ocr', 'qwen3-vl-plus', 'qwen3.5-plus', 'qwen3-omni', 'qwen3.7-plus', 'qwen3.8-max'] as $id) {
+        foreach (['qwen-vl-plus', 'qwen-vl-ocr', 'qwen3-vl-plus', 'qwen3.5-plus', 'qwen3-omni', 'qwen3.7-plus', 'qwen3.8-max-0902'] as $id) {
             $this->assertTrue(
                 QwenProvider::isVisionModel($id),
                 "{$id} should be classed as vision-capable",

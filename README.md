@@ -32,13 +32,13 @@ echo $result->text();
 - [Providers & Authentication](#providers--authentication)
 - [OpenAI Responses API](#openai-responses-api)
 - [Cross-provider handoff](#cross-provider-handoff)
-- [Fable 5](#fable-5)
+- [Fable 5.1](#fable-51)
 - [Opus 5](#opus-5)
-- [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
+- [GPT-6 Astra / GPT-5.6](#gpt-6-astra--gpt-56-sol--terra--luna)
 - [Grok 4.6](#grok-46)
-- [DeepSeek V4](#deepseek-v4)
+- [DeepSeek V4.1 / V4](#deepseek-v41--v4)
 - [MiniMax M3](#minimax-m3)
-- [GLM-5.2 / 5.3](#glm-52--53)
+- [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (codex `/goal` parity)](#goal-mode-codex-goal-parity-v098)
 - [Operational guardrails](#operational-guardrails-v098)
 - [Companion tools (jcode-inspired)](#companion-tools-jcode-inspired)
@@ -105,15 +105,15 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 
 | Registry key | Provider | Notes |
 |---|---|---|
-| `anthropic` | Anthropic | API key or stored Claude Code OAuth; default `claude-opus-5` *(v1.1.10)*, `claude-fable-5` flagship + `claude-sonnet-5` — adaptive thinking + effort dial *(Fable 5 / Sonnet 5, v1.1.5)* |
+| `anthropic` | Anthropic | API key or stored Claude Code OAuth; default `claude-opus-5` *(v1.1.10)*, `claude-fable-5-1` flagship *(Fable 5.1, v1.1.12)* + `claude-sonnet-5` — adaptive thinking + effort dial *(Fable 5 / Sonnet 5, v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | API key, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT`; GPT-5.6 Sol / Terra / Luna in catalog *(v1.1.6)*; still-served back-catalog GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
-| `openai-responses` | OpenAI Responses API (`/v1/responses`) | Default `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, explicit caching *(v1.1.6)*; [dedicated section below](#openai-responses-api) |
+| `openai-responses` | OpenAI Responses API (`/v1/responses`) | Default `gpt-6-astra` — effort `low…max` (no `none`), async tools, `reasoning.mode: pro`, explicit caching *(GPT-6 Astra, v1.1.12)*; [dedicated section below](#openai-responses-api) |
 | `openrouter` | OpenRouter | API key |
-| `gemini` | Google Gemini | API key; default `gemini-3.7-flash` — thinking_level dial + grounding *(Gemini 3.7 Flash, v1.1.11)* |
+| `gemini` | Google Gemini | API key; default `gemini-3.8-flash` — thinking_level dial + grounding *(Gemini 3.8 Flash, v1.1.12)* |
 | `kimi` | Moonshot Kimi (Kimi K3 default) | API key; regions `intl` / `cn` / `code` (OAuth); default `kimi-k3` — 2.8T MoE, 1M ctx, always-on thinking, image/video *(Kimi K3, v1.1.7)*; `kimi-for-coding` (Kimi Code subscription, region `code`) in catalog *(v1.1.8)* |
-| `qwen` | Alibaba Qwen (OpenAI-compat default) | API key; regions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE); default `qwen3.8-max` — multimodal GA flagship *(Qwen3.8-Max, v1.1.11)* |
+| `qwen` | Alibaba Qwen (OpenAI-compat default) | API key; regions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE); default `qwen3.8-max-0902` — multimodal flagship snapshot *(Qwen3.8-Max-0902, v1.1.12)* |
 | `qwen-native` | Alibaba Qwen (DashScope-native body) | Kept for `parameters.thinking_budget` callers |
-| `glm` | BigModel GLM (GLM-5.2 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.2, v1.1.2; GLM-5.3 dial, v1.1.11)* |
+| `glm` | BigModel GLM (GLM-5.3 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.3 default + GLM-5.3-Flash, v1.1.12; GLM-5.3 dial, v1.1.11)* |
 | `minimax` | MiniMax (M3 default) | API key; regions `intl` / `cn`; interleaved thinking + native image/video *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(since v0.9.6, multi-upstream v0.9.8)* |
 | `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.6` — reasoning-effort dial (incl. `xhigh`) + cache pinning *(Grok 4.6, v1.1.11; since v1.0.8)* |
@@ -188,7 +188,7 @@ Dedicated provider at `provider: 'openai-responses'`. Hits `/v1/responses` with 
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5.6-sol',   // default; `gpt-5.6` alias resolves here
+    'model'    => 'gpt-6-astra',   // default; `gpt-6` / `astra` aliases resolve here
 ]);
 
 $result = $agent->run('analyse this codebase and propose refactors', [
@@ -300,15 +300,15 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 
 ---
 
-## Fable 5
+## Fable 5.1
 
-Fable 5 (`claude-fable-5`) is Anthropic's most capable model — for the most demanding reasoning and long-horizon agentic work. It runs on the standard `anthropic` provider (API key **or** Claude Code OAuth), with a **1M-token context** (128K max output) and **high-res vision**. PAYG pricing is **$10 in / $50 out** per million tokens — above the Opus tier (Opus 5 is $5/$25). It is the Squad **EXPERT**-tier model; the zero-config `anthropic` default is **Claude Opus 5**. Refusals fall back to Opus 4.8.
+Fable 5.1 (`claude-fable-5-1`, released 2026-09-01) is Anthropic's most capable widely released model — for the most demanding reasoning and long-horizon agentic work. It runs on the standard `anthropic` provider (API key **or** Claude Code OAuth), with a **1M-token context** (128K max output) and **high-res vision**. PAYG pricing is **$10 in / $50 out** per million tokens — unchanged from Fable 5 — and **cache reads drop 75% to $0.25/M**. It is the Squad **EXPERT**-tier model and the `fable` alias target; the zero-config `anthropic` default is **Claude Opus 5**. Fable 5 (`claude-fable-5`) stays reachable as the previous generation.
 
 ```php
 $agent = new Agent([
     'provider' => 'anthropic',
     'api_key'  => getenv('ANTHROPIC_API_KEY'),
-    'model'    => 'claude-fable-5',             // or the `fable` alias
+    'model'    => 'claude-fable-5-1',           // or the `fable` alias
 ]);
 ```
 
@@ -317,6 +317,8 @@ Its request surface differs from the Opus tier — the SDK handles this automati
 - **Thinking is always on and adaptive.** The provider emits `thinking: {type: "adaptive"}`; an explicit `budget_tokens` is never sent (Fable 5 / Opus 4.7 / 4.8 **400** on it). Depth is steered by the effort dial, not a token budget.
 - **No sampling params, no prefill.** `temperature` / `top_p` / `top_k` and a trailing assistant prefill are dropped for Fable 5 (they 400 there); steer via prompting + effort instead.
 - **Effort dial.** `AnthropicProvider` implements `SupportsReasoningEffort` → Anthropic's GA `output_config.effort` (`low` … `high` … `xhigh` … `max`), also available on Opus 4.5+/Sonnet 4.6.
+- **No forced tool use (5.1 only).** `tool_choice: {type: "any"}` and `{type: "tool", name: …}` **400** on Fable 5.1; the provider downgrades a forced choice to `auto` automatically. Pair `auto` with an instruction naming the tool, or use structured outputs, when you need a guaranteed call. `none` and `auto` pass through untouched, and Fable 5 / Opus / Sonnet keep forced tool use.
+- **Preserved thinking (5.1 only).** Thinking blocks are bound to the model that produced them, and editing earlier turns invalidates them — keep the transcript append-only.
 
 ```php
 // Effort dial → output_config.effort
@@ -326,11 +328,11 @@ $agent->run('long-horizon agentic task', ['reasoning_effort' => 'xhigh']);
 $agent->run('hard reasoning prompt', ['features' => ['thinking' => true]]);
 ```
 
-> ⚠️ **30-day data retention required.** Fable 5 is not available under zero data retention — an org configured below 30-day retention gets a `400` on every request. Safety classifiers may also return `stop_reason: "refusal"`.
+> ⚠️ **Covered Model — 30-day data retention required.** Fable 5.1 is not available under zero data retention unless expressly authorized by Anthropic; an org configured below 30-day retention gets a `400` on every request, and Priority Tier is not offered. Safety classifiers may also return `stop_reason: "refusal"` — opt into server-side `fallbacks` to route around it.
 
-**Sonnet 5** (`claude-sonnet-5`, released 2026-06-30) ships alongside as the new `sonnet` flagship — Anthropic's most agentic Sonnet, close to Opus 4.8 at a lower price. Same Claude-5-generation adaptive surface (adaptive-only thinking, effort dial, no sampling params / prefill), 1M context (128K max output), **$3 in / $15 out** (intro **$2/$10 through 2026-08-31**). The `sonnet` / `claude-sonnet` / `sonnet-5` aliases now resolve to it.
+**Sonnet 5** (`claude-sonnet-5`, released 2026-06-30) ships alongside as the new `sonnet` flagship — Anthropic's most agentic Sonnet, close to Opus 4.8 at a lower price. Same Claude-5-generation adaptive surface (adaptive-only thinking, effort dial, no sampling params / prefill), 1M context (128K max output), **$2 in / $10 out** — the launch intro rate is now permanent, the $3/$15 increase scheduled for 2026-09-01 was cancelled. The `sonnet` / `claude-sonnet` / `sonnet-5` aliases now resolve to it.
 
-*Since v1.1.5*
+*Since v1.1.5; Fable 5.1 since v1.1.12*
 
 ---
 
@@ -361,33 +363,36 @@ Pinned ids are never rewritten: a config on `claude-opus-4-8` (or any other expl
 
 ---
 
-## GPT-5.6 (Sol / Terra / Luna)
+## GPT-6 Astra / GPT-5.6 (Sol / Terra / Luna)
 
-GPT-5.6 (GA 2026-07-09) replaces GPT-5.5 as OpenAI's flagship line and retires the mini/nano suffixes — the family is three tiers sharing a **1.05M-token context** (128K max output) and vision:
+GPT-6 Astra (GA 2026-09-03) is OpenAI's new frontier flagship and the `openai-responses` default. The GPT-5.6 tiers stay live below it and were all repriced at the Astra launch — the whole family shares a **1.05M-token context** (128K max output) and vision:
 
 | Model | Positioning | $/M in · cached · out |
 |---|---|---|
-| `gpt-5.6-sol` (alias `gpt-5.6`, `sol`) | Frontier flagship for complex professional work | $5 · $0.50 · $30 |
-| `gpt-5.6-terra` (alias `terra`) | Balanced default tier (≈5.5 level, cheaper) | $2.50 · $0.25 · $15 |
-| `gpt-5.6-luna` (alias `luna`) | High-throughput low-cost tier | $1 · $0.10 · $6 |
+| `gpt-6-astra` (alias `gpt-6`, `astra`) | Frontier flagship; async tools + mid-turn steering | $10 · $1 · $50 |
+| `gpt-5.6-sol` (alias `gpt-5.6`, `sol`) | Previous flagship for complex professional work | $4 · $0.40 · $20 |
+| `gpt-5.6-terra` (alias `terra`) | Balanced mid tier (≈5.5 level, cheaper) | $2 · $0.20 · $12 |
+| `gpt-5.6-luna` (alias `luna`) | High-throughput low-cost tier | $0.20 · $0.02 · $1.20 |
 
-Inputs beyond 272K tokens bill at 2× in / 1.5× out. `openai-responses` now defaults to `gpt-5.6-sol`; the Chat Completions `openai` provider keeps its `gpt-4o` default but resolves all three ids.
+Inputs beyond 272K tokens bill at 2× in / 1.5× out on the 5.6 line. `openai-responses` now defaults to `gpt-6-astra`; the Chat Completions `openai` provider keeps its `gpt-4o` default but resolves every id above.
 
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5.6-sol',
+    'model'    => 'gpt-6-astra',
 ]);
 
 $result = $agent->run('design then implement the migration', [
-    'reasoning_effort'     => 'max',              // 5.6 dial: none|low|medium|high|xhigh|max
+    'reasoning_effort'     => 'max',              // Astra dial: low|medium|high|xhigh|max (no `none`)
     'reasoning_mode'       => 'pro',              // Sol Pro — same weights, more parallel compute
     'reasoning_context'    => 'all_turns',        // persisted-reasoning reuse across turns
     'prompt_cache_options' => ['mode' => 'explicit'],
 ]);
 ```
 
-- **Effort dial, normalized per generation.** GPT-5.6 retired `minimal` and added `none` + `max` (default `medium`). The provider normalizes whatever you pass to the target model's legal set — `minimal` → `low` on 5.6, `max` → `xhigh` on pre-5.6 — so cross-provider `reasoning_effort` calls keep working. `OpenAIResponsesProvider` now implements `SupportsReasoningEffort`.
+- **Effort dial, normalized per generation.** GPT-5.6 retired `minimal` and added `none` + `max` (default `medium`); **GPT-6 Astra drops `none` again** (`low` … `max`). The provider normalizes whatever you pass to the target model's legal set — `none`/`minimal` → `low` on Astra, `minimal` → `low` on 5.6, `max` → `xhigh` on pre-5.6 — so cross-provider `reasoning_effort` calls keep working without ever emitting a value the model rejects. `OpenAIResponsesProvider` implements `SupportsReasoningEffort`.
+- **Async tools (Astra).** Pass `async_tools: true` (every tool) or `async_tools: ['name', …]` and those tool definitions ship `async: true`: Astra keeps reasoning, calls other tools, or answers independent parts of the request while the call runs, and you return the result later against the original `call_id`. The flag is silently dropped on pre-GPT-6 models, where it is a validation error.
+- **Mid-turn steering (Astra).** Over a WebSocket connection the Responses API accepts extra user instructions while the model is working and preserves completed work in the continuation.
 - **`reasoning.mode: pro`** is the API form of ChatGPT's Sol Pro (Sol only); **`reasoning.context`** controls reasoning persistence across turns. Both also pass through verbatim inside `options['reasoning']`.
 - **Explicit prompt caching.** `prompt_cache_options: {mode: explicit}` — cache writes bill at 1.25× uncached input, reads keep the 90% discount.
 - Programmatic tool calling / multi-agent beta stay reachable via `extra_body` until first-class knobs land.
@@ -424,16 +429,16 @@ new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
 
 ---
 
-## DeepSeek V4
+## DeepSeek V4.1 / V4
 
-DeepSeek V4 ships two MoE models — `deepseek-v4-pro` (1.6T total / 49B active; **GA since 2026-08-13** as model version `DeepSeek-V4-Pro-0813`, same id) and `deepseek-v4-flash` (284B / 13B active; re-post-trained 0731 public beta) — with **1M context** as the default and a single-model **thinking / non-thinking toggle** plus a `low | high | max` reasoning-effort dial (the `low` tier is new with GA). Pricing moves to a peak/off-peak model on 2026-08-16 (peak 01-04 + 06-10 UTC bills 2× the off-peak base of $0.66/$1.98 Pro, $0.22/$0.66 Flash per M). The same backend exposes both an OpenAI-wire and an Anthropic-wire endpoint, so the SDK supports two routes:
+DeepSeek now ships `deepseek-flash` (**V4.1 Flash**, GA 2026-09-10 — the first model of DeepSeek's new architecture family, natively multimodal, and the provider default) alongside `deepseek-v4-pro` (1.6T total / 49B active; GA 2026-08-13 as model version `DeepSeek-V4-Pro-0813`, and still served past its announced 2026-09-14 sunset at unchanged billing). Both run **1M context / 384K max output** with a single-model **thinking / non-thinking toggle** plus a `low | high | max` reasoning-effort dial. V4 Flash and V4 Flash Vision Exp are retired — `deepseek-v4-flash` is temporarily routed to V4.1 Flash for compatibility; point new code at `deepseek-flash`. Pricing is peak/off-peak (peak 01-04 + 06-10 UTC Mon-Fri bills 2× the off-peak base of $0.66/$1.98 Pro, $0.15/$0.60 Flash per M). The same backend exposes both an OpenAI-wire and an Anthropic-wire endpoint, so the SDK supports two routes:
 
 ```php
 // OpenAI-wire: native DeepSeekProvider
 $agent = new Agent([
     'provider' => 'deepseek',
     'api_key'  => getenv('DEEPSEEK_API_KEY'),
-    'model'    => 'deepseek-v4-pro',           // or 'deepseek-v4-flash'
+    'model'    => 'deepseek-v4-pro',           // or 'deepseek-flash' (default)
 ]);
 
 // Anthropic-wire: reuse AnthropicProvider with a custom base_url
@@ -459,7 +464,7 @@ foreach ($result->message()->content as $block) {
 }
 ```
 
-**Deprecation lane.** `deepseek-chat` and `deepseek-reasoner` retire **2026-07-24**. The catalog flags both with `deprecated_until` and `replaced_by` fields; `ModelResolver` emits a one-shot warning per process recommending `deepseek-v4-flash` / `deepseek-v4-pro` respectively. Set `SUPERAGENT_SUPPRESS_DEPRECATION=1` to silence.
+**Deprecation lane.** `deepseek-chat` and `deepseek-reasoner` retire **2026-07-24**. The catalog flags both with `deprecated_until` and `replaced_by` fields; `ModelResolver` emits a one-shot warning per process recommending `deepseek-flash` / `deepseek-v4-pro` respectively. Set `SUPERAGENT_SUPPRESS_DEPRECATION=1` to silence.
 
 **Cache-aware billing.** OpenAI-compat backends report `prompt_tokens` as gross (cache hits + misses). The parser now subtracts the cached portion before populating `Usage::inputTokens`, so the cache discount lands correctly — `CostCalculator` charges 10% of input price for read hits instead of effectively 110%. Affects every OpenAI-compat backend with caching (DeepSeek, Kimi, OpenAI itself).
 
@@ -553,7 +558,7 @@ use SuperAgent\Routing\AutoModelStrategy;
 
 $strategy = new AutoModelStrategy();
 $model    = $strategy->select($messages, $systemPrompt, $options);
-// → 'deepseek-v4-pro' or 'deepseek-v4-flash'
+// → 'deepseek-v4-pro' or 'deepseek-flash'
 
 $agent = new Agent([
     'provider' => 'deepseek',
@@ -626,17 +631,19 @@ $agent->run('hard reasoning prompt', ['features' => ['thinking' => ['budget' => 
 
 ---
 
-## GLM-5.2 / 5.3
+## GLM-5.3 / 5.3-Flash
 
-GLM-5.2 (the `glm` default as of v1.1.2) is Z.ai's coding-first agentic flagship: a **1M-token context** (128K max output), **text-only** I/O, and — new for the 5.2 line — a **reasoning-effort dial** on top of the binary thinking toggle. Official pay-as-you-go pricing is **$1.40 in / $4.40 out** per million tokens, with **$0.26 cache-hit input** (cache storage currently free, limited-time). `glm-5.1` (200K context, same pricing) ships alongside, and every prior `glm-5` / `glm-4.x` id stays reachable.
+GLM-5.2 (the `glm` alias target; the provider default until v1.1.12) is Z.ai's coding-first agentic flagship: a **1M-token context** (128K max output), **text-only** I/O, and — new for the 5.2 line — a **reasoning-effort dial** on top of the binary thinking toggle. Official pay-as-you-go pricing is **$1.40 in / $4.40 out** per million tokens, with **$0.26 cache-hit input** (cache storage currently free, limited-time). `glm-5.1` (200K context, same pricing) ships alongside, and every prior `glm-5` / `glm-4.x` id stays reachable.
 
-**GLM-5.3** (released 2026-08-14, "Built to Code. Ready for Cyber Defense") is a coding + cyber-defense post-train of the same 5.2 base, reachable as `glm-5.3` (alias `glm5.3`; 1M-context route `glm-5.3[1m]`). It widens the effort dial to a genuine **`low | high | max`** (server default `max`) and makes **thinking mandatory** — `thinking.type` cannot be disabled, so `reasoning_effort: off` degrades to the `low` tier instead (matching Z.ai's own Coding Plan adapters). It is live in the GLM Coding Plan while the standalone API rolls out in stages; per-token pricing is **not yet published** (cost tracking provisionally uses the 5.2 rate), so `glm-5.2` stays the provider default for now. Open weights are promised ~2 weeks post-launch.
+**GLM-5.3** (released 2026-08-14, "Built to Code. Ready for Cyber Defense") is a coding + cyber-defense post-train of the same 5.2 base, reachable as `glm-5.3` (alias `glm5.3`; 1M-context route `glm-5.3[1m]`). It widens the effort dial to a genuine **`low | high | max`** (server default `max`) and makes **thinking mandatory** — `thinking.type` cannot be disabled, so `reasoning_effort: off` degrades to the `low` tier instead (matching Z.ai's own Coding Plan adapters). Its standalone API is now GA at the 5.2 rate (**$1.40 in / $0.26 cached / $4.40 out** per M), so **`glm-5.3` is the provider default as of v1.1.12**. Open weights shipped post-launch.
+
+**GLM-5.3-Flash** (`glm-5.3-flash`, released 2026-08-26) is Z.ai's first *natively multimodal* GLM-5 model — 320B MoE / 18B active, image **and video** input, 1M context, MIT-licensed open weights, at **$0.15 in / $0.03 cached / $0.50 out** per M (the 50% launch promo ended 2026-09-09). It is a separate model rather than a 5.3 post-train, so it keeps the ordinary dial where `reasoning_effort: off` really disables thinking.
 
 ```php
 $agent = new Agent([
     'provider' => 'glm',
     'api_key'  => getenv('GLM_API_KEY'),
-    'model'    => 'glm-5.2',                    // or the `glm` alias
+    'model'    => 'glm-5.3',                    // default; or the `glm` alias
     'region'   => 'intl',                       // intl | cn
 ]);
 ```

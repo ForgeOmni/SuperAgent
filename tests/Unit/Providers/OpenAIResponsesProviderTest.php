@@ -109,10 +109,10 @@ class OpenAIResponsesProviderTest extends TestCase
         $this->assertSame('high', $body['reasoning']['effort']);
     }
 
-    public function test_default_model_is_gpt_56_sol(): void
+    public function test_default_model_is_gpt_6_astra(): void
     {
         $p = new OpenAIResponsesProvider(['api_key' => 'sk-test']);
-        $this->assertSame('gpt-5.6-sol', $p->getModel());
+        $this->assertSame('gpt-6-astra', $p->getModel());
     }
 
     public function test_effort_normalized_per_generation(): void

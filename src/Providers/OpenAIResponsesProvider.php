@@ -93,12 +93,13 @@ class OpenAIResponsesProvider extends OpenAIProvider implements \SuperAgent\Prov
 
     protected function defaultModel(): string
     {
-        // gpt-5.6-sol is the current flagship on the Responses API path
-        // (`gpt-5.6` is OpenAI's alias for it). gpt-4o-family still works
-        // here but its native home is Chat Completions; we default to the
+        // gpt-6-astra is OpenAI's frontier flagship (2026-09-03) and is
+        // Responses-API-native — async tools and mid-turn steering only
+        // exist on this endpoint. gpt-4o-family still works here but its
+        // native home is Chat Completions; we default to the
         // endpoint-native family so callers who pick this provider get
         // the intended shape.
-        return 'gpt-5.6-sol';
+        return 'gpt-6-astra';
     }
 
     protected function chatCompletionsPath(): string
@@ -302,7 +303,10 @@ class OpenAIResponsesProvider extends OpenAIProvider implements \SuperAgent\Prov
         }
 
         if (! empty($tools)) {
-            $body['tools'] = $this->convertToolsToResponses($tools);
+            $body['tools'] = $this->convertToolsToResponses(
+                $tools,
+                $this->resolveAsyncTools($tools, $options, (string) ($options['model'] ?? $this->model)),
+            );
             $body['tool_choice'] = $options['tool_choice'] ?? 'auto';
         }
 
@@ -425,20 +429,54 @@ class OpenAIResponsesProvider extends OpenAIProvider implements \SuperAgent\Prov
      * @param  Tool[] $tools
      * @return list<array<string,mixed>>
      */
-    protected function convertToolsToResponses(array $tools): array
+    protected function convertToolsToResponses(array $tools, array $asyncNames = []): array
     {
         $out = [];
         foreach ($tools as $tool) {
             if (! $tool instanceof \SuperAgent\Tools\Tool) continue;
-            $out[] = [
+            $entry = [
                 'type'        => 'function',
                 'name'        => $tool->name(),
                 'description' => $tool->description(),
                 'parameters'  => $tool->inputSchema(),
                 'strict'      => false,
             ];
+            // GPT-6 Astra async tools: the model keeps reasoning, calls other
+            // tools, or answers independent parts of the request while this
+            // one runs; the result is returned later against the original
+            // `call_id`.
+            if (in_array($tool->name(), $asyncNames, true)) {
+                $entry['async'] = true;
+            }
+            $out[] = $entry;
         }
         return $out;
+    }
+
+    /**
+     * Which tools may be marked `async: true` on this request.
+     *
+     * `options['async_tools']` accepts `true` (every tool) or a list of tool
+     * names. Silently ignored on models that don't implement async tools —
+     * sending the field to a 5.6-or-earlier model is a validation error.
+     *
+     * @param  Tool[]               $tools
+     * @param  array<string, mixed> $options
+     * @return list<string>
+     */
+    protected function resolveAsyncTools(array $tools, array $options, string $model): array
+    {
+        $spec = $options['async_tools'] ?? null;
+        if ($spec === null || $spec === false || ! $this->isGpt6($model)) {
+            return [];
+        }
+        if ($spec === true) {
+            return array_values(array_filter(array_map(
+                static fn ($t) => $t instanceof \SuperAgent\Tools\Tool ? $t->name() : null,
+                $tools,
+            )));
+        }
+        return is_array($spec) ? array_values(array_filter($spec, 'is_string')) : [];
     }
 
     /**
@@ -514,6 +552,18 @@ class OpenAIResponsesProvider extends OpenAIProvider implements \SuperAgent\Prov
     {
         $tier = strtolower(trim($effort));
 
+        if ($this->isGpt6($model)) {
+            // GPT-6 Astra runs low…max and — unlike the 5.6 tiers — does
+            // NOT accept `none`. Anything that means "don't think" has to
+            // land on `low` or the request 400s.
+            return match ($tier) {
+                'off', 'disabled', 'false', 'none', 'minimal' => 'low',
+                'mid' => 'medium',
+                'highest', 'ultra' => 'max',
+                default => $tier,
+            };
+        }
+
         if ($this->isGpt56($model)) {
             return match ($tier) {
                 'off', 'disabled', 'false' => 'none',
@@ -535,6 +585,15 @@ class OpenAIResponsesProvider extends OpenAIProvider implements \SuperAgent\Prov
     protected function isGpt56(string $model): bool
     {
         return str_starts_with(strtolower($model), 'gpt-5.6');
+    }
+
+    /**
+     * GPT-6 generation (Astra and any later 6.x id). Gates the effort dial
+     * (no `none`) and the async-tool surface.
+     */
+    protected function isGpt6(string $model): bool
+    {
+        return str_starts_with(strtolower($model), 'gpt-6');
     }
 
     /**

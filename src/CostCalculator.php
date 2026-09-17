@@ -11,14 +11,17 @@ class CostCalculator
      * Pricing per million tokens [input, output] in USD.
      */
     protected static array $pricing = [
-        // Anthropic Fable 5 (most capable model — above the Opus tier)
+        // Anthropic Fable 5.1 / 5 (most capable tier — above Opus).
+        // Same $10/$50; 5.1 cache reads are 4x cheaper ($0.25 vs $1.00/M).
+        'claude-fable-5-1'           => ['input' => 10.0, 'output' => 50.0],
         'claude-fable-5'             => ['input' => 10.0, 'output' => 50.0],
         // Anthropic Opus 5 (current flagship Opus — same $5/$25 as Opus 4.8)
         'claude-opus-5'              => ['input' => 5.0, 'output' => 25.0],
         // Anthropic Claude 4.8 (previous flagship Opus — $5/$25)
         'claude-opus-4-8'            => ['input' => 5.0, 'output' => 25.0],
-        // Anthropic Sonnet 5 (next-gen balanced; intro $2/$10 through 2026-08-31)
-        'claude-sonnet-5'            => ['input' => 3.0, 'output' => 15.0],
+        // Anthropic Sonnet 5 — $2/$10 is permanent; the $3/$15 increase
+        // scheduled for 2026-09-01 was cancelled.
+        'claude-sonnet-5'            => ['input' => 2.0, 'output' => 10.0],
         // Anthropic Claude 4.6 / 4.7 Opus (all $5/$25)
         'claude-opus-4-7'            => ['input' => 5.0, 'output' => 25.0],
         'claude-sonnet-4-7'          => ['input' => 3.0, 'output' => 15.0],
@@ -52,9 +55,11 @@ class CostCalculator
         // OpenAI GPT models
         // (gpt-5.6-* before gpt-5 — the fuzzy prefix match walks insertion
         // order, so dated 5.6 snapshots must hit the 5.6 rows first.)
-        'gpt-5.6-sol'   => ['input' => 5.00, 'output' => 30.0],
-        'gpt-5.6-terra' => ['input' => 2.50, 'output' => 15.0],
-        'gpt-5.6-luna'  => ['input' => 1.00, 'output' => 6.0],
+        'gpt-6-astra'   => ['input' => 10.00, 'output' => 50.0],
+        'gpt-5.6-sol'   => ['input' => 4.00, 'output' => 20.0],
+        'gpt-5.6-terra' => ['input' => 2.00, 'output' => 12.0],
+        'gpt-5.6-luna'  => ['input' => 0.20, 'output' => 1.20],
+        'gpt-5.5'       => ['input' => 5.00, 'output' => 30.0],
         'gpt-5-mini' => ['input' => 0.25, 'output' => 2.0],
         'gpt-5-nano' => ['input' => 0.05, 'output' => 0.40],
         'gpt-5' => ['input' => 1.25, 'output' => 10.0],
@@ -68,14 +73,20 @@ class CostCalculator
         'gpt-3.5-turbo-16k' => ['input' => 3.0, 'output' => 4.0],
         
         // OpenRouter models (varied pricing)
+        'anthropic/claude-fable-5.1' => ['input' => 10.0, 'output' => 50.0],
         'anthropic/claude-fable-5' => ['input' => 10.0, 'output' => 50.0],
         'anthropic/claude-opus-5' => ['input' => 5.0, 'output' => 25.0],
-        'anthropic/claude-sonnet-5' => ['input' => 3.0, 'output' => 15.0],
+        'anthropic/claude-sonnet-5' => ['input' => 2.0, 'output' => 10.0],
         'anthropic/claude-opus-4-8' => ['input' => 5.0, 'output' => 25.0],
         'anthropic/claude-3-5-sonnet' => ['input' => 3.0, 'output' => 15.0],
         'anthropic/claude-3-opus' => ['input' => 15.0, 'output' => 75.0],
         'anthropic/claude-3-sonnet' => ['input' => 3.0, 'output' => 15.0],
         'anthropic/claude-3-haiku' => ['input' => 0.25, 'output' => 1.25],
+        'openai/gpt-6-astra' => ['input' => 10.0, 'output' => 50.0],
+        'openai/gpt-5.6-sol' => ['input' => 4.0, 'output' => 20.0],
+        'openai/gpt-5.6-terra' => ['input' => 2.0, 'output' => 12.0],
+        'openai/gpt-5.6-luna' => ['input' => 0.20, 'output' => 1.20],
+        'meta/muse-spark-1.3' => ['input' => 1.25, 'output' => 4.25],
         'openai/gpt-4o' => ['input' => 2.50, 'output' => 10.0],
         'openai/gpt-4-turbo' => ['input' => 10.0, 'output' => 30.0],
         'openai/gpt-3.5-turbo' => ['input' => 0.50, 'output' => 1.50],
@@ -85,6 +96,7 @@ class CostCalculator
         // Google Gemini native API (per-token prices are USD per million tokens).
         // Values reflect Google AI Studio public pricing as of 2026-04; `register()`
         // can override any row if pricing shifts.
+        'gemini-3.8-flash'             => ['input' => 0.75, 'output' => 3.75],
         'gemini-3.7-flash'             => ['input' => 0.75, 'output' => 3.75],
         'gemini-2.0-flash'             => ['input' => 0.10, 'output' => 0.40],
         'gemini-2.0-flash-001'         => ['input' => 0.10, 'output' => 0.40],
@@ -104,18 +116,23 @@ class CostCalculator
 
         // Alibaba Qwen (DashScope). Explicit row needed: the Ollama 'qwen'
         // => $0 row below would otherwise win the prefix fuzzy-match.
+        'qwen3.8-max-0902' => ['input' => 2.00, 'output' => 6.00],
         'qwen3.8-max' => ['input' => 2.00, 'output' => 6.00],
+        'qwen3.8-flash' => ['input' => 0.15, 'output' => 0.47],
+        'qwen3.8-27b' => ['input' => 0.214, 'output' => 2.55],
 
-        // Z.AI GLM. glm-5.3 API pricing is unpublished as of 2026-08-14 —
-        // the 5.2 rate is a provisional stand-in (better than the $3/$15
-        // sonnet default fallback) until z.ai posts a 5.3 pricing row.
+        // Z.AI GLM. glm-5.3's standalone API is GA and prices at the 5.2
+        // rate; glm-5.3-flash is the cheap natively-multimodal tier (the
+        // 50% launch promo ended 2026-09-09, so this is the standard rate).
+        'glm-5.3-flash' => ['input' => 0.15, 'output' => 0.50],
         'glm-5.3' => ['input' => 1.40, 'output' => 4.40],
         'glm-5.2' => ['input' => 1.40, 'output' => 4.40],
 
         // AWS Bedrock models
+        'global.anthropic.claude-fable-5-1'         => ['input' => 10.0, 'output' => 50.0],
         'anthropic.claude-fable-5-v1:0'             => ['input' => 10.0, 'output' => 50.0],
         'anthropic.claude-opus-5-v1:0'              => ['input' => 5.0,  'output' => 25.0],
-        'anthropic.claude-sonnet-5-v1:0'            => ['input' => 3.0, 'output' => 15.0],
+        'anthropic.claude-sonnet-5-v1:0'            => ['input' => 2.0, 'output' => 10.0],
         'anthropic.claude-opus-4-8-v1:0'            => ['input' => 5.0,  'output' => 25.0],
         'anthropic.claude-sonnet-4-6-20250627-v1:0' => ['input' => 3.0, 'output' => 15.0],
         'anthropic.claude-opus-4-6-20250514-v1:0'   => ['input' => 5.0,  'output' => 25.0],
@@ -133,6 +150,16 @@ class CostCalculator
         'mistral.mistral-7b-instruct-v0:2' => ['input' => 0.15, 'output' => 0.20],
         'mistral.mixtral-8x7b-instruct-v0:1' => ['input' => 0.45, 'output' => 0.70],
         
+        // DeepSeek native API — off-peak base rates (peak hours 01-04 +
+        // 06-10 UTC Mon-Fri bill 2x; flat tracking uses the off-peak base).
+        'deepseek-flash' => ['input' => 0.15, 'output' => 0.60],
+        'deepseek-v4-pro' => ['input' => 0.66, 'output' => 1.98],
+        'deepseek-v4-flash' => ['input' => 0.15, 'output' => 0.60],
+
+        // Moonshot Kimi / MiniMax native APIs
+        'kimi-k3' => ['input' => 3.00, 'output' => 15.0],
+        'MiniMax-M3' => ['input' => 0.30, 'output' => 1.20],
+
         // Ollama models (local, free)
         'llama2' => ['input' => 0.0, 'output' => 0.0],
         'llama2:7b' => ['input' => 0.0, 'output' => 0.0],
@@ -145,6 +172,7 @@ class CostCalculator
         'mixtral' => ['input' => 0.0, 'output' => 0.0],
         'codellama' => ['input' => 0.0, 'output' => 0.0],
         'deepseek-coder' => ['input' => 0.0, 'output' => 0.0],
+
         'phi' => ['input' => 0.0, 'output' => 0.0],
         'orca-mini' => ['input' => 0.0, 'output' => 0.0],
         'vicuna' => ['input' => 0.0, 'output' => 0.0],

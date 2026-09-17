@@ -11129,3 +11129,34 @@ $agent = new Agent(['provider' => 'qwen']);   // → qwen3.8-max, vl_high_resolu
 ```
 
 Tests: `GrokProviderTest` (4.6 dial), `DeepSeekProviderTest` (low tier), `QwenProviderTest` (default + vision flag), `GeminiProviderTest` (default + thinking gate), `GlmProviderTest` (5.3 dial incl. the `[1m]` route). Full suite green (3362).
+
+## 100. Model wave 2026-09 — Fable 5.1 · GPT-6 Astra · Gemini 3.8 Flash · DeepSeek V4.1 Flash · Qwen3.8-Max-0902 · GLM-5.3-Flash (v1.1.12)
+
+A six-provider refresh, and this time three of the new flagships change the **request surface**, not just the id. Catalog (`resources/models.json`, `_meta.updated` 2026-09-17), `CostCalculator`, `TokenEstimator`, `ModelResolver` seeds, provider defaults and the `/model` picker move together.
+
+- **Claude Fable 5.1** (`claude-fable-5-1`, 2026-09-01) — new `fable` alias target and Squad **EXPERT** model. Same $10 / $50 per M as Fable 5 with **cache reads cut 75% to $0.25/M**. Three breaking changes vs Fable 5, of which one needed code: **forced tool use is gone** — `tool_choice: {type: "any"}` and `{type: "tool", name: …}` return 400, so `AnthropicProvider` now downgrades a forced choice to `auto` (`none` / `auto` pass through untouched, and Fable 5 / Opus / Sonnet keep forced tool use). The other two are harness rules: thinking blocks are bound to the producing model, and editing earlier turns invalidates them (preserved thinking — keep the transcript append-only). Covered Model: 30-day retention required, no Priority Tier.
+- **GPT-6 Astra** (`gpt-6-astra`, 2026-09-03) — new `openai-responses` default and `gpt-6` / `astra` alias target. 1.05M ctx / 128K out, $10 / $1 cached / $50 per M. Its effort dial is `low…max` and **drops `none`**, which the 5.6 tiers have — so `normalizeEffortForModel()` gained a GPT-6 branch mapping `off`/`none`/`minimal` → `low` (sending `none` there is a 400). Two new Responses surfaces: **async tools** (`async_tools: true` or a list of names → `async: true` on those tool definitions; Astra keeps reasoning, calls other tools or answers independent parts while the call runs, and you return the result later against the original `call_id`) and **mid-turn steering** over a WebSocket connection. The async flag is silently dropped on pre-GPT-6 models, where it is a validation error.
+- **Gemini 3.8 Flash** (`gemini-3.8-flash`, GA 2026-09-02) — new `gemini` default and `gemini` / `gemini-flash-latest` alias target. 1M ctx / 64K out, intro $0.75 / $0.075 cached / $3.75 per M through 2026-12-31 (then $1.50/$7.50; output pricing covers thinking tokens). `thinking_level` stays `low|medium|high` and **`MINIMAL` is a hard validation error**, so `GeminiProvider::clampThinkingLevel()` maps a requested `minimal` onto `LOW` for 3.7+ Flash (the 3.5 line still gets `MINIMAL`). Sampling params are deprecated on that tier — `temperature` / `top_p` / `top_k` are now dropped rather than forwarded.
+- **DeepSeek V4.1 Flash** (`deepseek-flash`, GA 2026-09-10) — new provider default and the first model of DeepSeek's new architecture family: natively multimodal, 1M ctx / 384K out, off-peak base $0.15 / $0.003 cache-hit / $0.60 per M (peak 2×). V4 Flash and V4 Flash Vision Exp are retired; `deepseek-v4-flash` is temporarily routed here and is repriced to match. V4 Pro keeps serving past its announced 2026-09-14 sunset at unchanged billing.
+- **Qwen3.8-Max-0902** (`qwen3.8-max-0902`, 2026-09-02) — new `qwen` / `qwen-anthropic` default and `qwen` / `qwen-max` alias target; same 1M ctx and $2/$6 per M as the 0803 GA build, with markedly stronger engineering-scale coding and collaborative-agent behaviour. `QwenProvider::isVisionModel()` now matches the whole `qwen3.8-*` line, which also brings `qwen3.8-flash` and `qwen3.8-27b` (both catalogued) under the HD-image flag.
+- **GLM-5.3 promoted, GLM-5.3-Flash added** — 5.3's standalone API is GA at the 5.2 rate ($1.40 / $0.26 / $4.40 per M), so **`glm-5.3` is now the provider default** and the `glm` / `glm5` aliases resolve to it; the provisional 5.2-rate fallback is gone. `glm-5.3-flash` (2026-08-26) is Z.ai's first natively multimodal GLM-5 model — 320B MoE / 18B active, image + video input, 1M ctx, MIT weights, $0.15 / $0.03 / $0.50 per M. It is a separate model rather than a 5.3 post-train, so `isGlm53()` excludes it and `reasoning_effort: off` really disables thinking there.
+
+Repricing, no new ids: **Sonnet 5** is $2/$10 permanently (the 2026-09-01 increase to $3/$15 was cancelled), **GPT-5.6** drops to Sol $4/$0.40/$20, Terra $2/$0.20/$12, Luna $0.20/$0.02/$1.20, and **GPT-5.5** has a published rate again ($5/$0.50/$30). Aggregator rows follow: `anthropic/claude-fable-5.1`, `openai/gpt-6-astra`, `google/gemini-3.8-flash`, `deepseek/deepseek-v4.1-flash`, `z-ai/glm-5.3[-flash]`, `moonshotai/kimi-k3`, `minimax/minimax-m3`, `x-ai/grok-build-0.1` and `meta/muse-spark-1.3` on OpenRouter; `global.anthropic.claude-fable-5-1` on Bedrock (invocation requires the account's data-retention mode to be `aws_review` in the region); Cursor gains Grok 4.6, Gemini 3.8 Flash, Fable 5.1 and Muse Spark 1.3 as catalog-only entries.
+
+```php
+// Fable 5.1: a forced tool_choice is downgraded instead of 400ing
+$agent = new Agent(['provider' => 'anthropic', 'model' => 'claude-fable-5-1']);
+$agent->run('extract the fields', ['tool_choice' => ['type' => 'any']]);
+// → wire body carries tool_choice: {type: "auto"}
+
+// GPT-6 Astra: async tools + an effort value the model actually accepts
+$agent = new Agent(['provider' => 'openai-responses']);      // → gpt-6-astra
+$agent->run('migrate the schema', [
+    'async_tools'      => ['run_migration'],                 // → async: true on that tool
+    'reasoning_effort' => 'off',                             // → reasoning.effort: low (never `none`)
+]);
+```
+
+> **Not shipped:** Meta's **Muse Spark 1.3** (MSL's agentic coding flagship, 2026-09-02, 1M ctx, $1.25/$4.25 per M) is reachable through OpenRouter and Cursor and is catalogued there, but SuperAgent has no native Meta provider — a native `meta` provider is a separate piece of work.
+
+Tests: `ModelRefresh202609Test` (Fable 5.1 tool_choice downgrade + pass-through, Astra effort floor, async-tool gating, catalog/pricing pins), plus updated `GeminiProviderTest` (3.8 default, MINIMAL clamp), `GlmProviderTest` (5.3 default, 5.3-Flash dial), `DeepSeekProviderTest`, `QwenProviderTest`, `OpenAIResponsesProviderTest`, `CostCalculatorTest`. Full suite green (3375).

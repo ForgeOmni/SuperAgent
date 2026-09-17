@@ -35,7 +35,7 @@ class DeepSeekDeprecationTest extends TestCase
         $info = ModelCatalog::deprecation('deepseek-chat');
         $this->assertNotNull($info);
         $this->assertSame('2026-07-24', $info['deprecated_until']);
-        $this->assertSame('deepseek-v4-flash', $info['replaced_by']);
+        $this->assertSame('deepseek-flash', $info['replaced_by']);
     }
 
     public function test_deepseek_reasoner_carries_deprecation_metadata(): void
@@ -48,7 +48,7 @@ class DeepSeekDeprecationTest extends TestCase
 
     public function test_current_models_have_no_deprecation(): void
     {
-        $this->assertNull(ModelCatalog::deprecation('deepseek-v4-flash'));
+        $this->assertNull(ModelCatalog::deprecation('deepseek-flash'));
         $this->assertNull(ModelCatalog::deprecation('deepseek-v4-pro'));
         $this->assertNull(ModelCatalog::deprecation('claude-opus-4-7'));
     }
@@ -71,7 +71,7 @@ class DeepSeekDeprecationTest extends TestCase
             $this->assertNotFalse($contents);
             $this->assertStringContainsString('deepseek-chat', $contents);
             $this->assertStringContainsString('deprecated', $contents);
-            $this->assertStringContainsString('deepseek-v4-flash', $contents);
+            $this->assertStringContainsString('deepseek-flash', $contents);
         } finally {
             ini_set('error_log', $prev !== false ? $prev : '');
             @unlink($log);
@@ -106,7 +106,7 @@ class DeepSeekDeprecationTest extends TestCase
         $prev = ini_set('error_log', $log);
 
         try {
-            ModelResolver::resolve('deepseek-v4-flash');
+            ModelResolver::resolve('deepseek-flash');
             ModelResolver::resolve('deepseek-v4-pro');
 
             $contents = (string) file_get_contents($log);

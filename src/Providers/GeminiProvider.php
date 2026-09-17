@@ -51,7 +51,7 @@ class GeminiProvider implements LLMProvider
         $baseUrl = rtrim($config['base_url'] ?? 'https://generativelanguage.googleapis.com', '/') . '/';
         // 3.7 Flash is the GA coding/agent flagship (2026-08-13) and
         // Google's recommended migration target from 3.5 Flash / 3.1 Pro.
-        $this->model = $config['model'] ?? 'gemini-3.7-flash';
+        $this->model = $config['model'] ?? 'gemini-3.8-flash';
         $this->maxTokens = $config['max_tokens'] ?? 8192;
         $this->maxRetries = $config['max_retries'] ?? 3;
 
@@ -170,14 +170,21 @@ class GeminiProvider implements LLMProvider
             ],
         ];
 
-        if (isset($options['temperature'])) {
-            $body['generationConfig']['temperature'] = $options['temperature'];
-        }
-        if (isset($options['top_p'])) {
-            $body['generationConfig']['topP'] = $options['top_p'];
-        }
-        if (isset($options['top_k'])) {
-            $body['generationConfig']['topK'] = $options['top_k'];
+        // Sampling params are deprecated on the 3.7+ Flash tiers (3.8 Flash
+        // lists temperature / topP / topK / candidateCount as removed). We
+        // drop them rather than forward a param the model no longer honours
+        // — thinking_level is the supported control there.
+        $samplingModel = (string) ($body['model'] ?? ($options['model'] ?? $this->model));
+        if ($this->modelAcceptsSamplingParams($samplingModel)) {
+            if (isset($options['temperature'])) {
+                $body['generationConfig']['temperature'] = $options['temperature'];
+            }
+            if (isset($options['top_p'])) {
+                $body['generationConfig']['topP'] = $options['top_p'];
+            }
+            if (isset($options['top_k'])) {
+                $body['generationConfig']['topK'] = $options['top_k'];
+            }
         }
         if (isset($options['stop_sequences'])) {
             $body['generationConfig']['stopSequences'] = $options['stop_sequences'];
@@ -253,7 +260,7 @@ class GeminiProvider implements LLMProvider
             if ($level === 'off' || ! $this->modelSupportsThinking($model)) {
                 return null;
             }
-            return ['thinkingLevel' => $level, 'includeThoughts' => true];
+            return ['thinkingLevel' => $this->clampThinkingLevel($level, $model), 'includeThoughts' => true];
         }
 
         if ($generic instanceof ThinkingConfig) {
@@ -278,9 +285,10 @@ class GeminiProvider implements LLMProvider
      * caller asked for no thinking, null when neither option is set or the
      * value is unrecognised.
      *
-     * Note: 3.7 Flash drops the `minimal` tier (dial is low|medium|high,
-     * server default medium); we still pass MINIMAL through for the 3.5
-     * generation, where it remains valid.
+     * Note: 3.7 and 3.8 Flash drop the `minimal` tier (dial is low|medium|high,
+     * server default medium — MINIMAL is a hard validation error there); we
+     * still emit MINIMAL for the 3.5 generation, where it remains valid.
+     * {@see clampThinkingLevel()} does the per-model narrowing.
      *
      * @param array<string, mixed> $options
      */
@@ -299,6 +307,37 @@ class GeminiProvider implements LLMProvider
             'high', 'max', 'xhigh', 'highest' => 'HIGH',
             default => null,
         };
+    }
+
+    /**
+     * False for the Gemini tiers that deprecated `temperature` / `topP` /
+     * `topK` / `candidateCount` (3.7 Flash onward).
+     */
+    protected function modelAcceptsSamplingParams(string $model): bool
+    {
+        return ! preg_match('/^gemini-3\.(7|8|9|\d{2,})-flash/', strtolower($model));
+    }
+
+    /**
+     * Narrow a resolved thinkingLevel to what the target model accepts.
+     *
+     * Gemini 3.7 Flash removed the MINIMAL tier and 3.8 Flash keeps it
+     * removed: sending `thinking_level: MINIMAL` to either returns an API
+     * validation error rather than silently degrading. Callers who ask for
+     * the cheapest thinking still get the cheapest tier that exists (LOW).
+     */
+    protected function clampThinkingLevel(string $level, string $model): string
+    {
+        if ($level !== 'MINIMAL') {
+            return $level;
+        }
+
+        // 3.7+ Flash (and anything newer in that line) has no MINIMAL tier.
+        if (preg_match('/^gemini-3\.(7|8|9|\d{2,})-flash/', strtolower($model))) {
+            return 'LOW';
+        }
+
+        return $level;
     }
 
     /**

@@ -18,7 +18,7 @@ namespace SuperAgent\Providers;
  * base_url override (like the DeepSeek pattern documented in
  * AnthropicProvider's class docblock)?
  *
- *   1. Default model differs (`qwen3.8-max` vs Claude's `claude-opus-*`)
+ *   1. Default model differs (`qwen3.8-max-0902` vs Claude's `claude-opus-*`)
  *      so callers don't have to spell it on every request.
  *   2. Default base_url targets DashScope, not api.anthropic.com.
  *   3. Skips the Anthropic-OAuth "You are Claude Code" system-prompt
@@ -52,7 +52,7 @@ namespace SuperAgent\Providers;
  *     $agent = new Agent([
  *         'provider' => 'qwen-anthropic',
  *         'api_key'  => env('DASHSCOPE_API_KEY'),
- *         'model'    => 'qwen3.8-max',
+ *         'model'    => 'qwen3.8-max-0902',
  *         // base_url override if the default suspected URL doesn't work
  *     ]);
  */
@@ -64,7 +64,7 @@ final class QwenAnthropicProvider extends AnthropicProvider
      */
     public const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/anthropic-mode/v1';
 
-    public const DEFAULT_MODEL = 'qwen3.8-max';
+    public const DEFAULT_MODEL = 'qwen3.8-max-0902';
 
     public function __construct(array $config)
     {

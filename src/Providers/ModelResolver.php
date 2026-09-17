@@ -330,6 +330,15 @@ class ModelResolver
 
         // ── Anthropic Claude ──────────────────────────────────────
 
+        // Fable family (above the Opus tier). 5.1 (2026-09-01) is the
+        // current member and the bare `fable` alias target.
+        static::register('claude-fable-5-1', 'fable', [
+            'fable', 'claude-fable', 'fable-5-1', 'fable-5.1',
+        ], 20260901);
+        static::register('claude-fable-5', 'fable', [
+            'fable-5',
+        ], 20260601);
+
         // Opus family
         static::register('claude-opus-5', 'opus', [
             'opus-5', 'opus5',
@@ -362,6 +371,15 @@ class ModelResolver
 
         // ── OpenAI ───────────────────────────────────────────────
 
+        // GPT-6 Astra (2026-09-03) is the frontier flagship and the bare
+        // `gpt-6` alias target; the 5.6 Sol/Terra/Luna tiers stay live.
+        static::register('gpt-6-astra', 'gpt-6', [
+            'gpt-6', 'gpt6', 'astra',
+        ], 20260903);
+        static::register('gpt-5.6-sol', 'gpt-5.6', [
+            'gpt-5.6', 'gpt5.6', 'sol',
+        ], 20260709);
+
         // GPT-4o family
         static::register('gpt-4o', 'gpt-4o', [
             'gpt4', 'gpt4o',
@@ -377,11 +395,14 @@ class ModelResolver
 
         // ── Google Gemini ─────────────────────────────────────────
 
-        // 3.7 Flash (GA 2026-08-13) is the coding/agent flagship and the
+        // 3.8 Flash (GA 2026-09-02) is the coding/agent flagship and the
         // bare `gemini` alias target; the 2.0 line was retired 2026-06-01,
         // so `gemini` must land on a live model even without a catalog.
+        static::register('gemini-3.8-flash', 'gemini-flash', [
+            'gemini', 'gemini-3.8', 'gemini-flash-latest',
+        ], 20260902);
         static::register('gemini-3.7-flash', 'gemini-flash', [
-            'gemini', 'gemini-3.7', 'gemini-flash-latest',
+            'gemini-3.7',
         ], 20260813);
         static::register('gemini-3.5-flash', 'gemini-flash', [
             'gemini-3.5',

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.12] - 2026-09-17
+
+### 💻 Summary
+
+**A six-provider model refresh where three of the new flagships change the request surface, not just the id: Claude Fable 5.1, GPT-6 Astra, Gemini 3.8 Flash, DeepSeek V4.1 Flash, Qwen3.8-Max-0902 and GLM-5.3-Flash.** Fable 5.1 removes forced tool use (`tool_choice` `any`/`tool` now 400s, so the provider downgrades to `auto`), GPT-6 Astra drops the `none` effort tier the 5.6 line has and adds async tools, and Gemini 3.8 Flash makes `thinking_level: MINIMAL` a hard error while deprecating the sampling params. Everything else is catalog + pricing: Sonnet 5's $2/$10 intro rate became permanent, the whole GPT-5.6 line was repriced downward at the Astra launch, GLM-5.3's standalone API went GA (so it takes over the `glm` default and alias), and DeepSeek retired V4 Flash behind a compatibility route to `deepseek-flash`. Additive and non-breaking: every previously reachable id still resolves. Full suite green (3375 tests).
+
+### Added
+
+- **Claude Fable 5.1** (`claude-fable-5-1`, released 2026-09-01) — new `fable` alias target and Squad **EXPERT** model, at Fable 5's $10 in / $50 out per M with **cache reads cut 75% to $0.25/M**. `AnthropicProvider` gained `modelRejectsForcedToolChoice()` + `normalizeToolChoice()`: a forced `tool_choice` (`any` / `tool`) is downgraded to `auto` on Fable 5.1 / Mythos 5.1 instead of 400ing, while `none` / `auto` pass through and Fable 5 / Opus / Sonnet keep forced tool use. Covered Model — 30-day retention required (no ZDR), no Priority Tier; thinking blocks are model-bound and history edits invalidate them (preserved thinking), so harnesses must stay append-only. `claude-fable-5` remains reachable as the previous generation.
+- **GPT-6 Astra** (`gpt-6-astra`, released 2026-09-03) — new `openai-responses` default and `gpt-6` / `astra` alias target. 1.05M ctx / 128K output, $10 in / $1 cached / $50 out per M. `OpenAIResponsesProvider::normalizeEffortForModel()` gained a GPT-6 branch: the dial is `low…max` and **`none` is not supported**, so `off`/`none`/`minimal` map to `low`. New **async tools** surface — `options['async_tools']` (`true` for every tool, or a list of names) marks those definitions `async: true` so Astra keeps working while the call runs; silently dropped on pre-GPT-6 models, where the field is a validation error. Mid-turn steering over WebSocket is documented.
+- **Gemini 3.8 Flash** (`gemini-3.8-flash`, GA 2026-09-02) — new `gemini` default and `gemini` / `gemini-flash-latest` alias target. 1M ctx / 64K output, intro $0.75 / $0.075 cached / $3.75 per M through 2026-12-31 (then $1.50/$7.50). New `GeminiProvider::clampThinkingLevel()` maps a requested `minimal` onto `LOW` on 3.7+ Flash (where `MINIMAL` is a validation error) while the 3.5 line keeps `MINIMAL`; new `modelAcceptsSamplingParams()` drops `temperature` / `top_p` / `top_k` on those tiers instead of forwarding deprecated params.
+- **DeepSeek V4.1 Flash** (`deepseek-flash`, GA 2026-09-10) — new provider default: first model of DeepSeek's new architecture family, natively multimodal, 1M ctx / 384K output, off-peak base $0.15 / $0.003 cache-hit / $0.60 per M (peak 2×).
+- **Qwen3.8-Max-0902** (`qwen3.8-max-0902`, 2026-09-02) — new `qwen` / `qwen-anthropic` default and `qwen` / `qwen-max` alias target; same 1M ctx and $2/$6 per M as the 0803 GA build with stronger engineering-scale coding and collaborative agents. Also catalogued: `qwen3.8-flash` (2026-08-26) and `qwen3.8-27b` (2026-08-19). `QwenProvider::isVisionModel()` now matches the whole `qwen3.8-*` line.
+- **GLM-5.3-Flash** (`glm-5.3-flash`, 2026-08-26) — Z.ai's first natively multimodal GLM-5 model (320B MoE / 18B active, image + video input, 1M ctx, MIT weights) at $0.15 / $0.03 / $0.50 per M. `GlmProvider::isGlm53()` explicitly excludes it, so it keeps the ordinary dial where `reasoning_effort: off` really disables thinking.
+- Catalog-only additions: `x-ai/grok-build-0.1`, `moonshotai/kimi-k3`, `minimax/minimax-m3`, `z-ai/glm-5.3[-flash]`, `deepseek/deepseek-v4.1-flash`, `qwen/qwen3.8-*`, `anthropic/claude-fable-5.1`, `openai/gpt-6-astra`, `google/gemini-3.8-flash` and **`meta/muse-spark-1.3`** on OpenRouter; `global.anthropic.claude-fable-5-1` on Bedrock (invocation requires the account's Bedrock data-retention mode to be `aws_review` in the region); Cursor gains `cursor-grok-4.6-high`, `gemini-3.8-flash-high`, `claude-fable-5-1` and `muse-spark-1.3`.
+- Tests: `tests/Unit/Providers/ModelRefresh202609Test.php` (12) — Fable 5.1 tool_choice downgrade + pass-through, Astra effort floor, async-tool gating, catalog and pricing pins.
+
+### Changed
+
+- `SuperAgentApplication::VERSION` `1.1.11` → `1.1.12`.
+- Provider defaults: `openai-responses` `gpt-5.6-sol` → `gpt-6-astra`; `gemini` `gemini-3.7-flash` → `gemini-3.8-flash`; `deepseek` `deepseek-v4-flash` → `deepseek-flash`; `qwen` / `qwen-anthropic` `qwen3.8-max` → `qwen3.8-max-0902`; `glm` `glm-5.2` → `glm-5.3` (its standalone API is GA at the 5.2 rate, so the provisional 5.2-rate fallback is gone and the `glm` / `glm5` aliases now resolve to 5.3). `Squad\ModelTierMap` EXPERT → `claude-fable-5-1`, EASY → `deepseek-flash`.
+- **Pricing.** Sonnet 5 → **$2 / $10** per M (the launch intro rate is now permanent; the $3/$15 increase scheduled for 2026-09-01 was cancelled). GPT-5.6 repriced at the Astra launch: Sol $5/$0.50/$30 → **$4/$0.40/$20**, Terra $2.50/$0.25/$15 → **$2/$0.20/$12**, Luna $1/$0.10/$6 → **$0.20/$0.02/$1.20**. GPT-5.5 has a published rate again (**$5/$0.50/$30**). GLM-5.3 carries real pricing ($1.40/$0.26/$4.40). `deepseek-v4-flash` repriced to the V4.1 Flash rate it now routes to. Bedrock and OpenRouter Sonnet 5 / Fable rows follow.
+- `resources/models.json` `_meta.updated` 2026-08-14 → 2026-09-17; `CostCalculator` static table, `TokenEstimator` context windows, `ModelResolver` built-in seeds (Fable family, GPT-6, Gemini 3.8) and the `/model` picker lists updated to match.
+- Docs: README / INSTALL / ADVANCED_USAGE refreshed in all three languages (EN / CN / FR), including a new ADVANCED_USAGE section 100.
+
+### Deprecated
+
+- **DeepSeek V4 Flash** and V4 Flash Vision Exp are retired (2026-09-10). `deepseek-v4-flash` is temporarily routed to V4.1 Flash for compatibility and is flagged `replaced_by: deepseek-flash`; point new code at `deepseek-flash`. The `deepseek-chat` deprecation warning now recommends `deepseek-flash`.
+- `gemini-3.7-flash` and `qwen3.8-max` are demoted to previous-generation entries (still reachable by explicit id; the bare family aliases move to the 3.8 / 0902 releases).
+
+### Notes
+
+- Meta's **Muse Spark 1.3** (MSL agentic coding flagship, 2026-09-02, 1M ctx, $1.25/$4.25 per M) is catalogued via OpenRouter and Cursor only — SuperAgent has no native Meta provider, which is tracked as separate work.
+
+
 ## [1.1.11] - 2026-08-14
 
 ### 💻 Summary

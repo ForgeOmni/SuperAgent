@@ -32,13 +32,13 @@ echo $result->text();
 - [Providers et authentification](#providers-et-authentification)
 - [API OpenAI Responses](#api-openai-responses)
 - [Bascule inter-providers](#bascule-inter-providers)
-- [Fable 5](#fable-5)
+- [Fable 5.1](#fable-51)
 - [Opus 5](#opus-5)
-- [GPT-5.6 (Sol / Terra / Luna)](#gpt-56-sol--terra--luna)
+- [GPT-6 Astra / GPT-5.6](#gpt-6-astra--gpt-56-sol--terra--luna)
 - [Grok 4.6](#grok-46)
-- [DeepSeek V4](#deepseek-v4)
+- [DeepSeek V4.1 / V4](#deepseek-v41--v4)
 - [MiniMax M3](#minimax-m3)
-- [GLM-5.2 / 5.3](#glm-52--53)
+- [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
 - [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
@@ -105,15 +105,15 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 
 | Clé de registre | Provider | Notes |
 |---|---|---|
-| `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké ; défaut `claude-opus-5` *(v1.1.10)*, fleuron `claude-fable-5` + `claude-sonnet-5` — thinking adaptatif + molette effort *(Fable 5 / Sonnet 5, v1.1.5)* |
+| `anthropic` | Anthropic | Clé API ou OAuth Claude Code stocké ; défaut `claude-opus-5` *(v1.1.10)*, fleuron `claude-fable-5-1` *(Fable 5.1, v1.1.12)* + `claude-sonnet-5` — thinking adaptatif + molette effort *(Fable 5 / Sonnet 5, v1.1.5)* |
 | `openai` | OpenAI Chat Completions (`/v1/chat/completions`) | Clé API, `OPENAI_ORGANIZATION` / `OPENAI_PROJECT` ; GPT-5.6 Sol / Terra / Luna au catalogue *(v1.1.6)* ; back-catalog encore servi GPT-5.5 / 5.4 / 5.4-mini / 5.3-codex / 5.2 / 5.1-codex-max *(v1.1.8–1.1.9)* |
-| `openai-responses` | OpenAI Responses API (`/v1/responses`) | Défaut `gpt-5.6-sol` — effort `none…max`, `reasoning.mode: pro`, cache explicite *(v1.1.6)* ; [section dédiée ci-dessous](#api-openai-responses) |
+| `openai-responses` | OpenAI Responses API (`/v1/responses`) | Défaut `gpt-6-astra` — effort `low…max` (sans `none`), outils asynchrones, `reasoning.mode: pro`, cache explicite *(GPT-6 Astra, v1.1.12)* ; [section dédiée ci-dessous](#api-openai-responses) |
 | `openrouter` | OpenRouter | Clé API |
-| `gemini` | Google Gemini | Clé API ; défaut `gemini-3.7-flash` — molette thinking_level + grounding *(Gemini 3.7 Flash, v1.1.11)* |
+| `gemini` | Google Gemini | Clé API ; défaut `gemini-3.8-flash` — molette thinking_level + grounding *(Gemini 3.8 Flash, v1.1.12)* |
 | `kimi` | Moonshot Kimi (défaut Kimi K3) | Clé API ; régions `intl` / `cn` / `code` (OAuth) ; défaut `kimi-k3` — MoE 2,8 T, 1M ctx, thinking permanent, image/vidéo *(Kimi K3, v1.1.7)* ; `kimi-for-coding` (abonnement Kimi Code, région `code`) au catalogue *(v1.1.8)* |
-| `qwen` | Alibaba Qwen (OpenAI-compat par défaut) | Clé API ; régions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) ; défaut `qwen3.8-max` — fleuron GA multimodal *(Qwen3.8-Max, v1.1.11)* |
+| `qwen` | Alibaba Qwen (OpenAI-compat par défaut) | Clé API ; régions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) ; défaut `qwen3.8-max-0902` — instantané du fleuron multimodal *(Qwen3.8-Max-0902, v1.1.12)* |
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
-| `glm` | BigModel GLM (GLM-5.2 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(GLM-5.2, v1.1.2 ; molette GLM-5.3, v1.1.11)* |
+| `glm` | BigModel GLM (GLM-5.3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(défaut GLM-5.3 + GLM-5.3-Flash, v1.1.12 ; molette GLM-5.3, v1.1.11)* |
 | `minimax` | MiniMax (M3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking entrelacé + image/vidéo natives *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
 | `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.6` — molette reasoning-effort (incl. `xhigh`) + pinning de cache *(Grok 4.6, v1.1.11 ; depuis v1.0.8)* |
@@ -188,7 +188,7 @@ Provider dédié : `provider: 'openai-responses'`. Frappe `/v1/responses` avec l
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5.6-sol',   // défaut ; l'alias `gpt-5.6` s'y résout
+    'model'    => 'gpt-6-astra',   // défaut ; les alias `gpt-6` / `astra` s'y résolvent
 ]);
 
 $result = $agent->run('analyse ce codebase et propose des refactos', [
@@ -301,15 +301,15 @@ $wire = (new Transcoder())->encode($messages, WireFamily::Gemini);
 
 ---
 
-## Fable 5
+## Fable 5.1
 
-Fable 5 (`claude-fable-5`) est le modèle le plus capable d'Anthropic — pour le raisonnement le plus exigeant et le travail agentique de long horizon. Il passe par le provider standard `anthropic` (clé API **ou** OAuth Claude Code), avec un **contexte de 1 M de tokens** (128 K de sortie max) et la **vision haute résolution**. Tarif pay-as-you-go : **10 $ en entrée / 50 $ en sortie** par million de tokens — au-dessus de la gamme Opus (Opus 5 est à 5 $/25 $). C'est le modèle du palier Squad **EXPERT** ; le défaut zéro-config d'`anthropic` est **Claude Opus 5**. Les refus basculent vers Opus 4.8.
+Fable 5.1 (`claude-fable-5-1`, sorti le 2026-09-01) est le modèle le plus capable largement disponible d'Anthropic — pour le raisonnement le plus exigeant et le travail agentique de long horizon. Il passe par le provider standard `anthropic` (clé API **ou** OAuth Claude Code), avec un **contexte de 1 M de tokens** (128 K de sortie max) et la **vision haute résolution**. Tarif pay-as-you-go : **10 $ en entrée / 50 $ en sortie** par million de tokens — inchangé depuis Fable 5 — et les **lectures de cache baissent de 75 %, à 0,25 $/M**. C'est le modèle du palier Squad **EXPERT** et la cible de l'alias `fable` ; le défaut zéro-config d'`anthropic` reste **Claude Opus 5**. Fable 5 (`claude-fable-5`) demeure accessible comme génération précédente.
 
 ```php
 $agent = new Agent([
     'provider' => 'anthropic',
     'api_key'  => getenv('ANTHROPIC_API_KEY'),
-    'model'    => 'claude-fable-5',             // ou l'alias `fable`
+    'model'    => 'claude-fable-5-1',           // ou l'alias `fable`
 ]);
 ```
 
@@ -318,6 +318,8 @@ Sa surface de requête diffère de la gamme Opus — le SDK s'en charge automati
 - **Le thinking est toujours actif et adaptatif.** Le provider émet `thinking: {type: "adaptive"}` et n'envoie jamais de `budget_tokens` (Fable 5 / Opus 4.7 / 4.8 renvoient **400** dessus). La profondeur est pilotée par la molette effort, pas par un budget de tokens.
 - **Ni paramètres d'échantillonnage, ni prefill.** `temperature` / `top_p` / `top_k` et un prefill assistant en fin de conversation sont retirés pour Fable 5 (ils renvoient 400) ; pilotez via le prompt + effort.
 - **Molette effort.** `AnthropicProvider` implémente `SupportsReasoningEffort` → le `output_config.effort` GA d'Anthropic (`low` … `high` … `xhigh` … `max`), aussi dispo sur Opus 4.5+/Sonnet 4.6.
+- **Pas d'appel d'outil forcé (5.1 uniquement).** `tool_choice: {type: "any"}` et `{type: "tool", name: …}` renvoient **400** sur Fable 5.1 ; le provider rétrograde automatiquement un choix forcé en `auto`. Pour garantir un appel, associez `auto` à une instruction nommant l'outil, ou utilisez les sorties structurées. `none` et `auto` passent tels quels ; Fable 5 / Opus / Sonnet gardent l'appel forcé.
+- **Thinking préservé (5.1 uniquement).** Les blocs de thinking sont liés au modèle qui les a produits, et modifier des tours antérieurs les invalide — gardez l'historique en append-only.
 
 ```php
 // Molette effort → output_config.effort
@@ -327,11 +329,11 @@ $agent->run('tâche agentique de long horizon', ['reasoning_effort' => 'xhigh'])
 $agent->run('prompt de raisonnement difficile', ['features' => ['thinking' => true]]);
 ```
 
-> ⚠️ **Rétention des données de 30 jours requise.** Fable 5 n'est pas disponible en rétention zéro — une organisation configurée sous 30 jours reçoit un `400` sur chaque requête. Les classifieurs de sécurité peuvent aussi renvoyer `stop_reason: "refusal"`.
+> ⚠️ **Covered Model — rétention des données de 30 jours requise.** Sauf autorisation expresse d'Anthropic, Fable 5.1 n'est pas disponible en rétention zéro — une organisation configurée sous 30 jours reçoit un `400` sur chaque requête, et le Priority Tier n'est pas proposé. Les classifieurs de sécurité peuvent aussi renvoyer `stop_reason: "refusal"` — activez les `fallbacks` côté serveur pour le contourner.
 
-**Sonnet 5** (`claude-sonnet-5`, sorti le 2026-06-30) est livré en parallèle comme nouveau fleuron `sonnet` — le Sonnet le plus agentique d'Anthropic, proche d'Opus 4.8 à un tarif inférieur. La même surface adaptative de la génération Claude 5 (thinking adaptatif uniquement, molette effort, ni paramètres d'échantillonnage ni prefill), contexte de 1 M (128 K de sortie max), **3 $ en entrée / 15 $ en sortie** (tarif de lancement **2 $/10 $ jusqu'au 2026-08-31**). Les alias `sonnet` / `claude-sonnet` / `sonnet-5` s'y résolvent désormais.
+**Sonnet 5** (`claude-sonnet-5`, sorti le 2026-06-30) est livré en parallèle comme nouveau fleuron `sonnet` — le Sonnet le plus agentique d'Anthropic, proche d'Opus 4.8 à un tarif inférieur. La même surface adaptative de la génération Claude 5 (thinking adaptatif uniquement, molette effort, ni paramètres d'échantillonnage ni prefill), contexte de 1 M (128 K de sortie max), **2 $ en entrée / 10 $ en sortie** — le tarif de lancement est devenu permanent, la hausse à 3 $/15 $ prévue au 2026-09-01 ayant été annulée. Les alias `sonnet` / `claude-sonnet` / `sonnet-5` s'y résolvent désormais.
 
-*Depuis v1.1.5*
+*Depuis v1.1.5 ; Fable 5.1 depuis v1.1.12*
 
 ---
 
@@ -362,22 +364,23 @@ Les identifiants épinglés ne sont jamais réécrits : une config sur `claude-o
 
 ---
 
-## GPT-5.6 (Sol / Terra / Luna)
+## GPT-6 Astra / GPT-5.6 (Sol / Terra / Luna)
 
 GPT-5.6 (GA le 2026-07-09) remplace GPT-5.5 comme gamme fleuron d'OpenAI et retire les suffixes mini/nano — la famille compte trois paliers partageant un **contexte de 1,05 M de tokens** (128 K de sortie max) et la vision :
 
 | Modèle | Positionnement | $/M entrée · caché · sortie |
 |---|---|---|
-| `gpt-5.6-sol` (alias `gpt-5.6`, `sol`) | Fleuron frontier pour le travail professionnel complexe | 5 $ · 0,50 $ · 30 $ |
+| `gpt-6-astra` (alias `gpt-6`, `astra`) | Fleuron frontier ; outils asynchrones + pilotage en cours de tour | 10 $ · 1 $ · 50 $ |
+| `gpt-5.6-sol` (alias `gpt-5.6`, `sol`) | Fleuron précédent pour le travail professionnel complexe | 4 $ · 0,40 $ · 20 $ |
 | `gpt-5.6-terra` (alias `terra`) | Palier équilibré par défaut (≈ niveau 5.5, moins cher) | 2,50 $ · 0,25 $ · 15 $ |
 | `gpt-5.6-luna` (alias `luna`) | Palier haut débit à bas coût | 1 $ · 0,10 $ · 6 $ |
 
-Les entrées au-delà de 272 K tokens sont facturées à 2× en entrée / 1,5× en sortie. `openai-responses` prend désormais `gpt-5.6-sol` par défaut ; le provider Chat Completions `openai` garde son défaut `gpt-4o` mais résout les trois ids.
+Sur la ligne 5.6, les entrées au-delà de 272 K tokens sont facturées à 2× en entrée / 1,5× en sortie. `openai-responses` prend désormais `gpt-6-astra` par défaut ; le provider Chat Completions `openai` garde son défaut `gpt-4o` mais résout tous les ids ci-dessus.
 
 ```php
 $agent = new Agent([
     'provider' => 'openai-responses',
-    'model'    => 'gpt-5.6-sol',
+    'model'    => 'gpt-6-astra',
 ]);
 
 $result = $agent->run('conçois puis implémente la migration', [
@@ -388,7 +391,9 @@ $result = $agent->run('conçois puis implémente la migration', [
 ]);
 ```
 
-- **Molette effort, normalisée par génération.** GPT-5.6 retire `minimal` et ajoute `none` + `max` (défaut `medium`). Le provider normalise ce que vous passez vers l'ensemble légal du modèle cible — `minimal` → `low` sur 5.6, `max` → `xhigh` avant 5.6 — de sorte que les appels cross-provider `reasoning_effort` continuent de fonctionner. `OpenAIResponsesProvider` implémente désormais `SupportsReasoningEffort`.
+- **Molette effort, normalisée par génération.** GPT-5.6 retire `minimal` et ajoute `none` + `max` (défaut `medium`) ; **GPT-6 Astra retire `none` à son tour** (`low` … `max`). Le provider normalise ce que vous passez vers l'ensemble légal du modèle cible — `none`/`minimal` → `low` sur Astra, `minimal` → `low` sur 5.6, `max` → `xhigh` avant 5.6 — de sorte que les appels cross-provider `reasoning_effort` continuent de fonctionner sans jamais émettre une valeur refusée. `OpenAIResponsesProvider` implémente `SupportsReasoningEffort`.
+- **Outils asynchrones (Astra).** Passez `async_tools: true` (tous les outils) ou `async_tools: ['nom', …]` : ces définitions embarquent `async: true`, Astra continue de raisonner, appelle d'autres outils ou répond aux parties indépendantes de la demande pendant l'exécution, et vous renvoyez le résultat plus tard via le `call_id` d'origine. Le champ est silencieusement ignoré avant GPT-6, où il constitue une erreur de validation.
+- **Pilotage en cours de tour (Astra).** Via une connexion WebSocket, la Responses API accepte des instructions utilisateur supplémentaires pendant que le modèle travaille et préserve le travail déjà accompli dans la continuation.
 - **`reasoning.mode: pro`** est la forme API du Sol Pro de ChatGPT (Sol uniquement) ; **`reasoning.context`** contrôle la persistance du raisonnement entre les tours. Les deux passent aussi tels quels dans `options['reasoning']`.
 - **Cache de prompt explicite.** `prompt_cache_options: {mode: explicit}` — les écritures de cache sont facturées à 1,25× l'entrée non cachée, les lectures gardent la remise de 90 %.
 - L'appel d'outils programmatique / la bêta multi-agents restent accessibles via `extra_body` en attendant des réglages de premier ordre.
@@ -425,16 +430,16 @@ new Agent(['provider' => 'grok', 'conversation_id' => 'session:42']);
 
 ---
 
-## DeepSeek V4
+## DeepSeek V4.1 / V4
 
-DeepSeek V4 propose deux modèles MoE — `deepseek-v4-pro` (1,6 T total / 49 B actifs ; **GA depuis le 2026-08-13** en version `DeepSeek-V4-Pro-0813`, même id) et `deepseek-v4-flash` (284 B / 13 B actifs ; bêta publique 0731 ré-post-entraînée) — avec **1 M de contexte** par défaut, un **bascule thinking / non-thinking** dans le même modèle et une molette reasoning-effort `low | high | max` (le palier `low` est nouveau avec la GA). La tarification passe à un modèle heures pleines/creuses le 2026-08-16 (heures pleines 01-04 + 06-10 UTC à 2× la base heures creuses : Pro 0,66 $/1,98 $, Flash 0,22 $/0,66 $ par million). Le même backend expose deux wires en parallèle (OpenAI et Anthropic) ; le SDK supporte les deux chemins :
+DeepSeek propose désormais `deepseek-flash` (**V4.1 Flash**, GA le 2026-09-10 — premier modèle de la nouvelle famille d'architecture, nativement multimodal, et défaut du provider) aux côtés de `deepseek-v4-pro` (1,6 T total / 49 B actifs ; GA le 2026-08-13 en version `DeepSeek-V4-Pro-0813`, toujours servi au-delà de l'arrêt annoncé du 2026-09-14, facturation inchangée). Les deux offrent **1 M de contexte / 384 K de sortie max**, un **bascule thinking / non-thinking** dans le même modèle et une molette reasoning-effort `low | high | max`. V4 Flash et V4 Flash Vision Exp sont retirés — `deepseek-v4-flash` est temporairement routé vers V4.1 Flash par compatibilité ; visez `deepseek-flash` dans le code neuf. Tarification heures pleines/creuses (heures pleines 01-04 + 06-10 UTC du lundi au vendredi à 2× la base heures creuses : Pro 0,66 $/1,98 $, Flash 0,15 $/0,60 $ par million). Le même backend expose deux wires en parallèle (OpenAI et Anthropic) ; le SDK supporte les deux chemins :
 
 ```php
 // Wire OpenAI : DeepSeekProvider natif
 $agent = new Agent([
     'provider' => 'deepseek',
     'api_key'  => getenv('DEEPSEEK_API_KEY'),
-    'model'    => 'deepseek-v4-pro',           // ou 'deepseek-v4-flash'
+    'model'    => 'deepseek-v4-pro',           // ou 'deepseek-flash' (défaut)
 ]);
 
 // Wire Anthropic : réutilise AnthropicProvider avec un base_url personnalisé
@@ -460,7 +465,7 @@ foreach ($result->message()->content as $block) {
 }
 ```
 
-**Voie de dépréciation.** `deepseek-chat` et `deepseek-reasoner` se retirent le **2026-07-24**. Le catalogue marque les deux avec `deprecated_until` et `replaced_by` ; `ModelResolver` émet un warning unique par processus recommandant `deepseek-v4-flash` / `deepseek-v4-pro`. `SUPERAGENT_SUPPRESS_DEPRECATION=1` rend le warning silencieux.
+**Voie de dépréciation.** `deepseek-chat` et `deepseek-reasoner` se retirent le **2026-07-24**. Le catalogue marque les deux avec `deprecated_until` et `replaced_by` ; `ModelResolver` émet un warning unique par processus recommandant `deepseek-flash` / `deepseek-v4-pro`. `SUPERAGENT_SUPPRESS_DEPRECATION=1` rend le warning silencieux.
 
 **Facturation cache-aware.** Les backends OpenAI-compat reportent `prompt_tokens` en brut (cache hits + miss). Le parser soustrait désormais la portion mise en cache avant de remplir `Usage::inputTokens`, ce qui fait atterrir la remise cache correctement — `CostCalculator` facture les lectures à 10 % du tarif input, au lieu d'un effectif 110 %. Concerne tout backend OpenAI-compat avec cache (DeepSeek, Kimi, OpenAI lui-même).
 
@@ -539,7 +544,7 @@ use SuperAgent\Routing\AutoModelStrategy;
 
 $strategy = new AutoModelStrategy();
 $model    = $strategy->select($messages, $systemPrompt, $options);
-// → 'deepseek-v4-pro' ou 'deepseek-v4-flash'
+// → 'deepseek-v4-pro' ou 'deepseek-flash'
 
 $agent = new Agent([
     'provider' => 'deepseek',
@@ -604,17 +609,19 @@ $agent->run('prompt de raisonnement difficile', ['features' => ['thinking' => ['
 
 ---
 
-## GLM-5.2 / 5.3
+## GLM-5.3 / 5.3-Flash
 
-GLM-5.2 (le modèle par défaut de `glm` depuis v1.1.2) est le fleuron agentique coding-first de Z.ai : un **contexte de 1 M de tokens** (128 K de sortie max), des E/S **texte uniquement** et — nouveauté de la série 5.2 — une **molette reasoning-effort** par-dessus le bascule thinking binaire. Tarif pay-as-you-go officiel : **1,40 $ en entrée / 4,40 $ en sortie** par million de tokens, avec **0,26 $ en entrée cache-hit** (stockage du cache actuellement gratuit, pour une durée limitée). `glm-5.1` (200 K de contexte, même tarif) est livré en parallèle, et chaque id `glm-5` / `glm-4.x` antérieur reste accessible.
+GLM-5.2 (cible de l'alias `glm` ; défaut du provider jusqu'à v1.1.12) est le fleuron agentique coding-first de Z.ai : un **contexte de 1 M de tokens** (128 K de sortie max), des E/S **texte uniquement** et — nouveauté de la série 5.2 — une **molette reasoning-effort** par-dessus le bascule thinking binaire. Tarif pay-as-you-go officiel : **1,40 $ en entrée / 4,40 $ en sortie** par million de tokens, avec **0,26 $ en entrée cache-hit** (stockage du cache actuellement gratuit, pour une durée limitée). `glm-5.1` (200 K de contexte, même tarif) est livré en parallèle, et chaque id `glm-5` / `glm-4.x` antérieur reste accessible.
 
-**GLM-5.3** (sorti le 2026-08-14, « Built to Code. Ready for Cyber Defense ») est un post-train codage + cyberdéfense de la même base 5.2, accessible sous `glm-5.3` (alias `glm5.3` ; route 1 M de contexte `glm-5.3[1m]`). Il élargit la molette d'effort à un véritable **`low | high | max`** (défaut serveur `max`) et rend le **thinking obligatoire** — `thinking.type` ne peut pas être désactivé, donc `reasoning_effort: off` se replie sur le palier `low` (comme les adaptateurs Coding Plan de Z.ai). Il est disponible dans le GLM Coding Plan tandis que l'API autonome se déploie par étapes ; le tarif au token n'est **pas encore publié** (le suivi des coûts utilise provisoirement le tarif 5.2), donc `glm-5.2` reste le défaut du provider pour l'instant. Les poids ouverts sont promis ~2 semaines après le lancement.
+**GLM-5.3** (sorti le 2026-08-14, « Built to Code. Ready for Cyber Defense ») est un post-train codage + cyberdéfense de la même base 5.2, accessible sous `glm-5.3` (alias `glm5.3` ; route 1 M de contexte `glm-5.3[1m]`). Il élargit la molette d'effort à un véritable **`low | high | max`** (défaut serveur `max`) et rend le **thinking obligatoire** — `thinking.type` ne peut pas être désactivé, donc `reasoning_effort: off` se replie sur le palier `low` (comme les adaptateurs Coding Plan de Z.ai). Son API autonome est désormais GA au tarif 5.2 (**1,40 $ en entrée / 0,26 $ en cache / 4,40 $ en sortie** par million), donc **`glm-5.3` est le défaut du provider depuis v1.1.12**. Les poids ouverts ont été publiés après le lancement.
+
+**GLM-5.3-Flash** (`glm-5.3-flash`, sorti le 2026-08-26) est le premier modèle GLM-5 *nativement multimodal* de Z.ai — 320 B MoE / 18 B actifs, entrée image **et vidéo**, 1 M de contexte, poids ouverts sous licence MIT, à **0,15 $ en entrée / 0,03 $ en cache / 0,50 $ en sortie** par million (la promo de lancement à -50 % s'est terminée le 2026-09-09). C'est un modèle distinct et non un post-train 5.3 : il garde la molette ordinaire, où `reasoning_effort: off` désactive réellement le thinking.
 
 ```php
 $agent = new Agent([
     'provider' => 'glm',
     'api_key'  => getenv('GLM_API_KEY'),
-    'model'    => 'glm-5.2',                    // ou l'alias `glm`
+    'model'    => 'glm-5.3',                    // défaut ; ou l'alias `glm`
     'region'   => 'intl',                       // intl | cn
 ]);
 ```

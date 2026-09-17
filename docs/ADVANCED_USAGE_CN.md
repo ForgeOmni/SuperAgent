@@ -11685,3 +11685,34 @@ $agent = new Agent(['provider' => 'qwen']);   // → qwen3.8-max，vl_high_resol
 ```
 
 测试：`GrokProviderTest`（4.6 档位）、`DeepSeekProviderTest`（low 档）、`QwenProviderTest`（默认模型 + vision 标志）、`GeminiProviderTest`（默认模型 + thinking gate）、`GlmProviderTest`（5.3 档位，含 `[1m]` 路由）。全量测试通过（3362）。
+
+## 100. 2026-09 模型潮 — Fable 5.1 · GPT-6 Astra · Gemini 3.8 Flash · DeepSeek V4.1 Flash · Qwen3.8-Max-0902 · GLM-5.3-Flash (v1.1.12)
+
+六家 provider 同时刷新，而且这一轮有三个新旗舰改的是**请求形态**，不只是换个 id。catalog（`resources/models.json`，`_meta.updated` 2026-09-17）、`CostCalculator`、`TokenEstimator`、`ModelResolver` 种子、provider 默认模型与 `/model` 选择器一起更新。
+
+- **Claude Fable 5.1**（`claude-fable-5-1`，2026-09-01）—— 新的 `fable` 别名落点与 Squad **EXPERT** 模型。价格与 Fable 5 相同（$10 / $50 每 M），**缓存读取降价 75% 至 $0.25/M**。相对 Fable 5 有三处破坏性变更，其中一处需要改代码：**强制工具调用被移除** —— `tool_choice: {type: "any"}` 与 `{type: "tool", name: …}` 返回 400，因此 `AnthropicProvider` 现在会把强制档降级为 `auto`（`none` / `auto` 原样透传；Fable 5 / Opus / Sonnet 仍支持强制调用）。另外两处是 harness 规则：thinking 块与产出它的模型绑定，且改写历史轮次会使其失效（preserved thinking —— 会话记录务必只追加）。Covered Model：需要 30 天数据保留，不提供 Priority Tier。
+- **GPT-6 Astra**（`gpt-6-astra`，2026-09-03）—— 新的 `openai-responses` 默认模型与 `gpt-6` / `astra` 别名落点。1.05M ctx / 128K 输出，$10 / $1 缓存 / $50 每 M。它的 effort 档位是 `low…max` 并且**去掉了 `none`**（5.6 系列有），因此 `normalizeEffortForModel()` 新增 GPT-6 分支，把 `off`/`none`/`minimal` 映射为 `low`（在那里发 `none` 会 400）。两个新的 Responses 能力：**异步工具**（`async_tools: true` 或工具名列表 → 对应定义带 `async: true`；工具执行期间 Astra 继续推理、调用其他工具或先回答无关部分，结果稍后按原 `call_id` 返回）与通过 WebSocket 的**轮内插话**。在 GPT-6 之前的模型上，异步标志会被静默丢弃（在那里属于校验错误）。
+- **Gemini 3.8 Flash**（`gemini-3.8-flash`，2026-09-02 GA）—— 新的 `gemini` 默认模型与 `gemini` / `gemini-flash-latest` 别名落点。1M ctx / 64K 输出，intro 价 $0.75 / $0.075 缓存 / $3.75 每 M 至 2026-12-31（之后 $1.50/$7.50；输出价包含 thinking token）。`thinking_level` 仍为 `low|medium|high`，而 **`MINIMAL` 是硬性校验错误**，因此 `GeminiProvider::clampThinkingLevel()` 会在 3.7+ Flash 上把 `minimal` 映射到 `LOW`（3.5 线仍发 `MINIMAL`）。该档位的采样参数已弃用 —— `temperature` / `top_p` / `top_k` 现在直接丢弃而不再透传。
+- **DeepSeek V4.1 Flash**（`deepseek-flash`，2026-09-10 GA）—— 新的 provider 默认模型，也是 DeepSeek 新架构家族的首个模型：原生多模态，1M ctx / 384K 输出，谷时基准 $0.15 / $0.003 缓存命中 / $0.60 每 M（峰时 2×）。V4 Flash 与 V4 Flash Vision Exp 已退役；`deepseek-v4-flash` 暂时路由到此并按同价计费。V4 Pro 在原定 2026-09-14 下线日之后继续提供服务，计费不变。
+- **Qwen3.8-Max-0902**（`qwen3.8-max-0902`，2026-09-02）—— 新的 `qwen` / `qwen-anthropic` 默认模型与 `qwen` / `qwen-max` 别名落点；1M ctx 与 $2/$6 每 M 与 0803 GA 版一致，工程级编码与协作 agent 能力显著增强。`QwenProvider::isVisionModel()` 现在匹配整条 `qwen3.8-*` 线，因此 catalog 中新增的 `qwen3.8-flash`、`qwen3.8-27b` 也自动带上高清图标志。
+- **GLM-5.3 升为默认，新增 GLM-5.3-Flash** —— 5.3 独立 API 已 GA，价格与 5.2 一致（$1.40 / $0.26 / $4.40 每 M），因此 **`glm-5.3` 成为 provider 默认**，`glm` / `glm5` 别名也改为指向它，临时按 5.2 费率计价的兜底逻辑随之删除。`glm-5.3-flash`（2026-08-26）是 Z.ai 首个原生多模态 GLM-5 模型 —— 320B MoE / 18B 激活，图像 + 视频输入，1M ctx，MIT 权重，$0.15 / $0.03 / $0.50 每 M。它是独立模型而非 5.3 post-train，因此 `isGlm53()` 将其排除，在那里 `reasoning_effort: off` 会真正关闭 thinking。
+
+仅调价、无新 id：**Sonnet 5** 长期价为 $2/$10（原定 2026-09-01 涨到 $3/$15 已取消）；**GPT-5.6** 降价为 Sol $4/$0.40/$20、Terra $2/$0.20/$12、Luna $0.20/$0.02/$1.20；**GPT-5.5** 重新公布价格（$5/$0.50/$30）。聚合渠道同步：OpenRouter 新增 `anthropic/claude-fable-5.1`、`openai/gpt-6-astra`、`google/gemini-3.8-flash`、`deepseek/deepseek-v4.1-flash`、`z-ai/glm-5.3[-flash]`、`moonshotai/kimi-k3`、`minimax/minimax-m3`、`x-ai/grok-build-0.1`、`meta/muse-spark-1.3`；Bedrock 新增 `global.anthropic.claude-fable-5-1`（调用要求账号在该区域的数据保留模式为 `aws_review`）；Cursor 侧以 catalog-only 形式新增 Grok 4.6、Gemini 3.8 Flash、Fable 5.1 与 Muse Spark 1.3。
+
+```php
+// Fable 5.1：强制 tool_choice 会被降级，而不是 400
+$agent = new Agent(['provider' => 'anthropic', 'model' => 'claude-fable-5-1']);
+$agent->run('抽取字段', ['tool_choice' => ['type' => 'any']]);
+// → 线上 body 里是 tool_choice: {type: "auto"}
+
+// GPT-6 Astra：异步工具 + 模型真正接受的 effort 值
+$agent = new Agent(['provider' => 'openai-responses']);      // → gpt-6-astra
+$agent->run('迁移数据库 schema', [
+    'async_tools'      => ['run_migration'],                 // → 该工具带 async: true
+    'reasoning_effort' => 'off',                             // → reasoning.effort: low（绝不发 `none`）
+]);
+```
+
+> **未内置：** Meta 的 **Muse Spark 1.3**（MSL 的 agentic 编码旗舰，2026-09-02，1M ctx，$1.25/$4.25 每 M）可经 OpenRouter 与 Cursor 访问，catalog 已收录，但 SuperAgent 尚无原生 Meta provider —— 原生 `meta` provider 是另一项独立工作。
+
+测试：`ModelRefresh202609Test`（Fable 5.1 tool_choice 降级与透传、Astra effort 下限、异步工具门控、catalog/价格 pin），以及更新后的 `GeminiProviderTest`（3.8 默认、MINIMAL 收敛）、`GlmProviderTest`（5.3 默认、5.3-Flash 档位）、`DeepSeekProviderTest`、`QwenProviderTest`、`OpenAIResponsesProviderTest`、`CostCalculatorTest`。全量测试通过（3375）。
