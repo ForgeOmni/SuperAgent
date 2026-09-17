@@ -57,7 +57,7 @@ return [
         // falls back to ModelTierMap::defaults().
         'tier_map' => [
             // 'trivial'  => ['provider' => 'anthropic', 'model' => 'claude-haiku-4-5-20251001'],
-            // 'easy'     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-flash'],
+            // 'easy'     => ['provider' => 'deepseek',  'model' => 'deepseek-flash'],
             // 'moderate' => ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6'],
             // 'hard'     => ['provider' => 'deepseek',  'model' => 'deepseek-v4-pro'],
             // 'expert'   => ['provider' => 'anthropic', 'model' => 'claude-opus-4-8'],

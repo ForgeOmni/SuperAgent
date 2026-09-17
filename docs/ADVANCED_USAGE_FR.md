@@ -8960,8 +8960,9 @@ DeepSeek V4 (sorti le 2026-04-24) est le premier provider du SDK qui propose **d
 | ID modèle | Params total | Params actifs | Contexte | Tarif input/output |
 |---|---|---|---|---|
 | `deepseek-v4-pro`   | 1,6T (MoE) | 49B  | 1 M | $0,55 / $2,20 par 1M |
-| `deepseek-v4-flash` |  284B (MoE)| 13B  | 1 M | $0,14 / $0,55 par 1M |
-| `deepseek-chat`     | (V3) | (V3) | (V3) | DÉPRÉCIÉ — retraite 2026-07-24 → routé vers `deepseek-v4-flash` |
+| `deepseek-flash`    |  (V4.1) | (V4.1) | 1 M | $0,15 / $0,60 par 1M (base heures creuses) |
+| `deepseek-v4-flash` |  284B (MoE)| 13B  | 1 M | RETIRÉ le 2026-09-10 → routé vers `deepseek-flash` |
+| `deepseek-chat`     | (V3) | (V3) | (V3) | DÉPRÉCIÉ — retraité 2026-07-24 → routé vers `deepseek-flash` |
 | `deepseek-reasoner` | (R1) | (R1) | (R1) | DÉPRÉCIÉ — retraite 2026-07-24 → recommandé : `deepseek-v4-pro` |
 
 V4 introduit un **bascule thinking / non-thinking dans le même modèle** : même ID modèle, le champ `thinking: {type: enabled}` active le canal de raisonnement. `deepseek-chat` (V3, toujours non-thinking) et `deepseek-reasoner` (R1, toujours thinking) fusionnent dans les deux paliers de V4.
@@ -9026,7 +9027,7 @@ Le schéma `models.json` gagne deux champs optionnels sur les rows modèle : `de
 
 ```
 [SuperAgent] model 'deepseek-chat' is deprecated: retires 2026-07-24
-(N days left) — switch to 'deepseek-v4-flash'.
+(N days left) — switch to 'deepseek-flash'.
 Set SUPERAGENT_SUPPRESS_DEPRECATION=1 to silence.
 ```
 
@@ -9038,7 +9039,7 @@ use SuperAgent\Providers\ModelCatalog;
 $info = ModelCatalog::deprecation('deepseek-chat');
 // [
 //     'deprecated_until' => '2026-07-24',
-//     'replaced_by'      => 'deepseek-v4-flash',
+//     'replaced_by'      => 'deepseek-flash',
 //     'days_left'        => 84,           // négatif une fois la fenêtre passée
 // ]
 ```
@@ -9077,7 +9078,7 @@ new Agent([
     'provider' => 'deepseek',
     'region'   => 'beta',
     'api_key'  => getenv('DEEPSEEK_API_KEY'),
-    'model'    => 'deepseek-v4-flash',   // FIM est le plus utile sur Flash pour la génération de code
+    'model'    => 'deepseek-flash',      // FIM est le plus utile sur Flash pour la génération de code
 ]);
 ```
 
@@ -10038,7 +10039,7 @@ Enum à 5 bandes. Les seuils s'alignent avec `SmartContext\TaskComplexity` pour 
 | Bande | Score | Modèle par défaut | Verrou auto ? |
 |---|---|---|---|
 | TRIVIAL | `< 0.25` | `anthropic / claude-haiku-4-5-20251001` | non |
-| EASY | `0.25–0.45` | `deepseek / deepseek-v4-flash` | non |
+| EASY | `0.25–0.45` | `deepseek / deepseek-flash` | non |
 | MODERATE | `0.45–0.70` | `anthropic / claude-sonnet-4-6` | non |
 | HARD | `0.70–0.85` | `deepseek / deepseek-v4-pro` | **oui** |
 | EXPERT | `>= 0.85` | `anthropic / claude-opus-4-7` | **oui** |
@@ -12426,3 +12427,24 @@ $provider->deleteBackground($job);
 **Le garde-fou de `chat()` a changé de forme.** En v1.1.14, `background: true` sur `chat()` levait `FeatureNotSupportedException` — exact à l'époque, faux maintenant que la fonctionnalité existe. Il lève désormais une `ProviderException` qui nomme `submitBackground()`. Toujours une exception plutôt qu'un abandon silencieux : un drapeau ignoré streamerait normalement et ressemblerait à un appel asynchrone fonctionnel qui ne l'a jamais été.
 
 Tests : `MetaResponsesProviderTest` passe à 27 — soumission imposant background/stream/store et retirant `include`, erreur d'id manquant, toutes les projections de statut, `fetch()` convertissant les items de sortie (texte, appels d'outils, `incomplete` tronqué) et levant sur `failed`, la course à l'annulation, les chemins cancel/delete, delete sur 404, la query string et le parse SSE de `followBackground()`, et `countInputTokens()`. Le tout contre un transport Guzzle mocké. Suite complète verte (3420).
+
+## 104. `/model auto` routait vers un modèle retiré (v1.1.16)
+
+`AutoModelStrategy::FLASH` nommait toujours `deepseek-v4-flash`. DeepSeek a retiré cet id le 2026-09-10 — il n'existe plus que comme route de compatibilité vers V4.1 Flash — de sorte que chaque conversation courte auto-routée s'adressait à une redirection plutôt qu'à un modèle. La 1.1.12 avait déplacé le défaut du provider, la table de paliers et le catalogue vers `deepseek-flash`, mais avait manqué cette constante.
+
+```php
+AutoModelStrategy::PRO;    // 'deepseek-v4-pro'  — inchangé, toujours courant
+AutoModelStrategy::FLASH;  // 'deepseek-flash'   — était 'deepseek-v4-flash'
+```
+
+L'heuristique ne change en rien : conversations courtes, chaînes d'outils peu profondes et prompts sans mot-clé d'intention Pro choisissent toujours Flash. Seul l'id vers lequel elle résout passe au modèle vivant. Les hôtes qui définissent `flash_model` explicitement n'ont jamais été concernés.
+
+**Pourquoi c'était déjà un problème avant de casser.** Une route de compatibilité n'est pas un contrat, c'est un délai de grâce. L'appel continuait de réussir, donc rien ne signalait la dérive ; la panne serait arrivée au moment où DeepSeek retire la redirection — en production, sur le chemin par défaut. C'est la pire forme que puisse prendre une constante périmée, et c'est pourquoi le correctif s'accompagne d'un test qui épingle les **deux** constantes à des ids vivants plutôt que de se contenter de corriger la chaîne :
+
+```php
+// AutoModelStrategyTest
+$this->assertSame('deepseek-flash', AutoModelStrategy::FLASH);
+$this->assertSame('deepseek-v4-pro', AutoModelStrategy::PRO);
+```
+
+La prochaine mise à la retraite fera échouer la suite au lieu de router silencieusement via une redirection. L'exemple commenté `squad.tier_map` dans `config/superagent.php` et le docblock de retour de `select()` nommaient le même id retiré et ont été corrigés eux aussi.

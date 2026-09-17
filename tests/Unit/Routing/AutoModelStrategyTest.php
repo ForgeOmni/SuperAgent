@@ -12,6 +12,15 @@ use SuperAgent\Routing\AutoModelStrategy;
 
 class AutoModelStrategyTest extends TestCase
 {
+    public function test_tier_constants_name_live_models_not_retired_ids(): void
+    {
+        // `deepseek-v4-flash` is retired upstream and only routes to V4.1
+        // Flash for compatibility. Auto-routing must name the live model —
+        // a compatibility route is not something to build a default on.
+        $this->assertSame('deepseek-flash', AutoModelStrategy::FLASH);
+        $this->assertSame('deepseek-v4-pro', AutoModelStrategy::PRO);
+    }
+
     public function test_default_short_chat_picks_flash(): void
     {
         $s = new AutoModelStrategy();

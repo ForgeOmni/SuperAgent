@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.16] - 2026-09-17
+
+### 💻 Summary
+
+**`/model auto` was routing to a retired model.** `AutoModelStrategy::FLASH` still named `deepseek-v4-flash`, which DeepSeek retired on 2026-09-10 — it only routes to V4.1 Flash for compatibility now. Auto-routing therefore picked a model that exists solely as a redirect, and would have started failing outright whenever DeepSeek drops the compatibility route. 1.1.12 moved every other DeepSeek reference to the live id and missed this constant. One-line behavioural fix plus the doc/config references that named the same id.
+
+### Fixed
+
+- **`Routing\AutoModelStrategy::FLASH`** `deepseek-v4-flash` → **`deepseek-flash`**. The Flash half of the `/model auto` heuristic (short chats, shallow tool chains, no Pro intent keywords) now names the live V4.1 Flash model instead of a retired id kept alive by a compatibility route. `PRO` is unchanged (`deepseek-v4-pro` is current). Hosts that override `flash_model` explicitly are unaffected.
+- `config/superagent.php`'s commented `squad.tier_map` example and the `select()` return docblock named the retired id too.
+
+### Added
+
+- `AutoModelStrategyTest::test_tier_constants_name_live_models_not_retired_ids` — pins both constants to live model ids so the next retirement is caught by the suite rather than in production.
+
+
 ## [1.1.15] - 2026-09-17
 
 ### 💻 Summary

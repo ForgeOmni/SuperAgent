@@ -8410,7 +8410,8 @@ DeepSeek V4（2026-04-24 发布）是 SDK 里第一个**同后端同时支持两
 | 模型 id | 总参数 | 激活参数 | Context | 价格 input/output |
 |---|---|---|---|---|
 | `deepseek-v4-pro`   | 1.6T (MoE) | 49B  | 1 M | $0.55 / $2.20 per 1M |
-| `deepseek-v4-flash` |  284B (MoE)| 13B  | 1 M | $0.14 / $0.55 per 1M |
+| `deepseek-flash`    |  (V4.1) | (V4.1) | 1 M | $0.15 / $0.60 per 1M（谷时基准）|
+| `deepseek-v4-flash` |  284B (MoE)| 13B  | 1 M | 已于 2026-09-10 退役 → 路由到 `deepseek-flash` |
 | `deepseek-chat`     | (V3) | (V3) | (V3) | 已弃用 — 2026-07-24 退役 → 路由到 `deepseek-v4-flash` |
 | `deepseek-reasoner` | (R1) | (R1) | (R1) | 已弃用 — 2026-07-24 退役 → 推荐 `deepseek-v4-pro` |
 
@@ -8475,7 +8476,7 @@ Streaming handler 的 `onText` 回调依然只在用户可见文本通道触发�
 
 ```
 [SuperAgent] model 'deepseek-chat' is deprecated: retires 2026-07-24
-(N days left) — switch to 'deepseek-v4-flash'.
+(N days left) — switch to 'deepseek-flash'.
 Set SUPERAGENT_SUPPRESS_DEPRECATION=1 to silence.
 ```
 
@@ -8487,7 +8488,7 @@ use SuperAgent\Providers\ModelCatalog;
 $info = ModelCatalog::deprecation('deepseek-chat');
 // [
 //     'deprecated_until' => '2026-07-24',
-//     'replaced_by'      => 'deepseek-v4-flash',
+//     'replaced_by'      => 'deepseek-flash',
 //     'days_left'        => 84,           // 退役窗口已过则为负
 // ]
 ```
@@ -8526,7 +8527,7 @@ new Agent([
     'provider' => 'deepseek',
     'region'   => 'beta',
     'api_key'  => getenv('DEEPSEEK_API_KEY'),
-    'model'    => 'deepseek-v4-flash',   // 代码生成用 Flash 走 FIM 最实用
+    'model'    => 'deepseek-flash',      // 代码生成用 Flash 走 FIM 最实用
 ]);
 ```
 
@@ -9485,7 +9486,7 @@ PipelineEngine.run(definition)  ←  PeerOrchestrator 串联：
 | 档 | 分数 | 默认模型 | 自动卡点？ |
 |---|---|---|---|
 | TRIVIAL | `< 0.25` | `anthropic / claude-haiku-4-5-20251001` | 否 |
-| EASY | `0.25–0.45` | `deepseek / deepseek-v4-flash` | 否 |
+| EASY | `0.25–0.45` | `deepseek / deepseek-flash` | 否 |
 | MODERATE | `0.45–0.70` | `anthropic / claude-sonnet-4-6` | 否 |
 | HARD | `0.70–0.85` | `deepseek / deepseek-v4-pro` | **是** |
 | EXPERT | `>= 0.85` | `anthropic / claude-opus-4-7` | **是** |
@@ -11872,3 +11873,24 @@ $provider->deleteBackground($job);
 **`chat()` 的守卫换了形态。** v1.1.14 里给 `chat()` 传 `background: true` 抛的是 `FeatureNotSupportedException` —— 当时准确，但现在这个特性已经存在，那就不对了。改为抛出点名 `submitBackground()` 的 `ProviderException`。仍然是抛异常而不是静默丢弃：丢掉标志会照常流式，看起来像一个能用的异步调用，而它从来就不是异步的。
 
 测试：`MetaResponsesProviderTest` 扩到 27 条 —— 提交强制 background/stream/store 并移除 `include`、缺少 id 的报错、全部状态映射、`fetch()` 转换输出项（文本、工具调用、被截断的 `incomplete`）以及 `failed` 时抛异常、cancel 竞态、cancel/delete 的端点路径、404 时的 delete、`followBackground()` 的 query string 与 SSE 解析、`countInputTokens()`。全部基于 mock 的 Guzzle 传输层。全量测试通过（3420）。
+
+## 104. `/model auto` 一直在路由到一个已退役的模型 (v1.1.16)
+
+`AutoModelStrategy::FLASH` 仍然写着 `deepseek-v4-flash`。DeepSeek 已于 2026-09-10 退役该 id —— 它如今只是通往 V4.1 Flash 的兼容路由 —— 因此每一次自动路由的短对话，寻址的都是一个重定向，而不是一个模型。1.1.12 把 provider 默认值、tier map 和 catalog 都迁到了 `deepseek-flash`，唯独漏了这个常量。
+
+```php
+AutoModelStrategy::PRO;    // 'deepseek-v4-pro'  —— 未变，仍是现役
+AutoModelStrategy::FLASH;  // 'deepseek-flash'   —— 原为 'deepseek-v4-flash'
+```
+
+启发式本身没有任何变化：短对话、浅工具链、系统提示里没有 Pro 意图关键词，仍然选 Flash。变的只是它解析到的 id 换成了现役模型。显式设置了 `flash_model` 的宿主从来不受影响。
+
+**为什么它在"坏掉"之前就已经是问题。** 兼容路由不是契约，而是宽限期。调用一直成功，所以漂移没有任何迹象；故障会在 DeepSeek 撤掉重定向的那一刻到来 —— 在生产环境、在默认路径上。这是一个过期常量最糟糕的形态，也是为什么这次修复附带一个把**两个**常量都钉到现役 id 的测试，而不只是改掉那个字符串：
+
+```php
+// AutoModelStrategyTest
+$this->assertSame('deepseek-flash', AutoModelStrategy::FLASH);
+$this->assertSame('deepseek-v4-pro', AutoModelStrategy::PRO);
+```
+
+下一次退役会让测试挂掉，而不是悄悄走重定向。`config/superagent.php` 里注释掉的 `squad.tier_map` 示例与 `select()` 的返回值 docblock 也写着同一个退役 id，一并修正。

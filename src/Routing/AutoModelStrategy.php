@@ -52,7 +52,10 @@ use SuperAgent\Messages\Message;
 final class AutoModelStrategy
 {
     public const PRO   = 'deepseek-v4-pro';
-    public const FLASH = 'deepseek-v4-flash';
+    // V4.1 Flash. The old `deepseek-v4-flash` id is retired upstream and
+    // only routes here, so auto-routing must name the live model — a
+    // compatibility route is not something to build a default on.
+    public const FLASH = 'deepseek-flash';
 
     /** @var list<string> */
     private const DEFAULT_PRO_INTENT_KEYWORDS = [
@@ -150,7 +153,7 @@ final class AutoModelStrategy
      * @param array<string, mixed>   $options     same shape Agent passes
      *                                            to provider->chat()
      * @return string                model id (`deepseek-v4-pro` |
-     *                                          `deepseek-v4-flash`)
+     *                                          `deepseek-flash`)
      */
     public function select(array $messages, ?string $systemPrompt = null, array $options = []): string
     {

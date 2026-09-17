@@ -7831,9 +7831,10 @@ DeepSeek V4 (announced 2026-04-24) is the first provider in the SDK that ships *
 
 | Model id | Total params | Active params | Context | Pricing input/output |
 |---|---|---|---|---|
-| `deepseek-v4-pro`   | 1.6T (MoE) | 49B  | 1 M | $0.55 / $2.20 per 1M |
-| `deepseek-v4-flash` |  284B (MoE)| 13B  | 1 M | $0.14 / $0.55 per 1M |
-| `deepseek-chat`     | (V3) | (V3) | (V3) | DEPRECATED — retires 2026-07-24 → routes to `deepseek-v4-flash` |
+| `deepseek-v4-pro`   | 1.6T (MoE) | 49B  | 1 M | $0.66 / $1.98 per 1M (off-peak base) |
+| `deepseek-flash`    |  (V4.1) | (V4.1) | 1 M | $0.15 / $0.60 per 1M (off-peak base) |
+| `deepseek-v4-flash` |  284B (MoE)| 13B  | 1 M | RETIRED 2026-09-10 → routes to `deepseek-flash` |
+| `deepseek-chat`     | (V3) | (V3) | (V3) | DEPRECATED — retired 2026-07-24 → routes to `deepseek-flash` |
 | `deepseek-reasoner` | (R1) | (R1) | (R1) | DEPRECATED — retires 2026-07-24 → recommend `deepseek-v4-pro` |
 
 V4 ships a single-model **thinking / non-thinking toggle**: same model id, the `thinking: {type: enabled}` field flips the reasoning channel on. V3's `deepseek-chat` (always non-thinking) and R1's `deepseek-reasoner` (always thinking) collapse into V4's two tiers.
@@ -7898,7 +7899,7 @@ Streaming handlers' `onText` callback continues to fire only for the user-facing
 
 ```
 [SuperAgent] model 'deepseek-chat' is deprecated: retires 2026-07-24
-(N days left) — switch to 'deepseek-v4-flash'.
+(N days left) — switch to 'deepseek-flash'.
 Set SUPERAGENT_SUPPRESS_DEPRECATION=1 to silence.
 ```
 
@@ -7910,7 +7911,7 @@ use SuperAgent\Providers\ModelCatalog;
 $info = ModelCatalog::deprecation('deepseek-chat');
 // [
 //     'deprecated_until' => '2026-07-24',
-//     'replaced_by'      => 'deepseek-v4-flash',
+//     'replaced_by'      => 'deepseek-flash',
 //     'days_left'        => 84,           // negative once the window has lapsed
 // ]
 ```
@@ -7950,7 +7951,7 @@ new Agent([
     'provider' => 'deepseek',
     'region'   => 'beta',
     'api_key'  => getenv('DEEPSEEK_API_KEY'),
-    'model'    => 'deepseek-v4-flash',   // FIM is most useful on Flash for codegen
+    'model'    => 'deepseek-flash',      // FIM is most useful on Flash for codegen
 ]);
 ```
 
@@ -8913,7 +8914,7 @@ Five-band enum. Thresholds align with `SmartContext\TaskComplexity` so a "comple
 | Band | Score | Default model | Auto-gate? |
 |---|---|---|---|
 | TRIVIAL | `< 0.25` | `anthropic / claude-haiku-4-5-20251001` | no |
-| EASY | `0.25–0.45` | `deepseek / deepseek-v4-flash` | no |
+| EASY | `0.25–0.45` | `deepseek / deepseek-flash` | no |
 | MODERATE | `0.45–0.70` | `anthropic / claude-sonnet-4-6` | no |
 | HARD | `0.70–0.85` | `deepseek / deepseek-v4-pro` | **yes** |
 | EXPERT | `>= 0.85` | `anthropic / claude-opus-4-7` | **yes** |
@@ -11317,3 +11318,24 @@ $provider->deleteBackground($job);
 **The `chat()` guard changed shape.** In v1.1.14, `background: true` on `chat()` raised `FeatureNotSupportedException` — accurate then, wrong now that the feature exists. It raises a `ProviderException` naming `submitBackground()` instead. Still an exception rather than a silent drop: a dropped flag would stream normally and look like a working async call that was never async.
 
 Tests: `MetaResponsesProviderTest` grows to 27 — submit forcing background/stream/store and dropping `include`, the missing-id error, every status mapping, `fetch()` converting output items (text, tool calls, truncated `incomplete`) and throwing on `failed`, the cancel race, cancel/delete endpoint paths, delete-on-404, `followBackground()` query string and SSE parse, and `countInputTokens()`. All against a mocked Guzzle transport. Full suite green (3420).
+
+## 104. `/model auto` was routing to a retired model (v1.1.16)
+
+`AutoModelStrategy::FLASH` still named `deepseek-v4-flash`. DeepSeek retired that id on 2026-09-10 — it exists only as a compatibility route to V4.1 Flash — so every auto-routed short chat was addressing a redirect rather than a model. 1.1.12 moved the provider default, the tier map and the catalog to `deepseek-flash` and missed this constant.
+
+```php
+AutoModelStrategy::PRO;    // 'deepseek-v4-pro'  — unchanged, still current
+AutoModelStrategy::FLASH;  // 'deepseek-flash'   — was 'deepseek-v4-flash'
+```
+
+Nothing about the heuristic changes: short chats, shallow tool chains and prompts without a Pro intent keyword still pick Flash. Only the id it resolves to moves onto the live model. Hosts that set `flash_model` explicitly were never affected.
+
+**Why this mattered before it broke.** A compatibility route is not a contract — it is a grace period. The call kept succeeding, so nothing surfaced the drift; the failure would have arrived whenever DeepSeek drops the redirect, in production, on the default path. That is the worst shape a stale constant can have, and it is why the fix ships with a test that pins *both* constants to live ids rather than just correcting the string:
+
+```php
+// AutoModelStrategyTest
+$this->assertSame('deepseek-flash', AutoModelStrategy::FLASH);
+$this->assertSame('deepseek-v4-pro', AutoModelStrategy::PRO);
+```
+
+The next retirement now fails the suite instead of quietly routing through a redirect. The commented `squad.tier_map` example in `config/superagent.php` and the `select()` return docblock named the same retired id and were corrected too.
