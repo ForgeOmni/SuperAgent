@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.14] - 2026-09-17
+
+### 💻 Summary
+
+**Meta's Responses route, wired — the only one of the three protocols that carries Muse Spark's reasoning across turns.** v1.1.13 shipped the Chat Completions route, which discards the chain of thought at every turn boundary; that is the wrong property for an agent loop, where each step then re-derives what the last one already worked out. `MetaResponsesProvider` (`provider: 'meta-responses'`) adds `POST /v1/responses` with both carry-over modes — stateless encrypted replay and server-managed `previous_response_id` — and strips the OpenAI-only knobs the shared Responses base emits, each of which is a 400 on Meta. Also fixes a bug shipped in v1.1.13: `max` effort is Standard-tier `muse-spark-1.3` only, and sending it to a `-contributor` id is a 400. Additive and non-breaking. Full suite green (3408 tests).
+
+### Added
+
+- **`Providers\MetaResponsesProvider`** (`provider: 'meta-responses'`) — Meta Model API Responses route, `POST /v1/responses` at `https://api.meta.ai`, same key / models / billing as `meta`. Extends `OpenAIResponsesProvider`, so input conversion, SSE parsing, the tool loop and `previous_response_id` tracking are shared.
+  - **Reasoning carry-over, two mutually exclusive modes.** `options['reasoning_replay'] => true` sets `store: false` + `include: ["reasoning.encrypted_content"]` (stateless; Meta's recommendation) — and, because Meta rejects a request carrying `include` **and** `previous_response_id`, drops the chaining id rather than letting the call 400. Without it, repeated `chat()` calls chain via `previous_response_id` as the base already does.
+  - **Divergences handled:** strips `reasoning.mode` / `reasoning.context` (GPT-5.6 concepts; `reasoning.summary` is kept — Muse Spark streams reasoning summaries), `text.verbosity`, `response_format` (structured output goes through `text.format`), `service_tier`, `prompt_cache_options`, and `logprobs` / `top_logprobs` / `stop` / `logit_bias` / `prediction` / `modalities` / `audio` / `web_search_options` / `n` > 1 — all after `extra_body` merges. `background: true` raises `FeatureNotSupportedException` instead of being silently dropped: it cannot be combined with streaming, and the retrieve / cancel / delete endpoints it implies are not wired.
+  - `options['grounding']` / `['web_search']` append the server-side `{"type": "web_search"}` tool; `options['safety_identifier']` passes through.
+- **`Traits\MuseSparkSurfaceTrait`** — the Muse Spark bits both routes share: the effort-tier normaliser, `modelSupportsMaxEffort()`, and bearer resolution (`api_key` → `META_API_KEY` → `MODEL_API_KEY`).
+- `ProviderRegistry`: `meta-responses` in the class map, defaults, required credentials, env-derived config, health probe and capability map.
+- Tests: `tests/Unit/Providers/MetaResponsesProviderTest.php` (15).
+
+### Fixed
+
+- **`max` effort was sent to models that reject it.** "Extended reasoning" (`max`) is documented for **Standard-tier `muse-spark-1.3` only**; `muse-spark-1.3-contributor` answers a 400 `invalid_request_error` for it while `xhigh` succeeds. v1.1.13's `modelSupportsMaxEffort()` only excluded 1.1 / 1.2, so any contributor-tier request asking for `max` failed. Every `-contributor` id now degrades `max` → `xhigh`.
+
+### Changed
+
+- `SuperAgentApplication::VERSION` `1.1.13` → `1.1.14`.
+- `MetaProvider` now uses `MuseSparkSurfaceTrait` for the effort dial and key lookup (behaviour unchanged apart from the `max` fix above).
+- Docs: README / INSTALL / ADVANCED_USAGE updated in all three languages (EN / CN / FR) — a route-selection table in the README Meta section, a "reasoning across turns" subsection, and ADVANCED_USAGE section 102.
+
+### Notes
+
+- Route selection: `meta` for one-shot calls in the OpenAI shape, `meta-responses` for agentic loops, `anthropic` + `base_url=https://api.meta.ai` for Claude-shaped clients. The background/async response lifecycle (`GET /v1/responses/{id}`, `/cancel`, `DELETE`) remains unwired.
+
+
 ## [1.1.13] - 2026-09-17
 
 ### 💻 Summary

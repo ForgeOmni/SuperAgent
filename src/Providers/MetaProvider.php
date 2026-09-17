@@ -6,6 +6,7 @@ namespace SuperAgent\Providers;
 
 use SuperAgent\Exceptions\ProviderException;
 use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
+use SuperAgent\Traits\MuseSparkSurfaceTrait;
 
 /**
  * Meta Model API — Muse Spark family, via `POST /v1/chat/completions`
@@ -14,8 +15,10 @@ use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
  * Meta ships three request formats against the same models and billing:
  * a Responses API, this OpenAI-compatible Chat Completions API, and an
  * Anthropic-compatible Messages API. This provider wires the Chat
- * Completions route (the one SuperAgent's `ChatCompletionsProvider` base
- * already speaks); the Anthropic route is reachable without new code by
+ * Completions route; {@see MetaResponsesProvider} (`provider: 'meta-responses'`)
+ * speaks the Responses API, which is the one to reach for in agentic loops —
+ * only it can replay reasoning across turns. The Anthropic route is
+ * reachable without new code by
  * pointing `provider=anthropic` at `base_url=https://api.meta.ai` with a
  * `muse-spark-*` model, the same trick the DeepSeek Anthropic route uses.
  *
@@ -32,7 +35,8 @@ use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
  *     `minimal | low | medium | high | xhigh` (plus `max` on 1.3), and
  *     `none` returns **400**. The dial therefore floors at `minimal`
  *     rather than emitting an off switch, and `max` is downgraded to
- *     `xhigh` on 1.1 / 1.2, which don't carry the top tier.
+ *     `xhigh` on every id that lacks the top tier — 1.1, 1.2 and every
+ *     `-contributor` id (`max` is Standard-tier 1.3 only).
  *   - **`developer` outranks `system`.** Meta accepts `system` for OpenAI
  *     compatibility but documents `developer` as the highest-precedence
  *     instruction channel, so the hoisted system prompt is re-roled.
@@ -58,6 +62,8 @@ use SuperAgent\Providers\Capabilities\SupportsReasoningEffort;
  */
 class MetaProvider extends ChatCompletionsProvider implements SupportsReasoningEffort
 {
+    use MuseSparkSurfaceTrait;
+
     /**
      * OpenAI parameters the Model API rejects outright (HTTP 400).
      * Stripped from the final body rather than forwarded.
@@ -85,35 +91,9 @@ class MetaProvider extends ChatCompletionsProvider implements SupportsReasoningE
      */
     public function reasoningEffortFragment(string $effort): array
     {
-        $tier = match (strtolower(trim($effort))) {
-            // No off switch on this family — floor at the cheapest tier.
-            'off', 'disabled', 'none', 'false', 'minimal' => 'minimal',
-            'low' => 'low',
-            'medium', 'mid', '' => 'medium',
-            'high' => 'high',
-            'xhigh' => 'xhigh',
-            'max', 'highest' => $this->modelSupportsMaxEffort($this->model) ? 'max' : 'xhigh',
-            default => null,
-        };
+        $tier = $this->museSparkEffortTier($effort, $this->model);
 
         return $tier === null ? [] : ['reasoning_effort' => $tier];
-    }
-
-    /**
-     * `max` is documented for Muse Spark 1.3 (and anything newer in the
-     * line); 1.1 / 1.2 stop at `xhigh`.
-     */
-    protected function modelSupportsMaxEffort(string $model): bool
-    {
-        $id = strtolower($model);
-        if (! str_starts_with($id, 'muse-spark-')) {
-            // Unknown id — assume the current surface rather than
-            // silently downgrading a model we don't know about.
-            return true;
-        }
-
-        return ! str_starts_with($id, 'muse-spark-1.1')
-            && ! str_starts_with($id, 'muse-spark-1.2');
     }
 
     protected function providerName(): string
@@ -168,26 +148,12 @@ class MetaProvider extends ChatCompletionsProvider implements SupportsReasoningE
      */
     protected function resolveBearer(array $config): ?string
     {
-        $explicit = parent::resolveBearer($config);
-        if ($explicit !== null && $explicit !== '') {
-            return $explicit;
-        }
-
-        foreach (['META_API_KEY', 'MODEL_API_KEY'] as $var) {
-            $value = $_ENV[$var] ?? getenv($var) ?: null;
-            if (is_string($value) && $value !== '') {
-                return $value;
-            }
-        }
-
-        return null;
+        return $this->resolveMetaBearer($config);
     }
 
     protected function missingBearerMessage(array $config): string
     {
-        return 'Meta Model API key is required — pass api_key, or set META_API_KEY '
-            . '(or MODEL_API_KEY, the name Meta\'s own docs use). Keys are issued in '
-            . 'the Meta Developer Console.';
+        return $this->missingMetaBearerMessage();
     }
 
     /**

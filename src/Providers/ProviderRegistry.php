@@ -38,6 +38,9 @@ class ProviderRegistry
         // Meta Model API — Muse Spark family, OpenAI-compatible at
         // api.meta.ai. See MetaProvider.
         'meta' => MetaProvider::class,
+        // Same models over Meta's Responses API — the only route that
+        // replays reasoning across turns. See MetaResponsesProvider.
+        'meta-responses' => MetaResponsesProvider::class,
         'deepseek' => DeepSeekProvider::class,
         // xAI Grok — OpenAI-compatible at api.x.ai.
         'grok' => GrokProvider::class,
@@ -165,6 +168,12 @@ class ProviderRegistry
         ],
         'meta' => [
             // Muse Spark 1.3 (2026-09-02) — MSL's agentic coding flagship.
+            'model' => 'muse-spark-1.3',
+            'region' => 'default',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
+        'meta-responses' => [
             'model' => 'muse-spark-1.3',
             'region' => 'default',
             'max_tokens' => 8192,
@@ -487,7 +496,8 @@ class ProviderRegistry
             'bedrock' => ['access_key', 'secret_key'],
             'ollama' => [], // No required keys for Ollama
             'gemini' => ['api_key'],
-            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax', 'deepseek', 'grok', 'meta' => ['api_key'],
+            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax', 'deepseek', 'grok', 'meta',
+            'meta-responses' => ['api_key'],
             default => [],
         };
 
@@ -588,7 +598,7 @@ class ProviderRegistry
                 'api_key' => $_ENV['XAI_API_KEY'] ?? getenv('XAI_API_KEY')
                     ?: ($_ENV['GROK_API_KEY'] ?? getenv('GROK_API_KEY')),
             ],
-            'meta' => [
+            'meta', 'meta-responses' => [
                 // META_API_KEY keeps our naming; MODEL_API_KEY is the name
                 // Meta's own docs and quickstarts use.
                 'api_key' => $_ENV['META_API_KEY'] ?? getenv('META_API_KEY')
@@ -700,7 +710,7 @@ class ProviderRegistry
             'glm'        => 'https://api.z.ai/api/paas/v4/models',
             'minimax'    => 'https://api.minimax.io/v1/text/models',
             'deepseek'   => 'https://api.deepseek.com/v1/models',
-            'meta'       => 'https://api.meta.ai/v1/models',
+            'meta', 'meta-responses' => 'https://api.meta.ai/v1/models',
             'ollama'     => 'http://localhost:11434/api/tags',
             default      => null,  // bedrock uses AWS SDK — no plain probe
         };
@@ -888,7 +898,7 @@ class ProviderRegistry
                 'structured_output' => true,
                 'regions' => ['intl', 'cn'],
             ],
-            'meta' => [
+            'meta', 'meta-responses' => [
                 'streaming' => true,
                 'tools' => true,
                 'vision' => true,
@@ -896,7 +906,8 @@ class ProviderRegistry
                 'max_context' => 1_048_576,
                 'structured_output' => true,
                 // Reasoning is always on — there is no off switch, only
-                // the minimal…max effort dial.
+                // the minimal…max effort dial. Only the Responses route
+                // can replay it across turns.
                 'thinking' => true,
                 'regions' => ['default'],
             ],

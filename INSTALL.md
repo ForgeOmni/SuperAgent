@@ -121,7 +121,7 @@ export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
 export DEEPSEEK_API_KEY=...        # DeepSeek V4 — since v0.9.6
 export XAI_API_KEY=...             # xAI Grok — since v1.0.8 (GROK_API_KEY also accepted)
-export META_API_KEY=...            # Meta Model API / Muse Spark — since v1.1.13 (MODEL_API_KEY also accepted)
+export META_API_KEY=...            # Meta Model API / Muse Spark — 'meta' + 'meta-responses', since v1.1.13 (MODEL_API_KEY also accepted)
 export OPENROUTER_API_KEY=...
 
 # DeepSeek multi-upstream relays (v0.9.8) — same V4 weights, alternate hosts.
@@ -747,7 +747,15 @@ $agent = new Agent(['provider' => 'meta']);                       // → muse-sp
 $agent->run('refactor this module', ['reasoning_effort' => 'xhigh', 'grounding' => true]);
 ```
 
-`muse-spark-1.3` is the default (1M context, $1.25/$0.15 cached/$4.25 per 1M, text + image + video + audio + PDF input). Reasoning is always on — the dial is `minimal…max` and `reasoning_effort: none` is a 400, so `off` floors at `minimal`. The same models are reachable over Meta's Anthropic-compatible route with `provider=anthropic` + `base_url=https://api.meta.ai`.
+`muse-spark-1.3` is the default (1M context, $1.25/$0.15 cached/$4.25 per 1M, text + image + video + audio + PDF input). Reasoning is always on — the dial is `minimal…max` and `reasoning_effort: none` is a 400, so `off` floors at `minimal` (`max` is Standard-tier 1.3 only).
+
+All three Meta protocols are wired: `provider=meta` (Chat Completions), `provider=meta-responses` (Responses — the only route that replays reasoning across turns, use it for agent loops), and Meta's Anthropic-compatible route via `provider=anthropic` + `base_url=https://api.meta.ai`.
+
+```php
+// Agentic loop with reasoning carried across turns
+$agent = new Agent(['provider' => 'meta-responses']);
+$agent->run('fix the failing test', ['reasoning_replay' => true]);
+```
 
 > The `-contributor` ids are ~12x cheaper because Meta trains on your prompts and completions. They are catalogued but never aliased — name the id explicitly if you want that trade.
 

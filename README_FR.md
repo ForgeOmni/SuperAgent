@@ -116,6 +116,7 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
 | `glm` | BigModel GLM (GLM-5.3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(défaut GLM-5.3 + GLM-5.3-Flash, v1.1.12 ; molette GLM-5.3, v1.1.11)* |
 | `meta` | Meta Model API (Muse Spark) | Clé API (`META_API_KEY` / `MODEL_API_KEY`) ; compatible OpenAI sur `api.meta.ai` ; défaut `muse-spark-1.3` — raisonnement toujours actif (`minimal…max`, pas d'interrupteur), 1 M de contexte, entrée texte/image/vidéo/audio/PDF, ancrage par recherche *(v1.1.13)* |
+| `meta-responses` | Meta Model API — route Responses | Même clé / mêmes modèles ; `POST /v1/responses` — rejeu du raisonnement entre les tours (chiffré ou `previous_response_id`), état géré côté serveur *(v1.1.14)* |
 | `minimax` | MiniMax (M3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking entrelacé + image/vidéo natives *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
 | `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.6` — molette reasoning-effort (incl. `xhigh`) + pinning de cache *(Grok 4.6, v1.1.11 ; depuis v1.0.8)* |
@@ -587,7 +588,27 @@ $agent = new Agent([
 ]);
 ```
 
-Meta expose les mêmes modèles via trois protocoles — une Responses API, une Chat Completions API compatible OpenAI et une Messages API compatible Anthropic. Ce provider câble **Chat Completions** ; la route Anthropic ne demande aucun code supplémentaire :
+Meta expose les mêmes modèles, et la même facturation, via trois protocoles. Les trois sont désormais accessibles :
+
+| Route | Provider | À utiliser pour |
+|---|---|---|
+| Chat Completions | `meta` | Appels one-shot, forme OpenAI standard |
+| Responses | `meta-responses` | **Boucles agentiques** — la seule route qui rejoue le raisonnement entre les tours |
+| Messages (Anthropic) | `anthropic` + `base_url` | Clients de forme Claude, sans code neuf |
+
+```php
+// Boucle agentique — le raisonnement survit à la frontière de tour
+$agent = new Agent([
+    'provider' => 'meta-responses',
+    'api_key'  => getenv('META_API_KEY'),
+]);
+$agent->run('trouve le bug, corrige-le, lance les tests', [
+    'reasoning_effort'  => 'xhigh',
+    'reasoning_replay'  => true,    // store:false + include:[reasoning.encrypted_content]
+]);
+```
+
+La route Anthropic ne demande pas davantage de code :
 
 ```php
 // Wire Anthropic, même modèle et même facturation
@@ -618,9 +639,22 @@ $agent->run('qu\'est-ce qui a été livré dans la dernière version ?', [
 
 > ⚠️ **Le palier Contributor entraîne sur vos données.** `muse-spark-1.3-contributor` est le même modèle à **0,10 $ / 0,002 $ / 0,20 $** par M — environ 12× moins cher — en échange de l'autorisation donnée à Meta d'entraîner ses futurs modèles sur vos prompts et complétions (et d'un plafond de 100 RPM au lieu de 3 000). Il est catalogué mais délibérément **sans alias** : rien n'y est routé si vous ne nommez pas l'id.
 
-Muse Spark est aussi accessible via OpenRouter (`meta/muse-spark-1.3`) et Cursor ; seul le provider natif parle ces champs spécifiques à Meta.
+### Raisonnement entre les tours (`meta-responses`)
 
-*Depuis v1.1.13*
+Sur Chat Completions, la chaîne de pensée de Muse Spark est jetée à la fin de chaque tour — la requête suivante repart à froid. La route Responses la transporte, de deux façons mutuellement exclusives :
+
+- **Rejeu chiffré (sans état, recommandé).** `reasoning_replay => true` pose `store: false` + `include: ["reasoning.encrypted_content"]` ; vous renvoyez la conversation à chaque tour et le raisonnement voyage sous forme de blob opaque. Rien n'est conservé côté serveur.
+- **État géré côté serveur.** `previous_response_id` chaîne les tours et le serveur reconstruit le contexte à partir de ce qu'il a stocké. Des appels `chat()` répétés sur une même instance le font automatiquement.
+
+Meta rejette une requête portant les deux, donc demander le rejeu retire l'id de chaînage au lieu de laisser l'appel partir en 400.
+
+La route retire aussi les boutons propres à OpenAI que la classe de base Responses peut émettre — `reasoning.mode`, `reasoning.context`, `text.verbosity`, `service_tier`, `prompt_cache_options`, `response_format` (la sortie structurée passe par `text.format`) — et refuse `background: true` franchement plutôt que de l'ignorer en silence : il est incompatible avec le streaming et les endpoints de récupération/annulation qu'il implique ne sont pas câblés.
+
+> Le palier `max` (« extended reasoning ») est réservé au `muse-spark-1.3` **de la tier Standard** — 1.1, 1.2 et tous les ids `-contributor` renvoient 400 pour lui, la molette les ramène donc à `xhigh`.
+
+Muse Spark est aussi accessible via OpenRouter (`meta/muse-spark-1.3`) et Cursor ; seuls les providers natifs parlent ces champs spécifiques à Meta.
+
+*Depuis v1.1.13 ; route Responses depuis v1.1.14*
 
 ---
 

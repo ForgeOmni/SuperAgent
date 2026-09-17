@@ -11213,3 +11213,52 @@ $agent = new Agent([
 **Also fixed here:** `ProviderRegistry::DEFAULTS` still pinned `gemini-3.7-flash`, `qwen3.8-max`, `glm-5.2` and `deepseek-v4-flash`. Those defaults are passed into the constructor, so they shadowed the `defaultModel()` bumps made in v1.1.12 for anyone going through the registry (which is the normal path). All four now match their provider.
 
 Tests: `MetaProviderTest` (18) — base URL / key resolution (`META_API_KEY` beats `MODEL_API_KEY`), `max_completion_tokens`, system→developer re-role, unsupported-param stripping through `extra_body`, the effort floor and the 1.2 `max`→`xhigh` downgrade, grounding alone and alongside function tools, cache-key/safety-identifier pass-through, registry resolution and catalog pricing. Full suite green (3393).
+
+## 102. Meta Responses route — reasoning that survives the turn boundary (v1.1.14)
+
+v1.1.13 wired Meta's Chat Completions route. That route throws Muse Spark's chain of thought away at the end of every turn, which is exactly the wrong property for an agent loop: each step re-derives what the previous step already worked out. Meta's **Responses API** is the only route that carries reasoning across turns, so `MetaResponsesProvider` (`provider: 'meta-responses'`) wires it.
+
+```php
+$agent = new Agent([
+    'provider' => 'meta-responses',
+    'api_key'  => getenv('META_API_KEY'),
+]);                                          // → muse-spark-1.3, POST /v1/responses
+```
+
+It extends `OpenAIResponsesProvider`, so the input conversion, SSE event parsing, `previous_response_id` tracking and tool loop are all the ones already in the codebase; what it overrides is the endpoint, the key lookup, the effort dial and the divergences below.
+
+**Two ways to carry reasoning, mutually exclusive.**
+
+```php
+// 1. Encrypted replay (stateless, Meta's recommendation)
+$agent->run('fix the failing test', ['reasoning_replay' => true]);
+//    → store: false, include: ["reasoning.encrypted_content"]
+//    Client resends the conversation; reasoning rides as an opaque blob.
+//    Nothing is retained server-side.
+
+// 2. Server-managed state (default for repeated calls on one instance)
+$agent->run('now add a regression test');
+//    → previous_response_id: resp_… — the server rebuilds context.
+```
+
+Meta rejects a request carrying `include` **and** `previous_response_id`, so asking for replay drops the chaining id instead of letting the call 400. `lastResponseId()` (inherited) still exposes the id for callers who want to pin a conversation externally.
+
+**What gets stripped, and why it matters.** The shared Responses base emits knobs that only exist on OpenAI's surface. Sending them to Meta is a 400, so `buildRequestBody()` removes them after `extra_body` merges:
+
+| Stripped | Meta's equivalent |
+|---|---|
+| `reasoning.mode`, `reasoning.context` | none — GPT-5.6 concepts (`reasoning.summary` is kept; Muse Spark streams reasoning *summaries*) |
+| `text.verbosity` | none |
+| `response_format` | `text.format` (the base already emits it) |
+| `service_tier`, `prompt_cache_options` | none |
+| `logprobs`, `top_logprobs`, `stop`, `logit_bias`, `prediction`, `modalities`, `audio`, `web_search_options`, `n > 1` | none |
+
+`background: true` is refused with `FeatureNotSupportedException` rather than dropped: it cannot be combined with streaming (and this provider always streams), and the retrieve / cancel / delete endpoints it implies are not wired. A silently-ignored flag would look like a working async call that never went async.
+
+**Effort dial, corrected.** Both Meta routes now share `MuseSparkSurfaceTrait`, which also fixes a bug shipped in v1.1.13: `max` ("extended reasoning") is **Standard-tier `muse-spark-1.3` only**. v1.1.13 sent `max` for `muse-spark-1.3-contributor` too, which the backend answers with a 400 `invalid_request_error` while `xhigh` succeeds. The trait now downgrades `max` → `xhigh` for every `-contributor` id as well as 1.1 / 1.2, and still floors `off`/`none`/`disabled` at `minimal` because this family cannot stop reasoning.
+
+**Search grounding** works the same on both routes — `options['grounding']` appends the server-side `{"type": "web_search"}` tool alongside your function tools, billed per query.
+
+Picking a route: `meta` for one-shot calls where the OpenAI shape is convenient, `meta-responses` for anything agentic, `anthropic` + `base_url=https://api.meta.ai` for Claude-shaped clients. Same key, same models, same billing.
+
+Tests: `MetaResponsesProviderTest` (15) — endpoint and registry resolution, the effort floor and the Standard-tier-only `max`, replay forcing `store: false`, the `include` / `previous_response_id` exclusion in both directions, OpenAI-only knob stripping (incl. via `extra_body`), `response_format` → `text.format`, grounding alone and with function tools, and `background` refusal. Full suite green (3408).

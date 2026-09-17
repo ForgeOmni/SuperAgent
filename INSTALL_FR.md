@@ -121,7 +121,7 @@ export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
 export DEEPSEEK_API_KEY=...        # DeepSeek V4 — depuis v0.9.6
 export XAI_API_KEY=...             # xAI Grok — depuis v1.0.8 (GROK_API_KEY accepté aussi)
-export META_API_KEY=...            # Meta Model API / Muse Spark — depuis v1.1.13 (MODEL_API_KEY aussi accepté)
+export META_API_KEY=...            # Meta Model API / Muse Spark — 'meta' + 'meta-responses', depuis v1.1.13 (MODEL_API_KEY aussi accepté)
 export OPENROUTER_API_KEY=...
 
 # Relais multi-upstream DeepSeek (v0.9.8) — mêmes poids V4, hôtes alternatifs.
@@ -769,7 +769,15 @@ $agent = new Agent(['provider' => 'meta']);                       // → muse-sp
 $agent->run('refactorise ce module', ['reasoning_effort' => 'xhigh', 'grounding' => true]);
 ```
 
-`muse-spark-1.3` est le défaut (contexte 1 M, 1,25 $/0,15 $ en cache/4,25 $ par 1M, entrée texte + image + vidéo + audio + PDF). Le raisonnement est toujours actif — la molette va de `minimal` à `max` et `reasoning_effort: none` renvoie 400, donc `off` plancher à `minimal`. Les mêmes modèles sont accessibles via la route compatible Anthropic de Meta avec `provider=anthropic` + `base_url=https://api.meta.ai`.
+`muse-spark-1.3` est le défaut (contexte 1 M, 1,25 $/0,15 $ en cache/4,25 $ par 1M, entrée texte + image + vidéo + audio + PDF). Le raisonnement est toujours actif — la molette va de `minimal` à `max` et `reasoning_effort: none` renvoie 400, donc `off` plancher à `minimal` (`max` est réservé au 1.3 Standard).
+
+Les trois protocoles Meta sont câblés : `provider=meta` (Chat Completions), `provider=meta-responses` (Responses — la seule route qui rejoue le raisonnement entre les tours, à utiliser pour les boucles d'agent) et la route compatible Anthropic via `provider=anthropic` + `base_url=https://api.meta.ai`.
+
+```php
+// Boucle agentique avec raisonnement transporté entre les tours
+$agent = new Agent(['provider' => 'meta-responses']);
+$agent->run('corrige le test qui échoue', ['reasoning_replay' => true]);
+```
 
 > Les ids `-contributor` sont ~12× moins chers parce que Meta entraîne ses modèles sur vos prompts et complétions. Ils sont catalogués mais jamais aliasés — nommez l'id explicitement si vous voulez cet échange.
 

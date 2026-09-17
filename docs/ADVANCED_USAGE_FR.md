@@ -12322,3 +12322,52 @@ $agent = new Agent([
 **Corrigé au passage :** `ProviderRegistry::DEFAULTS` épinglait encore `gemini-3.7-flash`, `qwen3.8-max`, `glm-5.2` et `deepseek-v4-flash`. Ces défauts sont passés au constructeur et masquaient donc les bumps de `defaultModel()` faits en v1.1.12 pour quiconque passe par le registre (c'est-à-dire le chemin normal). Les quatre correspondent désormais à leur provider.
 
 Tests : `MetaProviderTest` (18) — URL de base / résolution de clé (`META_API_KEY` l'emporte sur `MODEL_API_KEY`), `max_completion_tokens`, re-rôlage system→developer, retrait des paramètres non supportés injectés via `extra_body`, plancher d'effort et rétrogradation `max`→`xhigh` sur 1.2, ancrage seul et avec des outils de fonction, pass-through cache-key / safety-identifier, résolution par le registre et tarifs du catalogue. Suite complète verte (3393).
+
+## 102. Route Responses de Meta — un raisonnement qui survit à la frontière de tour (v1.1.14)
+
+La v1.1.13 a câblé la route Chat Completions de Meta. Cette route jette la chaîne de pensée de Muse Spark à la fin de chaque tour, ce qui est exactement la mauvaise propriété pour une boucle d'agent : chaque étape re-dérive ce que l'étape précédente avait déjà établi. La **Responses API** de Meta est la seule route qui transporte le raisonnement d'un tour à l'autre ; `MetaResponsesProvider` (`provider: 'meta-responses'`) la câble.
+
+```php
+$agent = new Agent([
+    'provider' => 'meta-responses',
+    'api_key'  => getenv('META_API_KEY'),
+]);                                          // → muse-spark-1.3, POST /v1/responses
+```
+
+Il étend `OpenAIResponsesProvider` : la conversion de l'input, le parsing des événements SSE, le suivi de `previous_response_id` et la boucle d'outils sont ceux déjà présents dans la base de code ; ce qu'il surcharge, c'est l'endpoint, la résolution de clé, la molette d'effort et les divergences ci-dessous.
+
+**Deux façons de transporter le raisonnement, mutuellement exclusives.**
+
+```php
+// 1. Rejeu chiffré (sans état, la recommandation de Meta)
+$agent->run('corrige le test qui échoue', ['reasoning_replay' => true]);
+//    → store: false, include: ["reasoning.encrypted_content"]
+//    Le client renvoie la conversation ; le raisonnement voyage en blob
+//    opaque. Rien n'est conservé côté serveur.
+
+// 2. État géré côté serveur (comportement par défaut d'appels répétés)
+$agent->run('ajoute maintenant un test de non-régression');
+//    → previous_response_id: resp_… — le serveur reconstruit le contexte.
+```
+
+Meta rejette une requête portant `include` **et** `previous_response_id` : demander le rejeu retire donc l'id de chaînage au lieu de laisser l'appel finir en 400. `lastResponseId()` (hérité) expose toujours l'id pour qui veut épingler une conversation à l'extérieur.
+
+**Ce qui est retiré, et pourquoi c'est important.** La base Responses partagée émet des boutons qui n'existent que sur la surface d'OpenAI. Les envoyer à Meta donne un 400, donc `buildRequestBody()` les retire après la fusion d'`extra_body` :
+
+| Retiré | Équivalent Meta |
+|---|---|
+| `reasoning.mode`, `reasoning.context` | aucun — concepts GPT-5.6 (`reasoning.summary` est conservé : Muse Spark diffuse des *résumés* de raisonnement) |
+| `text.verbosity` | aucun |
+| `response_format` | `text.format` (déjà émis par la base) |
+| `service_tier`, `prompt_cache_options` | aucun |
+| `logprobs`, `top_logprobs`, `stop`, `logit_bias`, `prediction`, `modalities`, `audio`, `web_search_options`, `n > 1` | aucun |
+
+`background: true` est refusé via `FeatureNotSupportedException` plutôt qu'ignoré : il est incompatible avec le streaming (et ce provider streame toujours), et les endpoints de récupération / annulation / suppression qu'il implique ne sont pas câblés. Un drapeau silencieusement ignoré ressemblerait à un appel asynchrone qui fonctionne alors qu'il n'a jamais été asynchrone.
+
+**Molette d'effort, corrigée.** Les deux routes Meta partagent désormais `MuseSparkSurfaceTrait`, qui corrige au passage un bug livré en v1.1.13 : `max` (« extended reasoning ») est réservé au `muse-spark-1.3` **de la tier Standard**. La v1.1.13 envoyait aussi `max` pour `muse-spark-1.3-contributor`, auquel le backend répond par un 400 `invalid_request_error` alors que `xhigh` passe. Le trait rétrograde maintenant `max` → `xhigh` pour tous les ids `-contributor` comme pour 1.1 / 1.2, et plancher toujours `off`/`none`/`disabled` à `minimal` — cette famille ne sait pas arrêter de raisonner.
+
+**L'ancrage par recherche** se comporte identiquement sur les deux routes — `options['grounding']` ajoute l'outil serveur `{"type": "web_search"}` à côté de vos outils de fonction, facturé à la requête.
+
+Choisir une route : `meta` pour les appels one-shot où la forme OpenAI est pratique, `meta-responses` pour tout ce qui est agentique, `anthropic` + `base_url=https://api.meta.ai` pour les clients de forme Claude. Même clé, mêmes modèles, même facturation.
+
+Tests : `MetaResponsesProviderTest` (15) — endpoint et résolution par le registre, plancher d'effort et `max` réservé à la tier Standard, rejeu forçant `store: false`, exclusion `include` / `previous_response_id` dans les deux sens, retrait des boutons OpenAI (y compris via `extra_body`), `response_format` → `text.format`, ancrage seul et avec outils de fonction, refus de `background`. Suite complète verte (3408).

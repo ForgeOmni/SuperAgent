@@ -11769,3 +11769,51 @@ $agent = new Agent([
 **顺带修复：** `ProviderRegistry::DEFAULTS` 里仍写着 `gemini-3.7-flash`、`qwen3.8-max`、`glm-5.2`、`deepseek-v4-flash`。这些默认值会传进构造函数，因此对走 registry 的调用方（也就是常规路径）来说，v1.1.12 里改的 `defaultModel()` 被它们遮蔽了。现在四个都已与各自 provider 对齐。
 
 测试：`MetaProviderTest`（18）—— base URL / key 解析（`META_API_KEY` 优先于 `MODEL_API_KEY`）、`max_completion_tokens`、system→developer 改角色、经 `extra_body` 注入的不支持参数被剔除、effort 下探与 1.2 上 `max`→`xhigh` 的降级、grounding 单独使用及与函数工具并存、cache-key / safety-identifier 透传、registry 解析与 catalog 价格。全量测试通过（3393）。
+
+## 102. Meta Responses 路由 —— 能跨过轮次边界的推理 (v1.1.14)
+
+v1.1.13 接的是 Meta 的 Chat Completions 路由。那条路在每轮结束时丢弃 Muse Spark 的思维链 —— 这恰恰是 agent 循环最不想要的性质：每一步都要重新推导上一步已经想明白的东西。Meta 的 **Responses API** 是唯一能跨轮携带推理的路由，因此本版加入 `MetaResponsesProvider`（`provider: 'meta-responses'`）。
+
+```php
+$agent = new Agent([
+    'provider' => 'meta-responses',
+    'api_key'  => getenv('META_API_KEY'),
+]);                                          // → muse-spark-1.3，POST /v1/responses
+```
+
+它继承 `OpenAIResponsesProvider`，因此 input 转换、SSE 事件解析、`previous_response_id` 跟踪和工具循环全部复用现成代码；覆盖的只有端点、key 解析、effort 档位，以及下面这些差异。
+
+**携带推理的两种方式，互斥。**
+
+```php
+// 1. 加密回放（无状态，Meta 的推荐做法）
+$agent->run('修掉失败的测试', ['reasoning_replay' => true]);
+//    → store: false，include: ["reasoning.encrypted_content"]
+//    客户端每轮重发会话，推理以不透明 blob 随行，服务端不保留任何内容。
+
+// 2. 服务端状态（同一实例上连续调用的默认行为）
+$agent->run('再加一个回归测试');
+//    → previous_response_id: resp_… —— 由服务端重建上下文。
+```
+
+Meta 不接受同时带 `include` 和 `previous_response_id` 的请求，因此一旦要求回放，就会丢掉串联 id，而不是让请求 400。继承来的 `lastResponseId()` 仍可取出 id，供需要在外部固定会话的调用方使用。
+
+**剔除了什么，为什么重要。** 共享的 Responses 基类会发出一些只存在于 OpenAI 表面的字段，发给 Meta 就是 400，因此 `buildRequestBody()` 在 `extra_body` 合并之后把它们剔除：
+
+| 被剔除 | Meta 的对应物 |
+|---|---|
+| `reasoning.mode`、`reasoning.context` | 无 —— 属于 GPT-5.6 的概念（保留 `reasoning.summary`：Muse Spark 会流式输出推理*摘要*）|
+| `text.verbosity` | 无 |
+| `response_format` | `text.format`（基类已经会发）|
+| `service_tier`、`prompt_cache_options` | 无 |
+| `logprobs`、`top_logprobs`、`stop`、`logit_bias`、`prediction`、`modalities`、`audio`、`web_search_options`、`n > 1` | 无 |
+
+`background: true` 会抛 `FeatureNotSupportedException` 而不是被悄悄丢掉：它不能与流式并用（本 provider 始终流式），且它所需的查询 / 取消 / 删除端点本版未接。悄悄忽略会让人以为异步调用生效了，而实际上根本没异步。
+
+**修正后的 effort 档位。** 两条 Meta 路由现在共用 `MuseSparkSurfaceTrait`，其中顺带修掉了 v1.1.13 的一个 bug：`max`（"extended reasoning"）**仅限标准档 `muse-spark-1.3`**。v1.1.13 会把 `max` 也发给 `muse-spark-1.3-contributor`，后端对此返回 400 `invalid_request_error`，而 `xhigh` 正常。现在 trait 会把所有 `-contributor` id（以及 1.1 / 1.2）的 `max` 降级为 `xhigh`，同时仍把 `off`/`none`/`disabled` 下探到 `minimal` —— 这个家族无法停止推理。
+
+**搜索接地**在两条路由上行为一致 —— `options['grounding']` 会把服务端的 `{"type": "web_search"}` 工具与你的函数工具并列加入，按查询计费。
+
+如何选路由：单轮调用、图 OpenAI 形态方便就用 `meta`；凡是 agentic 的用 `meta-responses`；Claude 形态的客户端用 `anthropic` + `base_url=https://api.meta.ai`。同一把 key、同一批模型、同一套计费。
+
+测试：`MetaResponsesProviderTest`（15）—— 端点与 registry 解析、effort 下探与仅标准档可用的 `max`、回放强制 `store: false`、`include` / `previous_response_id` 双向互斥、OpenAI 专有字段剔除（含经 `extra_body` 注入）、`response_format` → `text.format`、grounding 单独及与函数工具并存、`background` 拒绝。全量测试通过（3408）。

@@ -139,7 +139,10 @@ class MetaProviderTest extends TestCase
 
     public function test_max_downgrades_to_xhigh_on_models_without_the_top_tier(): void
     {
-        foreach (['muse-spark-1.2', 'muse-spark-1.1'] as $id) {
+        // `max` ("extended reasoning") is Standard-tier 1.3 only — the
+        // contributor build returns 400 invalid_request_error for it while
+        // xhigh succeeds.
+        foreach (['muse-spark-1.3-contributor', 'muse-spark-1.2-contributor', 'muse-spark-1.2', 'muse-spark-1.1'] as $id) {
             $p = new MetaProvider(['api_key' => 'k', 'model' => $id]);
             $this->assertSame(['reasoning_effort' => 'xhigh'], $p->reasoningEffortFragment('max'), $id);
         }

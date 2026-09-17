@@ -116,6 +116,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
 | `glm` | BigModel GLM（默认 GLM-5.3）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.3 默认 + GLM-5.3-Flash，v1.1.12；GLM-5.3 档位，v1.1.11)* |
 | `meta` | Meta Model API（Muse Spark）| API key（`META_API_KEY` / `MODEL_API_KEY`）；OpenAI 兼容，位于 `api.meta.ai`；默认 `muse-spark-1.3` —— 推理常开（`minimal…max`，没有关闭档）、1M ctx、文本/图像/视频/音频/PDF 输入、搜索接地 *(v1.1.13)* |
+| `meta-responses` | Meta Model API —— Responses 路由 | 同一把 key / 同一批模型；`POST /v1/responses` —— 推理可跨轮复用（加密回放或 `previous_response_id`）、服务端状态 *(v1.1.14)* |
 | `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
 | `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.6` —— reasoning-effort 档位（含 `xhigh`）+ cache 绑定 *（Grok 4.6，v1.1.11；v1.0.8 起）* |
@@ -586,7 +587,27 @@ $agent = new Agent([
 ]);
 ```
 
-Meta 用三种协议暴露同一批模型：Responses API、OpenAI 兼容的 Chat Completions API，以及 Anthropic 兼容的 Messages API。本 provider 走 **Chat Completions**；Anthropic 那条路不需要任何新代码：
+Meta 用三种协议暴露同一批模型与同一套计费，三条路现在都通了：
+
+| 路由 | Provider | 适用场景 |
+|---|---|---|
+| Chat Completions | `meta` | 单轮调用、标准 OpenAI 形态 |
+| Responses | `meta-responses` | **Agentic 循环** —— 唯一能跨轮复用推理的路由 |
+| Messages（Anthropic）| `anthropic` + `base_url` | Claude 形态的客户端，无需新代码 |
+
+```php
+// Agentic 循环 —— 推理能跨过轮次边界
+$agent = new Agent([
+    'provider' => 'meta-responses',
+    'api_key'  => getenv('META_API_KEY'),
+]);
+$agent->run('定位 bug、修复它、跑测试', [
+    'reasoning_effort'  => 'xhigh',
+    'reasoning_replay'  => true,    // store:false + include:[reasoning.encrypted_content]
+]);
+```
+
+Anthropic 那条路同样不需要新代码：
 
 ```php
 // 同一模型、同一计费，走 Anthropic 协议
@@ -617,9 +638,22 @@ $agent->run('上个版本发布了什么？', [
 
 > ⚠️ **Contributor 档会拿你的数据训练。** `muse-spark-1.3-contributor` 是同一个模型，价格 **$0.10 / $0.002 / $0.20** 每百万 token（约便宜 12 倍），代价是 Meta 会用你的 prompt 和回复训练后续模型（且速率限制降为 100 RPM，而非 3000）。catalog 收录了它，但**刻意不设别名**：除非你显式写出这个 id，否则不会有流量走到那里。
 
+### 跨轮推理（`meta-responses`）
+
+在 Chat Completions 上，Muse Spark 的思维链在每轮结束时被丢弃 —— 下一次请求从零开始。Responses 路由会把它带过去，有两种互斥方式：
+
+- **加密回放（无状态，推荐）。** `reasoning_replay => true` 会设置 `store: false` + `include: ["reasoning.encrypted_content"]`；你每轮重发完整会话，推理以不透明 blob 的形式随行，服务端不保留任何内容。
+- **服务端状态。** `previous_response_id` 串起各轮，由服务端用它保存的内容重建上下文。在同一个 provider 实例上连续 `chat()` 会自动走这条路。
+
+Meta 不接受同时带这两者的请求，因此一旦要求加密回放，就会丢掉串联 id，而不是让请求 400。
+
+该路由还会剔除共享 Responses 基类可能发出的 OpenAI 专有字段 —— `reasoning.mode`、`reasoning.context`、`text.verbosity`、`service_tier`、`prompt_cache_options`、`response_format`（结构化输出走 `text.format`）—— 并且对 `background: true` 直接报错而不是悄悄忽略：它不能与流式并用，且其所需的查询/取消端点本版未接。
+
+> `max` 档（"extended reasoning"）**仅限标准档的 `muse-spark-1.3`** —— 1.1、1.2 以及所有 `-contributor` id 收到它都会 400，因此档位会为它们降级到 `xhigh`。
+
 Muse Spark 也可通过 OpenRouter（`meta/muse-spark-1.3`）和 Cursor 访问；只有原生 provider 能使用上述 Meta 专有字段。
 
-*v1.1.13 起*
+*v1.1.13 起；Responses 路由自 v1.1.14 起*
 
 ---
 

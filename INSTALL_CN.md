@@ -121,7 +121,7 @@ export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
 export DEEPSEEK_API_KEY=...        # DeepSeek V4 — v0.9.6 起
 export XAI_API_KEY=...             # xAI Grok — v1.0.8 起（也接受 GROK_API_KEY）
-export META_API_KEY=...            # Meta Model API / Muse Spark —— v1.1.13 起（也接受 MODEL_API_KEY）
+export META_API_KEY=...            # Meta Model API / Muse Spark —— 'meta' + 'meta-responses'，v1.1.13 起（也接受 MODEL_API_KEY）
 export OPENROUTER_API_KEY=...
 
 # DeepSeek 多上游 relay (v0.9.8) —— 同一份 V4 权重的不同入口。
@@ -768,7 +768,15 @@ $agent = new Agent(['provider' => 'meta']);                       // → muse-sp
 $agent->run('重构这个模块', ['reasoning_effort' => 'xhigh', 'grounding' => true]);
 ```
 
-默认模型 `muse-spark-1.3`（1M context，$1.25 / $0.15 缓存 / $4.25 每 1M，支持文本 + 图像 + 视频 + 音频 + PDF 输入）。推理常开 —— 档位为 `minimal…max`，发 `reasoning_effort: none` 会 400，因此 `off` 下探到 `minimal`。同一批模型也可通过 Meta 的 Anthropic 兼容路由访问：`provider=anthropic` + `base_url=https://api.meta.ai`。
+默认模型 `muse-spark-1.3`（1M context，$1.25 / $0.15 缓存 / $4.25 每 1M，支持文本 + 图像 + 视频 + 音频 + PDF 输入）。推理常开 —— 档位为 `minimal…max`，发 `reasoning_effort: none` 会 400，因此 `off` 下探到 `minimal`（`max` 仅限标准档 1.3）。
+
+Meta 的三种协议现已全部接通：`provider=meta`（Chat Completions）、`provider=meta-responses`（Responses —— 唯一能跨轮复用推理的路由，agent 循环请用它），以及 Anthropic 兼容路由 `provider=anthropic` + `base_url=https://api.meta.ai`。
+
+```php
+// 推理可跨轮复用的 agentic 循环
+$agent = new Agent(['provider' => 'meta-responses']);
+$agent->run('修掉失败的测试', ['reasoning_replay' => true]);
+```
 
 > `-contributor` 系列便宜约 12 倍，代价是 Meta 会用你的 prompt 和回复训练模型。catalog 收录但不设别名 —— 需要这笔交换时请显式写出该 id。
 
