@@ -154,6 +154,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Resume  (1.4.0+)
+    |--------------------------------------------------------------------------
+    | A tool may answer with ToolResult::deferred($ticketId) when a human — or
+    | anything else outside this process — owes the answer. The turn ends
+    | cleanly and the AgentResult carries a serialisable envelope; the host
+    | finishes it later with Agent::resume($envelope, $ticketId, $result).
+    |
+    | ttl_seconds stamps an expiry on the envelope, after which a resume is
+    | refused. 0 means no expiry — the host decides when an approval is stale.
+    */
+    'resume' => [
+        'ttl_seconds' => (int) env('SUPERAGENT_RESUME_TTL', 0),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Default LLM Provider
     |--------------------------------------------------------------------------
     */

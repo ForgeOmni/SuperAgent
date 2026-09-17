@@ -534,8 +534,19 @@ class GeminiProvider implements LLMProvider
             $handler?->emitToolUse($block);
         }
 
-        if ($stopReason === null) {
-            $stopReason = ! empty($toolCalls) ? StopReason::ToolUse : StopReason::EndTurn;
+        // Gemini reports `finishReason: STOP` on a turn that asks for a
+        // function call — it has nothing else to say, so by its own reckoning
+        // the turn stopped normally. The agent loop reads stop reasons the
+        // Anthropic way and only runs tools on `tool_use`, so taking STOP at
+        // face value here means a Gemini function call is parsed, attached to
+        // the message, and then never executed. A turn that asks for a tool
+        // is a tool-use turn; the only stop reason that outranks that is one
+        // saying the turn was cut short (MAX_TOKENS), where the call may be
+        // truncated and must not run.
+        if (! empty($toolCalls) && ($stopReason === null || $stopReason === StopReason::EndTurn)) {
+            $stopReason = StopReason::ToolUse;
+        } elseif ($stopReason === null) {
+            $stopReason = StopReason::EndTurn;
         }
         $message->stopReason = $stopReason;
         // Surface thinking tokens via output usage (closest existing slot;

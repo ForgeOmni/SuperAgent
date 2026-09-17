@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-17
+
+### 💻 Summary
+
+**Wave 3 of the embedded-host plan: a turn can stop for a human and be picked up somewhere else.** The loop was synchronous, and a `PreToolUse` hook could only allow or deny — "ask" fell back to normal flow, because inside one synchronous loop there is nobody to ask. So every host with an approval step had to build suspend-and-resume around the SDK. A tool now answers with `ToolResult::deferred($ticketId)`, the turn ends cleanly, and the `AgentResult` carries a **serialisable** envelope: the host stores it, and finishes the turn later with `Agent::resume($envelope, $ticketId, $result)` — in another process, after a deploy. Verified end to end across three wire formats (Anthropic, OpenAI chat completions, Gemini), each time throwing the agent away and rebuilding it from the envelope's JSON.
+
+### Added
+
+- **`ToolResult::deferred($ticketId, $meta)`** — a tool hands its decision to a human. The ticket is the host's own identifier; the metadata rides along untouched, for whatever the approver has to be shown.
+- **`Agent::resume($envelope, $ticketId, $result)`**, **`AgentResult::isAwaitingHuman()`**, **`->deferrals()`**, **`->resume`**. A resumed turn may defer again, and carries the new envelope when it does.
+- **`SuperAgent\Resume\ResumeEnvelope`** — the transcript, the tool results that already completed in the interrupted turn, the pending tickets and the answers so far; `toJson()` / `fromJson()` for the trip through a database row or a queue. Refuses an unknown ticket, an already-answered one, an expired envelope (`superagent.resume.ttl_seconds`, 0 = never) and one created by a different provider — so a duplicate delivery or a double-clicked Approve cannot run the same tool twice.
+- **`HookResult::defer($ticketId, $meta)`** — the fourth answer a `PreToolUse` hook can give, beside allow, deny and ask. The tool never runs.
+- **`SuperAgent\Messages\MessageSerializer`** — a transcript that survives `json_encode()`. `Message::toArray()` reports both a tool result and a user message as `role: user`, which is fine on the wire and lossy for a round trip.
+
+### Fixed
+
+- **Gemini function calls were parsed and then never executed.** Gemini reports `finishReason: STOP` on a turn that asks for a function call, the loop only runs tools on a `tool_use` stop reason, and nothing reconciled the two — so a Gemini agent with tools quietly did nothing with them. A turn that asks for a tool is now a tool-use turn; `MAX_TOKENS` still outranks it, because a truncated call must not run.
+- **Every hook attached to a `QueryEngine` threw.** All four call sites built `HookInput` with an `event:` argument the class does not have, and omitted the two it requires, so attaching a registry turned the first tool call into `Error: Unknown named parameter $event`. The hook classes had tests; the wiring between them and the engine did not, and now does.
+- **`HookResult::merge()` dropped fields it did not know about**, which is how the new defer decision would have been lost when more than one hook was registered.
+
 ## [1.3.0] - 2026-09-17
 
 ### 💻 Summary

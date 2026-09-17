@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.4.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Docs**: [Installation](INSTALL.md) · [安装](INSTALL_CN.md) · [Installation FR](INSTALL_FR.md) · [Advanced usage](docs/ADVANCED_USAGE.md) · [API docs](docs/)
@@ -42,6 +42,7 @@ echo $result->text();
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (codex `/goal` parity)](#goal-mode-codex-goal-parity-v098)
 - [Profiles and tool policy](#profiles-and-tool-policy-v130)
+- [Deferred tool results](#deferred-tool-results-v140)
 - [Operational guardrails](#operational-guardrails-v098)
 - [Companion tools (jcode-inspired)](#companion-tools-jcode-inspired)
 - [Agent Loop](#agent-loop)
@@ -845,6 +846,77 @@ Recommended at every site that injects user-supplied text into a
 system-role message — goals, skills, memory imports.
 
 ---
+
+## Deferred tool results *(v1.4.0)*
+
+A tool that needs a human — an approval, a signature, a decision nobody in the
+process can make — answers with a ticket instead of a result:
+
+```php
+use SuperAgent\Tools\ToolResult;
+
+public function execute(array $input): ToolResult
+{
+    $approval = $this->approvals->request($input);
+
+    return ToolResult::deferred($approval->id, ['summary' => 'Cancel order 42']);
+}
+```
+
+The turn ends cleanly, and the result carries everything needed to finish it:
+
+```php
+$result = $agent->run('cancel order 42');
+
+if ($result->isAwaitingHuman()) {
+    foreach ($result->deferrals() as $deferral) {
+        // $deferral->ticketId, ->toolName, ->meta — what to show the approver
+    }
+
+    $row->update(['envelope' => $result->resume->toJson()]);
+    return;
+}
+```
+
+When the answer arrives — minutes later, in another process, after a deploy:
+
+```php
+$final = $agent->resume(
+    $row->envelope,                       // the JSON, an array, or the object
+    $approvalId,
+    ToolResult::success('Order 42 cancelled.'),
+);
+```
+
+The conversation continues from exactly where it stopped, in whatever wire
+format the provider speaks. A resumed turn may defer again, and
+`$final->resume` carries the new envelope when it does.
+
+### What the envelope holds, and why
+
+The SDK keeps no state between the two calls: the envelope **is** the state,
+and it serialises. It carries the transcript, the tool results that *did*
+complete in the same turn (a provider rejects an assistant message whose tool
+calls are only half answered, so the completed ones wait with the pending one),
+the pending tickets and the answers gathered so far.
+
+A resume is refused — `ResumeException`, before any model call — on an unknown
+ticket, one that was already answered, an expired envelope
+(`superagent.resume.ttl_seconds`, 0 for no expiry), or an envelope created by a
+different provider. A duplicate queue delivery or a double-clicked Approve
+button therefore cannot run the same tool twice.
+
+### From a hook, without touching the tool
+
+A `PreToolUse` hook could answer allow, deny, or "ask" — and ask fell back to
+normal flow, because inside one synchronous loop there was nobody to ask. Now
+there is a fourth answer, and the tool never runs:
+
+```php
+HookResult::defer($approvalId, ['requested_by' => 'agent']);
+```
+
+*Since v1.4.0.*
 
 ## Profiles and tool policy *(v1.3.0)*
 

@@ -21,7 +21,10 @@ use SuperAgent\Tools\ToolLoader;
 use SuperAgent\Tools\ToolPolicy;
 use SuperAgent\Tools\Builtin\AgentTool;
 use SuperAgent\Config\Profile;
+use SuperAgent\Exceptions\ResumeException;
 use SuperAgent\Exceptions\ToolPolicyException;
+use SuperAgent\Resume\ResumeEnvelope;
+use SuperAgent\Tools\ToolResult;
 
 class Agent
 {
@@ -733,6 +736,22 @@ class Agent
         $this->messages = $engine->getMessages();
         $totalCost += $engine->getTotalCostUsd();
 
+        // A tool (or a PreToolUse hook) handed a decision to a human: hand the
+        // caller everything needed to finish the turn later and stop here.
+        // Follow-ups are deliberately not drained — the conversation is not
+        // finished, and queueing more prompts onto an unanswered tool call
+        // would produce a transcript no provider accepts.
+        if ($engine->isAwaitingHuman()) {
+            return new AgentResult(
+                message: $lastMessage,
+                allResponses: $allResponses,
+                messages: $this->messages,
+                totalCostUsd: $totalCost,
+                idempotencyKey: $this->idempotencyKeyFromOptions(),
+                resume: $this->buildResumeEnvelope($engine, $totalCost),
+            );
+        }
+
         // Pi-borrowed follow-up drain: prompts queued via Agent::followUp()
         // while the main turn was running get processed in FIFO order
         // before returning. Each follow-up reuses the same Agent so
@@ -764,10 +783,119 @@ class Agent
             allResponses: $allResponses,
             messages: $this->messages,
             totalCostUsd: $totalCost,
-            idempotencyKey: isset($this->options['idempotency_key']) && is_string($this->options['idempotency_key'])
-                ? substr($this->options['idempotency_key'], 0, 80)
-                : null,
+            idempotencyKey: $this->idempotencyKeyFromOptions(),
         );
+    }
+
+    /**
+     * Finish a turn that stopped to wait for a human.
+     *
+     * The envelope is the only state that had to survive: a row, a queue
+     * message, a JSON string — and it may come back in a different process,
+     * after a deploy. Answering the last outstanding ticket continues the
+     * conversation from exactly where it stopped; answering one of several
+     * returns an envelope that is still waiting, with no model call made.
+     *
+     * A resumed turn can defer again, and the result carries the new envelope
+     * when it does.
+     *
+     * @param ResumeEnvelope|array|string $envelope  The envelope, its array form, or its JSON.
+     *
+     * @throws ResumeException on an unknown or already-answered ticket, an
+     *         expired envelope, or one belonging to a different provider.
+     *
+     * @since 1.4.0
+     */
+    public function resume(
+        ResumeEnvelope|array|string $envelope,
+        string $ticketId,
+        ToolResult $result,
+        ?StreamingHandler $streamingHandler = null,
+    ): AgentResult {
+        $envelope = $this->readEnvelope($envelope);
+
+        if ($envelope->providerName !== null && $envelope->providerName !== $this->provider->name()) {
+            throw new ResumeException(
+                "This envelope was created by the '{$envelope->providerName}' provider, "
+                . "but this agent runs '{$this->provider->name()}'."
+            );
+        }
+
+        $envelope = $envelope->withAnswer($ticketId, $result);
+
+        // Still waiting on a sibling ticket: record the answer, call nothing.
+        if (! $envelope->isReady()) {
+            return new AgentResult(
+                message: null,
+                allResponses: [],
+                messages: $envelope->messages,
+                totalCostUsd: $envelope->totalCostUsd,
+                idempotencyKey: $this->idempotencyKeyFromOptions(),
+                resume: $envelope,
+            );
+        }
+
+        $engine = $this->createEngine($streamingHandler);
+        $engine->setMessages($envelope->messages);
+
+        $lastMessage = null;
+        $allResponses = [];
+
+        foreach ($engine->resumeWithToolResults($envelope->toolResults()) as $assistantMessage) {
+            $lastMessage = $assistantMessage;
+            $allResponses[] = $assistantMessage;
+        }
+
+        $this->messages = $engine->getMessages();
+        $totalCost = $envelope->totalCostUsd + $engine->getTotalCostUsd();
+
+        return new AgentResult(
+            message: $lastMessage,
+            allResponses: $allResponses,
+            messages: $this->messages,
+            totalCostUsd: $totalCost,
+            idempotencyKey: $this->idempotencyKeyFromOptions(),
+            resume: $engine->isAwaitingHuman() ? $this->buildResumeEnvelope($engine, $totalCost) : null,
+        );
+    }
+
+    /** @since 1.4.0 */
+    protected function readEnvelope(ResumeEnvelope|array|string $envelope): ResumeEnvelope
+    {
+        if ($envelope instanceof ResumeEnvelope) {
+            return $envelope;
+        }
+
+        return is_string($envelope)
+            ? ResumeEnvelope::fromJson($envelope)
+            : ResumeEnvelope::fromArray($envelope);
+    }
+
+    /** @since 1.4.0 */
+    protected function buildResumeEnvelope(QueryEngine $engine, float $totalCost): ResumeEnvelope
+    {
+        $ttl = (int) static::config('superagent.resume.ttl_seconds', 0);
+
+        return new ResumeEnvelope(
+            id: bin2hex(random_bytes(16)),
+            messages: $engine->getMessages(),
+            completedResults: $engine->getDeferredCompletedResults(),
+            pending: $engine->getDeferrals(),
+            resolved: [],
+            providerName: $this->provider->name(),
+            model: $this->provider->getModel(),
+            turnCount: $engine->getTurnCount(),
+            totalCostUsd: $totalCost,
+            createdAt: date('c'),
+            expiresAt: $ttl > 0 ? date('c', time() + $ttl) : null,
+        );
+    }
+
+    protected function idempotencyKeyFromOptions(): ?string
+    {
+        return isset($this->options['idempotency_key']) && is_string($this->options['idempotency_key'])
+            ? substr($this->options['idempotency_key'], 0, 80)
+            : null;
     }
 
     /**

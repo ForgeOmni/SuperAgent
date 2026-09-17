@@ -132,6 +132,23 @@ class QueryEngine
      */
     protected ?\SuperAgent\Tools\ToolPolicy $toolPolicy = null;
 
+    /**
+     * Tool calls that answered with {@see ToolResult::deferred()} — a human,
+     * or anything else outside this process, owes them an answer. While this
+     * is non-empty the turn is over but the conversation is not: no
+     * ToolResultMessage is appended, because a provider refuses a transcript
+     * in which one tool call of an assistant message is answered and another
+     * is not.
+     *
+     * @var list<\SuperAgent\Resume\Deferral>
+     *
+     * @since 1.4.0
+     */
+    protected array $deferrals = [];
+
+    /** @var list<array{tool_use_id:string,content:string,is_error:bool}> */
+    protected array $deferredCompletedResults = [];
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -282,6 +299,99 @@ class QueryEngine
     }
 
     /**
+     * Tool calls this turn ended on, waiting for an answer from outside.
+     *
+     * @return list<\SuperAgent\Resume\Deferral>
+     *
+     * @since 1.4.0
+     */
+    public function getDeferrals(): array
+    {
+        return $this->deferrals;
+    }
+
+    /** @since 1.4.0 */
+    public function isAwaitingHuman(): bool
+    {
+        return $this->deferrals !== [];
+    }
+
+    /**
+     * Results that did complete in the same assistant message as a deferred
+     * one. They are held, not sent: the model gets all of them together when
+     * the missing answer arrives.
+     *
+     * @return list<array{tool_use_id:string,content:string,is_error:bool}>
+     *
+     * @since 1.4.0
+     */
+    public function getDeferredCompletedResults(): array
+    {
+        return $this->deferredCompletedResults;
+    }
+
+    /**
+     * Finish an interrupted turn: append the complete set of tool results and
+     * carry on where the loop stopped.
+     *
+     * @param list<array{tool_use_id:string,content:string,is_error:bool}> $results
+     *
+     * @return Generator<int, AssistantMessage>
+     *
+     * @since 1.4.0
+     */
+    public function resumeWithToolResults(array $results): Generator
+    {
+        $this->deferrals = [];
+        $this->deferredCompletedResults = [];
+        $this->messages[] = ToolResultMessage::fromResults($results);
+
+        yield from $this->runLoop();
+    }
+
+    /**
+     * A tool answered with a ticket instead of a result.
+     *
+     * @since 1.4.0
+     */
+    /**
+     * When any tool in this assistant message deferred, the ones that did
+     * answer are held rather than sent — the model sees the whole set at
+     * once when the missing answer arrives, because a provider will not
+     * accept an assistant message whose tool calls are only half answered.
+     *
+     * @param  list<array{tool_use_id:string,content:string,is_error:bool,deferred?:bool}> $results
+     * @return list<array{tool_use_id:string,content:string,is_error:bool}>
+     *
+     * @since 1.4.0
+     */
+    protected function setAsideResultsIfDeferred(array $results): array
+    {
+        $results = array_values(array_filter(
+            $results,
+            static fn (array $r): bool => empty($r['deferred'])
+        ));
+
+        if ($this->deferrals !== []) {
+            $this->deferredCompletedResults = $results;
+
+            return [];
+        }
+
+        return $results;
+    }
+
+    protected function registerDeferral(ToolResult $result, string $toolUseId, string $toolName): void
+    {
+        $this->deferrals[] = new \SuperAgent\Resume\Deferral(
+            (string) $result->deferredTicket,
+            $toolUseId,
+            $toolName,
+            $result->deferredMeta,
+        );
+    }
+
+    /**
      * Run the agentic loop: send prompt, handle tool calls, repeat until done.
      *
      * Uses token budget continuation logic when tokenBudget is set:
@@ -404,6 +514,16 @@ class QueryEngine
             }
 
             $toolResults = $this->executeTools($assistantMessage);
+
+            // A tool handed the decision to a human: end the turn with the
+            // transcript intact and nothing half-answered in it. The host
+            // picks it up again through Agent::resume().
+            if ($this->deferrals !== []) {
+                $this->streamingHandler?->emitFinalMessage($assistantMessage);
+
+                return;
+            }
+
             $this->messages[] = $toolResults;
 
             // --- Token budget continuation check ---
@@ -568,6 +688,8 @@ class QueryEngine
                 $results[] = $this->executeSingleTool($block);
             }
 
+            $results = $this->setAsideResultsIfDeferred($results);
+
             // Speculative prefetch after tool execution
             $this->runSpeculativePrefetch($results);
 
@@ -635,6 +757,16 @@ class QueryEngine
                 continue;
             }
 
+            // A hook handed this call to a human instead of allowing or denying it.
+            if ($hookResult->isDeferred()) {
+                $this->registerDeferral(
+                    ToolResult::deferred((string) $hookResult->deferTicket, $hookResult->deferMeta),
+                    $toolUseId,
+                    $toolName,
+                );
+                continue;
+            }
+
             // If hook says stop processing entirely
             if (! $hookResult->continue) {
                 $content = $hookResult->stopReason ?? "Execution stopped by PreToolUse hook";
@@ -655,6 +787,11 @@ class QueryEngine
                 } else {
                     $result = $tool->execute($toolInput);
                 }
+                if ($result->isDeferred()) {
+                    $this->registerDeferral($result, $toolUseId, $toolName);
+                    continue;
+                }
+
                 $content = $result->contentAsString();
                 $isError = $result->isError;
 
@@ -711,6 +848,8 @@ class QueryEngine
                 $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $errorContent, true);
             }
         }
+
+        $results = $this->setAsideResultsIfDeferred($results);
 
         // Speculative prefetch after sequential execution
         $this->runSpeculativePrefetch($results);
@@ -772,6 +911,12 @@ class QueryEngine
                 );
             } else {
                 $result = $tool->execute($toolInput);
+            }
+
+            if ($result->isDeferred()) {
+                $this->registerDeferral($result, $toolUseId, $toolName);
+
+                return ['tool_use_id' => $toolUseId, 'content' => '', 'is_error' => false, 'deferred' => true];
             }
 
             $content = $result->contentAsString();
@@ -836,7 +981,9 @@ class QueryEngine
         return $this->hookRegistry->executeHooks(
             HookEvent::PRE_TOOL_USE,
             new HookInput(
-                event: HookEvent::PRE_TOOL_USE,
+                hookEvent: HookEvent::PRE_TOOL_USE,
+                sessionId: $this->hookSessionId(),
+                cwd: getcwd() ?: '.',
                 additionalData: [
                     'tool_name' => $toolName,
                     'tool_use_id' => $toolUseId,
@@ -863,7 +1010,9 @@ class QueryEngine
         return $this->hookRegistry->executeHooks(
             HookEvent::POST_TOOL_USE,
             new HookInput(
-                event: HookEvent::POST_TOOL_USE,
+                hookEvent: HookEvent::POST_TOOL_USE,
+                sessionId: $this->hookSessionId(),
+                cwd: getcwd() ?: '.',
                 additionalData: [
                     'tool_name' => $toolName,
                     'tool_use_id' => $toolUseId,
@@ -891,7 +1040,9 @@ class QueryEngine
         return $this->hookRegistry->executeHooks(
             HookEvent::POST_TOOL_USE_FAILURE,
             new HookInput(
-                event: HookEvent::POST_TOOL_USE_FAILURE,
+                hookEvent: HookEvent::POST_TOOL_USE_FAILURE,
+                sessionId: $this->hookSessionId(),
+                cwd: getcwd() ?: '.',
                 additionalData: [
                     'tool_name' => $toolName,
                     'tool_use_id' => $toolUseId,
@@ -913,8 +1064,20 @@ class QueryEngine
 
         return $this->hookRegistry->executeHooks(
             $event,
-            new HookInput(event: $event, additionalData: $data),
+            new HookInput(
+                hookEvent: $event,
+                sessionId: $this->hookSessionId(),
+                cwd: getcwd() ?: '.',
+                additionalData: $data,
+            ),
         );
+    }
+
+    protected function hookSessionId(): string
+    {
+        $sessionId = $this->options['session_id'] ?? null;
+
+        return is_string($sessionId) && $sessionId !== '' ? $sessionId : 'default';
     }
 
     /**

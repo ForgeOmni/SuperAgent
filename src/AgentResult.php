@@ -24,7 +24,38 @@ class AgentResult
          * Null when the caller didn't supply one.
          */
         public readonly ?string $idempotencyKey = null,
+        /**
+         * Set when the turn stopped to wait for a human: everything needed to
+         * finish it later, serialisable, in this process or another one.
+         *
+         * @since 1.4.0
+         */
+        public readonly ?\SuperAgent\Resume\ResumeEnvelope $resume = null,
     ) {
+    }
+
+    /**
+     * Whether this turn ended waiting on an answer from outside the process
+     * rather than on the model.
+     *
+     * @since 1.4.0
+     */
+    public function isAwaitingHuman(): bool
+    {
+        return $this->resume !== null;
+    }
+
+    /**
+     * The tool calls that are waiting, with the metadata the tool attached —
+     * what a host shows the person who has to decide.
+     *
+     * @return list<\SuperAgent\Resume\Deferral>
+     *
+     * @since 1.4.0
+     */
+    public function deferrals(): array
+    {
+        return $this->resume?->awaiting() ?? [];
     }
 
     /**

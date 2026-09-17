@@ -10,6 +10,7 @@ use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\UserMessage;
+use SuperAgent\Enums\StopReason;
 use SuperAgent\Providers\GeminiProvider;
 use SuperAgent\Providers\ProviderRegistry;
 use SuperAgent\Tools\Tool;
@@ -325,6 +326,73 @@ class GeminiProviderTest extends TestCase
      * @param array<string, mixed> $options
      * @return array<string, mixed>
      */
+    /**
+     * Gemini answers a function-call turn with `finishReason: STOP` — nothing
+     * left to say, by its own reckoning. The agent loop only runs tools when
+     * the stop reason is `tool_use`, so taking STOP at face value left the
+     * call parsed, attached to the message, and never executed: Gemini plus
+     * tools quietly did nothing. Found while building deferred tool results
+     * in 1.4.0, when the Gemini leg of the resume round-trip never reached
+     * the tool.
+     */
+    public function test_a_function_call_with_finish_reason_stop_is_still_a_tool_use_turn(): void
+    {
+        $message = $this->parseStream([
+            'candidates' => [[
+                'content' => ['role' => 'model', 'parts' => [[
+                    'functionCall' => ['name' => 'cancel_order', 'args' => ['order_id' => 42]],
+                ]]],
+                'finishReason' => 'STOP',
+            ]],
+        ]);
+
+        $this->assertTrue($message->hasToolUse());
+        $this->assertSame(StopReason::ToolUse, $message->stopReason);
+    }
+
+    public function test_a_truncated_function_call_keeps_max_tokens_and_is_not_executed(): void
+    {
+        // MAX_TOKENS outranks it: the arguments may be cut off mid-JSON, and
+        // running a half-parsed tool call is worse than not running it.
+        $message = $this->parseStream([
+            'candidates' => [[
+                'content' => ['role' => 'model', 'parts' => [[
+                    'functionCall' => ['name' => 'cancel_order', 'args' => ['order_id' => 42]],
+                ]]],
+                'finishReason' => 'MAX_TOKENS',
+            ]],
+        ]);
+
+        $this->assertSame(StopReason::MaxTokens, $message->stopReason);
+    }
+
+    public function test_plain_text_still_ends_the_turn(): void
+    {
+        $message = $this->parseStream([
+            'candidates' => [[
+                'content' => ['role' => 'model', 'parts' => [['text' => 'all done']]],
+                'finishReason' => 'STOP',
+            ]],
+        ]);
+
+        $this->assertSame(StopReason::EndTurn, $message->stopReason);
+    }
+
+    private function parseStream(array $event): \SuperAgent\Messages\AssistantMessage
+    {
+        $provider = new GeminiProvider(['api_key' => 'AIzaSyTEST']);
+        $stream = \GuzzleHttp\Psr7\Utils::streamFor('data: ' . json_encode($event) . "\n\n");
+
+        $method = new \ReflectionMethod($provider, 'parseSSEStream');
+
+        $last = null;
+        foreach ($method->invoke($provider, $stream, null) as $message) {
+            $last = $message;
+        }
+
+        return $last;
+    }
+
     private function invokeBuild(GeminiProvider $p, array $messages, array $options): array
     {
         $m = new \ReflectionMethod($p, 'buildRequestBody');

@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-1.3.0-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-1.4.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -42,6 +42,7 @@ echo $result->text();
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
 - [Profile 与工具策略](#profile-与工具策略-v130)
+- [延迟工具结果](#延迟工具结果-v140)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
 - [Agent 循环](#agent-循环)
@@ -811,6 +812,70 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 任何把用户文本注入 system-role 消息的地方都建议用一下 —— goals、skills、memory 导入。
 
 ---
+
+## 延迟工具结果 *(v1.4.0)*
+
+当一个工具需要人来拍板——审批、签字、进程里没人能做的决定——它可以返回一张票据而不是结果：
+
+```php
+use SuperAgent\Tools\ToolResult;
+
+public function execute(array $input): ToolResult
+{
+    $approval = $this->approvals->request($input);
+
+    return ToolResult::deferred($approval->id, ['summary' => '取消订单 42']);
+}
+```
+
+这一轮会干净地结束，返回值里带着把它接着跑完所需的一切：
+
+```php
+$result = $agent->run('取消订单 42');
+
+if ($result->isAwaitingHuman()) {
+    foreach ($result->deferrals() as $deferral) {
+        // $deferral->ticketId、->toolName、->meta —— 拿去给审批人看
+    }
+
+    $row->update(['envelope' => $result->resume->toJson()]);
+    return;
+}
+```
+
+答案到达时——可能是几分钟后、在另一个进程里、甚至在一次部署之后：
+
+```php
+$final = $agent->resume(
+    $row->envelope,                       // JSON、数组或对象都行
+    $approvalId,
+    ToolResult::success('订单 42 已取消。'),
+);
+```
+
+对话会从中断的那一点继续，并按各家 provider 自己的协议格式回放。续跑的这一轮同样可以再次延迟，
+这时 `$final->resume` 里是新的信封。
+
+### 信封里装了什么，为什么
+
+SDK 在这两次调用之间**不保存任何状态**：信封本身就是状态，而且可序列化。它装着对话记录、
+同一轮里**已经完成**的工具结果（provider 会拒绝"一半有答复一半没答复"的助手消息，所以完成的那些
+要和待定的一起等）、待定票据，以及已经收到的答案。
+
+以下情况会在任何模型调用之前直接抛 `ResumeException`：票据不存在、票据已被回答过、信封已过期
+（`superagent.resume.ttl_seconds`，0 表示不过期）、信封来自另一个 provider。因此队列重复投递或
+审批按钮被点两次，都不会让同一个工具执行两遍。
+
+### 从 hook 发起，不必改工具
+
+`PreToolUse` hook 原本只能回答允许、拒绝或"询问"——而"询问"会退回普通流程，因为在一个同步循环里
+根本没人可问。现在有了第四种回答，并且工具不会被执行：
+
+```php
+HookResult::defer($approvalId, ['requested_by' => 'agent']);
+```
+
+*自 v1.4.0 起。*
 
 ## Profile 与工具策略 *(v1.3.0)*
 

@@ -23,6 +23,10 @@ class HookResult
      * @param string|null $permissionBehavior Permission decision: 'allow', 'deny', or 'ask'
      * @param string|null $permissionReason Reason for permission decision
      * @param bool $preventContinuation Prevent the agent loop from continuing after this tool
+     * @param string|null $deferTicket PreToolUse only: hand this call to a human instead of
+     *                                 running it. The turn ends cleanly and the host resumes
+     *                                 it with Agent::resume() quoting this ticket. (1.4.0)
+     * @param array $deferMeta Carried into the resume envelope untouched. (1.4.0)
      */
     public function __construct(
         public readonly bool $continue = true,
@@ -37,7 +41,36 @@ class HookResult
         public readonly ?string $permissionBehavior = null,
         public readonly ?string $permissionReason = null,
         public readonly bool $preventContinuation = false,
+        public readonly ?string $deferTicket = null,
+        public readonly array $deferMeta = [],
     ) {}
+
+    /**
+     * Hand this tool call to a human rather than allowing or denying it.
+     *
+     * The three answers a PreToolUse hook could give were allow, deny and
+     * "ask", where ask fell back to normal flow because there was nobody to
+     * ask inside one synchronous loop. This is the fourth: the turn ends, the
+     * transcript is kept in a resume envelope, and whoever owns the decision
+     * answers it later — possibly in another process.
+     *
+     * @since 1.4.0
+     */
+    public static function defer(string $ticketId, array $meta = [], ?string $systemMessage = null): self
+    {
+        return new self(
+            continue: true,
+            systemMessage: $systemMessage,
+            deferTicket: $ticketId,
+            deferMeta: $meta,
+        );
+    }
+
+    /** @since 1.4.0 */
+    public function isDeferred(): bool
+    {
+        return $this->deferTicket !== null;
+    }
     
     /**
      * Create a result that continues execution
@@ -138,8 +171,18 @@ class HookResult
         $permissionBehavior = null;
         $permissionReason = null;
         $preventContinuation = false;
+        $deferTicket = null;
+        $deferMeta = [];
 
         foreach ($results as $result) {
+            // First deferral wins: once one hook has handed this call to a
+            // human, a later hook's ticket would be a second decision on a
+            // call that is no longer going to run.
+            if ($result->isDeferred() && $deferTicket === null) {
+                $deferTicket = $result->deferTicket;
+                $deferMeta = $result->deferMeta;
+            }
+
             if (!$result->continue) {
                 $continue = false;
                 $stopReason = $result->stopReason ?? $stopReason;
@@ -205,6 +248,8 @@ class HookResult
             permissionBehavior: $permissionBehavior,
             permissionReason: $permissionReason,
             preventContinuation: $preventContinuation,
+            deferTicket: $deferTicket,
+            deferMeta: $deferMeta,
         );
     }
 

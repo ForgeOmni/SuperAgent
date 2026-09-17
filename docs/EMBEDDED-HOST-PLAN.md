@@ -161,7 +161,7 @@ Two design points settled while building it:
 
 ---
 
-## Wave 3 — v1.4.0 · Deferred tool results (A3)
+## Wave 3 — v1.4.0 · Deferred tool results (A3) — **shipped**
 
 **Why:** the loop is synchronous. `HookEvent` has `PRE_TOOL_USE`,
 `PERMISSION_REQUEST` and `PERMISSION_DENIED`, but a hook can only allow or deny
@@ -193,6 +193,44 @@ serialisation.
 model sees a well-formed result); resume with an unknown or expired ticket
 refused; double-resume refused; a deferred turn that is never resumed leaves no
 partial state.
+
+**What it actually took**
+
+The wire round-trip was the work the plan expected, and it needed one piece the
+plan had not named: `MessageSerializer`. `Message::toArray()` reports both a
+tool result and a user message as `role: user` — correct on the wire, lossy for
+a round trip — so a transcript could not be rebuilt from it at all.
+
+Two design points settled while building it:
+
+- **Completed siblings wait with the deferred call.** A provider rejects an
+  assistant message whose tool calls are only half answered, so when one tool
+  in a turn defers, the results that did complete are held in the envelope and
+  sent together when the answer arrives.
+- **Refusals happen before any model call.** Unknown ticket, already-answered
+  ticket, expired envelope, envelope from another provider — all
+  `ResumeException`, so a duplicate queue delivery or a double-clicked Approve
+  cannot run the same tool twice.
+
+Two latent defects the tests exposed, both outside the feature:
+
+- **Gemini function calls were never executed.** Gemini reports
+  `finishReason: STOP` on a turn that asks for a function call; the loop only
+  runs tools on a `tool_use` stop reason; nothing reconciled the two. A Gemini
+  agent with tools quietly did nothing with them. Found because the Gemini leg
+  of the round-trip never reached the tool.
+- **Every hook attached to a QueryEngine threw.** All four call sites built
+  `HookInput` with an `event:` argument the class does not have and omitted the
+  two it requires, so attaching a registry turned the first tool call into
+  `Error: Unknown named parameter $event`. The hook classes had tests; the
+  wiring did not. `HookResult::merge()` also dropped fields it did not know
+  about, which would have lost the new defer decision whenever two hooks were
+  registered.
+
+3475 tests (48 new across waves 2–3) green on PHP 8.1 / PHPUnit 10 and on
+Laravel 13 / PHPUnit 12 / PHP 8.5. The wave-1 deprecation gate caught one
+implicit-nullable parameter in the new tests on the 8.5 leg, which is what it
+is for.
 
 **Size:** the largest wave, and the only one with real design content. Its value
 is not Superroute-specific.

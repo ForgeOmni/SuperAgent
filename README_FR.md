@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.3.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.4.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -42,6 +42,7 @@ echo $result->text();
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
 - [Profils et politique d'outils](#profils-et-politique-doutils-v130)
+- [Résultats d'outils différés](#résultats-doutils-différés-v140)
 - [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
 - [Boucle d'agent](#boucle-dagent)
@@ -812,6 +813,82 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 Recommandé partout où du texte fourni par l'utilisateur est injecté dans un message de rôle système — goals, skills, imports mémoire.
 
 ---
+
+## Résultats d'outils différés *(v1.4.0)*
+
+Un outil qui a besoin d'un humain — une approbation, une signature, une
+décision que personne dans le processus ne peut prendre — répond par un ticket
+plutôt que par un résultat :
+
+```php
+use SuperAgent\Tools\ToolResult;
+
+public function execute(array $input): ToolResult
+{
+    $approval = $this->approvals->request($input);
+
+    return ToolResult::deferred($approval->id, ['summary' => 'Annuler la commande 42']);
+}
+```
+
+Le tour se termine proprement, et le résultat porte tout ce qu'il faut pour le
+finir plus tard :
+
+```php
+$result = $agent->run('annule la commande 42');
+
+if ($result->isAwaitingHuman()) {
+    foreach ($result->deferrals() as $deferral) {
+        // $deferral->ticketId, ->toolName, ->meta — ce qu'on montre au valideur
+    }
+
+    $row->update(['envelope' => $result->resume->toJson()]);
+    return;
+}
+```
+
+Quand la réponse arrive — des minutes plus tard, dans un autre processus, après
+un déploiement :
+
+```php
+$final = $agent->resume(
+    $row->envelope,                       // le JSON, un tableau ou l'objet
+    $approvalId,
+    ToolResult::success('Commande 42 annulée.'),
+);
+```
+
+La conversation reprend exactement là où elle s'était arrêtée, dans le format
+de chaque fournisseur. Un tour repris peut différer à nouveau, et
+`$final->resume` porte alors la nouvelle enveloppe.
+
+### Ce que contient l'enveloppe, et pourquoi
+
+Le SDK ne conserve aucun état entre les deux appels : l'enveloppe **est**
+l'état, et elle se sérialise. Elle porte la transcription, les résultats
+d'outils qui *ont* abouti dans le même tour (un fournisseur refuse un message
+d'assistant dont les appels d'outils ne sont qu'à moitié répondus, donc les
+résultats terminés attendent avec celui qui manque), les tickets en attente et
+les réponses déjà recueillies.
+
+Une reprise est refusée — `ResumeException`, avant tout appel au modèle — sur
+un ticket inconnu, un ticket déjà répondu, une enveloppe expirée
+(`superagent.resume.ttl_seconds`, 0 pour aucune expiration) ou une enveloppe
+créée par un autre fournisseur. Une livraison de file dupliquée ou un double
+clic sur « Approuver » ne peut donc pas exécuter le même outil deux fois.
+
+### Depuis un hook, sans toucher à l'outil
+
+Un hook `PreToolUse` pouvait répondre autoriser, refuser, ou « demander » — et
+« demander » retombait dans le flux normal, faute de quelqu'un à qui demander
+dans une boucle synchrone. Il existe maintenant une quatrième réponse, et
+l'outil n'est jamais exécuté :
+
+```php
+HookResult::defer($approvalId, ['requested_by' => 'agent']);
+```
+
+*Depuis la v1.4.0.*
 
 ## Profils et politique d'outils *(v1.3.0)*
 
