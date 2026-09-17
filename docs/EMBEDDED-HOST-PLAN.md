@@ -91,7 +91,7 @@ supply-chain workflow still pass.
 
 ---
 
-## Wave 2 — v1.3.0 · Embedded profile and tool policy (A1 + A2)
+## Wave 2 — v1.3.0 · Embedded profile and tool policy (A1 + A2) — **shipped**
 
 **Why:** an SDK embedded in a delivery platform must not be able to run shell
 commands, edit files or fetch arbitrary URLs. Today `Agent::initializeTools()`
@@ -132,6 +132,30 @@ it is a hope.
 **Acceptance:** with `profile: embedded` and an explicit tool list, no class
 under `SuperAgent\Tools\Builtin` is reachable, proven by test rather than by
 configuration review.
+
+**What it actually took**
+
+Close to the estimate, plus one thing the plan had assumed away. `ToolPolicy`
+filters by category — and three builtins (`CreateGoalTool`, `GetGoalTool`,
+`UpdateGoalTool`) declared none, so they inherited the base `general`, which no
+deny list names. A category-based policy could not have filtered them at all.
+They are `planning` now, and `BuiltinToolCategoryLockdownTest` fails on the next
+builtin that forgets, in both directions: a tool that inherits the base
+category, and a `HOST_CATEGORIES` entry that no builtin declares any more.
+
+Two design points settled while building it:
+
+- **A refused call is an error result, not an exception.** Raising mid-run
+  would let one refused tool abort a conversation. Contradictions in the
+  caller's own configuration — a tool it named itself that its own policy
+  refuses — do raise, at construction, which is the earliest moment they can.
+- **A host's own policy merges over the profile's floor rather than replacing
+  it.** `'tool_policy' => ['read_only_only' => true]` on an embedded agent
+  keeps the host-category denials underneath. Dropping the floor is
+  `'tool_policy' => false`, which is explicit.
+
+3450 tests (25 new) green on PHP 8.1 / PHPUnit 10 and on Laravel 13 / PHPUnit
+12 / PHP 8.5.
 
 **Size:** small-to-medium, and the highest safety return in the plan.
 

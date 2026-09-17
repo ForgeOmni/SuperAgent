@@ -125,6 +125,13 @@ class QueryEngine
      */
     protected ?SpillPolicy $spillPolicy = null;
 
+    /**
+     * Enforcement point 2 of 2 (the Agent constructor is the first): a tool is
+     * re-checked against the policy immediately before it runs, because the
+     * map it is looked up in can gain entries after the agent was built.
+     */
+    protected ?\SuperAgent\Tools\ToolPolicy $toolPolicy = null;
+
     public function __construct(
         protected readonly LLMProvider $provider,
         protected readonly array $tools = [],
@@ -141,7 +148,9 @@ class QueryEngine
         ?CostAutopilot $costAutopilot = null,
         ?CheckpointManager $checkpointManager = null,
         ?SmartContextManager $smartContextManager = null,
+        ?\SuperAgent\Tools\ToolPolicy $toolPolicy = null,
     ) {
+        $this->toolPolicy = $toolPolicy;
         foreach ($this->tools as $tool) {
             $this->toolMap[$tool->name()] = $tool;
         }
@@ -570,9 +579,10 @@ class QueryEngine
             $toolInput = $block->toolInput ?? [];
             $toolUseId = $block->toolUseId;
 
-            // --- Step 1: Permission check (allowed/denied lists) ---
-            if (! $this->isToolAllowed($toolName)) {
-                $content = "Error: Tool '{$toolName}' is not permitted.";
+            // --- Step 1: Permission check (allowed/denied lists, tool policy) ---
+            $refusal = $this->toolRefusalReason($toolName);
+            if ($refusal !== null) {
+                $content = 'Error: ' . $refusal;
                 $results[] = ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
                 $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
                 continue;
@@ -720,8 +730,9 @@ class QueryEngine
         $toolInput = $block->toolInput ?? [];
         $toolUseId = $block->toolUseId;
 
-        if (!$this->isToolAllowed($toolName)) {
-            $content = "Error: Tool '{$toolName}' is not permitted.";
+        $refusal = $this->toolRefusalReason($toolName);
+        if ($refusal !== null) {
+            $content = 'Error: ' . $refusal;
             $this->streamingHandler?->emitToolResult($toolUseId, $toolName, $content, true);
             return ['tool_use_id' => $toolUseId, 'content' => $content, 'is_error' => true];
         }
@@ -938,22 +949,42 @@ class QueryEngine
 
     protected function isToolAllowed(string $toolName): bool
     {
+        return $this->toolRefusalReason($toolName) === null;
+    }
+
+    /**
+     * Why this call is refused, or null when it may proceed.
+     *
+     * @since 1.3.0  policy check added beside the name lists
+     */
+    protected function toolRefusalReason(string $toolName): ?string
+    {
         // Check both the original name and its CC/SA alias
         $resolved = \SuperAgent\Tools\ToolNameResolver::toSuperAgent($toolName);
 
         if (in_array($toolName, $this->deniedTools, true)
             || in_array($resolved, $this->deniedTools, true)) {
-            return false;
+            return "Tool '{$toolName}' is not permitted.";
         }
 
         if ($this->allowedTools !== null) {
             if (!in_array($toolName, $this->allowedTools, true)
                 && !in_array($resolved, $this->allowedTools, true)) {
-                return false;
+                return "Tool '{$toolName}' is not permitted.";
             }
         }
 
-        return true;
+        if ($this->toolPolicy !== null) {
+            $tool = $this->toolMap[$toolName] ?? $this->toolMap[$resolved] ?? null;
+            if ($tool !== null) {
+                $reason = $this->toolPolicy->refusalReason($tool);
+                if ($reason !== null) {
+                    return 'Refused: ' . $reason . '.';
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

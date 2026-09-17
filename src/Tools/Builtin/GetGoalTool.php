@@ -29,6 +29,12 @@ class GetGoalTool extends Tool
         return 'get_goal';
     }
 
+    public function category(): string
+    {
+        return 'planning';
+    }
+
+
     public function description(): string
     {
         return 'Get the current goal for this thread, including status, budgets, '

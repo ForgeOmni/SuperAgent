@@ -18,7 +18,10 @@ use SuperAgent\Providers\ProviderRegistry;
 use SuperAgent\AutoMode\TaskAnalyzer;
 use SuperAgent\AutoMode\AutoModeAgent;
 use SuperAgent\Tools\ToolLoader;
+use SuperAgent\Tools\ToolPolicy;
 use SuperAgent\Tools\Builtin\AgentTool;
+use SuperAgent\Config\Profile;
+use SuperAgent\Exceptions\ToolPolicyException;
 
 class Agent
 {
@@ -52,8 +55,32 @@ class Agent
     
     protected ?ToolLoader $toolLoader = null;
 
+    protected bool $toolsWereNamedByCaller = false;
+
+    protected string $profile = Profile::WORKSTATION;
+
+    protected ?ToolPolicy $toolPolicy = null;
+
+    /**
+     * An agent built for a host that embeds this SDK in its own product:
+     * no tools load unless they are handed over, and anything that can reach
+     * the machine or the network is refused even if it is.
+     *
+     * @since 1.3.0
+     */
+    public static function embedded(array $config = []): static
+    {
+        $config['profile'] = Profile::EMBEDDED;
+
+        return new static($config);
+    }
+
     public function __construct(array $config = [])
     {
+        $config = Profile::apply($config);
+        $this->profile = $config['profile'];
+        $this->toolPolicy = $this->resolveToolPolicy($config);
+
         $this->provider = $this->resolveProvider($config);
         $this->maxTurns = $config['max_turns'] ?? static::config('superagent.agent.max_turns', 50);
         $this->maxBudgetUsd = (float) ($config['max_budget_usd'] ?? static::config('superagent.agent.max_budget_usd', 0));
@@ -66,6 +93,11 @@ class Agent
 
         // Tool loading configuration
         $this->initializeTools($config);
+
+        // Enforcement point 1 of 2: what the agent is allowed to hold. The
+        // second is in QueryEngine, immediately before a call, for tools that
+        // arrive after this point.
+        $this->enforceToolPolicyOnInitialTools();
 
         // Inject provider config into AgentTool so sub-agents share the same LLM credentials
         $this->injectProviderConfigIntoAgentTools($config);
@@ -138,6 +170,7 @@ class Agent
         // If tools are explicitly provided, use them
         if (isset($config['tools'])) {
             $this->tools = $config['tools'];
+            $this->toolsWereNamedByCaller = true;
             return;
         }
         
@@ -170,9 +203,101 @@ class Agent
 
     public function addTool(ToolInterface $tool): static
     {
+        if ($this->toolPolicy !== null) {
+            $reason = $this->toolPolicy->refusalReason($tool);
+            if ($reason !== null) {
+                throw new ToolPolicyException(ucfirst($reason) . '.');
+            }
+        }
+
         $this->tools[] = $tool;
 
         return $this;
+    }
+
+    /**
+     * The tools this agent currently holds, after any policy has been applied.
+     *
+     * @return ToolInterface[]
+     *
+     * @since 1.3.0
+     */
+    public function getTools(): array
+    {
+        return $this->tools;
+    }
+
+    /**
+     * The policy this agent enforces, or null when it enforces none.
+     *
+     * @since 1.3.0
+     */
+    public function getToolPolicy(): ?ToolPolicy
+    {
+        return $this->toolPolicy;
+    }
+
+    /**
+     * The profile this agent was built with: `workstation` or `embedded`.
+     *
+     * @since 1.3.0
+     */
+    public function getProfile(): string
+    {
+        return $this->profile;
+    }
+
+    /**
+     * A policy handed in as an array, a ToolPolicy, or false to opt out of the
+     * profile's own default.
+     */
+    protected function resolveToolPolicy(array $config): ?ToolPolicy
+    {
+        $spec = $config['tool_policy'] ?? static::config('superagent.tool_policy');
+
+        if ($spec instanceof ToolPolicy) {
+            return $spec;
+        }
+
+        if ($spec === false || $spec === null || ! is_array($spec) || ToolPolicy::isEmptySpec($spec)) {
+            return null;
+        }
+
+        return ToolPolicy::fromArray($spec);
+    }
+
+    /**
+     * Tools named by the caller are a contradiction with the caller's own
+     * policy, so they raise rather than disappear. Tools the loader produced
+     * are filtered: a profile that leaves the default set loading and a policy
+     * that refuses half of it is a configuration, not a mistake.
+     */
+    protected function enforceToolPolicyOnInitialTools(): void
+    {
+        if ($this->toolPolicy === null || $this->tools === []) {
+            return;
+        }
+
+        if ($this->toolsWereNamedByCaller) {
+            foreach ($this->tools as $tool) {
+                $reason = $this->toolPolicy->refusalReason($tool);
+                if ($reason !== null) {
+                    throw new ToolPolicyException(ucfirst($reason) . '.');
+                }
+            }
+
+            return;
+        }
+
+        $this->tools = $this->toolPolicy->filter($this->tools);
+    }
+
+    /** Loader-produced tools are filtered, the same way they are at construction. */
+    protected function applyToolPolicyToLoadedTools(): void
+    {
+        if ($this->toolPolicy !== null) {
+            $this->tools = $this->toolPolicy->filter($this->tools);
+        }
     }
 
     public function withSystemPrompt(string $prompt): static
@@ -466,7 +591,8 @@ class Agent
         }
         
         $this->tools = $this->toolLoader->loadForTask($task);
-        
+        $this->applyToolPolicyToLoadedTools();
+
         return $this;
     }
     
@@ -480,7 +606,8 @@ class Agent
         }
         
         $this->tools = $this->toolLoader->loadMany($toolNames);
-        
+        $this->applyToolPolicyToLoadedTools();
+
         return $this;
     }
     
@@ -687,6 +814,7 @@ class Agent
             allowedTools: $this->allowedTools,
             deniedTools: $this->deniedTools,
             maxBudgetUsd: $this->maxBudgetUsd,
+            toolPolicy: $this->toolPolicy,
         );
 
         // Pi-borrowed: let the engine pull mid-turn corrections from this

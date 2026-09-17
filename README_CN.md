@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-1.2.0-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-1.3.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -41,6 +41,7 @@ echo $result->text();
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
+- [Profile 与工具策略](#profile-与工具策略-v130)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
 - [Agent 循环](#agent-循环)
@@ -810,6 +811,56 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 任何把用户文本注入 system-role 消息的地方都建议用一下 —— goals、skills、memory 导入。
 
 ---
+
+## Profile 与工具策略 *(v1.3.0)*
+
+`workstation` 是默认档，也是这个 SDK 一直以来的行为：把开发者的机器当作工作区，shell、
+文件编辑、git、HTTP 默认全部加载，除非你另行指定。
+
+`embedded` 是把 SDK 嵌进你自己的产品、面向非开发者用户时的档位：**你没有交过去的工具一个都不加载**，
+而能碰到机器或网络的工具即便被误交进来也会被拒绝。
+
+```php
+use SuperAgent\Agent;
+
+$agent = Agent::embedded([
+    'provider' => 'anthropic',
+    'tools'    => $myDomainTools,   // 只有你自己的工具
+]);
+```
+
+profile **只提供默认值**——你显式传入的配置永远优先，两个方向都是。把
+`SUPERAGENT_PROFILE=embedded` 或 `superagent.profile` 设上，就是整个进程的默认档。
+
+### 工具策略
+
+`allowed_tools` / `denied_tools` 按工具**名字**管调用；策略则按工具**是什么**来管：它的类别，
+以及它是否只读。
+
+```php
+$agent = new Agent([
+    'provider'    => 'anthropic',
+    'tool_policy' => [
+        'deny_categories' => ['execution', 'file', 'network'],
+        'read_only_only'  => true,     // 拒绝一切会写的工具
+        'allow_list'      => null,     // 或者给一份名字白名单
+        'deny_list'       => [],
+    ],
+]);
+```
+
+策略会执行**两次**：装配工具列表时一次，每次调用前再一次。第二次才是关键——工具可能在 agent
+建好之后才出现（插件、MCP 服务器的工具目录、SDK 升级新增的内置工具），而"这个 agent 不能执行
+shell 命令"必须是 agent 自身的属性，而不是"构造参数写得够不够小心"这件事的副产品。
+
+你自己点名、却被策略拒绝的工具，会在构造时抛 `ToolPolicyException`——那是你自己配置里的矛盾，
+在最早的时刻暴露出来。加载器自动产出的工具则是被过滤掉。被拒绝的调用会以错误结果返回给模型并
+说明是哪条规则拒的，对话不会中断。
+
+`embedded` 档默认套用 `ToolPolicy::HOST_CATEGORIES`。传 `'tool_policy' => false` 可以退出这个默认，
+传你自己的规则则是**叠加**在 profile 的底线之上，而不是替换它。
+
+*自 v1.3.0 起。*
 
 ## 运行期护栏 *(v0.9.8)*
 

@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.2.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.3.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Docs**: [Installation](INSTALL.md) · [安装](INSTALL_CN.md) · [Installation FR](INSTALL_FR.md) · [Advanced usage](docs/ADVANCED_USAGE.md) · [API docs](docs/)
@@ -41,6 +41,7 @@ echo $result->text();
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (codex `/goal` parity)](#goal-mode-codex-goal-parity-v098)
+- [Profiles and tool policy](#profiles-and-tool-policy-v130)
 - [Operational guardrails](#operational-guardrails-v098)
 - [Companion tools (jcode-inspired)](#companion-tools-jcode-inspired)
 - [Agent Loop](#agent-loop)
@@ -844,6 +845,66 @@ Recommended at every site that injects user-supplied text into a
 system-role message — goals, skills, memory imports.
 
 ---
+
+## Profiles and tool policy *(v1.3.0)*
+
+`workstation` — the default, and what this SDK has always done — treats a
+developer's machine as the workspace: shell, file edits, git and HTTP load
+unless you say otherwise.
+
+`embedded` is for running the SDK inside your own product, for people who are
+not its developers. Nothing loads that you did not hand over, and anything that
+can reach the machine or the network is refused even if it is handed over by
+mistake.
+
+```php
+use SuperAgent\Agent;
+
+$agent = Agent::embedded([
+    'provider' => 'anthropic',
+    'tools'    => $myDomainTools,   // yours, and only yours
+]);
+```
+
+A profile supplies **defaults only** — anything you pass wins, in both
+directions. Set `SUPERAGENT_PROFILE=embedded`, or `superagent.profile`, to make
+it the default for every agent in the process.
+
+### Tool policy
+
+`allowed_tools` / `denied_tools` gate calls by tool *name*. A policy gates by
+what a tool **is**: its category, and whether it only reads.
+
+```php
+$agent = new Agent([
+    'provider'    => 'anthropic',
+    'tool_policy' => [
+        'deny_categories' => ['execution', 'file', 'network'],
+        'read_only_only'  => true,     // refuse anything that writes
+        'allow_list'      => null,     // or a list of names
+        'deny_list'       => [],
+    ],
+]);
+```
+
+It is enforced **twice**: when the tool list is assembled, and again
+immediately before each call. The second check is the point — a tool can arrive
+after the agent was built, from a plugin, an MCP server's catalog, or a builtin
+introduced by an SDK upgrade, and "this agent cannot run shell commands" has to
+be a property of the agent rather than a fact about how carefully its
+constructor arguments were written.
+
+Tools you name yourself and the policy refuses raise `ToolPolicyException` at
+construction — a contradiction in your own configuration, surfaced at the
+earliest possible moment. Tools the loader produced are filtered instead. A
+refused call comes back to the model as an error result naming the rule, so the
+conversation continues.
+
+`embedded` applies `ToolPolicy::HOST_CATEGORIES` as its default policy. Pass
+`'tool_policy' => false` to opt out of it, or your own spec to add to it — your
+rules merge over the profile's floor rather than replacing it.
+
+*Since v1.3.0.*
 
 ## Operational guardrails *(v0.9.8)*
 

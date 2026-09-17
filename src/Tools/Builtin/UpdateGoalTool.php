@@ -33,6 +33,11 @@ class UpdateGoalTool extends Tool
         return 'update_goal';
     }
 
+    public function category(): string
+    {
+        return 'planning';
+    }
+
     public function description(): string
     {
         return "Update the existing goal. Use this tool only to mark the goal achieved. "

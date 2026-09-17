@@ -37,6 +37,11 @@ class CreateGoalTool extends Tool
         return 'create_goal';
     }
 
+    public function category(): string
+    {
+        return 'planning';
+    }
+
     public function description(): string
     {
         return 'Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks. '

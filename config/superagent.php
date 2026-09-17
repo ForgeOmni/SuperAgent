@@ -106,6 +106,54 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Profile  (1.3.0+)
+    |--------------------------------------------------------------------------
+    | The posture agents are built with.
+    |
+    |   workstation  the historical default — a developer's machine is the
+    |                workspace, so the default tool set (shell, file edits,
+    |                git, HTTP) loads unless the caller says otherwise.
+    |
+    |   embedded     the SDK runs inside a host's own product, serving people
+    |                who are not its developers: no tools load unless the host
+    |                hands them over, anything that can reach the machine or
+    |                the network is refused by the tool policy below even if it
+    |                is handed over by mistake, and experimental paths, plugin
+    |                discovery, Claude Code skill/agent directories and local
+    |                persistence are all off.
+    |
+    | A profile supplies defaults only. Anything passed to the Agent
+    | constructor wins over it, in both directions.
+    */
+    'profile' => env('SUPERAGENT_PROFILE', 'workstation'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Tool policy  (1.3.0+)
+    |--------------------------------------------------------------------------
+    | What an agent may hold, judged by what a tool *is* rather than by its
+    | name — checked when the tool list is assembled and again immediately
+    | before each call, so a tool that arrives later (a plugin, an MCP
+    | server's catalog, a new builtin after an upgrade) is covered too.
+    |
+    |   allow_list       list of tool names; null means "no allow list"
+    |   deny_list        list of tool names refused outright
+    |   deny_categories  categories refused, e.g. ['execution', 'file']
+    |   read_only_only   refuse any tool that does not declare itself read-only
+    |
+    | Empty here means no policy, which is the historical behaviour. The
+    | `embedded` profile supplies ToolPolicy::HOST_CATEGORIES as its default;
+    | pass `'tool_policy' => false` to an Agent to opt out of that.
+    */
+    'tool_policy' => [
+        'allow_list' => null,
+        'deny_list' => [],
+        'deny_categories' => [],
+        'read_only_only' => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Default LLM Provider
     |--------------------------------------------------------------------------
     */

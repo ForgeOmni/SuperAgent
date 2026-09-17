@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-17
+
+### 💻 Summary
+
+**Wave 2 of the embedded-host plan: a posture an embedded host cannot lose by forgetting an option.** `Agent::initializeTools()` loads the default tool set — shell, file edits, git, HTTP — whenever the caller does not say otherwise, which is right on a developer's machine and wrong inside a product serving people who are not its developers. Safety that depends on the caller remembering an argument is not safety. The new `embedded` profile loads nothing it was not handed, and the new `ToolPolicy` refuses tools by what they *are* rather than by name — checked at assembly **and** again immediately before every call, so a tool that arrives later (a plugin, an MCP catalog, a builtin added by an upgrade) is covered too. `workstation` is still the default and behaves exactly as before.
+
+### Added
+
+- **`Agent::embedded()`** and **`superagent.profile`** (`workstation` | `embedded`, env `SUPERAGENT_PROFILE`). The embedded profile turns off tool auto-loading, experimental paths, plugin discovery, Claude Code skill/agent directories and local persistence, and applies a default tool policy. A profile supplies defaults only — explicit config wins in both directions.
+- **`SuperAgent\Tools\ToolPolicy`** — `allow_list`, `deny_list`, `deny_categories`, `read_only_only`, plus `ToolPolicy::hostSafe()` and the `HOST_CATEGORIES` constant (the categories that can reach the machine, the network or the working copy). Configurable per agent or in `superagent.tool_policy`.
+- **Two-point enforcement.** `Agent` filters loader-produced tools and raises `ToolPolicyException` for tools the caller named itself (a contradiction in the caller's own configuration, surfaced at construction); `QueryEngine` re-checks before each call and returns an error result naming the rule, so one refused tool never aborts a conversation.
+- **`Agent::getTools()`, `getToolPolicy()`, `getProfile()`** — accessors a host needs to assert its own posture in tests.
+- **`BuiltinToolCategoryLockdownTest`** — fails on any builtin that inherits the base category instead of declaring one, and on any `HOST_CATEGORIES` entry that no builtin declares. A category-less tool reads as `general`, which no deny list names, so it would reach an embedded host's model whatever that host configured.
+
+### Fixed
+
+- **`CreateGoalTool`, `GetGoalTool` and `UpdateGoalTool` declared no category**, so they fell back to the base `general` and no category-based policy could filter them. They are `planning` now; the lockdown test above keeps the next one from slipping through.
+
+### Notes
+
+- Nothing changes for an existing caller: the default profile is `workstation`, `superagent.tool_policy` ships empty, and an agent without a policy takes exactly the path it took before.
+
 ## [1.2.0] - 2026-09-17
 
 ### 💻 Summary

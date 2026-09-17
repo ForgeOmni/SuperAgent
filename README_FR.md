@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.2.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.3.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -41,6 +41,7 @@ echo $result->text();
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
+- [Profils et politique d'outils](#profils-et-politique-doutils-v130)
 - [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
 - [Boucle d'agent](#boucle-dagent)
@@ -811,6 +812,67 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 Recommandé partout où du texte fourni par l'utilisateur est injecté dans un message de rôle système — goals, skills, imports mémoire.
 
 ---
+
+## Profils et politique d'outils *(v1.3.0)*
+
+`workstation` est le profil par défaut, et ce que ce SDK a toujours fait : la
+machine du développeur est l'espace de travail, donc le shell, l'édition de
+fichiers, git et HTTP se chargent sauf indication contraire.
+
+`embedded` est le profil pour faire tourner le SDK à l'intérieur de votre
+propre produit, pour des personnes qui n'en sont pas les développeurs. Rien ne
+se charge que vous n'ayez remis vous-même, et tout ce qui peut atteindre la
+machine ou le réseau est refusé même si c'est remis par erreur.
+
+```php
+use SuperAgent\Agent;
+
+$agent = Agent::embedded([
+    'provider' => 'anthropic',
+    'tools'    => $myDomainTools,   // les vôtres, et eux seuls
+]);
+```
+
+Un profil ne fournit que des **valeurs par défaut** — ce que vous passez
+l'emporte, dans les deux sens. Définissez `SUPERAGENT_PROFILE=embedded`, ou
+`superagent.profile`, pour en faire le défaut de tout le processus.
+
+### Politique d'outils
+
+`allowed_tools` / `denied_tools` filtrent les appels par **nom**. Une politique
+filtre par ce qu'un outil **est** : sa catégorie, et s'il se contente de lire.
+
+```php
+$agent = new Agent([
+    'provider'    => 'anthropic',
+    'tool_policy' => [
+        'deny_categories' => ['execution', 'file', 'network'],
+        'read_only_only'  => true,     // refuser tout ce qui écrit
+        'allow_list'      => null,     // ou une liste de noms
+        'deny_list'       => [],
+    ],
+]);
+```
+
+Elle est appliquée **deux fois** : à l'assemblage de la liste d'outils, puis de
+nouveau juste avant chaque appel. C'est le second contrôle qui compte — un
+outil peut arriver après la construction de l'agent (un plugin, le catalogue
+d'un serveur MCP, un outil intégré ajouté par une mise à jour du SDK), et « cet
+agent ne peut pas exécuter de commandes shell » doit être une propriété de
+l'agent, pas une conséquence du soin apporté à ses arguments de construction.
+
+Les outils que vous nommez vous-même et que la politique refuse lèvent
+`ToolPolicyException` à la construction : une contradiction dans votre propre
+configuration, signalée au plus tôt. Ceux produits par le chargeur sont
+simplement filtrés. Un appel refusé revient au modèle sous forme de résultat
+d'erreur nommant la règle, donc la conversation continue.
+
+`embedded` applique `ToolPolicy::HOST_CATEGORIES` par défaut. Passez
+`'tool_policy' => false` pour y renoncer, ou votre propre spécification pour
+l'enrichir : vos règles se superposent au socle du profil, elles ne le
+remplacent pas.
+
+*Depuis la v1.3.0.*
 
 ## Garde-fous opérationnels *(v0.9.8)*
 
