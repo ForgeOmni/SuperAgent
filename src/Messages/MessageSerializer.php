@@ -115,6 +115,9 @@ final class MessageSerializer
             'content' => $block->content,
             'is_error' => $block->isError,
             'thinking' => $block->thinking,
+            // Carried provider detail (Gemini thought signatures): a resumed
+            // conversation has to replay a tool call exactly as it arrived.
+            'meta' => $block->meta,
         ];
     }
 
@@ -130,6 +133,7 @@ final class MessageSerializer
             content: $data['content'] ?? null,
             isError: $data['is_error'] ?? null,
             thinking: $data['thinking'] ?? null,
+            meta: is_array($data['meta'] ?? null) ? $data['meta'] : null,
         );
     }
 }

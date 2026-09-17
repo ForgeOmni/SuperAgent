@@ -127,17 +127,29 @@ class GeminiEncoder
     {
         $parts = [];
         foreach ($message->content as $block) {
+            // A thought signature signs the part it came back on, and Gemini 3
+            // refuses a replayed function call that lost it — so whatever the
+            // parser carried on the block goes back out on the same part.
+            $signature = $block->meta('gemini_thought_signature');
             if ($block->type === 'text' && $block->text !== null && $block->text !== '') {
-                $parts[] = ['text' => $block->text];
+                $part = ['text' => $block->text];
+                if (is_string($signature) && $signature !== '') {
+                    $part['thoughtSignature'] = $signature;
+                }
+                $parts[] = $part;
                 continue;
             }
             if ($block->type === 'tool_use') {
-                $parts[] = [
+                $part = [
                     'functionCall' => [
                         'name' => (string) ($block->toolName ?? ''),
                         'args' => $block->toolInput ?? (object) [],
                     ],
                 ];
+                if (is_string($signature) && $signature !== '') {
+                    $part['thoughtSignature'] = $signature;
+                }
+                $parts[] = $part;
                 continue;
             }
             // thinking / vendor-only blocks: dropped.

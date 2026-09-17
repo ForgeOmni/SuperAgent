@@ -100,6 +100,33 @@ class ResponseFormat
         return [];
     }
 
+    /**
+     * Convert to Gemini API format.
+     *
+     * Gemini takes structured output inside `generationConfig`, not beside it,
+     * and its schema dialect is the OpenAPI 3.0 subset — the caller (the
+     * provider) sanitises what it gets here before putting it on the wire.
+     */
+    public function toGeminiFormat(): array
+    {
+        if ($this->type === 'text') {
+            return [];
+        }
+
+        if ($this->type === 'json_object') {
+            return ['responseMimeType' => 'application/json'];
+        }
+
+        if ($this->type === 'json_schema' && $this->schema !== null) {
+            return [
+                'responseMimeType' => 'application/json',
+                'responseSchema' => $this->schema,
+            ];
+        }
+
+        return [];
+    }
+
     public function isStructured(): bool
     {
         return $this->type !== 'text';

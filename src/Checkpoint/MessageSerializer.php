@@ -47,7 +47,13 @@ class MessageSerializer
         $data = [
             '_class' => 'assistant',
             'role' => 'assistant',
-            'content' => array_map(fn (ContentBlock $b) => $b->toArray(), $message->content),
+            // toArray() is the provider-facing shape and leaves out the
+            // carried provider detail; a checkpoint that drops a Gemini
+            // thought signature comes back unable to replay its tool rounds.
+            'content' => array_map(
+                fn (ContentBlock $b) => $b->meta !== null ? $b->toArray() + ['meta' => $b->meta] : $b->toArray(),
+                $message->content
+            ),
             'stop_reason' => $message->stopReason?->value,
             'metadata' => $message->metadata,
         ];
@@ -143,12 +149,15 @@ class MessageSerializer
     {
         $type = $data['type'] ?? 'text';
 
+        $meta = is_array($data['meta'] ?? null) ? $data['meta'] : null;
+
         return match ($type) {
-            'text' => ContentBlock::text($data['text'] ?? ''),
+            'text' => ContentBlock::text($data['text'] ?? '', $meta),
             'tool_use' => ContentBlock::toolUse(
                 $data['id'] ?? $data['tool_use_id'] ?? '',
                 $data['name'] ?? $data['tool_name'] ?? '',
                 $data['input'] ?? $data['tool_input'] ?? [],
+                $meta,
             ),
             'tool_result' => ContentBlock::toolResult(
                 $data['tool_use_id'] ?? '',

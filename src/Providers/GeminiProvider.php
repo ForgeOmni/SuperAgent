@@ -40,6 +40,9 @@ class GeminiProvider implements LLMProvider
 
     protected int $maxRetries;
 
+    /** @var list<array<string, string>> */
+    protected array $safetySettings;
+
     public function __construct(array $config)
     {
         $apiKey = $config['api_key'] ?? null;
@@ -54,6 +57,11 @@ class GeminiProvider implements LLMProvider
         $this->model = $config['model'] ?? 'gemini-3.8-flash';
         $this->maxTokens = $config['max_tokens'] ?? 8192;
         $this->maxRetries = $config['max_retries'] ?? 3;
+        // Sent on every request when the host configured them; a per-call
+        // `safety_settings` option still wins.
+        $this->safetySettings = is_array($config['safety_settings'] ?? null)
+            ? array_values($config['safety_settings'])
+            : [];
 
         $this->client = new Client([
             'base_uri' => $baseUrl,
@@ -209,6 +217,23 @@ class GeminiProvider implements LLMProvider
             $body['generationConfig']['thinkingConfig'] = $thinkingCfg;
         }
 
+        // Structured output. Gemini puts it inside generationConfig and speaks
+        // the OpenAPI 3.0 subset, so the schema goes through the same
+        // sanitiser as a tool's parameters. Accepts a ResponseFormat, or the
+        // raw pair for a caller that already has Gemini's own shape.
+        $structured = $this->buildStructuredOutput($options);
+        if ($structured !== []) {
+            $body['generationConfig'] = array_merge($body['generationConfig'], $structured);
+        }
+
+        // Safety thresholds, as given. Gemini applies its own defaults when
+        // none are sent, which is rarely what an application that cares about
+        // this has decided.
+        $safety = $options['safety_settings'] ?? $this->safetySettings;
+        if (is_array($safety) && $safety !== []) {
+            $body['safetySettings'] = array_values($safety);
+        }
+
         if ($systemPrompt !== null && $systemPrompt !== '') {
             $body['systemInstruction'] = [
                 'parts' => [['text' => $systemPrompt]],
@@ -230,6 +255,34 @@ class GeminiProvider implements LLMProvider
         }
 
         return $body;
+    }
+
+    /**
+     * `generationConfig` keys for structured output, from a ResponseFormat
+     * (`response_format`) or from the raw `response_schema` /
+     * `response_mime_type` options.
+     *
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    protected function buildStructuredOutput(array $options): array
+    {
+        $format = $options['response_format'] ?? null;
+        $config = $format instanceof ResponseFormat ? $format->toGeminiFormat() : [];
+
+        if (isset($options['response_mime_type']) && is_string($options['response_mime_type'])) {
+            $config['responseMimeType'] = $options['response_mime_type'];
+        }
+        if (isset($options['response_schema']) && is_array($options['response_schema'])) {
+            $config['responseSchema'] = $options['response_schema'];
+            $config['responseMimeType'] ??= 'application/json';
+        }
+
+        if (isset($config['responseSchema'])) {
+            $config['responseSchema'] = $this->sanitizeSchema($config['responseSchema']);
+        }
+
+        return $config;
     }
 
     /**
@@ -420,6 +473,7 @@ class GeminiProvider implements LLMProvider
         $message = new AssistantMessage();
         $accumulatedText = '';
         $accumulatedThought = '';
+        $textSignature = null;
         $toolCalls = [];
         $groundingSources = [];
         $inputTokens = 0;
@@ -472,14 +526,23 @@ class GeminiProvider implements LLMProvider
                             $accumulatedThought .= $part['text'];
                             continue;
                         }
+                        // A thought signature signs the part it arrived on and
+                        // has to be handed back on the next request: Gemini 3
+                        // refuses a replayed function call whose signature is
+                        // missing, which is every tool round after the first.
+                        $signature = isset($part['thoughtSignature']) && is_string($part['thoughtSignature'])
+                            ? $part['thoughtSignature']
+                            : null;
                         if (isset($part['text'])) {
                             $accumulatedText .= $part['text'];
+                            $textSignature ??= $signature;
                             $handler?->emitText($part['text'], $accumulatedText);
                         } elseif (isset($part['functionCall'])) {
                             $call = $part['functionCall'];
                             $toolCalls[] = [
                                 'name' => $call['name'] ?? '',
                                 'args' => $call['args'] ?? [],
+                                'signature' => $signature,
                             ];
                         }
                     }
@@ -518,7 +581,10 @@ class GeminiProvider implements LLMProvider
         }
 
         if ($accumulatedText !== '') {
-            $message->content[] = ContentBlock::text($accumulatedText);
+            $message->content[] = ContentBlock::text(
+                $accumulatedText,
+                $textSignature !== null ? ['gemini_thought_signature' => $textSignature] : null,
+            );
         }
 
         // Gemini does not issue tool-call IDs; synthesize one so downstream
@@ -529,6 +595,9 @@ class GeminiProvider implements LLMProvider
                 $id,
                 $call['name'],
                 is_array($call['args']) ? $call['args'] : [],
+                isset($call['signature']) && is_string($call['signature'])
+                    ? ['gemini_thought_signature' => $call['signature']]
+                    : null,
             );
             $message->content[] = $block;
             $handler?->emitToolUse($block);

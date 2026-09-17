@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-09-17
+
+### 💻 Summary
+
+**Gemini can now drive a real tool loop through this SDK.** A host with its own hand-written Gemini client had three reasons to keep it: replayed function calls lost their thought signature and Gemini 3 refused them, structured output fell back to asking for JSON in words, and safety thresholds could not be set at all. All three are the provider's job, and now it does them.
+
+### Added
+
+- **Thought signatures survive the round trip.** `GeminiProvider` keeps the `thoughtSignature` that arrives on a `functionCall` (or a text part), carries it on the content block, and `GeminiEncoder` sends it back on the same part. Gemini 3 rejects a replayed call whose signature is missing — that is every tool round after the first, so multi-round tool use on Gemini 3 did not work before this.
+- **`ContentBlock::$meta`** — provider-side detail that must come back unchanged, keyed by provider, never shown to a user or given to a tool. `withMeta()` / `meta(key)` read it. `toArray()` deliberately leaves it out, because that is the shape that goes on the wire and an unknown key is a 400 from more than one provider; both `Messages\MessageSerializer` and `Checkpoint\MessageSerializer` carry it across a save, so a resumed conversation can still replay its tool rounds.
+- **Gemini-native structured output.** `ResponseFormat::toGeminiFormat()`, plus `response_format` / `response_schema` / `response_mime_type` options on `GeminiProvider`, emit `generationConfig.responseMimeType` and `responseSchema`. The schema goes through the same OpenAPI-3.0 sanitiser as a tool's parameters, so a JSON Schema with `$schema`, `additionalProperties` or `pattern` no longer 400s.
+- **Safety thresholds.** `safety_settings` as constructor config (per provider, also reachable through `createForHost`'s `extra`) or as a per-call option, which wins. Nothing is sent when neither is set, so an existing caller keeps Gemini's defaults exactly as before.
+
+
 ## [1.2.1] - 2026-09-17
 
 ### 💻 Summary
