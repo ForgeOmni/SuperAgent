@@ -133,7 +133,6 @@ class Phase3Test extends TestCase
 
         // Use reflection to test the protected method
         $method = new \ReflectionMethod($provider, 'formatSystemPrompt');
-        $method->setAccessible(true);
 
         $prompt = "Static part\n\n" . SystemPromptBuilder::CACHE_BOUNDARY . "\n\nDynamic part";
 
@@ -148,7 +147,6 @@ class Phase3Test extends TestCase
         $provider = new AnthropicProvider(['api_key' => 'test']);
 
         $method = new \ReflectionMethod($provider, 'formatSystemPrompt');
-        $method->setAccessible(true);
 
         $prompt = "Static part\n\n" . SystemPromptBuilder::CACHE_BOUNDARY . "\n\nDynamic part";
 
@@ -175,7 +173,6 @@ class Phase3Test extends TestCase
         $provider = new AnthropicProvider(['api_key' => 'test']);
 
         $method = new \ReflectionMethod($provider, 'formatSystemPrompt');
-        $method->setAccessible(true);
 
         $prompt = "Simple prompt without boundary";
 

@@ -75,7 +75,6 @@ class Phase10ObservabilityTest extends TestCase
     {
         $reflection = new \ReflectionClass($class);
         $property = $reflection->getProperty('instance');
-        $property->setAccessible(true);
         $property->setValue(null, null);
     }
 

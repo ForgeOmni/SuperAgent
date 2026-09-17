@@ -88,7 +88,6 @@ class MiniMaxVideoToolTest extends TestCase
         $ref = new \ReflectionObject($provider);
         while ($ref && ! $ref->hasProperty('client')) $ref = $ref->getParentClass();
         $p = $ref->getProperty('client');
-        $p->setAccessible(true);
         $p->setValue($provider, $client);
         return new MiniMaxVideoTool($provider);
     }

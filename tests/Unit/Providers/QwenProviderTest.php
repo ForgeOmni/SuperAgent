@@ -350,7 +350,6 @@ class QwenProviderTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $m = $rc->getMethod('buildRequestBody');
-        $m->setAccessible(true);
         return $m->invoke($p, $messages, $tools, $system, $options);
     }
 
@@ -366,7 +365,6 @@ class QwenProviderTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $prop = $rc->getProperty('client');
-        $prop->setAccessible(true);
         return (string) $prop->getValue($p)->getConfig('base_uri');
     }
 
@@ -377,7 +375,6 @@ class QwenProviderTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $prop = $rc->getProperty('client');
-        $prop->setAccessible(true);
         $headers = $prop->getValue($p)->getConfig()['headers'] ?? [];
         return array_change_key_case($headers, CASE_LOWER);
     }

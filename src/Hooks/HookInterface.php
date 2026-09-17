@@ -19,7 +19,7 @@ interface HookInterface
     /**
      * Check if the hook matches the given context
      */
-    public function matches(string $toolName = null, array $context = []): bool;
+    public function matches(?string $toolName = null, array $context = []): bool;
     
     /**
      * Check if this is an async hook

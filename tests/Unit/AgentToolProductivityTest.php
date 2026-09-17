@@ -33,7 +33,6 @@ class AgentToolProductivityTest extends TestCase
         $tool = new AgentTool();
         $rc = new ReflectionClass($tool);
         $activeTasks = $rc->getProperty('activeTasks');
-        $activeTasks->setAccessible(true);
         $activeTasks->setValue($tool, [
             $agentId => [
                 'task_id' => 'task_' . $agentId,
@@ -53,7 +52,6 @@ class AgentToolProductivityTest extends TestCase
     {
         $rc = new ReflectionClass($tool);
         $m = $rc->getMethod('recordToolUse');
-        $m->setAccessible(true);
         $m->invoke($tool, $agentId, $toolName, $input);
     }
 
@@ -61,7 +59,6 @@ class AgentToolProductivityTest extends TestCase
     {
         $rc = new ReflectionClass($tool);
         $m = $rc->getMethod('buildProductivityInfo');
-        $m->setAccessible(true);
         return $m->invoke($tool, $agentId, $childReportedTurns);
     }
 

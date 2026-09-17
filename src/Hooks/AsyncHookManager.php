@@ -218,7 +218,6 @@ class AsyncHookManager
         // Add the actual command
         $refl = new \ReflectionClass($hook);
         $commandProp = $refl->getProperty('command');
-        $commandProp->setAccessible(true);
         $command = $commandProp->getValue($hook);
         
         $script .= $command . "\n";

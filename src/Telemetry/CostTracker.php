@@ -59,7 +59,7 @@ class CostTracker
         string $model,
         int $inputTokens,
         int $outputTokens,
-        string $sessionId = null,
+        ?string $sessionId = null,
         array $metadata = []
     ): float {
         if (!$this->enabled) {
@@ -113,7 +113,7 @@ class CostTracker
     public function trackToolUsage(
         string $toolName,
         float $executionTime,
-        string $sessionId = null,
+        ?string $sessionId = null,
         array $metadata = []
     ): float {
         if (!$this->enabled) {
@@ -216,7 +216,7 @@ class CostTracker
     /**
      * Get cost summary.
      */
-    public function getCostSummary(Carbon $startDate = null, Carbon $endDate = null): array
+    public function getCostSummary(?Carbon $startDate = null, ?Carbon $endDate = null): array
     {
         $filtered = $this->costs;
 

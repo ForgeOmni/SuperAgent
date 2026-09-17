@@ -190,7 +190,6 @@ class ModelRefresh202609Test extends TestCase
     private function anthropicBody(AnthropicProvider $p, array $options): array
     {
         $m = new \ReflectionMethod($p, 'buildRequestBody');
-        $m->setAccessible(true);
 
         return $m->invoke($p, [new UserMessage('hi')], [$this->demoTool()], null, $options);
     }
@@ -203,7 +202,6 @@ class ModelRefresh202609Test extends TestCase
     private function responsesBody(OpenAIResponsesProvider $p, array $tools, array $options): array
     {
         $m = new \ReflectionMethod($p, 'buildRequestBody');
-        $m->setAccessible(true);
 
         return $m->invoke($p, [new UserMessage('hi')], $tools, null, $options);
     }

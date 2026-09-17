@@ -296,7 +296,6 @@ class ErrorRecoveryTest extends TestCase
         // Test fallback model resolution
         $reflection = new \ReflectionClass($manager);
         $method = $reflection->getMethod('getFallbackModel');
-        $method->setAccessible(true);
         
         $fallback = $method->invoke($manager, $provider);
         $this->assertEquals('claude-3-sonnet-20240229', $fallback);

@@ -146,7 +146,6 @@ class KimiFileExtractToolTest extends TestCase
             $ref = $ref->getParentClass();
         }
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         $prop->setValue($provider, $client);
 
         return new KimiFileExtractTool($provider);

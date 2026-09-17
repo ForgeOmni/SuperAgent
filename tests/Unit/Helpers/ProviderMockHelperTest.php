@@ -58,7 +58,6 @@ class ProviderMockHelperTest extends TestCase
             $ref = $ref->getParentClass();
         }
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         return $prop->getValue($provider);
     }
 }

@@ -39,7 +39,6 @@ class ExtraBodyMergingTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $m = $rc->getMethod('buildRequestBody');
-        $m->setAccessible(true);
 
         // Minimal valid inputs — we only care about extra_body merging.
         return $m->invoke($provider, [], [], null, $options);

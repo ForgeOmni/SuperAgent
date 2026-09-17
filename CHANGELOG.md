@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### 💻 Summary
+
+**Wave 1 of the embedded-host plan: the package is tested where its hosts actually run.** The PHPUnit matrix stopped at PHP 8.3 and no test ever booted the service provider inside a Laravel application, so neither PHP 8.5 nor a new framework major was covered by anything. Both are now, and PHP deprecations in `src/` fail the build instead of accumulating: 149 of them had already accumulated on 8.5.
+
+### Added
+
+- **`tests/Laravel/ServiceProviderBootTest`** — boots the package in a real application (Testbench): the provider loads, its config merges, the `Agent` binding and the `superagent` alias resolve, and all four Artisan commands register. Skips when Testbench is absent so the plain matrix stays green.
+- **CI Laravel matrix** — one leg per framework major: 10 (PHP 8.1), 11 (8.2), 12 (8.3), 13 (8.5).
+- **`failOnDeprecation`**, scoped with `<source restrictDeprecations>` to `src/`. A dev dependency that has not caught up with a new PHP release cannot turn the suite red; our own code cannot quietly drift.
+
+### Changed
+
+- **Dev/suggest bounds widened** so a host may resolve against a current stack: `illuminate/support ^13`, `orchestra/testbench ^11`, `phpunit/phpunit ^12`, `symfony/console ^8`, `systemsdk/phpcpd ^8|^9`. Runtime `php ^8.1` is unchanged — it already admitted 8.5; nothing exercised it.
+- **CI PHP matrix 8.1 → 8.5**, and `composer update` rather than `install` on those legs: one committed lock cannot span them, since PHPUnit 12 needs >= 8.3 while 8.1 can only have PHPUnit 10.
+
+### Fixed
+
+- **23 implicit-nullable parameters in `src/`** (plus 2 in tests) written as `Foo $x = null`, deprecated since PHP 8.4 — now `?Foo $x = null`, which is valid back to 7.1.
+- **6 `curl_close()` calls** removed. Deprecated in 8.5, and a no-op since 8.0, when the handle became a GC-managed object.
+- **127 `Reflection*::setAccessible()` calls** removed from tests and two from `src`. Deprecated in 8.5, and a no-op since 8.1 — which this package already requires.
+
 ## [1.1.16] - 2026-09-17
 
 ### 💻 Summary

@@ -196,7 +196,6 @@ class AnthropicProviderOAuthTest extends TestCase
     private function buildBody(AnthropicProvider $p, ?string $systemPrompt = null): array
     {
         $ref = new \ReflectionMethod($p, 'buildRequestBody');
-        $ref->setAccessible(true);
         return $ref->invoke($p, [], [], $systemPrompt, []);
     }
 
@@ -207,7 +206,6 @@ class AnthropicProviderOAuthTest extends TestCase
             $r = $r->getParentClass();
         }
         $p = $r->getProperty($prop);
-        $p->setAccessible(true);
         return $p->getValue($obj);
     }
 }

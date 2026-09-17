@@ -9,7 +9,7 @@ class FileCacheAdapter implements CacheInterface
     private string $directory;
     private int $defaultTTL;
     
-    public function __construct(string $directory = null, int $defaultTTL = 3600)
+    public function __construct(?string $directory = null, int $defaultTTL = 3600)
     {
         $this->directory = $directory ?? sys_get_temp_dir() . '/superagent_cache';
         $this->defaultTTL = $defaultTTL;

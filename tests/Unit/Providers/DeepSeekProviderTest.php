@@ -99,7 +99,6 @@ class DeepSeekProviderTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $m = $rc->getMethod('chatCompletionsPath');
-        $m->setAccessible(true);
         $this->assertSame('v1/chat/completions', $m->invoke($p));
     }
 
@@ -465,7 +464,6 @@ class DeepSeekProviderTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $m = $rc->getMethod('buildRequestBody');
-        $m->setAccessible(true);
         return $m->invoke($p, $messages, $tools, $system, $options);
     }
 
@@ -482,7 +480,6 @@ class DeepSeekProviderTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         return $prop->getValue($p);
     }
 
@@ -505,7 +502,6 @@ class DeepSeekProviderTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $m = $rc->getMethod('parseSSEStream');
-        $m->setAccessible(true);
         $gen = $m->invoke($p, $stream, null);
         return $gen->current();
     }

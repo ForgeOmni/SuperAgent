@@ -205,7 +205,6 @@ class KimiProviderTest extends TestCase
     private function buildBody(KimiProvider $provider, array $options): array
     {
         $m = new \ReflectionMethod($provider, 'buildRequestBody');
-        $m->setAccessible(true);
         return $m->invoke($provider, [], [], 'system', $options);
     }
 
@@ -229,7 +228,6 @@ class KimiProviderTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         return $prop->getValue($provider);
     }
 }

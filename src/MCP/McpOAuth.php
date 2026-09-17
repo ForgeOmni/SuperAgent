@@ -224,7 +224,6 @@ final class McpOAuth
         $body = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $err = curl_error($ch);
-        curl_close($ch);
 
         if ($body === false) {
             throw new \RuntimeException("OAuth request failed: {$err}");

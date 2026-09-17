@@ -263,7 +263,6 @@ class HarnessLoopTest extends TestCase
         // Use reflection to set busy=true
         $ref = new \ReflectionClass($loop);
         $busy = $ref->getProperty('busy');
-        $busy->setAccessible(true);
         $busy->setValue($loop, true);
 
         $output = [];

@@ -102,7 +102,6 @@ abstract class ProviderToolBase extends Tool
             );
         }
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         return $prop->getValue($this->provider);
     }
 

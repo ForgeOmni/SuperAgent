@@ -99,7 +99,6 @@ class KimiSwarmToolTest extends TestCase
             $ref = $ref->getParentClass();
         }
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         $prop->setValue($p, $client);
 
         return new KimiSwarmTool($p);

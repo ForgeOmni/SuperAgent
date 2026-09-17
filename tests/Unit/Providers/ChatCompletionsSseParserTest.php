@@ -294,7 +294,6 @@ class ChatCompletionsSseParserTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $m = $rc->getMethod('parseSSEStream');
-        $m->setAccessible(true);
         $gen = $m->invoke($provider, $stream, $handler);
 
         // parseSSEStream yields exactly one AssistantMessage at the end.

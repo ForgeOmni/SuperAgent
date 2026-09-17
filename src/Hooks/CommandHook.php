@@ -107,7 +107,7 @@ class CommandHook implements HookInterface
         return HookType::COMMAND;
     }
     
-    public function matches(string $toolName = null, array $context = []): bool
+    public function matches(?string $toolName = null, array $context = []): bool
     {
         return true; // Matching is handled by HookMatcher
     }

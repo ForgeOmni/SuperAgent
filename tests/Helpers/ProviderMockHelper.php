@@ -70,7 +70,6 @@ final class ProviderMockHelper
             );
         }
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         $prop->setValue($provider, $client);
 
         return $client;

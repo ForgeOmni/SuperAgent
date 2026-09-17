@@ -454,7 +454,6 @@ class MetaResponsesProviderTest extends TestCase
     private function body(MetaResponsesProvider $p, array $options, array $tools = []): array
     {
         $m = new \ReflectionMethod($p, 'buildRequestBody');
-        $m->setAccessible(true);
 
         return $m->invoke($p, [new UserMessage('hi')], $tools, null, $options);
     }
@@ -462,7 +461,6 @@ class MetaResponsesProviderTest extends TestCase
     private function call(object $p, string $method): mixed
     {
         $m = new \ReflectionMethod($p, $method);
-        $m->setAccessible(true);
 
         return $m->invoke($p);
     }
@@ -506,7 +504,6 @@ class MetaResponsesProviderTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         $prop->setValue($provider, $client);
 
         return $provider;
@@ -519,7 +516,6 @@ class MetaResponsesProviderTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         $client = $prop->getValue($provider);
 
         return (string) parse_url((string) $client->getConfig('base_uri'), PHP_URL_HOST);

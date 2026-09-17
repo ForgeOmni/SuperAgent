@@ -98,7 +98,7 @@ class KimiSwarmCapabilityTest extends TestCase
      * @param array<int, Response>              $responses
      * @param array<int, array<string, mixed>> &$history
      */
-    private function providerWithMock(array $responses, array &$history = null): KimiProvider
+    private function providerWithMock(array $responses, ?array &$history = null): KimiProvider
     {
         if ($history === null) {
             $sink = [];
@@ -117,7 +117,6 @@ class KimiSwarmCapabilityTest extends TestCase
             $ref = $ref->getParentClass();
         }
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         $prop->setValue($p, $client);
         return $p;
     }

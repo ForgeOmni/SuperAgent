@@ -69,7 +69,6 @@ class MiniMaxProviderTest extends TestCase
             $ref = $ref->getParentClass();
         }
         $m = $ref->getMethod('chatCompletionsPath');
-        $m->setAccessible(true);
         $this->assertSame('v1/text/chatcompletion_v2', $m->invoke($p));
     }
 
@@ -124,7 +123,6 @@ class MiniMaxProviderTest extends TestCase
             $ref = $ref->getParentClass();
         }
         $m = $ref->getMethod($name);
-        $m->setAccessible(true);
         return $m;
     }
 
@@ -148,7 +146,6 @@ class MiniMaxProviderTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         return $prop->getValue($p);
     }
 }

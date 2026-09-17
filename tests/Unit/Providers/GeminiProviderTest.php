@@ -328,7 +328,6 @@ class GeminiProviderTest extends TestCase
     private function invokeBuild(GeminiProvider $p, array $messages, array $options): array
     {
         $m = new \ReflectionMethod($p, 'buildRequestBody');
-        $m->setAccessible(true);
         return $m->invoke($p, $messages, [], null, $options);
     }
 
@@ -339,7 +338,6 @@ class GeminiProviderTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         $client = $prop->getValue($p);
 
         $opts = method_exists($client, 'getConfig')
@@ -347,7 +345,6 @@ class GeminiProviderTest extends TestCase
             : (function () use ($client) {
                 $ro = new \ReflectionObject($client);
                 $pp = $ro->getProperty('config');
-                $pp->setAccessible(true);
                 return $pp->getValue($client);
             })();
         $headers = $opts['headers'] ?? [];

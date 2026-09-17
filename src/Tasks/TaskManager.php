@@ -269,7 +269,7 @@ class TaskManager
     /**
      * Get or create a task list.
      */
-    public function getOrCreateTaskList(string $id, string $name = null): TaskList
+    public function getOrCreateTaskList(string $id, ?string $name = null): TaskList
     {
         if (!$this->taskLists->has($id)) {
             $this->taskLists->put($id, new TaskList($id, $name ?? $id));

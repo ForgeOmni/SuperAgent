@@ -226,7 +226,6 @@ class MetaProviderTest extends TestCase
     private function body(MetaProvider $p, array $options, ?string $system = null, array $tools = []): array
     {
         $m = new \ReflectionMethod($p, 'buildRequestBody');
-        $m->setAccessible(true);
 
         return $m->invoke($p, [new UserMessage('hi')], $tools, $system, $options);
     }
@@ -301,7 +300,6 @@ class MetaProviderTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
 
         return $prop->getValue($provider);
     }

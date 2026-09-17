@@ -132,7 +132,6 @@ class MiniMaxTtsToolTest extends TestCase
             $ref = $ref->getParentClass();
         }
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         $prop->setValue($provider, $client);
 
         return new MiniMaxTtsTool($provider);

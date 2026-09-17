@@ -77,7 +77,6 @@ class RetryPolicyTest extends TestCase
         $p = new OpenAIProvider(['api_key' => 'sk-test']);
         $rc = new \ReflectionClass($p);
         $m = $rc->getMethod('jitteredBackoff');
-        $m->setAccessible(true);
 
         $base = pow(2, 3); // attempt=3 → 8s base
         $min = $base * 0.9;
@@ -99,7 +98,6 @@ class RetryPolicyTest extends TestCase
         $p = new OpenAIProvider(['api_key' => 'sk-test']);
         $rc = new \ReflectionClass($p);
         $m = $rc->getMethod('jitteredBackoff');
-        $m->setAccessible(true);
 
         // attempt=0 → base 2^1=2s (the max(1) guard); still above 0.2 floor
         $this->assertGreaterThanOrEqual(0.2, $m->invoke($p, 0));
@@ -112,7 +110,6 @@ class RetryPolicyTest extends TestCase
     private function readInt(OpenAIProvider $p, string $prop): int
     {
         $r = new \ReflectionProperty(\SuperAgent\Providers\ChatCompletionsProvider::class, $prop);
-        $r->setAccessible(true);
         return (int) $r->getValue($p);
     }
 }

@@ -76,7 +76,6 @@ class ProviderDefaultsLockdownTest extends TestCase
     {
         $ref = new \ReflectionObject($provider);
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         /** @var Client $client */
         $client = $prop->getValue($provider);
 

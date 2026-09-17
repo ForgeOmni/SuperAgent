@@ -276,7 +276,6 @@ class SmartCommandTest extends TestCase
         $app = new SuperAgentApplication();
         $ref = new \ReflectionClass($app);
         $m = $ref->getMethod('parseOptions');
-        $m->setAccessible(true);
         return $m->invoke($app, $argv);
     }
 
@@ -290,7 +289,6 @@ class SmartCommandTest extends TestCase
         $cmd = new SmartCommand();
         $ref = new \ReflectionClass($cmd);
         $m = $ref->getMethod('parseArgs');
-        $m->setAccessible(true);
         return $m->invoke($cmd, $args);
     }
 

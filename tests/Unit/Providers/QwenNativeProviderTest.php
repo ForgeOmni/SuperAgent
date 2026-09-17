@@ -124,7 +124,6 @@ class QwenNativeProviderTest extends TestCase
         array $options,
     ): array {
         $m = (new \ReflectionObject($p))->getMethod('buildRequestBody');
-        $m->setAccessible(true);
         return $m->invoke($p, $messages, $tools, $system, $options);
     }
 
@@ -132,7 +131,6 @@ class QwenNativeProviderTest extends TestCase
     {
         $r = new \ReflectionObject($p);
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         $client = $prop->getValue($p);
         return parse_url((string) $client->getConfig('base_uri'), PHP_URL_HOST);
     }

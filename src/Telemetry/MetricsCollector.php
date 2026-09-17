@@ -183,7 +183,7 @@ class MetricsCollector
     /**
      * Get metric statistics.
      */
-    public function getStatistics(string $metricName = null): array
+    public function getStatistics(?string $metricName = null): array
     {
         $stats = [];
 

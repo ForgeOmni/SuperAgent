@@ -123,13 +123,11 @@ class EnvHttpHeadersTest extends TestCase
     {
         $rc = new \ReflectionClass($p);
         $rp = $rc->getProperty('client');
-        $rp->setAccessible(true);
         /** @var \GuzzleHttp\Client $client */
         $client = $rp->getValue($p);
 
         $cfgProp = new \ReflectionClass($client);
         $configProp = $cfgProp->getProperty('config');
-        $configProp->setAccessible(true);
         $config = $configProp->getValue($client);
 
         return $config['headers'] ?? [];

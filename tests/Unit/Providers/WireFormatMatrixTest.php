@@ -121,7 +121,6 @@ class WireFormatMatrixTest extends TestCase
         $anth    = new AnthropicProvider(['api_key' => 'sk-ant-x']);
 
         $reflect = new ReflectionMethod(BedrockProvider::class, 'convertMessageToAnthropic');
-        $reflect->setAccessible(true);
 
         $fixture = $this->fixture();
         $bedrockWire = array_map(fn ($m) => $reflect->invoke($bedrock, $m), $fixture);
@@ -185,7 +184,6 @@ class WireFormatMatrixTest extends TestCase
         $p = new OpenAIResponsesProvider(['api_key' => 'sk-x']);
 
         $reflect = new ReflectionMethod(OpenAIResponsesProvider::class, 'convertMessagesToInput');
-        $reflect->setAccessible(true);
         /** @var array<int, array<string, mixed>> $wire */
         $wire = $reflect->invoke($p, $this->fixture());
 

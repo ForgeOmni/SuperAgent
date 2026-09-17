@@ -47,10 +47,8 @@ class LMStudioProviderTest extends TestCase
     {
         $rc = new \ReflectionClass(\SuperAgent\Providers\ChatCompletionsProvider::class);
         $cp = $rc->getProperty('client');
-        $cp->setAccessible(true);
         $client = $cp->getValue($p);
         $cfg = (new \ReflectionClass($client))->getProperty('config');
-        $cfg->setAccessible(true);
         return (string) $cfg->getValue($client)['base_uri'];
     }
 
@@ -58,10 +56,8 @@ class LMStudioProviderTest extends TestCase
     {
         $rc = new \ReflectionClass(\SuperAgent\Providers\ChatCompletionsProvider::class);
         $cp = $rc->getProperty('client');
-        $cp->setAccessible(true);
         $client = $cp->getValue($p);
         $cfg = (new \ReflectionClass($client))->getProperty('config');
-        $cfg->setAccessible(true);
         return (array) $cfg->getValue($client)['headers'];
     }
 }

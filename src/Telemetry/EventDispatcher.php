@@ -175,7 +175,7 @@ class EventDispatcher
         ]);
     }
 
-    public function dispatchError(string $message, \Throwable $exception = null): void
+    public function dispatchError(string $message, ?\Throwable $exception = null): void
     {
         $data = ['message' => $message];
         
@@ -215,7 +215,7 @@ class EventDispatcher
     /**
      * Get event history.
      */
-    public function getHistory(string $event = null, int $limit = 100): Collection
+    public function getHistory(?string $event = null, int $limit = 100): Collection
     {
         $history = $this->eventHistory;
 

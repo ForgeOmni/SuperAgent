@@ -674,7 +674,6 @@ class ProviderRegistry
             curl_exec($ch);
             $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $err = curl_error($ch);
-            curl_close($ch);
             $ms = (int) ((microtime(true) - $t0) * 1000);
 
             if ($status >= 200 && $status < 300) {

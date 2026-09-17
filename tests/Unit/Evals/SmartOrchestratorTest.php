@@ -322,7 +322,6 @@ class SmartOrchestratorTest extends TestCase
     {
         $ref = new \ReflectionClass(SmartOrchestrator::class);
         $m = $ref->getMethod($method);
-        $m->setAccessible(true);
         return $m->invokeArgs($obj, $args);
     }
 
@@ -420,7 +419,6 @@ final class SmartOrchestratorWithFakeProvider extends SmartOrchestrator
         $this->eventCb = $cb;
         $ref = new \ReflectionClass(SmartOrchestrator::class);
         $prop = $ref->getProperty('onEvent');
-        $prop->setAccessible(true);
         $prop->setValue($this, $cb);
     }
 

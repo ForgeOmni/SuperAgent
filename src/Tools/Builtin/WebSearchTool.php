@@ -143,7 +143,6 @@ class WebSearchTool extends Tool
             ]);
             $html  = curl_exec($ch);
             $error = curl_error($ch);
-            curl_close($ch);
 
             if ($html === false || $error !== '') {
                 throw new \Exception("cURL error: {$error}");

@@ -131,7 +131,6 @@ class SuperAgentApplicationParseTest extends TestCase
     {
         $app = new SuperAgentApplication();
         $r = new \ReflectionMethod($app, 'parseOptions');
-        $r->setAccessible(true);
         return $r->invoke($app, $args);
     }
 }

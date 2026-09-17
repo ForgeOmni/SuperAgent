@@ -179,7 +179,6 @@ class GlmProviderTest extends TestCase
             $ref = $ref->getParentClass();
         }
         $m = $ref->getMethod('buildRequestBody');
-        $m->setAccessible(true);
         return $m->invoke($p, $messages, $tools, $system, $options);
     }
 
@@ -196,7 +195,6 @@ class GlmProviderTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         return $prop->getValue($p);
     }
 }

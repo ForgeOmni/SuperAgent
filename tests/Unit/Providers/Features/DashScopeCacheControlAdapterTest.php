@@ -174,7 +174,6 @@ class DashScopeCacheControlAdapterTest extends TestCase
             $rc = $rc->getParentClass();
         }
         $prop = $rc->getProperty('client');
-        $prop->setAccessible(true);
         $headers = $prop->getValue($provider)->getConfig()['headers'] ?? [];
         return array_change_key_case($headers, CASE_LOWER);
     }

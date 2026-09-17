@@ -32,7 +32,6 @@ class PersistentTaskManagerTest extends TestCase
         // Reset singleton
         $reflection = new \ReflectionClass(\SuperAgent\Tasks\TaskManager::class);
         $instance = $reflection->getProperty('instance');
-        $instance->setAccessible(true);
         $instance->setValue(null, null);
 
         parent::tearDown();

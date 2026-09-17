@@ -139,7 +139,6 @@ class AgentFactoryAuthTest extends TestCase
         try {
             $factory = new AgentFactory();
             $ref = new \ReflectionMethod($factory, 'resolveStoredAuth');
-            $ref->setAccessible(true);
             return $ref->invoke($factory, $provider);
         } finally {
             putenv('HOME' . ($origHome === false ? '' : '=' . $origHome));

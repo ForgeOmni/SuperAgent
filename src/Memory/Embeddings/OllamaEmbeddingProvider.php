@@ -69,7 +69,6 @@ final class OllamaEmbeddingProvider implements EmbeddingProvider
         ]);
         $resp = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        curl_close($ch);
         if (!is_string($resp) || $code < 200 || $code >= 300) return null;
 
         $decoded = json_decode($resp, true);

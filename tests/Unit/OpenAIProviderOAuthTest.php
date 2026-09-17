@@ -91,7 +91,6 @@ class OpenAIProviderOAuthTest extends TestCase
             $r = $r->getParentClass();
         }
         $prop = $r->getProperty('client');
-        $prop->setAccessible(true);
         $client = $prop->getValue($p);
 
         $opts = method_exists($client, 'getConfig')
@@ -99,7 +98,6 @@ class OpenAIProviderOAuthTest extends TestCase
             : (function () use ($client) {
                 $r = new \ReflectionObject($client);
                 $p = $r->getProperty('config');
-                $p->setAccessible(true);
                 return $p->getValue($client);
             })();
         $headers = $opts['headers'] ?? [];

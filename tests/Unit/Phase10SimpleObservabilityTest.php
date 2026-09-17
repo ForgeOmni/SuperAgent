@@ -312,7 +312,7 @@ class SimpleCostTracker
         return self::$instance;
     }
 
-    public function trackLLM(string $model, int $inputTokens, int $outputTokens, string $session = null): float
+    public function trackLLM(string $model, int $inputTokens, int $outputTokens, ?string $session = null): float
     {
         $pricing = $this->pricing[$model] ?? ['input' => 0, 'output' => 0];
         $cost = ($inputTokens / 1_000_000 * $pricing['input']) + 

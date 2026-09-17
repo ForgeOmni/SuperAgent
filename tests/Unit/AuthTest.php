@@ -343,7 +343,6 @@ class AuthTest extends TestCase
 
         // Use reflection to call private method
         $ref = new \ReflectionMethod($flow, 'tryOpenBrowser');
-        $ref->setAccessible(true);
 
         // Should not throw on any platform
         $ref->invoke($flow, 'https://example.com/device');

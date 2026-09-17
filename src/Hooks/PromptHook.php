@@ -94,7 +94,7 @@ class PromptHook implements HookInterface
         return HookType::PROMPT;
     }
 
-    public function matches(string $toolName = null, array $context = []): bool
+    public function matches(?string $toolName = null, array $context = []): bool
     {
         if ($this->matcher === null) {
             return true;

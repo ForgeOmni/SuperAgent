@@ -137,7 +137,6 @@ class KimiServerBuiltinToolTest extends TestCase
             $r = $r->getParentClass();
         }
         $m = $r->getMethod('convertTools');
-        $m->setAccessible(true);
         return $m->invoke($provider, $tools);
     }
 }

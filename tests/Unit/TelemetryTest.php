@@ -80,7 +80,6 @@ class TelemetryTest extends TestCase
             $reflection = new \ReflectionClass($class);
             if ($reflection->hasProperty('instance')) {
                 $instance = $reflection->getProperty('instance');
-                $instance->setAccessible(true);
                 $instance->setValue(null, null);
             }
         }

@@ -134,7 +134,6 @@ class GrokProviderTest extends TestCase
         $p = new GrokProvider(['api_key' => 'k', 'conversation_id' => 'conv-123']);
         $ref = new \ReflectionObject($p);
         $prop = $ref->getProperty('client');
-        $prop->setAccessible(true);
         $headers = $prop->getValue($p)->getConfig('headers');
         $this->assertSame('conv-123', $headers['x-grok-conv-id'] ?? null);
 

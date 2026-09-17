@@ -265,7 +265,7 @@ PROMPT;
     /**
      * Get memories by type
      */
-    public function getByType(MemoryType $type, int $limit = null): array
+    public function getByType(MemoryType $type, ?int $limit = null): array
     {
         $memories = $this->storage->findByType($type);
         

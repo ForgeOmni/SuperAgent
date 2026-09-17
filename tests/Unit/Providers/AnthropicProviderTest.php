@@ -162,7 +162,6 @@ class AnthropicProviderTest extends TestCase
     private function buildBody(AnthropicProvider $p, array $options): array
     {
         $m = new \ReflectionMethod($p, 'buildRequestBody');
-        $m->setAccessible(true);
 
         return $m->invoke($p, [new UserMessage('hi')], [], 'sys', $options);
     }

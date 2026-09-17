@@ -216,7 +216,7 @@ class LazyContextManager
     /**
      * 获取智能上下文窗口
      */
-    public function getSmartWindow(int $maxTokens, string $focusArea = null): array
+    public function getSmartWindow(int $maxTokens, ?string $focusArea = null): array
     {
         // 根据焦点区域和令牌限制智能选择上下文
         $selected = $this->selector->selectByTokenLimit(

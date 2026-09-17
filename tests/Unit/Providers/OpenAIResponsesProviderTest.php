@@ -533,17 +533,14 @@ SSE;
     {
         $rc = new \ReflectionClass($p);
         $cp = $rc->getProperty('client');
-        $cp->setAccessible(true);
         /** @var \GuzzleHttp\Client $client */
         $client = $cp->getValue($p);
 
         $configProp = (new \ReflectionClass($client))->getProperty('config');
-        $configProp->setAccessible(true);
         $cfg = $configProp->getValue($client);
 
         $base = (string) $cfg['base_uri'];
         $m = $rc->getMethod('chatCompletionsPath');
-        $m->setAccessible(true);
         $path = (string) $m->invoke($p);
 
         return rtrim($base, '/') . '/' . $path;
@@ -553,12 +550,10 @@ SSE;
     {
         $rc = new \ReflectionClass($p);
         $cp = $rc->getProperty('client');
-        $cp->setAccessible(true);
         /** @var \GuzzleHttp\Client $client */
         $client = $cp->getValue($p);
 
         $configProp = (new \ReflectionClass($client))->getProperty('config');
-        $configProp->setAccessible(true);
         $cfg = $configProp->getValue($client);
 
         return $cfg['headers'] ?? [];
@@ -579,7 +574,6 @@ SSE;
     ): array {
         $rc = new \ReflectionClass($p);
         $m = $rc->getMethod('buildRequestBody');
-        $m->setAccessible(true);
         return $m->invoke($p, $messages, $tools, $systemPrompt, $options);
     }
 
@@ -589,7 +583,6 @@ SSE;
 
         $rc = new \ReflectionClass($p);
         $m = $rc->getMethod('parseResponsesSseStream');
-        $m->setAccessible(true);
 
         $gen = $m->invoke($p, $stream, null);
         $final = null;

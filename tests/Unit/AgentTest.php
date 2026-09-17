@@ -45,7 +45,6 @@ class AgentTest extends TestCase
 
         // Default max_turns is 50 (from Agent.php line 57)
         $ref = new \ReflectionProperty(Agent::class, 'maxTurns');
-        $ref->setAccessible(true);
         $this->assertEquals(50, $ref->getValue($agent));
     }
 
@@ -57,7 +56,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'maxTurns');
-        $ref->setAccessible(true);
         $this->assertEquals(10, $ref->getValue($agent));
     }
 
@@ -69,7 +67,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'maxBudgetUsd');
-        $ref->setAccessible(true);
         $this->assertEquals(5.0, $ref->getValue($agent));
     }
 
@@ -81,7 +78,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'systemPrompt');
-        $ref->setAccessible(true);
         $this->assertEquals('You are a helpful assistant.', $ref->getValue($agent));
     }
 
@@ -94,7 +90,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'allowedTools');
-        $ref->setAccessible(true);
         $this->assertEquals(['read', 'grep'], $ref->getValue($agent));
     }
 
@@ -107,7 +102,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'deniedTools');
-        $ref->setAccessible(true);
         $this->assertEquals(['bash'], $ref->getValue($agent));
     }
 
@@ -119,7 +113,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'tools');
-        $ref->setAccessible(true);
         $this->assertEmpty($ref->getValue($agent));
     }
 
@@ -133,7 +126,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'tools');
-        $ref->setAccessible(true);
         $tools = $ref->getValue($agent);
         $this->assertCount(1, $tools);
         $this->assertEquals('my_tool', $tools[0]->name());
@@ -150,7 +142,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'streamingHandler');
-        $ref->setAccessible(true);
         $this->assertSame($handler, $ref->getValue($agent));
     }
 
@@ -169,7 +160,6 @@ class AgentTest extends TestCase
 
         $this->assertSame($agent, $result); // Returns self
         $ref = new \ReflectionProperty(Agent::class, 'systemPrompt');
-        $ref->setAccessible(true);
         $this->assertEquals('Be concise', $ref->getValue($agent));
     }
 
@@ -200,7 +190,6 @@ class AgentTest extends TestCase
 
         $this->assertSame($agent, $result);
         $ref = new \ReflectionProperty(Agent::class, 'maxTurns');
-        $ref->setAccessible(true);
         $this->assertEquals(5, $ref->getValue($agent));
     }
 
@@ -215,7 +204,6 @@ class AgentTest extends TestCase
 
         $this->assertSame($agent, $result);
         $ref = new \ReflectionProperty(Agent::class, 'maxBudgetUsd');
-        $ref->setAccessible(true);
         $this->assertEquals(2.50, $ref->getValue($agent));
     }
 
@@ -230,7 +218,6 @@ class AgentTest extends TestCase
         $agent->withOptions(['b' => 2]);
 
         $ref = new \ReflectionProperty(Agent::class, 'options');
-        $ref->setAccessible(true);
         $options = $ref->getValue($agent);
         $this->assertEquals(1, $options['a']);
         $this->assertEquals(2, $options['b']);
@@ -247,7 +234,6 @@ class AgentTest extends TestCase
 
         $this->assertSame($agent, $result);
         $ref = new \ReflectionProperty(Agent::class, 'allowedTools');
-        $ref->setAccessible(true);
         $this->assertEquals(['read', 'edit'], $ref->getValue($agent));
     }
 
@@ -261,7 +247,6 @@ class AgentTest extends TestCase
         $agent->withDeniedTools(['bash', 'write']);
 
         $ref = new \ReflectionProperty(Agent::class, 'deniedTools');
-        $ref->setAccessible(true);
         $this->assertEquals(['bash', 'write'], $ref->getValue($agent));
     }
 
@@ -276,7 +261,6 @@ class AgentTest extends TestCase
 
         $this->assertSame($agent, $result);
         $ref = new \ReflectionProperty(Agent::class, 'autoMode');
-        $ref->setAccessible(true);
         $this->assertTrue($ref->getValue($agent));
     }
 
@@ -296,7 +280,6 @@ class AgentTest extends TestCase
 
         $this->assertSame($agent, $result);
         $ref = new \ReflectionProperty(Agent::class, 'tools');
-        $ref->setAccessible(true);
         $tools = $ref->getValue($agent);
         $this->assertCount(1, $tools);
         $this->assertEquals('custom_tool', $tools[0]->name());
@@ -313,7 +296,6 @@ class AgentTest extends TestCase
         $agent->addTool($this->createMockTool('tool_b'));
 
         $ref = new \ReflectionProperty(Agent::class, 'tools');
-        $ref->setAccessible(true);
         $this->assertCount(2, $ref->getValue($agent));
     }
 
@@ -325,7 +307,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'tools');
-        $ref->setAccessible(true);
         $this->assertEmpty($ref->getValue($agent));
     }
 
@@ -382,7 +363,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionMethod(Agent::class, 'createEngine');
-        $ref->setAccessible(true);
         $engine = $ref->invoke($agent, null);
 
         $this->assertInstanceOf(\SuperAgent\QueryEngine::class, $engine);
@@ -400,7 +380,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'autoMode');
-        $ref->setAccessible(true);
         $this->assertFalse($ref->getValue($agent));
     }
 
@@ -413,7 +392,6 @@ class AgentTest extends TestCase
         ]);
 
         $ref = new \ReflectionProperty(Agent::class, 'autoMode');
-        $ref->setAccessible(true);
         $this->assertTrue($ref->getValue($agent));
     }
 
@@ -481,7 +459,6 @@ class AgentTest extends TestCase
         $agent->withOptions(['idempotency_key' => 'job-42:turn-3']);
 
         $ref = new \ReflectionProperty(Agent::class, 'options');
-        $ref->setAccessible(true);
         $stored = $ref->getValue($agent);
 
         $this->assertSame('kept', $stored['existing']);

@@ -5,6 +5,7 @@
          colors="true"
          failOnRisky="true"
          failOnWarning="true"
+         failOnDeprecation="true"
 >
     <testsuites>
         <testsuite name="Unit">
@@ -23,6 +24,19 @@
             <directory>tests/Integration</directory>
         </testsuite>
     </testsuites>
+    <!--
+        Deprecations fail the build, but only the ones this package can fix:
+        `restrictDeprecations` narrows reporting to the source set below, so a
+        dev dependency that has not caught up with a new PHP release (Laravel's
+        console helpers and Testbench's database config both trigger 8.5
+        deprecations today) cannot turn the suite red.
+    -->
+    <source restrictDeprecations="true">
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+
     <php>
         <env name="ANTHROPIC_API_KEY" value="" force="false"/>
     </php>

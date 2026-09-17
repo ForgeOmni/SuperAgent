@@ -124,7 +124,6 @@ class HttpHookTest extends TestCase
         // We verify the default via reflection since method is private
         $reflection = new \ReflectionClass($hook);
         $prop = $reflection->getProperty('method');
-        $prop->setAccessible(true);
 
         $this->assertEquals('POST', $prop->getValue($hook));
     }
@@ -135,7 +134,6 @@ class HttpHookTest extends TestCase
 
         $reflection = new \ReflectionClass($hook);
         $prop = $reflection->getProperty('blockOnFailure');
-        $prop->setAccessible(true);
 
         $this->assertFalse($prop->getValue($hook));
     }
@@ -148,7 +146,6 @@ class HttpHookTest extends TestCase
 
         $reflection = new \ReflectionClass($hook);
         $prop = $reflection->getProperty('hasExecuted');
-        $prop->setAccessible(true);
         $prop->setValue($hook, true);
 
         $input = $this->makeInput();

@@ -21,7 +21,6 @@ class SkillsTest extends TestCase
         // Reset the singleton instance
         $reflection = new \ReflectionClass(SkillManager::class);
         $instance = $reflection->getProperty('instance');
-        $instance->setAccessible(true);
         $instance->setValue(null, null);
         
         parent::tearDown();

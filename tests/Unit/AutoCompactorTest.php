@@ -133,7 +133,6 @@ class AutoCompactorTest extends TestCase
         // Simulate failures by reading the counter
         $reflection = new \ReflectionClass($compactor);
         $prop = $reflection->getProperty('failures');
-        $prop->setAccessible(true);
         $prop->setValue($compactor, 2);
 
         $messages = [];
@@ -169,7 +168,6 @@ class AutoCompactorTest extends TestCase
 
         $reflection = new \ReflectionClass($compactor);
         $prop = $reflection->getProperty('failures');
-        $prop->setAccessible(true);
         $prop->setValue($compactor, 5);
 
         $compactor->resetFailures();
@@ -222,7 +220,6 @@ class AutoCompactorTest extends TestCase
         // Access via reflection to verify
         $reflection = new \ReflectionClass($compactor);
         $prop = $reflection->getProperty('model');
-        $prop->setAccessible(true);
         $this->assertEquals('claude-haiku-4-5', $prop->getValue($compactor));
     }
 

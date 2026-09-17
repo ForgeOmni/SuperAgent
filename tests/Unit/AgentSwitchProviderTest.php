@@ -36,7 +36,6 @@ class AgentSwitchProviderTest extends TestCase
     private function setMessages(Agent $agent, array $messages): void
     {
         $rp = new ReflectionProperty(Agent::class, 'messages');
-        $rp->setAccessible(true);
         $rp->setValue($agent, $messages);
     }
 

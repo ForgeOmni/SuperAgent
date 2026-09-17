@@ -106,7 +106,7 @@ class HttpHook implements HookInterface
         return HookType::HTTP;
     }
 
-    public function matches(string $toolName = null, array $context = []): bool
+    public function matches(?string $toolName = null, array $context = []): bool
     {
         if ($this->matcher === null) {
             return true;

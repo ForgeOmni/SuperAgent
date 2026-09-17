@@ -65,7 +65,7 @@ class CallbackHook implements HookInterface
         return HookType::CALLBACK;
     }
     
-    public function matches(string $toolName = null, array $context = []): bool
+    public function matches(?string $toolName = null, array $context = []): bool
     {
         return true;
     }

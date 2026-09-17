@@ -299,7 +299,6 @@ class PromptHookTest extends TestCase
 
         $reflection = new \ReflectionClass($hook);
         $prop = $reflection->getProperty('blockOnFailure');
-        $prop->setAccessible(true);
 
         $this->assertTrue($prop->getValue($hook));
     }
@@ -310,7 +309,6 @@ class PromptHookTest extends TestCase
 
         $reflection = new \ReflectionClass($hook);
         $prop = $reflection->getProperty('timeout');
-        $prop->setAccessible(true);
 
         $this->assertEquals(60, $prop->getValue($hook));
     }

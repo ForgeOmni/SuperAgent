@@ -79,8 +79,8 @@ class StructuredLogger
     public function logLLMRequest(
         string $model,
         array $messages,
-        array $response = null,
-        float $duration = null,
+        ?array $response = null,
+        ?float $duration = null,
         array $metadata = []
     ): void {
         if (!$this->enabled) {
@@ -132,9 +132,9 @@ class StructuredLogger
         string $toolName,
         array $input,
         $result = null,
-        float $duration = null,
+        ?float $duration = null,
         bool $success = true,
-        string $error = null
+        ?string $error = null
     ): void {
         if (!$this->enabled) {
             return;
@@ -175,7 +175,7 @@ class StructuredLogger
      */
     public function logError(
         string $message,
-        \Throwable $exception = null,
+        ?\Throwable $exception = null,
         array $context = []
     ): void {
         if (!$this->enabled) {

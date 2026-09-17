@@ -23,7 +23,6 @@ class TasksTest extends TestCase
         // Reset the singleton instance
         $reflection = new \ReflectionClass(TaskManager::class);
         $instance = $reflection->getProperty('instance');
-        $instance->setAccessible(true);
         $instance->setValue(null, null);
 
         parent::tearDown();
