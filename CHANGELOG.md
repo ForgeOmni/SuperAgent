@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-17
+
 ### 💻 Summary
 
 **Wave 1 of the embedded-host plan: the package is tested where its hosts actually run.** The PHPUnit matrix stopped at PHP 8.3 and no test ever booted the service provider inside a Laravel application, so neither PHP 8.5 nor a new framework major was covered by anything. Both are now, and PHP deprecations in `src/` fail the build instead of accumulating: 149 of them had already accumulated on 8.5.

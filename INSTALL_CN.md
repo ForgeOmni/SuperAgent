@@ -26,13 +26,13 @@
 
 ## 系统要求
 
-| 要求 | 最低 |
-|---|---|
-| PHP | 8.1 |
-| Composer | 2.0 |
-| 扩展 | `curl` / `json` / `mbstring` / `openssl` |
-| 可选 | `pcntl`（fork 形态 swarm）、`proc_open`（子 agent ProcessBackend，POSIX 默认启用）、`sockets`（wire 协议 unix-socket 传输）|
-| 操作系统 | Linux / macOS / Windows（Windows 建议用 WSL）|
+| 要求 | 最低 | CI 实测 |
+|---|---|---|
+| PHP | 8.1 | 8.1、8.2、8.3、8.4、8.5 |
+| Composer | 2.0 | 2.x |
+| 扩展 | `curl` / `json` / `mbstring` / `openssl` | — |
+| 可选 | `pcntl`（fork 形态 swarm）、`proc_open`（子 agent ProcessBackend，POSIX 默认启用）、`sockets`（wire 协议 unix-socket 传输）| — |
+| 操作系统 | Linux / macOS / Windows（Windows 建议用 WSL）| — |
 
 验证 PHP + 扩展：
 
@@ -43,10 +43,10 @@ php -m | grep -E 'curl|json|mbstring|openssl|pcntl|sockets'
 
 Laravel 集成额外需要：
 
-| 要求 | 最低 |
-|---|---|
-| Laravel | 10.0 |
-| 数据库 | MySQL 8 / PostgreSQL 14 / SQLite 3.35（用 `ai_usage_logs` 时）|
+| 要求 | 最低 | CI 实测 |
+|---|---|---|
+| Laravel | 10.0 | 10、11、12、13（每个大版本一条作业，实际启动服务提供者）|
+| 数据库 | MySQL 8 / PostgreSQL 14 / SQLite 3.35（用 `ai_usage_logs` 时）| — |
 
 ---
 

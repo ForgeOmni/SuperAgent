@@ -26,13 +26,13 @@
 
 ## System requirements
 
-| Requirement | Minimum |
-|---|---|
-| PHP | 8.1 |
-| Composer | 2.0 |
-| Extensions | `curl`, `json`, `mbstring`, `openssl` |
-| Optional | `pcntl` (fork-based swarm), `proc_open` (sub-agent ProcessBackend — enabled by default on POSIX), `sockets` (wire-protocol unix-socket transport) |
-| OS | Linux / macOS / Windows (WSL recommended for Windows) |
+| Requirement | Minimum | Tested in CI |
+|---|---|---|
+| PHP | 8.1 | 8.1, 8.2, 8.3, 8.4, 8.5 |
+| Composer | 2.0 | 2.x |
+| Extensions | `curl`, `json`, `mbstring`, `openssl` | — |
+| Optional | `pcntl` (fork-based swarm), `proc_open` (sub-agent ProcessBackend — enabled by default on POSIX), `sockets` (wire-protocol unix-socket transport) | — |
+| OS | Linux / macOS / Windows (WSL recommended for Windows) | — |
 
 Verify PHP + extensions:
 
@@ -43,10 +43,10 @@ php -m | grep -E 'curl|json|mbstring|openssl|pcntl|sockets'
 
 For Laravel integration add:
 
-| Requirement | Minimum |
-|---|---|
-| Laravel | 10.0 |
-| Database | MySQL 8 / PostgreSQL 14 / SQLite 3.35 (for `ai_usage_logs` if used) |
+| Requirement | Minimum | Tested in CI |
+|---|---|---|
+| Laravel | 10.0 | 10, 11, 12, 13 (one job per major, booting the service provider) |
+| Database | MySQL 8 / PostgreSQL 14 / SQLite 3.35 (for `ai_usage_logs` if used) | — |
 
 ---
 
