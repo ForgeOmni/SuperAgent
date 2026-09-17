@@ -1,6 +1,6 @@
 <?php
 
-namespace SuperAgent\Tests\Unit\Bridge\Enhancers;
+namespace SuperAgent\Tests\Laravel\Bridge\Enhancers;
 
 use Orchestra\Testbench\TestCase;
 use SuperAgent\Bridge\BridgeToolProxy;

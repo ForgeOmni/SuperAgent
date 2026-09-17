@@ -7,6 +7,24 @@ use SuperAgent\Agent;
 use SuperAgent\Facades\SuperAgent;
 use SuperAgent\SuperAgentServiceProvider;
 
+// Without Testbench there is no base class to extend, and PHP fails while
+// loading this file — which takes the whole run with it, not just this suite.
+// A guard inside the class cannot help: the parent is resolved first. So when
+// Testbench is absent, this file defines a test that says so and stops.
+if (! class_exists(TestCase::class)) {
+    final class ServiceProviderBootTest extends \PHPUnit\Framework\TestCase
+    {
+        public function test_the_laravel_suite_needs_testbench(): void
+        {
+            $this->markTestSkipped(
+                'orchestra/testbench is not installed, so the package cannot be booted inside an application.'
+            );
+        }
+    }
+
+    return;
+}
+
 /**
  * Boots the package inside a real Laravel application.
  *
@@ -21,15 +39,6 @@ use SuperAgent\SuperAgentServiceProvider;
  */
 class ServiceProviderBootTest extends TestCase
 {
-    public static function setUpBeforeClass(): void
-    {
-        if (! class_exists(TestCase::class)) {
-            self::markTestSkipped('orchestra/testbench is not installed.');
-        }
-
-        parent::setUpBeforeClass();
-    }
-
     protected function getPackageProviders($app): array
     {
         return [SuperAgentServiceProvider::class];

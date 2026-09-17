@@ -358,6 +358,19 @@ API key; the telemetry singletons fataled outside a booted Laravel app; and the
 English system-prompt-extraction rule missed its own most natural phrasing.
 Each is pinned by a test of its own.
 
+## Open, found while wiring CI
+
+**`illuminate/support` is a runtime dependency of parts of `src`, and composer
+says it is dev-only.** With no framework installed, the Unit suite reports 177
+errors: `CostTracker` and others use `collect()` / `Collection` directly, and
+the `config()` polyfill in `Foundation/helpers.php` deliberately steps aside
+whenever Illuminate is present, which is a different case from it being absent.
+Nothing in the five waves depends on this, and a Laravel host never sees it —
+but the README calls this SDK framework-agnostic, and today that is true of its
+design and not of its test suite. Either the Illuminate uses come out of `src`,
+or `illuminate/support` moves into `require`. Worth deciding before claiming
+standalone support again.
+
 ## Sequencing and parallelism
 
 ```
