@@ -12371,3 +12371,58 @@ Meta rejette une requête portant `include` **et** `previous_response_id` : dema
 Choisir une route : `meta` pour les appels one-shot où la forme OpenAI est pratique, `meta-responses` pour tout ce qui est agentique, `anthropic` + `base_url=https://api.meta.ai` pour les clients de forme Claude. Même clé, mêmes modèles, même facturation.
 
 Tests : `MetaResponsesProviderTest` (15) — endpoint et résolution par le registre, plancher d'effort et `max` réservé à la tier Standard, rejeu forçant `store: false`, exclusion `include` / `previous_response_id` dans les deux sens, retrait des boutons OpenAI (y compris via `extra_body`), `response_format` → `text.format`, ancrage seul et avec outils de fonction, refus de `background`. Suite complète verte (3408).
+
+## 103. Réponses en arrière-plan — des tours détachés de la connexion (v1.1.15)
+
+La v1.1.14 refusait `background: true` parce que le cycle de vie qu'il implique n'était pas câblé. Il l'est désormais : `MetaResponsesProvider` implémente la nouvelle `Capabilities\SupportsBackgroundResponses`, qui étend le contrat `AsyncCapable` déjà présent dans le SDK (`poll` / `fetch` / `cancel`) avec `submitBackground()`, `followBackground()` et `deleteBackground()`.
+
+**Quand c'est la bonne forme.** Un tour Muse Spark à effort `max` sur une vraie tâche agentique peut durer plusieurs dizaines de minutes. Maintenir un flux HTTP ouvert pour cela couple le travail au processus client : la connexion tombe, le CLI est fermé, le worker de queue est redéployé — et le tour est perdu, avec ce qu'il a coûté. `background: true` les découple : le serveur accuse réception en quelques millisecondes, continue de travailler, et le résultat attend dans une réponse stockée.
+
+```php
+$provider = ProviderRegistry::create('meta-responses', ['api_key' => getenv('META_API_KEY')]);
+
+$job = $provider->submitBackground($messages, $tools, $system, ['reasoning_effort' => 'max']);
+// JobHandle{provider: "meta-responses", jobId: "resp_…", kind: "response"}
+// Sérialisable via ->toArray() / JobHandle::fromArray() — rangez-le dans une ligne de queue.
+
+while (! $provider->poll($job)->isTerminal()) {
+    sleep(2);
+}
+
+$message = $provider->fetch($job);      // AssistantMessage — la forme que chat() produit
+$provider->deleteBackground($job);
+```
+
+`JobHandle` est immuable et fait l'aller-retour via `toArray()` / `fromArray()`, donc la soumission et la collecte peuvent vivre dans des processus différents — c'est tout l'intérêt.
+
+**La soumission impose la forme détachée**, quoi qu'ait passé l'appelant :
+
+| Imposé | Pourquoi |
+|---|---|
+| `background: true` | c'est le but |
+| `stream: false` | Meta renvoie 400 pour `background` + `stream` à la création |
+| `store: true` | sans lui, une réponse d'arrière-plan est supprimée au bout d'environ 10 minutes — `poll()` courrait après le ramasse-miettes |
+| `include` retiré | le rejeu chiffré est le mode *sans état* ; une tâche d'arrière-plan est par définition de l'état côté serveur |
+
+**Terminal ≠ réussi, et la distinction compte.** `poll()` projette les statuts de Meta sur `JobStatus` :
+
+| Meta | `JobStatus` | Notes |
+|---|---|---|
+| `queued` | `Pending` | accusé réception, pas encore planifié |
+| `in_progress` | `Running` | |
+| `completed` | `Done` | |
+| `incomplete` | `Done` | terminal **avec** sortie — le tour s'est arrêté tôt (p. ex. `max_output_tokens`). `fetch()` renvoie le contenu tronqué avec `StopReason::MaxTokens` ; le jeter reviendrait à jeter un travail déjà payé |
+| `failed` | `Failed` | `fetch()` lève via le classifieur d'erreurs partagé |
+| `cancelled` | `Canceled` | |
+
+**Une annulation qui perd la course est un succès, pas une erreur.** Si le tour se termine à l'instant même où l'annulation arrive, Meta renvoie la réponse complétée au lieu d'échouer. `cancel()` renvoie donc true pour *tout* état terminal — l'action suivante de l'appelant (« arrêter de poller ») est identique dans les deux cas. Il renvoie false uniquement si la tâche tourne encore ou si la requête elle-même a échoué.
+
+**La suppression est explicite et non idempotente.** Une réponse d'arrière-plan est un objet stocké avec une empreinte de rétention : le SDK ne nettoie jamais dans votre dos — `deleteBackground()` est à vous d'appeler. Il renvoie false quand l'objet a déjà disparu (Meta répond 404 à une suppression répétée).
+
+**Se rattacher.** `followBackground($job, startingAfter: $seq)` appelle `GET /v1/responses/{id}?stream=true` et produit via le parseur SSE Responses de la classe de base : une tâche reprise se rend donc exactement comme un tour en direct. Soyez au clair sur le contenu de ce flux : `response.created`, l'événement terminal portant la réponse finale complète, puis `[DONE]`. Pas de deltas de tokens — ils ont été générés pendant que personne n'écoutait. C'est un rattachement, pas un rejeu de la frappe.
+
+**Dimensionnement.** `countInputTokens()` enveloppe `POST /v1/responses/input_tokens` : demandez si une conversation compactée tient avant de dépenser un tour à découvrir que non.
+
+**Le garde-fou de `chat()` a changé de forme.** En v1.1.14, `background: true` sur `chat()` levait `FeatureNotSupportedException` — exact à l'époque, faux maintenant que la fonctionnalité existe. Il lève désormais une `ProviderException` qui nomme `submitBackground()`. Toujours une exception plutôt qu'un abandon silencieux : un drapeau ignoré streamerait normalement et ressemblerait à un appel asynchrone fonctionnel qui ne l'a jamais été.
+
+Tests : `MetaResponsesProviderTest` passe à 27 — soumission imposant background/stream/store et retirant `include`, erreur d'id manquant, toutes les projections de statut, `fetch()` convertissant les items de sortie (texte, appels d'outils, `incomplete` tronqué) et levant sur `failed`, la course à l'annulation, les chemins cancel/delete, delete sur 404, la query string et le parse SSE de `followBackground()`, et `countInputTokens()`. Le tout contre un transport Guzzle mocké. Suite complète verte (3420).

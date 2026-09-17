@@ -755,6 +755,13 @@ All three Meta protocols are wired: `provider=meta` (Chat Completions), `provide
 // Agentic loop with reasoning carried across turns
 $agent = new Agent(['provider' => 'meta-responses']);
 $agent->run('fix the failing test', ['reasoning_replay' => true]);
+
+// Long job detached from the connection (v1.1.15)
+$provider = ProviderRegistry::create('meta-responses');
+$job = $provider->submitBackground($messages, [], null, ['reasoning_effort' => 'max']);
+while (! $provider->poll($job)->isTerminal()) { sleep(2); }
+$message = $provider->fetch($job);
+$provider->deleteBackground($job);
 ```
 
 > The `-contributor` ids are ~12x cheaper because Meta trains on your prompts and completions. They are catalogued but never aliased — name the id explicitly if you want that trade.

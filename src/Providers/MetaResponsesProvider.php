@@ -4,7 +4,16 @@ declare(strict_types=1);
 
 namespace SuperAgent\Providers;
 
-use SuperAgent\Exceptions\FeatureNotSupportedException;
+use Generator;
+use GuzzleHttp\Exception\ClientException;
+use GuzzleHttp\Exception\GuzzleException;
+use SuperAgent\Enums\StopReason;
+use SuperAgent\Exceptions\Provider\OpenAIErrorClassifier;
+use SuperAgent\Exceptions\ProviderException;
+use SuperAgent\Messages\AssistantMessage;
+use SuperAgent\Messages\ContentBlock;
+use SuperAgent\Messages\Usage;
+use SuperAgent\Providers\Capabilities\SupportsBackgroundResponses;
 use SuperAgent\Traits\MuseSparkSurfaceTrait;
 
 /**
@@ -60,13 +69,32 @@ use SuperAgent\Traits\MuseSparkSurfaceTrait;
  *   - **Search grounding** is the server-side `{"type": "web_search"}`
  *     tool (billed per query, on top of tokens), exposed as
  *     `options['grounding']`.
- *   - **`background: true`** runs the response asynchronously and cannot
- *     be combined with streaming. This provider always streams, so asking
- *     for it raises {@see FeatureNotSupportedException} rather than
- *     silently dropping the flag — the retrieve / cancel / delete
- *     endpoints it implies are not wired.
+ *   - **`background: true`** detaches the turn from the connection and
+ *     cannot be combined with streaming. It therefore has its own entry
+ *     point — {@see submitBackground()} and the rest of
+ *     {@see SupportsBackgroundResponses} — rather than an option on
+ *     `chat()`, which always streams. Passing it to `chat()` raises, with
+ *     a message pointing at the right method.
+ *
+ * ## Background lifecycle
+ *
+ * ```php
+ * $job = $provider->submitBackground($messages, $tools, $system, [
+ *     'reasoning_effort' => 'max',
+ * ]);
+ *
+ * while (! $provider->poll($job)->isTerminal()) {
+ *     sleep(2);
+ * }
+ *
+ * $message = $provider->fetch($job);     // AssistantMessage
+ * $provider->deleteBackground($job);     // stored objects are the caller's to clean up
+ * ```
+ *
+ * Or re-attach and render it like a live turn:
+ * `foreach ($provider->followBackground($job) as $message) { … }`.
  */
-class MetaResponsesProvider extends OpenAIResponsesProvider
+class MetaResponsesProvider extends OpenAIResponsesProvider implements SupportsBackgroundResponses
 {
     use MuseSparkSurfaceTrait;
 
@@ -154,13 +182,18 @@ class MetaResponsesProvider extends OpenAIResponsesProvider
         ?string $systemPrompt,
         array $options,
     ): array {
-        if (! empty($options['background'])) {
-            throw new FeatureNotSupportedException(
-                feature: 'background',
-                provider: 'meta-responses',
-                model: (string) ($options['model'] ?? $this->model),
+        // `background` is a different lifecycle, not a request flag: Meta
+        // rejects it alongside `stream: true`, and chat() always streams.
+        // Route the caller to the method that actually implements it
+        // rather than dropping the flag and streaming anyway.
+        if (! empty($options['background']) && empty($options['__background_submit'])) {
+            throw new ProviderException(
+                'background responses cannot be combined with streaming — use '
+                . 'submitBackground() / poll() / fetch() (SupportsBackgroundResponses) instead',
+                'meta-responses',
             );
         }
+        unset($options['__background_submit']);
 
         $body = parent::buildRequestBody($messages, $tools, $systemPrompt, $options);
 
@@ -216,5 +249,339 @@ class MetaResponsesProvider extends OpenAIResponsesProvider
         }
 
         return $body;
+    }
+
+    // ── Background lifecycle (SupportsBackgroundResponses) ───────
+
+    /**
+     * Submit a turn that outlives the HTTP request.
+     *
+     * Forces what Meta requires for a detached run regardless of what the
+     * caller passed: `background: true`, `stream: false` (the pair is a
+     * 400), and `store: true` — without storage a background response is
+     * dropped after roughly ten minutes, which would make `poll()` race
+     * the garbage collector. That also rules out encrypted reasoning
+     * replay, which is the stateless mode; a background job is by
+     * definition server-side state.
+     *
+     * @param  array<int, mixed>    $messages
+     * @param  array<int, mixed>    $tools
+     * @param  array<string, mixed> $options
+     */
+    public function submitBackground(
+        array $messages,
+        array $tools = [],
+        ?string $systemPrompt = null,
+        array $options = [],
+    ): JobHandle {
+        $options['__background_submit'] = true;
+        $body = $this->buildRequestBody($messages, $tools, $systemPrompt, $options);
+
+        $body['background'] = true;
+        $body['stream'] = false;
+        $body['store'] = true;
+        unset($body['stream_options'], $body['include']);
+
+        $decoded = $this->requestJson('POST', $this->chatCompletionsPath(), $body);
+
+        $id = $decoded['id'] ?? null;
+        if (! is_string($id) || $id === '') {
+            throw new ProviderException(
+                'Meta background submit returned no response id',
+                $this->providerName(),
+            );
+        }
+
+        $this->lastResponseId = $id;
+
+        return JobHandle::new(
+            provider: $this->providerName(),
+            jobId: $id,
+            kind: 'response',
+            meta: [
+                'model'  => (string) ($decoded['model'] ?? $body['model']),
+                'status' => (string) ($decoded['status'] ?? 'queued'),
+            ],
+        );
+    }
+
+    public function poll(JobHandle $handle): JobStatus
+    {
+        $decoded = $this->requestJson('GET', $this->responsePath($handle));
+
+        return self::mapResponseStatus((string) ($decoded['status'] ?? ''));
+    }
+
+    /**
+     * The finished turn as an {@see AssistantMessage} — same shape `chat()`
+     * yields, so a background result renders through the same code path.
+     *
+     * Throws if the job failed; a job that stopped early (`incomplete`,
+     * e.g. it hit `max_output_tokens`) returns what it produced with
+     * `StopReason::MaxTokens`, because truncated output is still output.
+     */
+    public function fetch(JobHandle $handle): mixed
+    {
+        $decoded = $this->requestJson('GET', $this->responsePath($handle));
+        $status = (string) ($decoded['status'] ?? '');
+
+        if ($status === 'failed') {
+            $error = is_array($decoded['error'] ?? null) ? $decoded['error'] : null;
+            throw OpenAIErrorClassifier::classify(
+                statusCode: 500,
+                body: $error !== null ? ['error' => $error] : null,
+                message: (string) ($error['message'] ?? 'background response failed'),
+                provider: $this->providerName(),
+            );
+        }
+
+        return $this->responseToMessage($decoded);
+    }
+
+    /**
+     * Best-effort cancel. Meta returns the response\'s current state, and a
+     * cancel that lands in the same instant the turn finishes comes back
+     * `completed` rather than as an error — either way the caller should
+     * stop polling, so both count as acknowledged.
+     */
+    public function cancel(JobHandle $handle): bool
+    {
+        try {
+            $decoded = $this->requestJson('POST', $this->responsePath($handle) . '/cancel');
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return self::mapResponseStatus((string) ($decoded['status'] ?? ''))->isTerminal();
+    }
+
+    /**
+     * Soft-delete the stored response. Returns false when it was already
+     * gone (Meta answers 404 — the endpoint is not idempotent).
+     */
+    public function deleteBackground(JobHandle $handle): bool
+    {
+        try {
+            $this->requestJson('DELETE', $this->responsePath($handle));
+
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Re-attach to a submitted job and stream the rest of it.
+     *
+     * This is the stored-response stream (`?stream=true`), not the live
+     * one: Meta emits `response.created`, then the terminal event carrying
+     * the whole final response, then `[DONE]`. No token deltas — they were
+     * generated while nobody was listening. The base SSE parser handles
+     * exactly those events, so the yielded message is identical in shape
+     * to a live turn.
+     *
+     * @return Generator<int, \SuperAgent\Messages\Message>
+     */
+    public function followBackground(JobHandle $handle, ?int $startingAfter = null): Generator
+    {
+        $path = $this->responsePath($handle) . '?stream=true';
+        if ($startingAfter !== null) {
+            $path .= '&starting_after=' . $startingAfter;
+        }
+
+        $response = $this->send('GET', $path, null, stream: true);
+
+        yield from $this->parseResponsesSseStream($response->getBody(), null);
+    }
+
+    /**
+     * Ask the server how many input tokens a conversation would cost
+     * before spending a turn on it — the check to run when compaction has
+     * trimmed history and you need to know it now fits.
+     *
+     * @param  array<int, mixed>    $messages
+     * @param  array<int, mixed>    $tools
+     * @param  array<string, mixed> $options
+     */
+    public function countInputTokens(
+        array $messages,
+        array $tools = [],
+        ?string $systemPrompt = null,
+        array $options = [],
+    ): int {
+        $body = $this->buildRequestBody($messages, $tools, $systemPrompt, $options);
+        unset($body['stream'], $body['stream_options'], $body['store'], $body['include']);
+
+        $decoded = $this->requestJson('POST', 'v1/responses/input_tokens', $body);
+
+        return (int) ($decoded['input_tokens'] ?? $decoded['total_tokens'] ?? 0);
+    }
+
+    // ── Background plumbing ──────────────────────────────────────
+
+    protected function responsePath(JobHandle $handle): string
+    {
+        return 'v1/responses/' . rawurlencode($handle->jobId);
+    }
+
+    /**
+     * Meta\'s response `status` → the SDK\'s job lifecycle.
+     *
+     * `incomplete` is terminal-with-output (the turn stopped early), so it
+     * maps to Done and `fetch()` returns the truncated content rather than
+     * throwing it away.
+     */
+    protected static function mapResponseStatus(string $status): JobStatus
+    {
+        return match (strtolower(trim($status))) {
+            'queued'                 => JobStatus::Pending,
+            'in_progress', 'running' => JobStatus::Running,
+            'completed', 'incomplete' => JobStatus::Done,
+            'failed', 'error'        => JobStatus::Failed,
+            'cancelled', 'canceled'  => JobStatus::Canceled,
+            default                  => JobStatus::Running,
+        };
+    }
+
+    /**
+     * Convert a stored response object into an assistant message — the
+     * non-streaming counterpart of the SSE assembler in the base class.
+     *
+     * @param array<string, mixed> $response
+     */
+    protected function responseToMessage(array $response): AssistantMessage
+    {
+        $text = '';
+        $content = [];
+        $toolCalls = [];
+
+        foreach (($response['output'] ?? []) as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            if (($item['type'] ?? '') === 'message') {
+                foreach (($item['content'] ?? []) as $part) {
+                    if (is_array($part) && ($part['type'] ?? '') === 'output_text') {
+                        $text .= (string) ($part['text'] ?? '');
+                    }
+                }
+                continue;
+            }
+
+            if (($item['type'] ?? '') === 'function_call') {
+                $toolCalls[] = ContentBlock::toolUse(
+                    (string) ($item['call_id'] ?? ''),
+                    (string) ($item['name'] ?? ''),
+                    self::decodeToolArguments((string) ($item['arguments'] ?? '')),
+                );
+            }
+        }
+
+        if ($text !== '') {
+            $content[] = ContentBlock::text($text);
+        }
+        foreach ($toolCalls as $block) {
+            $content[] = $block;
+        }
+
+        $message = new AssistantMessage();
+        $message->content = $content;
+        $message->usage = self::usageFromResponse($response['usage'] ?? null);
+        $message->stopReason = match (true) {
+            $toolCalls !== []                              => StopReason::ToolUse,
+            ($response['status'] ?? '') === 'incomplete'   => StopReason::MaxTokens,
+            default                                        => StopReason::EndTurn,
+        };
+
+        return $message;
+    }
+
+    /**
+     * @param mixed $usage
+     */
+    protected static function usageFromResponse($usage): ?Usage
+    {
+        if (! is_array($usage)) {
+            return null;
+        }
+
+        return new Usage(
+            inputTokens: (int) ($usage['input_tokens'] ?? 0),
+            outputTokens: (int) ($usage['output_tokens'] ?? 0),
+            cacheCreationInputTokens: null,
+            cacheReadInputTokens: isset($usage['input_tokens_details']['cached_tokens'])
+                ? (int) $usage['input_tokens_details']['cached_tokens']
+                : null,
+        );
+    }
+
+    /**
+     * One JSON request with the same retry policy `chat()` uses.
+     *
+     * @param  array<string, mixed>|null $body
+     * @return array<string, mixed>
+     */
+    protected function requestJson(string $method, string $path, ?array $body = null): array
+    {
+        $response = $this->send($method, $path, $body);
+        $decoded = json_decode((string) $response->getBody(), true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * Shared transport for the non-streaming lifecycle endpoints: retries
+     * 429 / 5xx like `chat()` does and classifies failures through the
+     * same error classifier, so a background job reports problems the way
+     * a live turn does.
+     *
+     * @param array<string, mixed>|null $body
+     */
+    protected function send(
+        string $method,
+        string $path,
+        ?array $body = null,
+        bool $stream = false,
+    ): \Psr\Http\Message\ResponseInterface {
+        $options = [];
+        if ($body !== null) {
+            $options['json'] = $body;
+        }
+        if ($stream) {
+            $options['stream'] = true;
+        }
+
+        $attempt = 0;
+        while (true) {
+            try {
+                return $this->client->request($method, $path, $options);
+            } catch (ClientException $e) {
+                $status = $e->getResponse()->getStatusCode();
+                $decoded = json_decode((string) $e->getResponse()->getBody(), true);
+
+                if (($status === 429 || $status >= 500) && $attempt < $this->requestMaxRetries) {
+                    $attempt++;
+                    usleep((int) ($this->getRetryDelay($attempt, $e->getResponse()) * 1_000_000));
+                    continue;
+                }
+
+                throw OpenAIErrorClassifier::classify(
+                    statusCode: $status,
+                    body: is_array($decoded) ? $decoded : null,
+                    message: $decoded['error']['message'] ?? $e->getMessage(),
+                    provider: $this->providerName(),
+                    previous: $e,
+                );
+            } catch (GuzzleException $e) {
+                if ($attempt < $this->requestMaxRetries) {
+                    $attempt++;
+                    usleep((int) ($this->jitteredBackoff($attempt) * 1_000_000));
+                    continue;
+                }
+
+                throw new ProviderException($e->getMessage(), $this->providerName(), previous: $e);
+            }
+        }
     }
 }

@@ -116,7 +116,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
 | `glm` | BigModel GLM（默认 GLM-5.3）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.3 默认 + GLM-5.3-Flash，v1.1.12；GLM-5.3 档位，v1.1.11)* |
 | `meta` | Meta Model API（Muse Spark）| API key（`META_API_KEY` / `MODEL_API_KEY`）；OpenAI 兼容，位于 `api.meta.ai`；默认 `muse-spark-1.3` —— 推理常开（`minimal…max`，没有关闭档）、1M ctx、文本/图像/视频/音频/PDF 输入、搜索接地 *(v1.1.13)* |
-| `meta-responses` | Meta Model API —— Responses 路由 | 同一把 key / 同一批模型；`POST /v1/responses` —— 推理可跨轮复用（加密回放或 `previous_response_id`）、服务端状态 *(v1.1.14)* |
+| `meta-responses` | Meta Model API —— Responses 路由 | 同一把 key / 同一批模型；`POST /v1/responses` —— 推理可跨轮复用（加密回放或 `previous_response_id`）、服务端状态 *(v1.1.14)*；后台任务 —— submit / poll / fetch / cancel / delete *(v1.1.15)* |
 | `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
 | `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.6` —— reasoning-effort 档位（含 `xhigh`）+ cache 绑定 *（Grok 4.6，v1.1.11；v1.0.8 起）* |
@@ -650,6 +650,40 @@ Meta 不接受同时带这两者的请求，因此一旦要求加密回放，就
 该路由还会剔除共享 Responses 基类可能发出的 OpenAI 专有字段 —— `reasoning.mode`、`reasoning.context`、`text.verbosity`、`service_tier`、`prompt_cache_options`、`response_format`（结构化输出走 `text.format`）—— 并且对 `background: true` 直接报错而不是悄悄忽略：它不能与流式并用，且其所需的查询/取消端点本版未接。
 
 > `max` 档（"extended reasoning"）**仅限标准档的 `muse-spark-1.3`** —— 1.1、1.2 以及所有 `-contributor` id 收到它都会 400，因此档位会为它们降级到 `xhigh`。
+
+### 后台任务（`meta-responses`）
+
+一个在高 effort 下跑几十分钟的回合，用挂着不放的流式连接来接并不合适。`background: true` 会把它从连接上摘下来：服务端立即确认、继续干活，你之后再回来取结果。`MetaResponsesProvider` 实现了 `SupportsBackgroundResponses`（submit → poll → fetch，外加 cancel 与 delete）：
+
+```php
+$provider = ProviderRegistry::create('meta-responses', ['api_key' => getenv('META_API_KEY')]);
+
+$job = $provider->submitBackground($messages, $tools, $system, ['reasoning_effort' => 'max']);
+// → JobHandle{jobId: "resp_…", kind: "response"} —— 此时还没开始生成
+
+while (! $provider->poll($job)->isTerminal()) {
+    sleep(2);
+}
+
+$message = $provider->fetch($job);      // AssistantMessage，与 chat() 产出的形态一致
+$provider->deleteBackground($job);      // 存储对象由你负责清理
+```
+
+也可以重新挂上去、像实时回合一样渲染 —— `followBackground()` 会流式读取已存储的响应（`response.created`，然后是携带完整结果的终止事件；没有 token 增量，因为它们是在无人监听时产生的）：
+
+```php
+foreach ($provider->followBackground($job, startingAfter: $lastSeq) as $message) { … }
+```
+
+SDK 替你处理的细节：
+
+- **提交时强制"分离"形态** —— `background: true`、`stream: false`（两者同时出现是 400）、`store: true`。没有存储，Meta 会在约 10 分钟后丢弃后台响应，那就会和你的轮询赛跑。这也意味着 `reasoning_replay` 在这里无效：它是无状态模式，而后台任务本质上就是服务端状态。
+- **`incomplete` 不是失败。** 撞到 `max_output_tokens` 的任务是"终止且有输出"：`poll()` 返回 `Done`，`fetch()` 返回被截断的内容并带上 `StopReason::MaxTokens`。只有 `failed` 才抛异常。
+- **抢跑失败的 cancel 也算数。** 如果回合恰好在同一瞬间完成，Meta 返回的是已完成的响应而不是错误；`cancel()` 对任何终止状态都返回 true —— 反正你都该停止轮询了。
+- **对象已不存在时 `deleteBackground()` 返回 false**（Meta 返回 404 —— 该端点不是幂等的）。
+- 给普通 `chat()` 传 `background: true` 会抛异常并指向 `submitBackground()`，而不是丢掉这个标志照常流式。
+
+`countInputTokens()` 封装了 `POST /v1/responses/input_tokens` —— 在真花一个回合去试之前，先问清楚裁剪过的会话是否放得下。
 
 Muse Spark 也可通过 OpenRouter（`meta/muse-spark-1.3`）和 Cursor 访问；只有原生 provider 能使用上述 Meta 专有字段。
 

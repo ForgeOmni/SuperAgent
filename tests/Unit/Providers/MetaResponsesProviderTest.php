@@ -5,8 +5,17 @@ declare(strict_types=1);
 namespace SuperAgent\Tests\Unit\Providers;
 
 use PHPUnit\Framework\TestCase;
-use SuperAgent\Exceptions\FeatureNotSupportedException;
+use GuzzleHttp\Client;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Response;
+use SuperAgent\Enums\StopReason;
+use SuperAgent\Exceptions\ProviderException;
+use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\UserMessage;
+use SuperAgent\Providers\JobHandle;
+use SuperAgent\Providers\JobStatus;
 use SuperAgent\Providers\MetaResponsesProvider;
 use SuperAgent\Providers\ProviderRegistry;
 use SuperAgent\Tools\Tool;
@@ -190,10 +199,13 @@ class MetaResponsesProviderTest extends TestCase
         $this->assertSame('user-abc', $body['safety_identifier']);
     }
 
-    public function test_background_is_refused_rather_than_silently_dropped(): void
+    public function test_background_on_the_streaming_path_points_at_the_right_method(): void
     {
-        $this->expectException(FeatureNotSupportedException::class);
-        $this->expectExceptionMessageMatches('/background/');
+        // chat() always streams and Meta 400s background + stream, so the
+        // flag must route the caller to submitBackground() rather than be
+        // dropped (which would stream and look like it worked).
+        $this->expectException(ProviderException::class);
+        $this->expectExceptionMessageMatches('/submitBackground/');
 
         $this->body(new MetaResponsesProvider(['api_key' => 'k']), ['background' => true]);
     }
@@ -207,6 +219,229 @@ class MetaResponsesProviderTest extends TestCase
         $this->assertArrayNotHasKey('include', $body);
         $this->assertArrayNotHasKey('safety_identifier', $body);
         $this->assertArrayNotHasKey('tools', $body);
+    }
+
+    // ---------------- background lifecycle ----------------
+
+    public function test_submit_background_forces_the_detached_shape(): void
+    {
+        $history = [];
+        $p = $this->withTransport([
+            new Response(200, [], json_encode([
+                'id' => 'resp_bg1', 'status' => 'queued', 'background' => true, 'model' => 'muse-spark-1.3',
+            ])),
+        ], $history);
+
+        $job = $p->submitBackground([new UserMessage('long job')], [], null, [
+            'reasoning_effort' => 'max',
+            // A caller asking for stateless replay must not win here — a
+            // background job IS server-side state.
+            'reasoning_replay' => true,
+        ]);
+
+        $this->assertSame('resp_bg1', $job->jobId);
+        $this->assertSame('meta-responses', $job->provider);
+        $this->assertSame('response', $job->kind);
+        $this->assertSame('queued', $job->meta['status']);
+
+        $sent = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame('POST', $history[0]['request']->getMethod());
+        $this->assertSame('/v1/responses', $history[0]['request']->getUri()->getPath());
+        $this->assertTrue($sent['background']);
+        $this->assertFalse($sent['stream'], 'background + stream is a 400');
+        $this->assertTrue($sent['store'], 'without store the response is dropped after ~10 min');
+        $this->assertArrayNotHasKey('include', $sent, 'encrypted replay is the stateless mode');
+        $this->assertArrayNotHasKey('stream_options', $sent);
+        $this->assertSame('max', $sent['reasoning']['effort']);
+    }
+
+    public function test_submit_background_without_an_id_is_an_error(): void
+    {
+        $p = $this->withTransport([new Response(200, [], json_encode(['status' => 'queued']))]);
+
+        $this->expectException(ProviderException::class);
+        $this->expectExceptionMessageMatches('/no response id/');
+        $p->submitBackground([new UserMessage('hi')]);
+    }
+
+    public function test_poll_maps_every_status_meta_reports(): void
+    {
+        $map = [
+            'queued' => JobStatus::Pending,
+            'in_progress' => JobStatus::Running,
+            'completed' => JobStatus::Done,
+            // Terminal with partial output — Done, so fetch() can return it.
+            'incomplete' => JobStatus::Done,
+            'failed' => JobStatus::Failed,
+            'cancelled' => JobStatus::Canceled,
+        ];
+
+        foreach ($map as $status => $expected) {
+            $p = $this->withTransport([new Response(200, [], json_encode(['id' => 'resp_1', 'status' => $status]))]);
+            $this->assertSame($expected, $p->poll($this->handle()), $status);
+        }
+    }
+
+    public function test_fetch_converts_a_stored_response_into_an_assistant_message(): void
+    {
+        $history = [];
+        $p = $this->withTransport([
+            new Response(200, [], json_encode([
+                'id' => 'resp_1',
+                'status' => 'completed',
+                'output' => [
+                    ['type' => 'reasoning', 'summary' => []],
+                    ['type' => 'message', 'role' => 'assistant', 'content' => [
+                        ['type' => 'output_text', 'text' => 'the answer'],
+                    ]],
+                ],
+                'usage' => [
+                    'input_tokens' => 120,
+                    'output_tokens' => 40,
+                    'input_tokens_details' => ['cached_tokens' => 80],
+                ],
+            ])),
+        ], $history);
+
+        $message = $p->fetch($this->handle());
+
+        $this->assertInstanceOf(AssistantMessage::class, $message);
+        $this->assertSame('the answer', $message->content[0]->text);
+        $this->assertSame(StopReason::EndTurn, $message->stopReason);
+        $this->assertSame(120, $message->usage->inputTokens);
+        $this->assertSame(80, $message->usage->cacheReadInputTokens);
+        $this->assertSame('GET', $history[0]['request']->getMethod());
+        $this->assertSame('/v1/responses/resp_1', $history[0]['request']->getUri()->getPath());
+    }
+
+    public function test_fetch_surfaces_tool_calls(): void
+    {
+        $p = $this->withTransport([
+            new Response(200, [], json_encode([
+                'id' => 'resp_1',
+                'status' => 'completed',
+                'output' => [
+                    ['type' => 'function_call', 'call_id' => 'call_9', 'name' => 'demo', 'arguments' => '{"a":1}'],
+                ],
+            ])),
+        ]);
+
+        $message = $p->fetch($this->handle());
+
+        $this->assertSame(StopReason::ToolUse, $message->stopReason);
+        $this->assertSame('tool_use', $message->content[0]->type);
+        $this->assertSame('call_9', $message->content[0]->toolUseId);
+        $this->assertSame('demo', $message->content[0]->toolName);
+        $this->assertSame(['a' => 1], $message->content[0]->toolInput);
+    }
+
+    public function test_fetch_returns_truncated_output_for_an_incomplete_job(): void
+    {
+        $p = $this->withTransport([
+            new Response(200, [], json_encode([
+                'id' => 'resp_1',
+                'status' => 'incomplete',
+                'output' => [
+                    ['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'half an ans']]],
+                ],
+            ])),
+        ]);
+
+        $message = $p->fetch($this->handle());
+
+        $this->assertSame('half an ans', $message->content[0]->text);
+        $this->assertSame(StopReason::MaxTokens, $message->stopReason);
+    }
+
+    public function test_fetch_throws_on_a_failed_job(): void
+    {
+        $p = $this->withTransport([
+            new Response(200, [], json_encode([
+                'id' => 'resp_1',
+                'status' => 'failed',
+                'error' => ['message' => 'model exploded'],
+            ])),
+        ]);
+
+        $this->expectException(ProviderException::class);
+        $this->expectExceptionMessageMatches('/model exploded/');
+        $p->fetch($this->handle());
+    }
+
+    public function test_cancel_acknowledges_a_completed_race(): void
+    {
+        // Meta returns the completed response when a cancel lands in the
+        // same instant the turn finishes — the caller should stop polling
+        // either way, so that still counts as acknowledged.
+        $cancelled = $this->withTransport([new Response(200, [], json_encode(['status' => 'cancelled']))]);
+        $this->assertTrue($cancelled->cancel($this->handle()));
+
+        $raced = $this->withTransport([new Response(200, [], json_encode(['status' => 'completed']))]);
+        $this->assertTrue($raced->cancel($this->handle()));
+
+        $running = $this->withTransport([new Response(200, [], json_encode(['status' => 'in_progress']))]);
+        $this->assertFalse($running->cancel($this->handle()));
+    }
+
+    public function test_cancel_and_delete_hit_the_right_endpoints(): void
+    {
+        $history = [];
+        $p = $this->withTransport([
+            new Response(200, [], json_encode(['status' => 'cancelled'])),
+            new Response(200, [], json_encode(['id' => 'resp_1', 'deleted' => true])),
+        ], $history);
+
+        $p->cancel($this->handle());
+        $this->assertTrue($p->deleteBackground($this->handle()));
+
+        $this->assertSame('POST', $history[0]['request']->getMethod());
+        $this->assertSame('/v1/responses/resp_1/cancel', $history[0]['request']->getUri()->getPath());
+        $this->assertSame('DELETE', $history[1]['request']->getMethod());
+        $this->assertSame('/v1/responses/resp_1', $history[1]['request']->getUri()->getPath());
+    }
+
+    public function test_delete_reports_false_when_the_object_is_already_gone(): void
+    {
+        $p = $this->withTransport([new Response(404, [], json_encode(['error' => ['message' => 'not found']]))]);
+
+        $this->assertFalse($p->deleteBackground($this->handle()));
+    }
+
+    public function test_follow_background_streams_the_stored_response(): void
+    {
+        $sse = "event: response.created\n"
+            . 'data: ' . json_encode(['response' => ['id' => 'resp_1']]) . "\n\n"
+            . "event: response.completed\n"
+            . 'data: ' . json_encode([
+                'response' => [
+                    'id' => 'resp_1',
+                    'usage' => ['input_tokens' => 10, 'output_tokens' => 5],
+                ],
+            ]) . "\n\n"
+            . "data: [DONE]\n\n";
+
+        $history = [];
+        $p = $this->withTransport([new Response(200, [], $sse)], $history);
+
+        $messages = iterator_to_array($p->followBackground($this->handle(), startingAfter: 7));
+
+        $this->assertInstanceOf(AssistantMessage::class, $messages[0]);
+        $this->assertSame('GET', $history[0]['request']->getMethod());
+        $this->assertSame('/v1/responses/resp_1', $history[0]['request']->getUri()->getPath());
+        $this->assertSame('stream=true&starting_after=7', $history[0]['request']->getUri()->getQuery());
+    }
+
+    public function test_count_input_tokens_uses_the_sizing_endpoint(): void
+    {
+        $history = [];
+        $p = $this->withTransport([new Response(200, [], json_encode(['input_tokens' => 4242]))], $history);
+
+        $this->assertSame(4242, $p->countInputTokens([new UserMessage('how big is this?')]));
+
+        $sent = json_decode((string) $history[0]['request']->getBody(), true);
+        $this->assertSame('/v1/responses/input_tokens', $history[0]['request']->getUri()->getPath());
+        $this->assertArrayNotHasKey('stream', $sent);
+        $this->assertArrayNotHasKey('store', $sent);
     }
 
     // ---------------- helpers ----------------
@@ -247,6 +482,34 @@ class MetaResponsesProviderTest extends TestCase
             }
             public function isReadOnly(): bool { return true; }
         };
+    }
+
+    private function handle(string $id = 'resp_1'): JobHandle
+    {
+        return JobHandle::new('meta-responses', $id, 'response');
+    }
+
+    /**
+     * @param  Response[]                        $responses
+     * @param  array<int, array<string, mixed>>  $history
+     */
+    private function withTransport(array $responses, array &$history = []): MetaResponsesProvider
+    {
+        $provider = new MetaResponsesProvider(['api_key' => 'k']);
+
+        $stack = HandlerStack::create(new MockHandler($responses));
+        $stack->push(Middleware::history($history));
+        $client = new Client(['handler' => $stack, 'base_uri' => 'https://api.meta.ai/']);
+
+        $r = new \ReflectionObject($provider);
+        while ($r && ! $r->hasProperty('client')) {
+            $r = $r->getParentClass();
+        }
+        $prop = $r->getProperty('client');
+        $prop->setAccessible(true);
+        $prop->setValue($provider, $client);
+
+        return $provider;
     }
 
     private function host(object $provider): string

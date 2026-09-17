@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.15] - 2026-09-17
+
+### 💻 Summary
+
+**The background-response lifecycle on Meta's Responses route: submit → poll → fetch, plus cancel, delete and re-attach.** v1.1.14 refused `background: true` because the endpoints it implies weren't wired; they are now, through the SDK's existing `AsyncCapable` contract. The point is decoupling: a Muse Spark turn at `max` effort can run for many minutes, and holding an HTTP stream open for it ties the work to the client process — drop the connection, close the CLI or redeploy the worker and the turn is gone along with what it cost. A background job survives all three, and `JobHandle` serialises, so submit and collect can live in different processes. Additive and non-breaking except for the `chat()` guard's exception type. Full suite green (3420 tests).
+
+### Added
+
+- **`Providers\Capabilities\SupportsBackgroundResponses`** — extends `AsyncCapable` (`poll` / `fetch` / `cancel`) with `submitBackground()`, `followBackground()` and `deleteBackground()`. Documented as distinct from `SupportsBatch`: a batch is many requests submitted as a file for throughput and a discount; a background response is one ordinary turn that outlives its HTTP request.
+- **`MetaResponsesProvider` implements it**:
+  - `submitBackground()` forces the detached shape whatever the caller passed — `background: true`, `stream: false` (the pair is a 400 at creation), `store: true` (without storage Meta drops the response after ~10 minutes and `poll()` would race the garbage collector), and drops `include`, since encrypted replay is the stateless mode and a background job is server-side state by definition. Returns a `JobHandle` carrying the response id, model and initial status.
+  - `poll()` maps Meta's statuses: `queued` → Pending, `in_progress` → Running, `completed` → Done, **`incomplete` → Done** (terminal *with* output — a turn that hit `max_output_tokens` still produced work), `failed` → Failed, `cancelled` → Canceled.
+  - `fetch()` converts a stored response into an `AssistantMessage` — the non-streaming counterpart of the base class's SSE assembler — including `output_text` parts, `function_call` items as tool-use blocks, usage (with `input_tokens_details.cached_tokens`), and `StopReason::MaxTokens` for an `incomplete` job. Throws through the shared error classifier on `failed`.
+  - `cancel()` treats any terminal state as acknowledged: Meta returns the completed response when a cancel lands in the same instant the turn finishes, and the caller's next move ("stop polling") is identical either way.
+  - `deleteBackground()` soft-deletes the stored object and reports false when it was already gone (the endpoint is not idempotent — a repeat delete is a 404). Never called implicitly: retention is the caller's decision.
+  - `followBackground($handle, $startingAfter)` re-attaches via `GET /v1/responses/{id}?stream=true` and yields through the base Responses SSE parser, so a resumed job renders like a live turn. The stored stream carries `response.created`, the terminal event with the full response, then `[DONE]` — no token deltas, since they were generated while nobody was listening.
+  - `countInputTokens()` wraps `POST /v1/responses/input_tokens` for sizing a compacted conversation before spending a turn on it.
+  - Shared `send()` / `requestJson()` transport gives the lifecycle endpoints the same 429 / 5xx retry policy and error classification `chat()` uses.
+- Tests: `MetaResponsesProviderTest` grows from 15 to 27, all against a mocked Guzzle transport.
+
+### Changed
+
+- `SuperAgentApplication::VERSION` `1.1.14` → `1.1.15`.
+- **`background: true` on `chat()` now raises `ProviderException` naming `submitBackground()`, not `FeatureNotSupportedException`.** The old type said "this provider cannot do that", which stopped being true in this release. Still an exception rather than a silent drop — a dropped flag would stream normally and look like a working async call that was never async.
+- Docs: README / INSTALL / ADVANCED_USAGE updated in all three languages (EN / CN / FR) — a "Background jobs" README subsection and ADVANCED_USAGE section 103.
+
+
 ## [1.1.14] - 2026-09-17
 
 ### 💻 Summary

@@ -11817,3 +11817,58 @@ Meta 不接受同时带 `include` 和 `previous_response_id` 的请求，因此�
 如何选路由：单轮调用、图 OpenAI 形态方便就用 `meta`；凡是 agentic 的用 `meta-responses`；Claude 形态的客户端用 `anthropic` + `base_url=https://api.meta.ai`。同一把 key、同一批模型、同一套计费。
 
 测试：`MetaResponsesProviderTest`（15）—— 端点与 registry 解析、effort 下探与仅标准档可用的 `max`、回放强制 `store: false`、`include` / `previous_response_id` 双向互斥、OpenAI 专有字段剔除（含经 `extra_body` 注入）、`response_format` → `text.format`、grounding 单独及与函数工具并存、`background` 拒绝。全量测试通过（3408）。
+
+## 103. 后台响应 —— 从连接上摘下来的回合 (v1.1.15)
+
+v1.1.14 拒绝 `background: true`，因为它隐含的那套生命周期还没接。现在接上了：`MetaResponsesProvider` 实现了新增的 `Capabilities\SupportsBackgroundResponses`，它在 SDK 既有的 `AsyncCapable` 契约（`poll` / `fetch` / `cancel`）之上补了 `submitBackground()`、`followBackground()` 和 `deleteBackground()`。
+
+**什么时候该用这种形态。** Muse Spark 在 `max` effort 下做一件真正的 agentic 任务，可能跑几十分钟。为此一直挂着 HTTP 流，等于把这份工作和客户端进程绑死：连接断了、CLI 被关了、队列 worker 重新部署了 —— 这个回合连同已经花掉的钱一起没了。`background: true` 把两者解耦：服务端毫秒级确认、继续干活，结果留在一个已存储的响应里等你。
+
+```php
+$provider = ProviderRegistry::create('meta-responses', ['api_key' => getenv('META_API_KEY')]);
+
+$job = $provider->submitBackground($messages, $tools, $system, ['reasoning_effort' => 'max']);
+// JobHandle{provider: "meta-responses", jobId: "resp_…", kind: "response"}
+// 可经 ->toArray() / JobHandle::fromArray() 序列化 —— 塞进队列记录里即可。
+
+while (! $provider->poll($job)->isTerminal()) {
+    sleep(2);
+}
+
+$message = $provider->fetch($job);      // AssistantMessage —— 与 chat() 产出的形态一致
+$provider->deleteBackground($job);
+```
+
+`JobHandle` 不可变，且能通过 `toArray()` / `fromArray()` 往返，所以提交和取回可以分处不同进程 —— 这正是它的意义所在。
+
+**提交会强制"分离"形态**，不管调用方传了什么：
+
+| 强制值 | 原因 |
+|---|---|
+| `background: true` | 就是为了它 |
+| `stream: false` | Meta 在创建时对 `background` + `stream` 直接 400 |
+| `store: true` | 否则后台响应约 10 分钟后被丢弃 —— `poll()` 会和垃圾回收赛跑 |
+| 移除 `include` | 加密回放是*无状态*模式；而后台任务本质上就是服务端状态 |
+
+**终止 ≠ 成功，这个区分很重要。** `poll()` 把 Meta 的状态映射到 `JobStatus`：
+
+| Meta | `JobStatus` | 说明 |
+|---|---|---|
+| `queued` | `Pending` | 已确认，尚未调度 |
+| `in_progress` | `Running` | |
+| `completed` | `Done` | |
+| `incomplete` | `Done` | 终止**且有输出** —— 回合提前停止（如撞到 `max_output_tokens`）。`fetch()` 返回被截断的内容并带 `StopReason::MaxTokens`；丢掉它等于丢掉已经付过钱的工作 |
+| `failed` | `Failed` | `fetch()` 通过共享的错误分类器抛出 |
+| `cancelled` | `Canceled` | |
+
+**cancel 抢跑失败属于成功，而非错误。** 如果回合恰好在 cancel 抵达的同一瞬间完成，Meta 返回的是已完成的响应而不是失败。因此 `cancel()` 对*任何*终止状态都返回 true —— 无论哪种情况，调用方接下来的动作（"停止轮询"）是一样的。只有任务仍在运行、或请求本身失败时才返回 false。
+
+**删除是显式的，且不幂等。** 后台响应是带留存足迹的存储对象，因此 SDK 绝不在背后替你清理 —— `deleteBackground()` 由你来调。对象已不存在时返回 false（Meta 对重复删除返回 404）。
+
+**重新挂接。** `followBackground($job, startingAfter: $seq)` 请求 `GET /v1/responses/{id}?stream=true`，并交给基类的 Responses SSE 解析器产出，因此恢复的任务渲染起来与实时回合完全一样。但要清楚这个流里有什么：`response.created`、携带完整最终响应的终止事件，然后 `[DONE]`。没有 token 增量 —— 它们是在无人监听时产生的。这是重新挂接，不是把打字过程重放一遍。
+
+**估算大小。** `countInputTokens()` 封装 `POST /v1/responses/input_tokens`：在花一个回合去发现"放不下"之前，先问清楚压缩后的会话是否放得下。
+
+**`chat()` 的守卫换了形态。** v1.1.14 里给 `chat()` 传 `background: true` 抛的是 `FeatureNotSupportedException` —— 当时准确，但现在这个特性已经存在，那就不对了。改为抛出点名 `submitBackground()` 的 `ProviderException`。仍然是抛异常而不是静默丢弃：丢掉标志会照常流式，看起来像一个能用的异步调用，而它从来就不是异步的。
+
+测试：`MetaResponsesProviderTest` 扩到 27 条 —— 提交强制 background/stream/store 并移除 `include`、缺少 id 的报错、全部状态映射、`fetch()` 转换输出项（文本、工具调用、被截断的 `incomplete`）以及 `failed` 时抛异常、cancel 竞态、cancel/delete 的端点路径、404 时的 delete、`followBackground()` 的 query string 与 SSE 解析、`countInputTokens()`。全部基于 mock 的 Guzzle 传输层。全量测试通过（3420）。

@@ -116,7 +116,7 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
 | `glm` | BigModel GLM (GLM-5.3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(défaut GLM-5.3 + GLM-5.3-Flash, v1.1.12 ; molette GLM-5.3, v1.1.11)* |
 | `meta` | Meta Model API (Muse Spark) | Clé API (`META_API_KEY` / `MODEL_API_KEY`) ; compatible OpenAI sur `api.meta.ai` ; défaut `muse-spark-1.3` — raisonnement toujours actif (`minimal…max`, pas d'interrupteur), 1 M de contexte, entrée texte/image/vidéo/audio/PDF, ancrage par recherche *(v1.1.13)* |
-| `meta-responses` | Meta Model API — route Responses | Même clé / mêmes modèles ; `POST /v1/responses` — rejeu du raisonnement entre les tours (chiffré ou `previous_response_id`), état géré côté serveur *(v1.1.14)* |
+| `meta-responses` | Meta Model API — route Responses | Même clé / mêmes modèles ; `POST /v1/responses` — rejeu du raisonnement entre les tours (chiffré ou `previous_response_id`), état géré côté serveur *(v1.1.14)* ; tâches en arrière-plan — submit / poll / fetch / cancel / delete *(v1.1.15)* |
 | `minimax` | MiniMax (M3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking entrelacé + image/vidéo natives *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
 | `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.6` — molette reasoning-effort (incl. `xhigh`) + pinning de cache *(Grok 4.6, v1.1.11 ; depuis v1.0.8)* |
@@ -651,6 +651,40 @@ Meta rejette une requête portant les deux, donc demander le rejeu retire l'id d
 La route retire aussi les boutons propres à OpenAI que la classe de base Responses peut émettre — `reasoning.mode`, `reasoning.context`, `text.verbosity`, `service_tier`, `prompt_cache_options`, `response_format` (la sortie structurée passe par `text.format`) — et refuse `background: true` franchement plutôt que de l'ignorer en silence : il est incompatible avec le streaming et les endpoints de récupération/annulation qu'il implique ne sont pas câblés.
 
 > Le palier `max` (« extended reasoning ») est réservé au `muse-spark-1.3` **de la tier Standard** — 1.1, 1.2 et tous les ids `-contributor` renvoient 400 pour lui, la molette les ramène donc à `xhigh`.
+
+### Tâches en arrière-plan (`meta-responses`)
+
+Un tour qui tourne plusieurs dizaines de minutes à effort élevé n'a pas la bonne forme pour un flux maintenu ouvert. `background: true` le détache : le serveur accuse réception immédiatement, continue de travailler, et vous revenez chercher le résultat. `MetaResponsesProvider` implémente `SupportsBackgroundResponses` (submit → poll → fetch, plus cancel et delete) :
+
+```php
+$provider = ProviderRegistry::create('meta-responses', ['api_key' => getenv('META_API_KEY')]);
+
+$job = $provider->submitBackground($messages, $tools, $system, ['reasoning_effort' => 'max']);
+// → JobHandle{jobId: "resp_…", kind: "response"} — rien n'est encore généré
+
+while (! $provider->poll($job)->isTerminal()) {
+    sleep(2);
+}
+
+$message = $provider->fetch($job);      // AssistantMessage, la forme que chat() produit
+$provider->deleteBackground($job);      // les objets stockés sont à vous de nettoyer
+```
+
+Ou rattachez-vous et rendez-le comme un tour en direct — `followBackground()` diffuse la réponse stockée (`response.created`, puis l'événement terminal portant le résultat complet ; pas de deltas de tokens, ils ont été produits pendant que personne n'écoutait) :
+
+```php
+foreach ($provider->followBackground($job, startingAfter: $lastSeq) as $message) { … }
+```
+
+Ce dont le SDK s'occupe pour vous :
+
+- **La soumission impose la forme détachée** — `background: true`, `stream: false` (la paire est un 400) et `store: true`. Sans stockage, Meta supprime une réponse d'arrière-plan au bout d'environ 10 minutes, ce qui ferait courir votre polling après elle. Cela exclut aussi `reasoning_replay`, qui est le mode sans état ; une tâche d'arrière-plan est par définition de l'état côté serveur.
+- **`incomplete` n'est pas un échec.** Une tâche ayant atteint `max_output_tokens` est terminale *avec* sortie : `poll()` renvoie `Done` et `fetch()` retourne le contenu tronqué avec `StopReason::MaxTokens`. Seul `failed` lève.
+- **Une annulation qui perd la course compte quand même.** Si le tour se termine au même instant, Meta renvoie la réponse complétée plutôt qu'une erreur ; `cancel()` renvoie true pour tout état terminal, puisque dans les deux cas vous arrêtez de poller.
+- **`deleteBackground()` renvoie false quand l'objet a déjà disparu** (Meta répond 404 — l'endpoint n'est pas idempotent).
+- Passer `background: true` à un `chat()` normal lève une exception qui pointe vers `submitBackground()`, plutôt que d'ignorer le drapeau et de streamer quand même.
+
+`countInputTokens()` enveloppe `POST /v1/responses/input_tokens` — demandez si une conversation élaguée tient avant de dépenser un tour à le découvrir.
 
 Muse Spark est aussi accessible via OpenRouter (`meta/muse-spark-1.3`) et Cursor ; seuls les providers natifs parlent ces champs spécifiques à Meta.
 

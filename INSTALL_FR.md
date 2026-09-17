@@ -777,6 +777,13 @@ Les trois protocoles Meta sont câblés : `provider=meta` (Chat Completions), `p
 // Boucle agentique avec raisonnement transporté entre les tours
 $agent = new Agent(['provider' => 'meta-responses']);
 $agent->run('corrige le test qui échoue', ['reasoning_replay' => true]);
+
+// Tâche longue détachée de la connexion (v1.1.15)
+$provider = ProviderRegistry::create('meta-responses');
+$job = $provider->submitBackground($messages, [], null, ['reasoning_effort' => 'max']);
+while (! $provider->poll($job)->isTerminal()) { sleep(2); }
+$message = $provider->fetch($job);
+$provider->deleteBackground($job);
 ```
 
 > Les ids `-contributor` sont ~12× moins chers parce que Meta entraîne ses modèles sur vos prompts et complétions. Ils sont catalogués mais jamais aliasés — nommez l'id explicitement si vous voulez cet échange.

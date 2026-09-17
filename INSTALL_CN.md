@@ -776,6 +776,13 @@ Meta 的三种协议现已全部接通：`provider=meta`（Chat Completions）�
 // 推理可跨轮复用的 agentic 循环
 $agent = new Agent(['provider' => 'meta-responses']);
 $agent->run('修掉失败的测试', ['reasoning_replay' => true]);
+
+// 从连接上摘下来的长任务（v1.1.15）
+$provider = ProviderRegistry::create('meta-responses');
+$job = $provider->submitBackground($messages, [], null, ['reasoning_effort' => 'max']);
+while (! $provider->poll($job)->isTerminal()) { sleep(2); }
+$message = $provider->fetch($job);
+$provider->deleteBackground($job);
 ```
 
 > `-contributor` 系列便宜约 12 倍，代价是 Meta 会用你的 prompt 和回复训练模型。catalog 收录但不设别名 —— 需要这笔交换时请显式写出该 id。
