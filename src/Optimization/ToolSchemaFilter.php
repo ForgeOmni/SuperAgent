@@ -2,6 +2,8 @@
 
 namespace SuperAgent\Optimization;
 
+use SuperAgent\Support\Config;
+
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\Message;
 use SuperAgent\Tools\Tool;
@@ -55,12 +57,7 @@ class ToolSchemaFilter
      */
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config') ? (config('superagent.optimization.selective_tool_schema') ?? []) : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.optimization.selective_tool_schema', []);
 
         return new self(
             enabled: (bool) ($config['enabled'] ?? true),

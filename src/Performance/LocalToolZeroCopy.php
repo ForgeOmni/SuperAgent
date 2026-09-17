@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Performance;
 
+use SuperAgent\Support\Config;
+
 use SuperAgent\Tools\ToolResult;
 
 /**
@@ -33,14 +35,7 @@ class LocalToolZeroCopy
 
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config')
-                ? (config('superagent.performance.local_tool_zero_copy') ?? [])
-                : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.performance.local_tool_zero_copy', []);
 
         return new self(
             enabled: (bool) ($config['enabled'] ?? true),

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-17
+
+### 💻 Summary
+
+**Building an agent outside a booted application stops narrating it.** Twelve `fromConfig()` factories each caught their own config failure and wrote `[SuperAgent] Config unavailable for …` — once per object, per turn. Running without a framework is this SDK's documented standalone mode, not an error worth a log line, and in a host's test suite that output alone marks 27 tests risky under `beStrictAboutOutputDuringTests`. Found where it lands: in SuperAICore's suite, on the Laravel 13 leg.
+
+### Fixed
+
+- **`Optimization\{ModelRouter, PromptCachePinning, ResponsePrefill, ToolResultCompactor, ToolSchemaFilter}` and `Performance\{AdaptiveMaxTokens, BatchApiClient, ConnectionPool, LocalToolZeroCopy, ParallelToolExecutor, SpeculativePrefetch, StreamingBashExecutor, StreamingToolDispatch}`** read through `Support\Config` now, which answers with the caller's default and says nothing. Same defaults, same behaviour, no output.
+- `QuietConfigFallbackTest` pins it: every one of those factories constructs silently, and still returns a usable object.
+
 ## [1.2.0] - 2026-09-17
 
 ### 💻 Summary

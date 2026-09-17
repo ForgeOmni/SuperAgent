@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Optimization;
 
+use SuperAgent\Support\Config;
+
 use SuperAgent\Context\CompactionShadowStore;
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ContentBlock;
@@ -23,12 +25,7 @@ class ToolResultCompactor
      */
     public static function fromConfig(?string $sessionId = null): self
     {
-        try {
-            $config = function_exists('config') ? (config('superagent.optimization.tool_result_compaction') ?? []) : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.optimization.tool_result_compaction', []);
 
         return new self(
             enabled: $config['enabled'] ?? true,

@@ -2,6 +2,8 @@
 
 namespace SuperAgent\Performance;
 
+use SuperAgent\Support\Config;
+
 use Fiber;
 use SuperAgent\Messages\ContentBlock;
 
@@ -40,14 +42,7 @@ class StreamingToolDispatch
      */
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config')
-                ? (config('superagent.performance.streaming_tool_dispatch') ?? [])
-                : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.performance.streaming_tool_dispatch', []);
 
         return new self(
             enabled: (bool) ($config['enabled'] ?? true),

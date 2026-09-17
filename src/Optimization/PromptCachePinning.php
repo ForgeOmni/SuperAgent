@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Optimization;
 
+use SuperAgent\Support\Config;
+
 class PromptCachePinning
 {
     public const CACHE_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__';
@@ -32,12 +34,7 @@ class PromptCachePinning
      */
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config') ? (config('superagent.optimization.prompt_cache_pinning') ?? []) : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.optimization.prompt_cache_pinning', []);
 
         return new self(
             enabled: $config['enabled'] ?? true,

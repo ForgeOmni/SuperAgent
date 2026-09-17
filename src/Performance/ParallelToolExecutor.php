@@ -2,6 +2,8 @@
 
 namespace SuperAgent\Performance;
 
+use SuperAgent\Support\Config;
+
 use Fiber;
 use SuperAgent\Messages\ContentBlock;
 
@@ -53,23 +55,8 @@ class ParallelToolExecutor
      */
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config')
-                ? (config('superagent.performance.parallel_tool_execution') ?? [])
-                : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
-
-        try {
-            $processConfig = function_exists('config')
-                ? (config('superagent.performance.process_parallel_execution') ?? [])
-                : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for process_parallel_execution: ' . $e->getMessage());
-            $processConfig = [];
-        }
+        $config = Config::get('superagent.performance.parallel_tool_execution', []);
+        $processConfig = Config::get('superagent.performance.process_parallel_execution', []);
 
         return new self(
             enabled: (bool) ($config['enabled'] ?? true),

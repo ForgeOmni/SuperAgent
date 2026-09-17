@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Performance;
 
+use SuperAgent\Support\Config;
+
 use GuzzleHttp\Client;
 
 class BatchApiClient
@@ -33,14 +35,7 @@ class BatchApiClient
      */
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config')
-                ? (config('superagent.performance.batch_api') ?? [])
-                : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.performance.batch_api', []);
 
         $apiKey = $config['api_key'] ?? '';
         $baseUrl = $config['base_url'] ?? 'https://api.anthropic.com/';

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Performance;
 
+use SuperAgent\Support\Config;
+
 /**
  * Streaming executor for Bash commands.
  *
@@ -22,14 +24,7 @@ class StreamingBashExecutor
 
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config')
-                ? (config('superagent.performance.streaming_bash') ?? [])
-                : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.performance.streaming_bash', []);
 
         return new self(
             enabled: (bool) ($config['enabled'] ?? true),

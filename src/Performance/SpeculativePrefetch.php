@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Performance;
 
+use SuperAgent\Support\Config;
+
 class SpeculativePrefetch
 {
     private const MAX_PREDICTIONS = 5;
@@ -25,12 +27,7 @@ class SpeculativePrefetch
      */
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config') ? (config('superagent.performance.speculative_prefetch') ?? []) : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.performance.speculative_prefetch', []);
 
         return new self(
             enabled: $config['enabled'] ?? true,

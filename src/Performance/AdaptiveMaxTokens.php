@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Performance;
 
+use SuperAgent\Support\Config;
+
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ToolResultMessage;
 
@@ -21,12 +23,7 @@ class AdaptiveMaxTokens
      */
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config') ? (config('superagent.performance.adaptive_max_tokens') ?? []) : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.performance.adaptive_max_tokens', []);
 
         return new self(
             enabled: $config['enabled'] ?? true,

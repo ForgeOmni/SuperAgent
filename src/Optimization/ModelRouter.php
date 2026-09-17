@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Optimization;
 
+use SuperAgent\Support\Config;
+
 use SuperAgent\Enums\StopReason;
 use SuperAgent\Messages\AssistantMessage;
 
@@ -22,12 +24,7 @@ class ModelRouter
      */
     public static function fromConfig(string $currentModel): self
     {
-        try {
-            $config = function_exists('config') ? (config('superagent.optimization.model_routing') ?? []) : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.optimization.model_routing', []);
 
         return new self(
             enabled: $config['enabled'] ?? true,

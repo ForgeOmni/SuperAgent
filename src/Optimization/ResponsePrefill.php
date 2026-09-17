@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace SuperAgent\Optimization;
 
+use SuperAgent\Support\Config;
+
 use SuperAgent\Messages\AssistantMessage;
 use SuperAgent\Messages\ToolResultMessage;
 use SuperAgent\Messages\UserMessage;
@@ -19,12 +21,7 @@ class ResponsePrefill
      */
     public static function fromConfig(): self
     {
-        try {
-            $config = function_exists('config') ? (config('superagent.optimization.response_prefill') ?? []) : [];
-        } catch (\Throwable $e) {
-            error_log('[SuperAgent] Config unavailable for ' . static::class . ': ' . $e->getMessage());
-            $config = [];
-        }
+        $config = Config::get('superagent.optimization.response_prefill', []);
 
         return new self(
             enabled: $config['enabled'] ?? true,
