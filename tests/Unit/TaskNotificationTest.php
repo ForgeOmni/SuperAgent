@@ -2,6 +2,7 @@
 
 namespace SuperAgent\Tests\Unit;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Coordinator\TaskNotification;
 
@@ -221,7 +222,7 @@ class TaskNotificationTest extends TestCase
         $this->assertEqualsWithDelta($original->durationMs, $parsed->durationMs, 1.0);
     }
 
-    /** @dataProvider statusProvider */
+    #[DataProvider('statusProvider')]
     public function test_status_values(string $status): void
     {
         $n = new TaskNotification(taskId: 'x', status: $status, summary: 's');

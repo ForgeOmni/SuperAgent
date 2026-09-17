@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace SuperAgent\Tests\Compat;
 
 use GuzzleHttp\Client;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Providers\AnthropicProvider;
 use SuperAgent\Providers\GeminiProvider;
@@ -21,9 +22,7 @@ use SuperAgent\Providers\OpenRouterProvider;
  */
 class ProviderDefaultsLockdownTest extends TestCase
 {
-    /**
-     * @dataProvider providerDefaultHostProvider
-     */
+    #[DataProvider('providerDefaultHostProvider')]
     public function test_provider_default_base_uri_is_fixed(string $class, array $config, string $expectedHost): void
     {
         $provider = new $class($config);

@@ -30,6 +30,12 @@
         dev dependency that has not caught up with a new PHP release (Laravel's
         console helpers and Testbench's database config both trigger 8.5
         deprecations today) cannot turn the suite red.
+
+        PHPUnit 12 renamed the attribute to `ignoreIndirectDeprecations` and
+        reports this file as "a deprecated schema" because of it — but it still
+        honours the old name, and the new one does not exist in PHPUnit 10's
+        schema, which the PHP 8.1 leg is pinned to. One config has to serve
+        both, so the old name stays until PHP 8.1 support is dropped.
     -->
     <source restrictDeprecations="true">
         <include>

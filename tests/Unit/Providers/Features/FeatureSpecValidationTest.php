@@ -17,9 +17,13 @@ use SuperAgent\Providers\Features\ThinkingAdapter;
  * Improvement #19 — FeatureDispatcher surfaces misspelled spec keys
  * under `SUPERAGENT_DEBUG=1`, without ever blocking the call.
  *
- * The tests use PHP's `error_log` intercepted via a custom handler so we
- * can assert against the emitted message without spamming the real
- * error log.
+ * The warnings go out through `error_log()`, so the tests read whatever
+ * file the `error_log` ini setting points at *at the moment of the call*,
+ * and only the bytes appended by the call. Pointing the setting at a file
+ * of our own in setUp() is not enough: PHPUnit 12 redirects `error_log`
+ * to a temp file of its own per test, after setUp() has run, so a test
+ * that reads its own path finds an empty string and passes or fails for
+ * the wrong reason.
  */
 class FeatureSpecValidationTest extends TestCase
 {
@@ -40,6 +44,34 @@ class FeatureSpecValidationTest extends TestCase
             @unlink($this->logFile);
         }
         putenv('SUPERAGENT_DEBUG');
+    }
+
+    /**
+     * Runs $fn and returns only what it appended to the active error log.
+     *
+     * Reading the delta rather than the whole file keeps the assertions
+     * honest when the destination is shared between tests in one process,
+     * which is what PHPUnit 12's per-test error log is.
+     */
+    private function captureErrorLog(callable $fn): string
+    {
+        $path = (string) ini_get('error_log');
+        if ($path === '') {
+            $path = $this->logFile;
+            ini_set('error_log', $path);
+        }
+
+        $offset = is_file($path) ? (int) filesize($path) : 0;
+
+        $fn();
+
+        if (! is_file($path)) {
+            return '';
+        }
+
+        clearstatcache(true, $path);
+
+        return (string) file_get_contents($path, false, null, $offset);
     }
 
     public function test_thinking_adapter_declares_valid_keys(): void
@@ -75,13 +107,14 @@ class FeatureSpecValidationTest extends TestCase
         $provider = new FakeNoCapProvider();
         $body = ['messages' => [['role' => 'user', 'content' => 'hi']]];
 
-        FeatureDispatcher::apply($provider, [
-            'features' => [
-                'thinking' => ['budget' => 4000, 'budjet' => 3000],  // typo
-            ],
-        ], $body);
+        $log = $this->captureErrorLog(function () use ($provider, &$body) {
+            FeatureDispatcher::apply($provider, [
+                'features' => [
+                    'thinking' => ['budget' => 4000, 'budjet' => 3000],  // typo
+                ],
+            ], $body);
+        });
 
-        $log = is_file($this->logFile) ? file_get_contents($this->logFile) : '';
         $this->assertStringContainsString("features.thinking", $log);
         $this->assertStringContainsString("'budjet'", $log);
     }
@@ -92,13 +125,14 @@ class FeatureSpecValidationTest extends TestCase
         $provider = new FakeNoCapProvider();
         $body = ['messages' => [['role' => 'user', 'content' => 'hi']]];
 
-        FeatureDispatcher::apply($provider, [
-            'features' => [
-                'thinking' => ['budjet' => 3000],  // typo — silent in prod
-            ],
-        ], $body);
+        $log = $this->captureErrorLog(function () use ($provider, &$body) {
+            FeatureDispatcher::apply($provider, [
+                'features' => [
+                    'thinking' => ['budjet' => 3000],  // typo — silent in prod
+                ],
+            ], $body);
+        });
 
-        $log = is_file($this->logFile) ? file_get_contents($this->logFile) : '';
         $this->assertStringNotContainsString('unknown spec key', $log);
     }
 
@@ -109,14 +143,15 @@ class FeatureSpecValidationTest extends TestCase
         $provider = new FakeNoCapProvider();
         $body = ['messages' => [['role' => 'user', 'content' => 'hi']]];
 
-        FeatureDispatcher::apply($provider, [
-            'features' => [
-                'thinking' => ['budget' => 4000, 'required' => false],
-                'code_interpreter' => ['timeout_seconds' => 30],
-            ],
-        ], $body);
+        $log = $this->captureErrorLog(function () use ($provider, &$body) {
+            FeatureDispatcher::apply($provider, [
+                'features' => [
+                    'thinking' => ['budget' => 4000, 'required' => false],
+                    'code_interpreter' => ['timeout_seconds' => 30],
+                ],
+            ], $body);
+        });
 
-        $log = is_file($this->logFile) ? file_get_contents($this->logFile) : '';
         $this->assertStringNotContainsString('unknown spec key', $log);
     }
 }

@@ -2,6 +2,7 @@
 
 namespace SuperAgent\Tests\Tools\Schema;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Tools\Schema\ProviderNormalizer;
 use SuperAgent\Tools\BuiltinToolRegistry;
@@ -24,21 +25,21 @@ use SuperAgent\Tools\BuiltinToolRegistry;
  */
 class CrossProviderComplianceTest extends TestCase
 {
-    /** @dataProvider builtinTools */
+    #[DataProvider('builtinTools')]
     public function test_anthropic_normalization(string $toolName, array $schema): void
     {
         $normalized = ProviderNormalizer::forAnthropic($schema);
         $this->assertNoRefs($toolName, $normalized);
     }
 
-    /** @dataProvider builtinTools */
+    #[DataProvider('builtinTools')]
     public function test_openai_normalization(string $toolName, array $schema): void
     {
         $normalized = ProviderNormalizer::forOpenAI($schema);
         $this->assertNoRefs($toolName, $normalized);
     }
 
-    /** @dataProvider builtinTools */
+    #[DataProvider('builtinTools')]
     public function test_gemini_normalization(string $toolName, array $schema): void
     {
         $normalized = ProviderNormalizer::forGemini($schema);

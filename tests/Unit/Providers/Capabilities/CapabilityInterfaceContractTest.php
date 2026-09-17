@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Tests\Unit\Providers\Capabilities;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SuperAgent\Providers\AsyncCapable;
 
@@ -18,9 +19,7 @@ use SuperAgent\Providers\AsyncCapable;
  */
 class CapabilityInterfaceContractTest extends TestCase
 {
-    /**
-     * @dataProvider syncCapabilityProvider
-     */
+    #[DataProvider('syncCapabilityProvider')]
     public function test_sync_capability_interfaces_exist_and_have_expected_methods(
         string $interface,
         array $expectedMethods,
@@ -72,9 +71,7 @@ class CapabilityInterfaceContractTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider asyncCapabilityProvider
-     */
+    #[DataProvider('asyncCapabilityProvider')]
     public function test_async_capability_interfaces_extend_async_capable(
         string $interface,
         array $expectedSubmitMethods,

@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`tests/Laravel/ServiceProviderBootTest`** — boots the package in a real application (Testbench): the provider loads, its config merges, the `Agent` binding and the `superagent` alias resolve, and all four Artisan commands register. Skips when Testbench is absent so the plain matrix stays green.
-- **CI Laravel matrix** — one leg per framework major: 10 (PHP 8.1), 11 (8.2), 12 (8.3), 13 (8.5).
+- **CI Laravel matrix** — one leg per framework major: 10 (PHP 8.1), 11 (8.2), 12 (8.3), 13 (8.5). Verified locally against the real stack: Laravel 13.32 / PHPUnit 12.5 / PHP 8.5, full suite green.
 - **`failOnDeprecation`**, scoped with `<source restrictDeprecations>` to `src/`. A dev dependency that has not caught up with a new PHP release cannot turn the suite red; our own code cannot quietly drift.
 
 ### Changed
@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PHPUnit 12 (what the Laravel 13 leg resolves to) dropped docblock metadata**, so the 9 `@dataProvider` annotations in 6 test files silently stopped feeding their tests — 6 errors, not 6 skips. Migrated to `#[DataProvider]` attributes, which PHPUnit 10 understands as well.
+- **`FeatureSpecValidationTest` asserted against its own `error_log` file**, which PHPUnit 12 supersedes with a per-test temp file of its own *after* `setUp()` runs. The test now reads the bytes appended to whichever log is active during the call, so it asserts the same thing on every runner.
 - **23 implicit-nullable parameters in `src/`** (plus 2 in tests) written as `Foo $x = null`, deprecated since PHP 8.4 — now `?Foo $x = null`, which is valid back to 7.1.
 - **6 `curl_close()` calls** removed. Deprecated in 8.5, and a no-op since 8.0, when the handle became a GC-managed object.
 - **127 `Reflection*::setAccessible()` calls** removed from tests and two from `src`. Deprecated in 8.5, and a no-op since 8.1 — which this package already requires.

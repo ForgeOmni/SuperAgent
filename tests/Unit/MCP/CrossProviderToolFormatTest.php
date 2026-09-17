@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Tests\Unit\MCP;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SuperAgent\MCP\Client;
 use SuperAgent\MCP\MCPTool;
@@ -32,9 +33,7 @@ class CrossProviderToolFormatTest extends TestCase
         $this->assertIsArray($tool->inputSchema());
     }
 
-    /**
-     * @dataProvider chatCompletionsProviderNames
-     */
+    #[DataProvider('chatCompletionsProviderNames')]
     public function test_chat_completions_providers_format_mcp_tool_as_function(string $class): void
     {
         /** @var ChatCompletionsProvider $provider */

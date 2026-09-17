@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SuperAgent\Tests\Unit\Providers;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 use SuperAgent\Messages\AssistantMessage;
@@ -152,8 +153,8 @@ class WireFormatMatrixTest extends TestCase
      * them ship divergent message encoding logic in the future, this
      * matrix catches it.
      *
-     * @dataProvider chatCompletionsSubclasses
      */
+    #[DataProvider('chatCompletionsSubclasses')]
     public function test_family_B_subclasses_produce_identical_wire(string $providerClass): void
     {
         /** @var \SuperAgent\Providers\ChatCompletionsProvider $sub */
