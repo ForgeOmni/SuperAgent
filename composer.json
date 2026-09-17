@@ -18,11 +18,11 @@
         "psr/log": "^3.0"
     },
     "require-dev": {
-        "illuminate/support": "^10.0|^11.0|^12.0",
-        "orchestra/testbench": "^8.0|^9.0|^10.0",
-        "phpunit/phpunit": "^10.0|^11.0",
-        "symfony/console": "^6.0|^7.0",
-        "systemsdk/phpcpd": "^7.0"
+        "illuminate/support": "^10.0|^11.0|^12.0|^13.0",
+        "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
+        "phpunit/phpunit": "^10.0|^11.0|^12.0",
+        "symfony/console": "^6.0|^7.0|^8.0",
+        "systemsdk/phpcpd": "^7.0|^8.0|^9.0"
     },
     "suggest": {
         "illuminate/support": "Required for Laravel service provider, facades, and Artisan commands",
