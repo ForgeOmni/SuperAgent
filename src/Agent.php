@@ -69,7 +69,7 @@ class Agent
      * no tools load unless they are handed over, and anything that can reach
      * the machine or the network is refused even if it is.
      *
-     * @since 1.3.0
+     * @since 1.2.0
      */
     public static function embedded(array $config = []): static
     {
@@ -232,7 +232,7 @@ class Agent
      *
      * @return ToolInterface[]
      *
-     * @since 1.3.0
+     * @since 1.2.0
      */
     public function getTools(): array
     {
@@ -242,7 +242,7 @@ class Agent
     /**
      * The policy this agent enforces, or null when it enforces none.
      *
-     * @since 1.3.0
+     * @since 1.2.0
      */
     public function getToolPolicy(): ?ToolPolicy
     {
@@ -252,7 +252,7 @@ class Agent
     /**
      * The profile this agent was built with: `workstation` or `embedded`.
      *
-     * @since 1.3.0
+     * @since 1.2.0
      */
     public function getProfile(): string
     {
@@ -813,7 +813,7 @@ class Agent
      * @throws ResumeException on an unknown or already-answered ticket, an
      *         expired envelope, or one belonging to a different provider.
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     public function resume(
         ResumeEnvelope|array|string $envelope,
@@ -868,7 +868,7 @@ class Agent
         );
     }
 
-    /** @since 1.4.0 */
+    /** @since 1.2.0 */
     protected function readEnvelope(ResumeEnvelope|array|string $envelope): ResumeEnvelope
     {
         if ($envelope instanceof ResumeEnvelope) {
@@ -880,7 +880,7 @@ class Agent
             : ResumeEnvelope::fromArray($envelope);
     }
 
-    /** @since 1.4.0 */
+    /** @since 1.2.0 */
     protected function buildResumeEnvelope(QueryEngine $engine, float $totalCost): ResumeEnvelope
     {
         $ttl = (int) static::config('superagent.resume.ttl_seconds', 0);
@@ -978,7 +978,7 @@ class Agent
      *         'api_key'  => fn (): string => $vault->keyFor($tenantId),
      *     ]);
      *
-     * @since 1.5.0
+     * @since 1.2.0
      */
     protected function resolveCredentials(array $config): array
     {

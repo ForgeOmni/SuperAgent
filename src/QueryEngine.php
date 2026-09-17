@@ -142,7 +142,7 @@ class QueryEngine
      *
      * @var list<\SuperAgent\Resume\Deferral>
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     protected array $deferrals = [];
 
@@ -303,14 +303,14 @@ class QueryEngine
      *
      * @return list<\SuperAgent\Resume\Deferral>
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     public function getDeferrals(): array
     {
         return $this->deferrals;
     }
 
-    /** @since 1.4.0 */
+    /** @since 1.2.0 */
     public function isAwaitingHuman(): bool
     {
         return $this->deferrals !== [];
@@ -323,7 +323,7 @@ class QueryEngine
      *
      * @return list<array{tool_use_id:string,content:string,is_error:bool}>
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     public function getDeferredCompletedResults(): array
     {
@@ -338,7 +338,7 @@ class QueryEngine
      *
      * @return Generator<int, AssistantMessage>
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     public function resumeWithToolResults(array $results): Generator
     {
@@ -352,7 +352,7 @@ class QueryEngine
     /**
      * A tool answered with a ticket instead of a result.
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     /**
      * When any tool in this assistant message deferred, the ones that did
@@ -363,7 +363,7 @@ class QueryEngine
      * @param  list<array{tool_use_id:string,content:string,is_error:bool,deferred?:bool}> $results
      * @return list<array{tool_use_id:string,content:string,is_error:bool}>
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     protected function setAsideResultsIfDeferred(array $results): array
     {
@@ -1118,7 +1118,7 @@ class QueryEngine
     /**
      * Why this call is refused, or null when it may proceed.
      *
-     * @since 1.3.0  policy check added beside the name lists
+     * @since 1.2.0  policy check added beside the name lists
      */
     protected function toolRefusalReason(string $toolName): ?string
     {

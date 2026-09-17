@@ -14,7 +14,7 @@ namespace SuperAgent\Support;
  * booted. Classes that read config in their constructor therefore fatal in
  * exactly the environments this SDK claims to support standalone.
  *
- * @since 1.5.0
+ * @since 1.2.0
  */
 final class Config
 {

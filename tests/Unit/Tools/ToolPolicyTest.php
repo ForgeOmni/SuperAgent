@@ -11,7 +11,7 @@ use SuperAgent\Tools\ToolPolicy;
 use SuperAgent\Tools\ToolResult;
 
 /**
- * ToolPolicy (1.3.0): what an agent may hold, judged by what a tool is.
+ * ToolPolicy (1.2.0): what an agent may hold, judged by what a tool is.
  */
 class ToolPolicyTest extends TestCase
 {

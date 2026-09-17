@@ -32,7 +32,7 @@ use SuperAgent\StreamingHandler;
  *         $emitter->close();
  *     }, 200, SseEmitter::HEADERS);
  *
- * @since 1.6.0
+ * @since 1.2.0
  */
 final class SseEmitter
 {

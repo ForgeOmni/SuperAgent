@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.6.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.2.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -41,10 +41,10 @@ echo $result->text();
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
-- [Profils et politique d'outils](#profils-et-politique-doutils-v130)
-- [Résultats d'outils différés](#résultats-doutils-différés-v140)
-- [Servir plusieurs locataires dans un seul processus](#servir-plusieurs-locataires-dans-un-seul-processus-v150)
-- [Signaux et provenance](#signaux-et-provenance-v160)
+- [Profils et politique d'outils](#profils-et-politique-doutils-v120)
+- [Résultats d'outils différés](#résultats-doutils-différés-v120)
+- [Servir plusieurs locataires dans un seul processus](#servir-plusieurs-locataires-dans-un-seul-processus-v120)
+- [Signaux et provenance](#signaux-et-provenance-v120)
 - [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
 - [Boucle d'agent](#boucle-dagent)
@@ -816,7 +816,7 @@ Recommandé partout où du texte fourni par l'utilisateur est injecté dans un m
 
 ---
 
-## Signaux et provenance *(v1.6.0)*
+## Signaux et provenance *(v1.2.0)*
 
 ### Détection d'injection au-delà de l'anglais
 
@@ -906,9 +906,9 @@ quoi nginx tamponne toute la réponse et la livre d'un bloc, ce qui ressemble
 exactement à un bug de streaming dans votre propre code. `keepAlive()` émet une
 trame de commentaire pendant le silence d'un long appel d'outil.
 
-*Depuis la v1.6.0.*
+*Depuis la v1.2.0.*
 
-## Servir plusieurs locataires dans un seul processus *(v1.5.0)*
+## Servir plusieurs locataires dans un seul processus *(v1.2.0)*
 
 Tout ce qui est statique dans ce SDK a été écrit pour une CLI : un processus,
 une personne, un espace de travail, et le processus se termine quand elle a
@@ -951,7 +951,7 @@ $agent = new Agent([
 
 L'intérêt est ce qui *n'arrive pas* : la clé ne traîne pas dans un tableau de
 configuration recopié dans les configs de sous-agents, le contexte de logs et
-les charges utiles de télémétrie. Depuis la 1.5.0, `AgentSpawnConfig::toArray()`
+les charges utiles de télémétrie. Depuis la 1.2.0, `AgentSpawnConfig::toArray()`
 masque les identifiants — `toArrayWithCredentials()` est le seul chemin qui les
 transporte encore, pour authentifier un processus enfant — et
 `SuperAgent\Support\Secrets::redact()` fait de même pour n'importe quel
@@ -978,9 +978,9 @@ $manager = new SessionManager($storageDir, $logger, 50, 90, $myStore);
 Le stockage SQLite fourni reste le défaut, et quand un hôte injecte le sien, la
 base locale n'est jamais ouverte.
 
-*Depuis la v1.5.0.*
+*Depuis la v1.2.0.*
 
-## Résultats d'outils différés *(v1.4.0)*
+## Résultats d'outils différés *(v1.2.0)*
 
 Un outil qui a besoin d'un humain — une approbation, une signature, une
 décision que personne dans le processus ne peut prendre — répond par un ticket
@@ -1054,9 +1054,9 @@ l'outil n'est jamais exécuté :
 HookResult::defer($approvalId, ['requested_by' => 'agent']);
 ```
 
-*Depuis la v1.4.0.*
+*Depuis la v1.2.0.*
 
-## Profils et politique d'outils *(v1.3.0)*
+## Profils et politique d'outils *(v1.2.0)*
 
 `workstation` est le profil par défaut, et ce que ce SDK a toujours fait : la
 machine du développeur est l'espace de travail, donc le shell, l'édition de
@@ -1115,7 +1115,7 @@ d'erreur nommant la règle, donc la conversation continue.
 l'enrichir : vos règles se superposent au socle du profil, elles ne le
 remplacent pas.
 
-*Depuis la v1.3.0.*
+*Depuis la v1.2.0.*
 
 ## Garde-fous opérationnels *(v0.9.8)*
 

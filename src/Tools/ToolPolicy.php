@@ -23,7 +23,7 @@ use SuperAgent\Contracts\ToolInterface;
  * the agent, and it does not replace the permission engine, the hooks or the
  * host's own authorization — those still run.
  *
- * @since 1.3.0
+ * @since 1.2.0
  */
 final class ToolPolicy
 {

@@ -7,7 +7,7 @@ namespace SuperAgent\Guardrails\Injection;
 /**
  * The packs that ship with this SDK.
  *
- * English was the only language covered until 1.6.0. These add the three a
+ * English was the only language covered until 1.2.0. These add the three a
  * host is most likely to be reading untrusted text in next, and the registry
  * takes more: `PatternPacks::register(new PatternPack('de', [...]))`.
  *
@@ -15,7 +15,7 @@ namespace SuperAgent\Guardrails\Injection;
  * bytes, not characters — and none of them use `\b`, which does not mean
  * anything between two Han characters.
  *
- * @since 1.6.0
+ * @since 1.2.0
  */
 final class PatternPacks
 {

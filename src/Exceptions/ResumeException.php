@@ -11,7 +11,7 @@ namespace SuperAgent\Exceptions;
  * Every one of these means the host's own bookkeeping and the envelope
  * disagree, so the SDK refuses rather than guessing which is right.
  *
- * @since 1.4.0
+ * @since 1.2.0
  */
 class ResumeException extends SuperAgentException
 {

@@ -232,7 +232,7 @@ class CostCalculator
      * The same cost, plus which price list produced it and whether the price
      * was looked up or guessed.
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     public static function calculateWithProvenance(string $model, Usage $usage): CostBreakdown
     {
@@ -256,7 +256,7 @@ class CostCalculator
     /**
      * @return array{0: array{input: float, output: float}, 1: string} prices and their source
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     protected static function resolveWithSource(string $model): array
     {

@@ -42,7 +42,7 @@ use SuperAgent\Tracing\TraceCollector;
  * solve a problem it does not have, and only the host knows where one
  * tenant's work ends and the next begins.
  *
- * @since 1.5.0
+ * @since 1.2.0
  */
 final class RuntimeState
 {

@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-1.6.0-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-1.2.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -41,10 +41,10 @@ echo $result->text();
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
-- [Profile 与工具策略](#profile-与工具策略-v130)
-- [延迟工具结果](#延迟工具结果-v140)
-- [在一个进程里服务多个租户](#在一个进程里服务多个租户-v150)
-- [信号与溯源](#信号与溯源-v160)
+- [Profile 与工具策略](#profile-与工具策略-v120)
+- [延迟工具结果](#延迟工具结果-v120)
+- [在一个进程里服务多个租户](#在一个进程里服务多个租户-v120)
+- [信号与溯源](#信号与溯源-v120)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
 - [Agent 循环](#agent-循环)
@@ -815,7 +815,7 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 
 ---
 
-## 信号与溯源 *(v1.6.0)*
+## 信号与溯源 *(v1.2.0)*
 
 ### 注入检测不再只认英文
 
@@ -893,9 +893,9 @@ return response()->stream(function () use ($agent, $prompt) {
 少了它 nginx 会把整个响应缓冲起来一次性吐出，和「你自己代码的流式坏了」看起来一模一样。
 `keepAlive()` 在长工具调用那段静默期发注释帧保活。
 
-*自 v1.6.0 起。*
+*自 v1.2.0 起。*
 
-## 在一个进程里服务多个租户 *(v1.5.0)*
+## 在一个进程里服务多个租户 *(v1.2.0)*
 
 这个 SDK 里所有静态状态都是按 CLI 写的：一个进程、一个人、一个工作区，人做完了进程就退出。
 而一个服务多租户的队列 worker 把这四条假设全破了——静态状态活了下来，它攒的上一个租户的东西也活了下来。
@@ -929,7 +929,7 @@ $agent = new Agent([
 ```
 
 关键在于**不会发生的事**：密钥不会躺在一个会被复制进子 agent spawn 配置、日志上下文和遥测负载的配置数组里。
-从 1.5.0 起 `AgentSpawnConfig::toArray()` 会脱敏凭据——`toArrayWithCredentials()` 是唯一仍然携带凭据的路径，
+从 1.2.0 起 `AgentSpawnConfig::toArray()` 会脱敏凭据——`toArrayWithCredentials()` 是唯一仍然携带凭据的路径，
 供子进程认证用——而 `SuperAgent\Support\Secrets::redact()` 对你自己的任何数组做同样的事，
 键名匹配忽略大小写和分隔符（`api_key`、`apiKey`、`X-Api-Key`、`ANTHROPIC_API_KEY` 都认）。
 
@@ -948,9 +948,9 @@ $manager = new SessionManager($storageDir, $logger, 50, 90, $myStore);
 
 自带的 SQLite 存储仍然是默认；宿主注入了自己的实现时，那个本地数据库根本不会被打开。
 
-*自 v1.5.0 起。*
+*自 v1.2.0 起。*
 
-## 延迟工具结果 *(v1.4.0)*
+## 延迟工具结果 *(v1.2.0)*
 
 当一个工具需要人来拍板——审批、签字、进程里没人能做的决定——它可以返回一张票据而不是结果：
 
@@ -1012,9 +1012,9 @@ SDK 在这两次调用之间**不保存任何状态**：信封本身就是状态
 HookResult::defer($approvalId, ['requested_by' => 'agent']);
 ```
 
-*自 v1.4.0 起。*
+*自 v1.2.0 起。*
 
-## Profile 与工具策略 *(v1.3.0)*
+## Profile 与工具策略 *(v1.2.0)*
 
 `workstation` 是默认档，也是这个 SDK 一直以来的行为：把开发者的机器当作工作区，shell、
 文件编辑、git、HTTP 默认全部加载，除非你另行指定。
@@ -1062,7 +1062,7 @@ shell 命令"必须是 agent 自身的属性，而不是"构造参数写得够�
 `embedded` 档默认套用 `ToolPolicy::HOST_CATEGORIES`。传 `'tool_policy' => false` 可以退出这个默认，
 传你自己的规则则是**叠加**在 profile 的底线之上，而不是替换它。
 
-*自 v1.3.0 起。*
+*自 v1.2.0 起。*
 
 ## 运行期护栏 *(v0.9.8)*
 

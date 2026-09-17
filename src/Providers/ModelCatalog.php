@@ -50,7 +50,7 @@ class ModelCatalog
      *
      * @var array<string,mixed>
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     private static array $meta = [];
 
@@ -70,7 +70,7 @@ class ModelCatalog
      *
      * @return array<string,mixed>
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     public static function meta(): array
     {
@@ -83,7 +83,7 @@ class ModelCatalog
      * A short identifier for the price list — schema version and date, or
      * `unknown` when the source declared neither.
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     public static function version(): string
     {

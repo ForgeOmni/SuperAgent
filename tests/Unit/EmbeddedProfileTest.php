@@ -15,7 +15,7 @@ use SuperAgent\Tools\Builtin\BashTool;
 use SuperAgent\Tools\ToolPolicy;
 
 /**
- * The `embedded` profile (1.3.0) and its two enforcement points.
+ * The `embedded` profile (1.2.0) and its two enforcement points.
  *
  * The question these tests answer is not "can a host configure this safely"
  * — it always could — but "does the safe posture survive a host that forgets

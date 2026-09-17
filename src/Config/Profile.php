@@ -24,7 +24,7 @@ use SuperAgent\Tools\ToolPolicy;
  * a policy. The default profile is `workstation`, so an existing caller that
  * sets nothing behaves exactly as before.
  *
- * @since 1.3.0
+ * @since 1.2.0
  */
 final class Profile
 {

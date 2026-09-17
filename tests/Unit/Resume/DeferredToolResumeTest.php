@@ -24,7 +24,7 @@ use SuperAgent\Tests\Helpers\ProviderMockHelper;
 use SuperAgent\Tools\ToolResult;
 
 /**
- * Deferred tool results, end to end and across a process boundary (1.4.0).
+ * Deferred tool results, end to end and across a process boundary (1.2.0).
  *
  * The interesting part is not that a turn can stop — it is that it can be
  * picked up again somewhere else. Each case runs the first half against a

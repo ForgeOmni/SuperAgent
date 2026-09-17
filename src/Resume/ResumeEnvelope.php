@@ -23,7 +23,7 @@ use SuperAgent\Tools\ToolResult;
  * message, so the completed ones wait with the pending one), the pending
  * tickets and the answers gathered so far.
  *
- * @since 1.4.0
+ * @since 1.2.0
  */
 final class ResumeEnvelope
 {

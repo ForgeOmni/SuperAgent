@@ -51,7 +51,7 @@ class AgentSpawnConfig
      * clear text. Use {@see toArrayWithCredentials()} at the one place that
      * genuinely has to hand credentials to a child process.
      *
-     * @since 1.5.0 redacted by default
+     * @since 1.2.0 redacted by default
      */
     public function toArray(): array
     {
@@ -65,7 +65,7 @@ class AgentSpawnConfig
      * The same array with credentials intact — for spawning a child that has
      * to authenticate, and for nothing else.
      *
-     * @since 1.5.0
+     * @since 1.2.0
      */
     public function toArrayWithCredentials(): array
     {

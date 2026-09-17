@@ -12,7 +12,7 @@ namespace SuperAgent\Support;
  * key. One `json_encode()` of that array in a host's log line publishes a
  * tenant's credential, and nothing in the array's shape warns anyone.
  *
- * @since 1.5.0
+ * @since 1.2.0
  */
 final class Secrets
 {

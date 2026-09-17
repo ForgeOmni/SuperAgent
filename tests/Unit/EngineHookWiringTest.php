@@ -24,7 +24,7 @@ use SuperAgent\Tests\Helpers\ProviderMockHelper;
  * `event:` argument the class does not have, and omitted the two it requires
  * — so attaching any registry turned every tool call into
  * `Error: Unknown named parameter $event`. The hook classes had tests; the
- * wiring between them and the engine did not. Fixed in 1.4.0.
+ * wiring between them and the engine did not. Fixed in 1.2.0.
  */
 class EngineHookWiringTest extends TestCase
 {

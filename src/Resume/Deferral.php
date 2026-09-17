@@ -7,7 +7,7 @@ namespace SuperAgent\Resume;
 /**
  * One tool call that is waiting on an answer from outside this process.
  *
- * @since 1.4.0
+ * @since 1.2.0
  */
 final class Deferral
 {

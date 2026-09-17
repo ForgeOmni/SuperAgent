@@ -28,7 +28,7 @@ class AgentResult
          * Set when the turn stopped to wait for a human: everything needed to
          * finish it later, serialisable, in this process or another one.
          *
-         * @since 1.4.0
+         * @since 1.2.0
          */
         public readonly ?\SuperAgent\Resume\ResumeEnvelope $resume = null,
     ) {
@@ -38,7 +38,7 @@ class AgentResult
      * Whether this turn ended waiting on an answer from outside the process
      * rather than on the model.
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     public function isAwaitingHuman(): bool
     {
@@ -51,7 +51,7 @@ class AgentResult
      *
      * @return list<\SuperAgent\Resume\Deferral>
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     public function deferrals(): array
     {

@@ -67,7 +67,7 @@ class ProviderRegistry
      * multi-tenant worker is both a memory leak and a pile of other people's
      * keys.
      *
-     * @since 1.5.0
+     * @since 1.2.0
      */
     protected static int $maxCachedInstances = 32;
 
@@ -471,7 +471,7 @@ class ProviderRegistry
      * How many provider instances stay cached. Lower it on a worker that
      * serves many tenants and wants credentials out of memory sooner.
      *
-     * @since 1.5.0
+     * @since 1.2.0
      */
     public static function setMaxCachedInstances(int $max): void
     {
@@ -482,7 +482,7 @@ class ProviderRegistry
         }
     }
 
-    /** @since 1.5.0 */
+    /** @since 1.2.0 */
     public static function cachedInstanceCount(): int
     {
         return count(self::$instances);

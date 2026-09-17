@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.6.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.2.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Docs**: [Installation](INSTALL.md) · [安装](INSTALL_CN.md) · [Installation FR](INSTALL_FR.md) · [Advanced usage](docs/ADVANCED_USAGE.md) · [API docs](docs/)
@@ -41,10 +41,10 @@ echo $result->text();
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (codex `/goal` parity)](#goal-mode-codex-goal-parity-v098)
-- [Profiles and tool policy](#profiles-and-tool-policy-v130)
-- [Deferred tool results](#deferred-tool-results-v140)
-- [Running many tenants in one process](#running-many-tenants-in-one-process-v150)
-- [Signals and provenance](#signals-and-provenance-v160)
+- [Profiles and tool policy](#profiles-and-tool-policy-v120)
+- [Deferred tool results](#deferred-tool-results-v120)
+- [Running many tenants in one process](#running-many-tenants-in-one-process-v120)
+- [Signals and provenance](#signals-and-provenance-v120)
 - [Operational guardrails](#operational-guardrails-v098)
 - [Companion tools (jcode-inspired)](#companion-tools-jcode-inspired)
 - [Agent Loop](#agent-loop)
@@ -849,7 +849,7 @@ system-role message — goals, skills, memory imports.
 
 ---
 
-## Signals and provenance *(v1.6.0)*
+## Signals and provenance *(v1.2.0)*
 
 ### Injection detection past English
 
@@ -936,9 +936,9 @@ delivers it in one block, indistinguishable from a streaming bug in your own
 code. `keepAlive()` emits a comment frame for the silent stretch while a long
 tool call runs.
 
-*Since v1.6.0.*
+*Since v1.2.0.*
 
-## Running many tenants in one process *(v1.5.0)*
+## Running many tenants in one process *(v1.2.0)*
 
 Everything static in this SDK was written for a CLI: one process, one person,
 one workspace, and the process exits when they are done. A queue worker that
@@ -979,7 +979,7 @@ $agent = new Agent([
 
 The point is what does *not* happen: the key is not sitting in a configuration
 array that gets copied into sub-agent spawn configs, log context and telemetry
-payloads. `AgentSpawnConfig::toArray()` redacts credentials as of 1.5.0 —
+payloads. `AgentSpawnConfig::toArray()` redacts credentials as of 1.2.0 —
 `toArrayWithCredentials()` is the one path that still carries them, for
 authenticating a child process — and `SuperAgent\Support\Secrets::redact()`
 does the same for any array of your own, matching key names regardless of case
@@ -1004,9 +1004,9 @@ $manager = new SessionManager($storageDir, $logger, 50, 90, $myStore);
 The bundled SQLite store stays the default, and when a host injects its own the
 local database is never opened.
 
-*Since v1.5.0.*
+*Since v1.2.0.*
 
-## Deferred tool results *(v1.4.0)*
+## Deferred tool results *(v1.2.0)*
 
 A tool that needs a human — an approval, a signature, a decision nobody in the
 process can make — answers with a ticket instead of a result:
@@ -1075,9 +1075,9 @@ there is a fourth answer, and the tool never runs:
 HookResult::defer($approvalId, ['requested_by' => 'agent']);
 ```
 
-*Since v1.4.0.*
+*Since v1.2.0.*
 
-## Profiles and tool policy *(v1.3.0)*
+## Profiles and tool policy *(v1.2.0)*
 
 `workstation` — the default, and what this SDK has always done — treats a
 developer's machine as the workspace: shell, file edits, git and HTTP load
@@ -1135,7 +1135,7 @@ conversation continues.
 `'tool_policy' => false` to opt out of it, or your own spec to add to it — your
 rules merge over the profile's floor rather than replacing it.
 
-*Since v1.3.0.*
+*Since v1.2.0.*
 
 ## Operational guardrails *(v0.9.8)*
 

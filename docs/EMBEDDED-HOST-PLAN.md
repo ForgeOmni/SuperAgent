@@ -28,7 +28,7 @@ this document is the package-side plan for them.
 
 ---
 
-## Wave 1 — v1.2.0 · Runtime compatibility (PHP 8.4 / 8.5, Laravel 13) — **shipped**
+## Wave 1 — Runtime compatibility (PHP 8.4 / 8.5, Laravel 13) — **shipped**
 
 **Why first:** Superroute's `master` runs Laravel 10 / PHP 8.1 and its `l13`
 branch runs Laravel 13 / PHP 8.5. One SuperAgent release line has to serve both,
@@ -91,7 +91,7 @@ supply-chain workflow still pass.
 
 ---
 
-## Wave 2 — v1.3.0 · Embedded profile and tool policy (A1 + A2) — **shipped**
+## Wave 2 — Embedded profile and tool policy (A1 + A2) — **shipped**
 
 **Why:** an SDK embedded in a delivery platform must not be able to run shell
 commands, edit files or fetch arbitrary URLs. Today `Agent::initializeTools()`
@@ -161,7 +161,7 @@ Two design points settled while building it:
 
 ---
 
-## Wave 3 — v1.4.0 · Deferred tool results (A3) — **shipped**
+## Wave 3 — Deferred tool results (A3) — **shipped**
 
 **Why:** the loop is synchronous. `HookEvent` has `PRE_TOOL_USE`,
 `PERMISSION_REQUEST` and `PERMISSION_DENIED`, but a hook can only allow or deny
@@ -237,7 +237,7 @@ is not Superroute-specific.
 
 ---
 
-## Wave 4 — v1.5.0 · Tenant hygiene (A4, A6, A8) — **shipped**
+## Wave 4 — Tenant hygiene (A4, A6, A8) — **shipped**
 
 Three changes that only matter once many tenants share one long-lived process.
 
@@ -297,7 +297,7 @@ Three defects the work exposed:
 
 ---
 
-## Wave 5 — v1.6.0 · Signals and provenance (A5, A7, A9) — **shipped**
+## Wave 5 — Signals and provenance (A5, A7, A9) — **shipped**
 
 1. **Multilingual injection detection.** `PromptInjectionDetector::PATTERNS` is
    English regexes. Split into per-language packs (en, zh-Hans, zh-Hant, fr at
@@ -341,10 +341,13 @@ the detector is the second signal beside it.
 
 ## Status
 
-All five waves are shipped: 1.2.0 (runtime compatibility), 1.3.0 (embedded
-profile and tool policy), 1.4.0 (deferred tool results), 1.5.0 (tenant
-hygiene), 1.6.0 (signals and provenance). The suite went from 3421 tests to
-3515, and runs on PHP 8.1 through 8.5 and Laravel 10 through 13.
+All five waves are shipped, as a **single release: 1.2.0**. They were built and
+reviewed one at a time — runtime compatibility, embedded profile and tool
+policy, deferred tool results, tenant hygiene, signals and provenance — and
+released together, so a host adopts one version rather than five in a row. The
+`@since` annotations throughout the code therefore all read 1.2.0. The suite
+went from 3421 tests to 3515, and runs on PHP 8.1 through 8.5 and Laravel 10
+through 13.
 
 Seven defects turned up along the way, none of them in the features being
 built: Gemini function calls were parsed and never executed; every hook

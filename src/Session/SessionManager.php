@@ -55,7 +55,7 @@ class SessionManager
         // A host that brought its own store keeps sessions there; opening the
         // bundled SQLite file anyway would write a second copy of other
         // people's conversations to local disk, which is the thing the
-        // injection exists to avoid. (1.5.0)
+        // injection exists to avoid. (1.2.0)
         if ($store !== null) {
             $this->store = $store;
 
@@ -353,7 +353,7 @@ class SessionManager
     /**
      * Get the SQLite storage backend, when that is what is in use.
      *
-     * @deprecated 1.5.0 Use {@see getSessionStore()}; a host may have injected
+     * @deprecated 1.2.0 Use {@see getSessionStore()}; a host may have injected
      *             a store that is not SQLite, and this returns null for it.
      */
     public function getSqliteStorage(): ?SqliteSessionStorage
@@ -364,7 +364,7 @@ class SessionManager
     /**
      * The store snapshots are written to, or null when none is available.
      *
-     * @since 1.5.0
+     * @since 1.2.0
      */
     public function getSessionStore(): ?SessionStore
     {

@@ -10,7 +10,7 @@ use SuperAgent\Messages\ContentBlock;
 use SuperAgent\Streaming\SseEmitter;
 
 /**
- * A run's stream, on the wire of a web response (1.6.0).
+ * A run's stream, on the wire of a web response (1.2.0).
  *
  * Nothing here touches symfony/console: this is the path a controller uses,
  * and it is tested with a string buffer as its sink, exactly as a

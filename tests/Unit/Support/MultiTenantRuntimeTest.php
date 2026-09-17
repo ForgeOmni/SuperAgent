@@ -14,7 +14,7 @@ use SuperAgent\Support\RuntimeState;
 use SuperAgent\Telemetry\CostTracker;
 
 /**
- * Two tenants, one process (1.5.0).
+ * Two tenants, one process (1.2.0).
  *
  * Everything static in this SDK was written for a CLI: one process, one
  * person, and the process exits when they are done. A queue worker breaks

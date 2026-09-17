@@ -26,7 +26,7 @@ class PromptInjectionDetector implements InjectionDetector
     /**
      * Injection pattern categories with their regex patterns.
      *
-     * @deprecated 1.6.0 Kept so anything reading the constant still works.
+     * @deprecated 1.2.0 Kept so anything reading the constant still works.
      *             The detector reads {@see PatternPacks} now, which covers
      *             more than English — see the `en` and `universal` packs for
      *             these same rules.
@@ -112,7 +112,7 @@ class PromptInjectionDetector implements InjectionDetector
     /**
      * Add a detector of the host's own; its findings merge with these.
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     public function addDetector(InjectionDetector $detector): static
     {
@@ -126,7 +126,7 @@ class PromptInjectionDetector implements InjectionDetector
      *
      * @return list<string>
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     public function languages(): array
     {

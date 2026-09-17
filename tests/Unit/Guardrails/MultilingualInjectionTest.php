@@ -13,7 +13,7 @@ use SuperAgent\Guardrails\PromptInjectionDetector;
 use SuperAgent\Guardrails\PromptInjectionResult;
 
 /**
- * Injection detection past English (1.6.0).
+ * Injection detection past English (1.2.0).
  *
  * The rules were English regexes, so untrusted text in any other language
  * scanned clean — which is worse than not scanning, because a clean result

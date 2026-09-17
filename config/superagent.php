@@ -106,7 +106,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Profile  (1.3.0+)
+    | Profile  (1.2.0+)
     |--------------------------------------------------------------------------
     | The posture agents are built with.
     |
@@ -129,7 +129,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Tool policy  (1.3.0+)
+    | Tool policy  (1.2.0+)
     |--------------------------------------------------------------------------
     | What an agent may hold, judged by what a tool *is* rather than by its
     | name — checked when the tool list is assembled and again immediately
@@ -154,7 +154,7 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Resume  (1.4.0+)
+    | Resume  (1.2.0+)
     |--------------------------------------------------------------------------
     | A tool may answer with ToolResult::deferred($ticketId) when a human — or
     | anything else outside this process — owes the answer. The turn ends

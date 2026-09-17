@@ -332,7 +332,7 @@ class GeminiProviderTest extends TestCase
      * the stop reason is `tool_use`, so taking STOP at face value left the
      * call parsed, attached to the message, and never executed: Gemini plus
      * tools quietly did nothing. Found while building deferred tool results
-     * in 1.4.0, when the Gemini leg of the resume round-trip never reached
+     * in 1.2.0, when the Gemini leg of the resume round-trip never reached
      * the tool.
      */
     public function test_a_function_call_with_finish_reason_stop_is_still_a_tool_use_turn(): void

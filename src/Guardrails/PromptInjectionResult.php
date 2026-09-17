@@ -26,7 +26,7 @@ class PromptInjectionResult
      * door". A score lets a host route the middle of that range to a human
      * instead of choosing between blocking and ignoring.
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     public function score(): float
     {
@@ -50,7 +50,7 @@ class PromptInjectionResult
      *
      * @return array<string,int>
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     public function categoryCounts(): array
     {
@@ -71,7 +71,7 @@ class PromptInjectionResult
      *
      * @return list<string>
      *
-     * @since 1.6.0
+     * @since 1.2.0
      */
     public function languages(): array
     {
@@ -80,7 +80,7 @@ class PromptInjectionResult
         )));
     }
 
-    /** @return array<string,mixed> @since 1.6.0 */
+    /** @return array<string,mixed> @since 1.2.0 */
     public function toArray(): array
     {
         return [

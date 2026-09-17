@@ -13,7 +13,7 @@ namespace SuperAgent;
  * writes money, where a corrected price and a billing bug have to be
  * distinguishable months later.
  *
- * @since 1.6.0
+ * @since 1.2.0
  */
 final class CostBreakdown
 {

@@ -22,7 +22,7 @@ namespace SuperAgent\Session\Contracts;
  * A snapshot is the array `SessionManager` builds: session_id, cwd, model,
  * summary, messages, message_count, total_cost_usd, created_at, updated_at.
  *
- * @since 1.5.0
+ * @since 1.2.0
  */
 interface SessionStore
 {

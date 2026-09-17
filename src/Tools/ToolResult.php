@@ -50,7 +50,7 @@ class ToolResult
      * @param string $ticketId  The host's handle for the pending decision.
      * @param array  $meta      Carried through to the envelope untouched.
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     public static function deferred(string $ticketId, array $meta = []): static
     {
@@ -61,7 +61,7 @@ class ToolResult
         return new static('', false, $ticketId, $meta);
     }
 
-    /** @since 1.4.0 */
+    /** @since 1.2.0 */
     public function isDeferred(): bool
     {
         return $this->deferredTicket !== null;

@@ -25,8 +25,8 @@ class HookResult
      * @param bool $preventContinuation Prevent the agent loop from continuing after this tool
      * @param string|null $deferTicket PreToolUse only: hand this call to a human instead of
      *                                 running it. The turn ends cleanly and the host resumes
-     *                                 it with Agent::resume() quoting this ticket. (1.4.0)
-     * @param array $deferMeta Carried into the resume envelope untouched. (1.4.0)
+     *                                 it with Agent::resume() quoting this ticket. (1.2.0)
+     * @param array $deferMeta Carried into the resume envelope untouched. (1.2.0)
      */
     public function __construct(
         public readonly bool $continue = true,
@@ -54,7 +54,7 @@ class HookResult
      * transcript is kept in a resume envelope, and whoever owns the decision
      * answers it later — possibly in another process.
      *
-     * @since 1.4.0
+     * @since 1.2.0
      */
     public static function defer(string $ticketId, array $meta = [], ?string $systemMessage = null): self
     {
@@ -66,7 +66,7 @@ class HookResult
         );
     }
 
-    /** @since 1.4.0 */
+    /** @since 1.2.0 */
     public function isDeferred(): bool
     {
         return $this->deferTicket !== null;

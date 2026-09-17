@@ -17,7 +17,7 @@ namespace SuperAgent\Guardrails\Injection;
  * holds the rules that do not depend on language at all — invisible Unicode,
  * hidden HTML, shell exfiltration, encoded payloads — and is always applied.
  *
- * @since 1.6.0
+ * @since 1.2.0
  */
 final class PatternPack
 {

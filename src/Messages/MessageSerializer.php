@@ -16,7 +16,7 @@ use SuperAgent\Enums\StopReason;
  * resume envelope survive `json_encode()` and come back as the same
  * conversation in a different process.
  *
- * @since 1.4.0
+ * @since 1.2.0
  */
 final class MessageSerializer
 {

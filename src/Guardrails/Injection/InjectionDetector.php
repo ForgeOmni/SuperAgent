@@ -20,7 +20,7 @@ use SuperAgent\Guardrails\PromptInjectionResult;
  * instructions — is what actually holds, and it holds whether or not any
  * pattern matched.
  *
- * @since 1.6.0
+ * @since 1.2.0
  */
 interface InjectionDetector
 {

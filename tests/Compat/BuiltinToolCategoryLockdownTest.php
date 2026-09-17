@@ -13,7 +13,7 @@ use SuperAgent\Tools\ToolPolicy;
  * A tool policy refuses by category, so a builtin that declares none is a
  * hole: it reads as 'general', which no deny list names, and it would be
  * offered to an embedded host's model however carefully that host configured
- * itself. Three goal tools were exactly that until 1.3.0.
+ * itself. Three goal tools were exactly that until 1.2.0.
  *
  * This test exists for the next builtin, not for those three — it fails on
  * any tool that inherits the base category instead of declaring its own.

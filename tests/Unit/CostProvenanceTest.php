@@ -10,7 +10,7 @@ use SuperAgent\Messages\Usage;
 use SuperAgent\Providers\ModelCatalog;
 
 /**
- * Where a cost came from (1.6.0).
+ * Where a cost came from (1.2.0).
  *
  * `calculate()` always returns a number: an unrecognised model silently gets
  * Sonnet pricing. Fine for a progress line, wrong for a ledger row, where a

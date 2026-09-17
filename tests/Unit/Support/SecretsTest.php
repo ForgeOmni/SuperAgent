@@ -9,7 +9,7 @@ use SuperAgent\Support\Secrets;
 use SuperAgent\Swarm\AgentSpawnConfig;
 
 /**
- * Credentials must not ride along in anything that leaves the process (1.5.0).
+ * Credentials must not ride along in anything that leaves the process (1.2.0).
  */
 class SecretsTest extends TestCase
 {
