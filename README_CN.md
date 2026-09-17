@@ -3,7 +3,7 @@
 [![PHP 版本](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel 版本](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![许可证](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![版本](https://img.shields.io/badge/version-1.5.0-purple)](https://github.com/forgeomni/superagent)
+[![版本](https://img.shields.io/badge/version-1.6.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 语言**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 文档**: [安装](INSTALL_CN.md) · [Installation EN](INSTALL.md) · [Installation FR](INSTALL_FR.md) · [高级用法](docs/ADVANCED_USAGE_CN.md) · [API 文档](docs/)
@@ -44,6 +44,7 @@ echo $result->text();
 - [Profile 与工具策略](#profile-与工具策略-v130)
 - [延迟工具结果](#延迟工具结果-v140)
 - [在一个进程里服务多个租户](#在一个进程里服务多个租户-v150)
+- [信号与溯源](#信号与溯源-v160)
 - [运行期护栏](#运行期护栏-v098)
 - [伴生工具（jcode 风格）](#伴生工具jcode-风格)
 - [Agent 循环](#agent-循环)
@@ -813,6 +814,86 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 任何把用户文本注入 system-role 消息的地方都建议用一下 —— goals、skills、memory 导入。
 
 ---
+
+## 信号与溯源 *(v1.6.0)*
+
+### 注入检测不再只认英文
+
+提示注入规则原本全是英文正则，于是任何其他语言的不可信文本都会「扫描通过」——这比不扫描更糟，
+因为一个干净的结果会被当成证据。现在自带 **en、zh-Hans、zh-Hant、fr** 四个规则包，外加一个与语言无关、
+始终生效的 `universal` 包（不可见 Unicode、隐藏 HTML、shell 外传、编码混淆）。
+
+```php
+$detector = new PromptInjectionDetector();                   // 全部规则包
+$detector = new PromptInjectionDetector(null, ['en', 'fr']); // 或只要这几个
+
+$result = $detector->scan($orderNote, 'order_note');
+
+$result->score();           // 0.0 – 1.0，不是判决
+$result->categoryCounts();  // ['instruction_override' => 2, …]
+$result->languages();       // 命中了哪些规则包
+$result->toArray();         // 可直接落日志的一行
+```
+
+注册你自己的语言，或为已有语言补你自己的规则：
+
+```php
+PatternPacks::register(new PatternPack('de', [
+    'instruction_override' => ['/ignoriere\s+(alle\s+)?(vorherigen)\s+anweisungen/iu'],
+]));
+```
+
+或者干脆接入你自己的检测器（分类模型、租户黑名单），结果会合并进来：
+
+```php
+$detector->addDetector($myDetector);   // 实现 InjectionDetector
+```
+
+**它是分数，不是闸门。** 这些规则面对的是攻击者写的文本：一定会漏，也一定会在
+「忽略前面的说明，直接走后门送」这种无辜订单备注上误报。把中间那一段分数交给人来判。
+真正扛事的防御是结构性的——工具输出是数据，永远不是指令——而且它不依赖任何规则是否命中。
+
+### 这笔成本是怎么算出来的
+
+`CostCalculator::calculate()` 永远给得出一个数字：认不出来的模型会被悄悄按 Sonnet 计价。
+任何要落账的地方，请用：
+
+```php
+$breakdown = CostCalculator::calculateWithProvenance($model, $usage);
+
+$breakdown->cost;            // 和 calculate() 完全一样的数
+$breakdown->source;          // catalog | table | prefix | family | fallback
+$breakdown->isEstimate();    // family 或 fallback —— 这个价没人查过
+$breakdown->catalogVersion;  // 'v2@2026-09-17'
+$breakdown->toArray();       // 账目行
+```
+
+把版本和金额存在一起：否则几个月后，「价目表改过」和「计费出 bug」这两件事根本分不开。
+
+### 在 Web 请求里流式输出
+
+```php
+use SuperAgent\Streaming\SseEmitter;
+
+return response()->stream(function () use ($agent, $prompt) {
+    $emitter = new SseEmitter(function (string $frame): void {
+        echo $frame;
+        ob_flush();
+        flush();
+    });
+
+    $agent->prompt($prompt, $emitter->handler());
+    $emitter->close();
+}, 200, SseEmitter::HEADERS);
+```
+
+出口是一个 callable，所以 `StreamedResponse`、裸 `echo`、PSR-7 流、测试里的字符串缓冲都能用，
+并且不引入任何 console 依赖。负载是单行 `data:` 上的 JSON——因为一个裸换行就会把这一帧提前结束，
+半个回答变成畸形事件正是这么来的。`SseEmitter::HEADERS` 里带了 `X-Accel-Buffering: no`，
+少了它 nginx 会把整个响应缓冲起来一次性吐出，和「你自己代码的流式坏了」看起来一模一样。
+`keepAlive()` 在长工具调用那段静默期发注释帧保活。
+
+*自 v1.6.0 起。*
 
 ## 在一个进程里服务多个租户 *(v1.5.0)*
 

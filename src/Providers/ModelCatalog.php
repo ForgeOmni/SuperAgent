@@ -45,11 +45,59 @@ class ModelCatalog
     private static bool $sourcesLoaded = false;
 
     /**
+     * `_meta` of the last source ingested, so a host that stores money can
+     * record which price list produced a number.
+     *
+     * @var array<string,mixed>
+     *
+     * @since 1.6.0
+     */
+    private static array $meta = [];
+
+    /**
      * Pricing + catalog entry for a specific model id.
      * Returns null if the model isn't known.
      *
      * @return array{id:string, provider?:string, family?:string, date?:int, input?:float, output?:float, description?:string, aliases?:array<int,string>}|null
      */
+    /**
+     * Which price list is in force: `schema_version`, `updated`, and whatever
+     * else the source declared.
+     *
+     * A cost is derived data. Storing it without recording the list it came
+     * from means a corrected price cannot be told apart from a billing bug
+     * later, so anything that writes money should write this beside it.
+     *
+     * @return array<string,mixed>
+     *
+     * @since 1.6.0
+     */
+    public static function meta(): array
+    {
+        self::ensureLoaded();
+
+        return self::$meta;
+    }
+
+    /**
+     * A short identifier for the price list — schema version and date, or
+     * `unknown` when the source declared neither.
+     *
+     * @since 1.6.0
+     */
+    public static function version(): string
+    {
+        $meta = self::meta();
+        $schema = $meta['schema_version'] ?? null;
+        $updated = $meta['updated'] ?? null;
+
+        if ($schema === null && $updated === null) {
+            return 'unknown';
+        }
+
+        return 'v' . ($schema ?? '?') . '@' . ($updated ?? '?');
+    }
+
     public static function model(string $id): ?array
     {
         self::ensureLoaded();
@@ -517,6 +565,12 @@ class ModelCatalog
      */
     private static function ingest(array $data): void
     {
+        if (isset($data['_meta']) && is_array($data['_meta'])) {
+            // A user override is ingested after the bundled file, so its
+            // metadata is what describes the prices actually in force.
+            self::$meta = $data['_meta'] + self::$meta;
+        }
+
         $providers = $data['providers'] ?? [];
         if (! is_array($providers)) {
             return;

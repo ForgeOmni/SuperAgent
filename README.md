@@ -3,7 +3,7 @@
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Laravel Version](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.5.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.6.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Language**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Docs**: [Installation](INSTALL.md) · [安装](INSTALL_CN.md) · [Installation FR](INSTALL_FR.md) · [Advanced usage](docs/ADVANCED_USAGE.md) · [API docs](docs/)
@@ -44,6 +44,7 @@ echo $result->text();
 - [Profiles and tool policy](#profiles-and-tool-policy-v130)
 - [Deferred tool results](#deferred-tool-results-v140)
 - [Running many tenants in one process](#running-many-tenants-in-one-process-v150)
+- [Signals and provenance](#signals-and-provenance-v160)
 - [Operational guardrails](#operational-guardrails-v098)
 - [Companion tools (jcode-inspired)](#companion-tools-jcode-inspired)
 - [Agent Loop](#agent-loop)
@@ -847,6 +848,95 @@ Recommended at every site that injects user-supplied text into a
 system-role message — goals, skills, memory imports.
 
 ---
+
+## Signals and provenance *(v1.6.0)*
+
+### Injection detection past English
+
+The prompt-injection rules were English regexes, so untrusted text in any
+other language scanned clean — worse than not scanning, because a clean result
+reads as evidence. Bundled packs now cover **en, zh-Hans, zh-Hant, fr**, plus a
+`universal` pack (invisible Unicode, hidden HTML, shell exfiltration, encoded
+payloads) that is language-agnostic and always applied.
+
+```php
+$detector = new PromptInjectionDetector();                 // every pack
+$detector = new PromptInjectionDetector(null, ['en', 'fr']); // or just these
+
+$result = $detector->scan($orderNote, 'order_note');
+
+$result->score();           // 0.0 – 1.0, not a verdict
+$result->categoryCounts();  // ['instruction_override' => 2, …]
+$result->languages();       // which packs matched
+$result->toArray();         // a row to log
+```
+
+Register your own language, or your own rules for one already here:
+
+```php
+PatternPacks::register(new PatternPack('de', [
+    'instruction_override' => ['/ignoriere\s+(alle\s+)?(vorherigen)\s+anweisungen/iu'],
+]));
+```
+
+…or your own detector entirely — a classifier, a tenant blocklist — and its
+findings merge in:
+
+```php
+$detector->addDetector($myDetector);   // implements InjectionDetector
+```
+
+**A score, not a gate.** These are patterns against text an attacker writes:
+they will miss things, and they will fire on an innocent order note that says
+"ignore the previous instructions, use the back door". Route the middle of the
+range to a human. The defence that actually holds is structural — tool output
+is data, never instructions — and it holds whether or not a pattern matched.
+
+### Where a cost came from
+
+`CostCalculator::calculate()` always returns a number; an unrecognised model
+silently gets Sonnet pricing. For anything that writes money:
+
+```php
+$breakdown = CostCalculator::calculateWithProvenance($model, $usage);
+
+$breakdown->cost;            // same number as calculate()
+$breakdown->source;          // catalog | table | prefix | family | fallback
+$breakdown->isEstimate();    // family or fallback — nobody looked this price up
+$breakdown->catalogVersion;  // 'v2@2026-09-17'
+$breakdown->toArray();       // a ledger row
+```
+
+Store the version beside the cost: a corrected price and a billing bug are
+indistinguishable months later otherwise.
+
+### Streaming inside a web request
+
+```php
+use SuperAgent\Streaming\SseEmitter;
+
+return response()->stream(function () use ($agent, $prompt) {
+    $emitter = new SseEmitter(function (string $frame): void {
+        echo $frame;
+        ob_flush();
+        flush();
+    });
+
+    $agent->prompt($prompt, $emitter->handler());
+    $emitter->close();
+}, 200, SseEmitter::HEADERS);
+```
+
+The sink is a callable, so this works with `StreamedResponse`, plain `echo`, a
+PSR-7 stream or a test buffer, and it pulls in no console dependency. Payloads
+are JSON on one `data:` line, because a raw newline ends a frame — that is how
+half an answer becomes a malformed event. `SseEmitter::HEADERS` includes
+`X-Accel-Buffering: no`, without which nginx buffers the whole response and
+delivers it in one block, indistinguishable from a streaming bug in your own
+code. `keepAlive()` emits a comment frame for the silent stretch while a long
+tool call runs.
+
+*Since v1.6.0.*
 
 ## Running many tenants in one process *(v1.5.0)*
 

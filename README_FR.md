@@ -3,7 +3,7 @@
 [![Version PHP](https://img.shields.io/badge/php-%3E%3D8.1-blue)](https://www.php.net/)
 [![Version Laravel](https://img.shields.io/badge/laravel-%3E%3D10.0-orange)](https://laravel.com)
 [![Licence](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.5.0-purple)](https://github.com/forgeomni/superagent)
+[![Version](https://img.shields.io/badge/version-1.6.0-purple)](https://github.com/forgeomni/superagent)
 
 > **🌍 Langue**: [English](README.md) | [中文](README_CN.md) | [Français](README_FR.md)
 > **📖 Documentation**: [Installation FR](INSTALL_FR.md) · [Installation EN](INSTALL.md) · [安装](INSTALL_CN.md) · [Utilisation avancée](docs/ADVANCED_USAGE_FR.md) · [Docs API](docs/)
@@ -44,6 +44,7 @@ echo $result->text();
 - [Profils et politique d'outils](#profils-et-politique-doutils-v130)
 - [Résultats d'outils différés](#résultats-doutils-différés-v140)
 - [Servir plusieurs locataires dans un seul processus](#servir-plusieurs-locataires-dans-un-seul-processus-v150)
+- [Signaux et provenance](#signaux-et-provenance-v160)
 - [Garde-fous opérationnels](#garde-fous-opérationnels-v098)
 - [Outils compagnons (inspirés de jcode)](#outils-compagnons-inspirés-de-jcode)
 - [Boucle d'agent](#boucle-dagent)
@@ -814,6 +815,98 @@ $wrapped = UntrustedInput::wrap($userInput, kind: 'note');
 Recommandé partout où du texte fourni par l'utilisateur est injecté dans un message de rôle système — goals, skills, imports mémoire.
 
 ---
+
+## Signaux et provenance *(v1.6.0)*
+
+### Détection d'injection au-delà de l'anglais
+
+Les règles d'injection étaient des regex anglaises : un texte non fiable dans
+toute autre langue passait le scan — pire que pas de scan, puisqu'un résultat
+propre se lit comme une preuve. Les packs fournis couvrent désormais **en,
+zh-Hans, zh-Hant, fr**, plus un pack `universal` (Unicode invisible, HTML
+caché, exfiltration shell, charges encodées) indépendant de la langue et
+toujours appliqué.
+
+```php
+$detector = new PromptInjectionDetector();                   // tous les packs
+$detector = new PromptInjectionDetector(null, ['en', 'fr']); // ou ceux-ci
+
+$result = $detector->scan($orderNote, 'order_note');
+
+$result->score();           // 0.0 – 1.0, pas un verdict
+$result->categoryCounts();  // ['instruction_override' => 2, …]
+$result->languages();       // quels packs ont déclenché
+$result->toArray();         // une ligne à journaliser
+```
+
+Enregistrez votre propre langue, ou vos propres règles pour l'une de
+celles-ci :
+
+```php
+PatternPacks::register(new PatternPack('de', [
+    'instruction_override' => ['/ignoriere\s+(alle\s+)?(vorherigen)\s+anweisungen/iu'],
+]));
+```
+
+…ou votre propre détecteur — un classifieur, une liste noire de locataire — et
+ses constats sont fusionnés :
+
+```php
+$detector->addDetector($myDetector);   // implémente InjectionDetector
+```
+
+**Un score, pas une barrière.** Ce sont des motifs face à un texte écrit par un
+attaquant : ils rateront des choses, et se déclencheront sur une note de
+livraison innocente disant « ignorez les instructions précédentes, passez par
+l'arrière ». Faites arbitrer le milieu de la plage par un humain. La défense
+qui tient vraiment est structurelle — la sortie d'un outil est une donnée,
+jamais une instruction — et elle tient qu'un motif ait déclenché ou non.
+
+### D'où vient un coût
+
+`CostCalculator::calculate()` renvoie toujours un nombre : un modèle inconnu
+reçoit silencieusement le tarif Sonnet. Pour tout ce qui écrit de l'argent :
+
+```php
+$breakdown = CostCalculator::calculateWithProvenance($model, $usage);
+
+$breakdown->cost;            // le même nombre que calculate()
+$breakdown->source;          // catalog | table | prefix | family | fallback
+$breakdown->isEstimate();    // family ou fallback — personne n'a consulté ce prix
+$breakdown->catalogVersion;  // 'v2@2026-09-17'
+$breakdown->toArray();       // une ligne de grand livre
+```
+
+Stockez la version à côté du montant : sinon, des mois plus tard, un prix
+corrigé et un bug de facturation sont indiscernables.
+
+### Streaming dans une requête web
+
+```php
+use SuperAgent\Streaming\SseEmitter;
+
+return response()->stream(function () use ($agent, $prompt) {
+    $emitter = new SseEmitter(function (string $frame): void {
+        echo $frame;
+        ob_flush();
+        flush();
+    });
+
+    $agent->prompt($prompt, $emitter->handler());
+    $emitter->close();
+}, 200, SseEmitter::HEADERS);
+```
+
+Le puits est un callable : cela fonctionne avec `StreamedResponse`, un simple
+`echo`, un flux PSR-7 ou un tampon de test, sans aucune dépendance console. Les
+charges utiles sont du JSON sur une seule ligne `data:`, car un saut de ligne
+brut termine la trame — c'est ainsi que la moitié d'une réponse devient un
+événement malformé. `SseEmitter::HEADERS` inclut `X-Accel-Buffering: no`, sans
+quoi nginx tamponne toute la réponse et la livre d'un bloc, ce qui ressemble
+exactement à un bug de streaming dans votre propre code. `keepAlive()` émet une
+trame de commentaire pendant le silence d'un long appel d'outil.
+
+*Depuis la v1.6.0.*
 
 ## Servir plusieurs locataires dans un seul processus *(v1.5.0)*
 

@@ -228,45 +228,77 @@ class CostCalculator
         ]);
     }
 
+    /**
+     * The same cost, plus which price list produced it and whether the price
+     * was looked up or guessed.
+     *
+     * @since 1.6.0
+     */
+    public static function calculateWithProvenance(string $model, Usage $usage): CostBreakdown
+    {
+        [$prices, $source] = static::resolveWithSource($model);
+
+        return new CostBreakdown(
+            cost: static::calculate($model, $usage),
+            model: $model,
+            inputPerMillion: (float) $prices['input'],
+            outputPerMillion: (float) $prices['output'],
+            source: $source,
+            catalogVersion: ModelCatalog::version(),
+        );
+    }
+
     protected static function resolve(string $model): array
+    {
+        return static::resolveWithSource($model)[0];
+    }
+
+    /**
+     * @return array{0: array{input: float, output: float}, 1: string} prices and their source
+     *
+     * @since 1.6.0
+     */
+    protected static function resolveWithSource(string $model): array
     {
         // Dynamic source first: the JSON-backed catalog (bundled + user override +
         // runtime register()). Keeps pricing updatable without a code release.
         $catalog = ModelCatalog::pricing($model);
         if ($catalog !== null) {
-            return $catalog;
+            return [$catalog, 'catalog'];
         }
 
         if (isset(static::$pricing[$model])) {
-            return static::$pricing[$model];
+            return [static::$pricing[$model], 'table'];
         }
 
         // Fuzzy match: if model starts with a known prefix
         foreach (static::$pricing as $key => $prices) {
             if (str_starts_with($model, $key)) {
-                return $prices;
+                return [$prices, 'prefix'];
             }
         }
 
         // Provider-based defaults
         if (str_contains($model, 'gpt')) {
-            return ['input' => 2.50, 'output' => 10.0]; // GPT-4o pricing
+            return [['input' => 2.50, 'output' => 10.0], 'family']; // GPT-4o pricing
         }
         
         if (str_contains($model, 'claude')) {
-            return ['input' => 3.0, 'output' => 15.0]; // Sonnet pricing
+            return [['input' => 3.0, 'output' => 15.0], 'family']; // Sonnet pricing
         }
         
         if (str_contains($model, 'gemini')) {
-            return ['input' => 0.50, 'output' => 1.50]; // Gemini Pro pricing
+            return [['input' => 0.50, 'output' => 1.50], 'family']; // Gemini Pro pricing
         }
         
         if (str_contains($model, 'llama') || str_contains($model, 'mistral')) {
-            return ['input' => 0.50, 'output' => 0.50]; // Open model average
+            return [['input' => 0.50, 'output' => 0.50], 'family']; // Open model average
         }
 
-        // Default fallback: sonnet pricing
-        return ['input' => 3.0, 'output' => 15.0];
+        // Default fallback: sonnet pricing. Nothing about this model was
+        // recognised, so the number that comes out is an assumption — which
+        // is what the 'fallback' source says.
+        return [['input' => 3.0, 'output' => 15.0], 'fallback'];
     }
     
     /**

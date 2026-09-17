@@ -6,6 +6,9 @@ namespace SuperAgent\Guardrails;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
+use SuperAgent\Guardrails\Injection\InjectionDetector;
+use SuperAgent\Guardrails\Injection\PatternPack;
+use SuperAgent\Guardrails\Injection\PatternPacks;
 
 /**
  * Detects prompt injection attempts in context files and user input.
@@ -18,11 +21,15 @@ use Psr\Log\NullLogger;
  *   - Role confusion ("you are now", "act as")
  *   - Encoded/obfuscated payloads
  */
-class PromptInjectionDetector
+class PromptInjectionDetector implements InjectionDetector
 {
     /**
      * Injection pattern categories with their regex patterns.
-     * Each pattern is designed to catch common prompt injection techniques.
+     *
+     * @deprecated 1.6.0 Kept so anything reading the constant still works.
+     *             The detector reads {@see PatternPacks} now, which covers
+     *             more than English — see the `en` and `universal` packs for
+     *             these same rules.
      */
     private const PATTERNS = [
         'instruction_override' => [
@@ -84,9 +91,46 @@ class PromptInjectionDetector
 
     private LoggerInterface $logger;
 
-    public function __construct(?LoggerInterface $logger = null)
+    /** @var list<PatternPack> */
+    private array $packs;
+
+    /** @var list<InjectionDetector> */
+    private array $detectors = [];
+
+    /**
+     * @param list<string>|null $languages Which bundled / registered packs to
+     *        apply, e.g. `['en', 'zh-Hans']`. Null applies every one of them:
+     *        a host that does not know what language untrusted text will
+     *        arrive in should not have to guess, and the packs are cheap.
+     */
+    public function __construct(?LoggerInterface $logger = null, ?array $languages = null)
     {
         $this->logger = $logger ?? new NullLogger();
+        $this->packs = PatternPacks::resolve($languages);
+    }
+
+    /**
+     * Add a detector of the host's own; its findings merge with these.
+     *
+     * @since 1.6.0
+     */
+    public function addDetector(InjectionDetector $detector): static
+    {
+        $this->detectors[] = $detector;
+
+        return $this;
+    }
+
+    /**
+     * Languages whose packs this instance applies.
+     *
+     * @return list<string>
+     *
+     * @since 1.6.0
+     */
+    public function languages(): array
+    {
+        return array_map(static fn (PatternPack $p): string => $p->language, $this->packs);
     }
 
     /**
@@ -98,17 +142,27 @@ class PromptInjectionDetector
     {
         $threats = [];
 
-        foreach (self::PATTERNS as $category => $patterns) {
-            foreach ($patterns as $pattern) {
-                if (preg_match($pattern, $text, $matches)) {
-                    $threats[] = [
-                        'category' => $category,
-                        'severity' => self::SEVERITY[$category],
-                        'pattern' => $pattern,
-                        'match' => mb_substr($matches[0], 0, 100),
-                        'source' => $source,
-                    ];
+        foreach ($this->packs as $pack) {
+            foreach ($pack->patterns as $category => $patterns) {
+                foreach ($patterns as $pattern) {
+                    if (preg_match($pattern, $text, $matches)) {
+                        $threats[] = [
+                            'category' => $category,
+                            'severity' => self::SEVERITY[$category] ?? 'medium',
+                            'pattern' => $pattern,
+                            'match' => mb_substr($matches[0], 0, 100),
+                            'source' => $source,
+                            'language' => $pack->language,
+                        ];
+                    }
                 }
+            }
+        }
+
+        foreach ($this->detectors as $detector) {
+            foreach ($detector->scan($text, $source)->threats as $threat) {
+                $threat['language'] ??= 'host';
+                $threats[] = $threat;
             }
         }
 
@@ -169,7 +223,7 @@ class PromptInjectionDetector
      */
     public function sanitizeInvisible(string $text): string
     {
-        foreach (self::PATTERNS['invisible_unicode'] as $pattern) {
+        foreach (PatternPacks::universal()->patternsFor('invisible_unicode') as $pattern) {
             $text = preg_replace($pattern, '', $text) ?? $text;
         }
         return $text;
