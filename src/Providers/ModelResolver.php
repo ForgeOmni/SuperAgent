@@ -393,6 +393,18 @@ class ModelResolver
             'gpt35', 'gpt3.5', 'gpt-3.5-turbo',
         ], 20230613);
 
+        // ── Meta (Muse Spark) ─────────────────────────────────────
+
+        // 1.3 (2026-09-02) is the current release and the bare `muse`
+        // alias target. Contributor ids are deliberately NOT aliased —
+        // that tier trains on your prompts, so it has to be asked for
+        // by name.
+        static::register('muse-spark-1.3', 'muse-spark', [
+            'muse', 'muse-spark', 'spark',
+        ], 20260902);
+        static::register('muse-spark-1.2', 'muse-spark', [], 20260701);
+        static::register('muse-spark-1.1', 'muse-spark', [], 20260501);
+
         // ── Google Gemini ─────────────────────────────────────────
 
         // 3.8 Flash (GA 2026-09-02) is the coding/agent flagship and the

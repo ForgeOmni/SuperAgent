@@ -121,6 +121,7 @@ export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
 export DEEPSEEK_API_KEY=...        # DeepSeek V4 — v0.9.6 起
 export XAI_API_KEY=...             # xAI Grok — v1.0.8 起（也接受 GROK_API_KEY）
+export META_API_KEY=...            # Meta Model API / Muse Spark —— v1.1.13 起（也接受 MODEL_API_KEY）
 export OPENROUTER_API_KEY=...
 
 # DeepSeek 多上游 relay (v0.9.8) —— 同一份 V4 权重的不同入口。
@@ -753,6 +754,23 @@ $agent = new Agent(['provider' => 'qwen-anthropic', 'api_key' => env('DASHSCOPE_
 > 2026-05-22 阿里还没在英文文档里正式公布 `qwen-anthropic` 的端点 URL。默认 `https://dashscope.aliyuncs.com/anthropic-mode/v1` 是合理猜测；如果 404，请通过 `base_url` 覆盖。装了 qwen-code v0.16+ 后，可以在 `~/.qwen/settings.json` 里看是否有 `anthropic-base-url` 字段。
 
 Qwen OAuth 已于 2026-04-15 停用 —— 只支持 API key 认证。
+
+### Meta Model API — Muse Spark *(v1.1.13)*
+
+除标准包外无需额外安装。在 Meta Developer Console 申请 key，然后：
+
+```bash
+export META_API_KEY=...        # 也可用 MODEL_API_KEY（Meta 官方命名）
+```
+
+```php
+$agent = new Agent(['provider' => 'meta']);                       // → muse-spark-1.3
+$agent->run('重构这个模块', ['reasoning_effort' => 'xhigh', 'grounding' => true]);
+```
+
+默认模型 `muse-spark-1.3`（1M context，$1.25 / $0.15 缓存 / $4.25 每 1M，支持文本 + 图像 + 视频 + 音频 + PDF 输入）。推理常开 —— 档位为 `minimal…max`，发 `reasoning_effort: none` 会 400，因此 `off` 下探到 `minimal`。同一批模型也可通过 Meta 的 Anthropic 兼容路由访问：`provider=anthropic` + `base_url=https://api.meta.ai`。
+
+> `-contributor` 系列便宜约 12 倍，代价是 Meta 会用你的 prompt 和回复训练模型。catalog 收录但不设别名 —— 需要这笔交换时请显式写出该 id。
 
 ### Pi session 导入 *(v1.0.6)*
 

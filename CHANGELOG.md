@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.13] - 2026-09-17
+
+### 💻 Summary
+
+**A native `meta` provider for Meta's Model API, so Muse Spark is reachable directly instead of only through OpenRouter.** v1.1.12 catalogued Muse Spark 1.3 but had no route that speaks Meta's dialect — and Muse Spark is OpenAI-*compatible*, not OpenAI-*identical*: five of the differences are hard 400s (`max_completion_tokens` instead of `max_tokens`, no way to disable reasoning, `developer` outranking `system`, a list of rejected OpenAI params, and search grounding as a server-side tool rather than a flag). `MetaProvider` handles all five. Also fixes a real bug from the last release: `ProviderRegistry::DEFAULTS` still pinned the pre-1.1.12 models for gemini / qwen / glm / deepseek, shadowing the `defaultModel()` bumps for anyone going through the registry. Additive and non-breaking. Full suite green (3393 tests).
+
+### Added
+
+- **`Providers\MetaProvider`** (`provider: 'meta'`) — Meta Model API at `https://api.meta.ai`, `POST /v1/chat/completions`, bearer auth read from `api_key` → `META_API_KEY` → `MODEL_API_KEY` (the name Meta's own docs use). Default model `muse-spark-1.3`. Overrides: `completionTokenParam()` → `max_completion_tokens`; `reasoningEffortFragment()` floors `off`/`none`/`disabled` at `minimal` because Muse Spark always reasons and `reasoning_effort: none` is a 400; `modelSupportsMaxEffort()` downgrades `max` → `xhigh` on 1.1 / 1.2, which lack the top tier; `buildRequestBody()` re-roles the hoisted system message to `developer` and strips the params Meta rejects (`stop`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `modalities`, `audio`, `web_search_options`, `n` > 1) **after** `extra_body` merges, so a body carried over from another provider is sanitised rather than 400'd.
+- **Meta-specific options:** `grounding` / `web_search` append the server-side `{"type": "web_search"}` tool alongside function tools (billed $2.50 per 1K queries on top of tokens); `prompt_cache_key` and `safety_identifier` pass through.
+- **Catalog: a native `meta` provider block** — `muse-spark-1.3` ($1.25 in / $0.15 cached / $4.25 out per M, 1M ctx, text+image+video+audio+PDF in), `muse-spark-1.2` / `1.1` (effort dial stops at `xhigh`; 1.2 is still recommended for audio), the `-contributor` variants ($0.10 / $0.002 / $0.20), plus `muse-image-1.0` and `muse-voice-transcribe-1.0` as catalog-only entries with no chat route. `ModelResolver` seeds `muse` / `muse-spark` / `spark` → `muse-spark-1.3`; the contributor ids are deliberately **unaliased** so nothing routes to a train-on-your-data tier implicitly. `meta/muse-spark-1.3-contributor` added on OpenRouter.
+- `ProviderRegistry`: `meta` in the class map, defaults, required-credential list, env-derived config (`META_API_KEY` / `MODEL_API_KEY`), `discover()`, the health-probe URL (`https://api.meta.ai/v1/models`) and the capability map (1M ctx, vision, structured output, always-on thinking). `/model` picker gains a `meta` list.
+- Tests: `tests/Unit/Providers/MetaProviderTest.php` (18).
+
+### Fixed
+
+- **`ProviderRegistry::DEFAULTS` shadowed the v1.1.12 model bumps.** The registry passes an explicit `model` into every constructor, so `gemini` still ran `gemini-3.7-flash`, `qwen` `qwen3.8-max`, `glm` `glm-5.2` and `deepseek` `deepseek-v4-flash` despite those providers' `defaultModel()` having moved. All four now match.
+
+### Changed
+
+- `SuperAgentApplication::VERSION` `1.1.12` → `1.1.13`.
+- `CostCalculator` / `TokenEstimator` carry Muse Spark rows (contributor rows first — the fuzzy prefix match walks insertion order and `muse-spark-1.3` is a prefix of `muse-spark-1.3-contributor`).
+- Docs: README / INSTALL / ADVANCED_USAGE updated in all three languages (EN / CN / FR) — a new "Meta Model API — Muse Spark" README section, an INSTALL setup section, and ADVANCED_USAGE section 101.
+
+### Notes
+
+- Meta serves the same models and billing over three protocols. This provider wires Chat Completions; the Anthropic-compatible Messages route needs no new code (`provider: 'anthropic'` + `base_url: 'https://api.meta.ai'` + a `muse-spark-*` model), and the Responses route is not wired.
+
+
 ## [1.1.12] - 2026-09-17
 
 ### 💻 Summary

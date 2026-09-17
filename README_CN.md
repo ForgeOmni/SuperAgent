@@ -37,6 +37,7 @@ echo $result->text();
 - [GPT-6 Astra / GPT-5.6](#gpt-6-astra--gpt-56-sol--terra--luna)
 - [Grok 4.6](#grok-46)
 - [DeepSeek V4.1 / V4](#deepseek-v41--v4)
+- [Meta Muse Spark](#meta-model-api--muse-spark)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode（codex `/goal` 对齐）](#goal-modecodex-goal-对齐-v098)
@@ -114,6 +115,7 @@ superagent "检查 composer.json，告诉我这个项目目标 PHP 版本"
 | `qwen` | 阿里 Qwen（OpenAI 兼容，默认）| API key；region `intl` / `us` / `cn` / `hk` / `code`（OAuth + PKCE）；默认 `qwen3.8-max-0902` —— 多模态旗舰快照 *(Qwen3.8-Max-0902，v1.1.12)* |
 | `qwen-native` | 阿里 Qwen（DashScope 原生 body）| 保留给依赖 `parameters.thinking_budget` 的调用方 |
 | `glm` | BigModel GLM（默认 GLM-5.3）| API key；region `intl` / `cn`；thinking + reasoning-effort 档位 *(GLM-5.3 默认 + GLM-5.3-Flash，v1.1.12；GLM-5.3 档位，v1.1.11)* |
+| `meta` | Meta Model API（Muse Spark）| API key（`META_API_KEY` / `MODEL_API_KEY`）；OpenAI 兼容，位于 `api.meta.ai`；默认 `muse-spark-1.3` —— 推理常开（`minimal…max`，没有关闭档）、1M ctx、文本/图像/视频/音频/PDF 输入、搜索接地 *(v1.1.13)* |
 | `minimax` | MiniMax（默认 M3） | API key；region `intl` / `cn`；交错式思考 + 原生图像/视频 *(M3，v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key；upstream `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *（v0.9.6 起，多上游 v0.9.8）* |
 | `grok` | xAI Grok | API key（`XAI_API_KEY` / `GROK_API_KEY`）；OpenAI 兼容，`api.x.ai`；默认 `grok-4.6` —— reasoning-effort 档位（含 `xhigh`）+ cache 绑定 *（Grok 4.6，v1.1.11；v1.0.8 起）* |
@@ -569,6 +571,55 @@ $compactor = new CacheAwareCompressor(
 ```
 
 包装任意 `CompressionStrategy`。结果形态：`[head_pinned, summary_boundary, summary, tail_preserved]`，缓存前缀停留在 byte 0。多轮压缩幂等 —— 把压缩结果再喂回去也保持同样的前缀字节，DeepSeek 自动前缀缓存每轮 `/compact` 都继续命中。
+
+---
+
+## Meta Model API — Muse Spark
+
+Muse Spark 是 Meta Superintelligence Labs 的 agentic 编码模型家族，通过 **Meta Model API**（`https://api.meta.ai`）提供。`muse-spark-1.3`（2026-09-02）是 `meta` provider 的默认模型：**1M token context**，支持文本 + 图像 + 视频 + 音频 + PDF 输入、参数流式的并行工具调用、结构化输出，以及服务端搜索接地。计价 **$1.25 输入 / $0.15 缓存 / $4.25 输出** 每百万 token。
+
+```php
+$agent = new Agent([
+    'provider' => 'meta',
+    'api_key'  => getenv('META_API_KEY'),        // 或 MODEL_API_KEY（Meta 官方命名）
+    'model'    => 'muse-spark-1.3',              // 或 `muse` 别名
+]);
+```
+
+Meta 用三种协议暴露同一批模型：Responses API、OpenAI 兼容的 Chat Completions API，以及 Anthropic 兼容的 Messages API。本 provider 走 **Chat Completions**；Anthropic 那条路不需要任何新代码：
+
+```php
+// 同一模型、同一计费，走 Anthropic 协议
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('META_API_KEY'),
+    'base_url' => 'https://api.meta.ai',
+    'model'    => 'muse-spark-1.3',
+]);
+```
+
+它的请求形态与标准 OpenAI 有五处不同，SDK 已全部处理：
+
+- **推理无法关闭。** `reasoning_effort` 取值为 `minimal | low | medium | high | xhigh`（1.3 另有 `max`），发 **`none` 会 400**。因此跨 provider 的档位在这里**下探到 `minimal`** 而不是发送关闭档；在没有顶档的 1.1 / 1.2 上，`max` 会降级为 `xhigh`。
+- **用 `max_completion_tokens`，不是 `max_tokens`。** 推理通道与输出共享预算，`max_tokens` 不在 Meta 支持的字段里。
+- **`developer` 优先级高于 `system`。** `system` 仅为兼容 OpenAI 而保留，`developer` 才是文档规定的最高优先级指令通道 —— 提升上来的 system prompt 会自动改角色。
+- **不支持的 OpenAI 参数会被剔除**：`stop`、`logprobs`、`logit_bias`、`prediction`、`modalities`、`audio`、`web_search_options` 以及 `n` > 1 都会 400。剔除发生在 `extra_body` 合并**之后**，因此从别的 provider 搬过来的 payload 会被清洗而不是被拒。
+- **搜索接地是工具而非开关** —— `{"type": "web_search"}`，在 token 之外按每 1000 次查询 $2.50 计费。
+
+```php
+$agent->run('上个版本发布了什么？', [
+    'reasoning_effort'  => 'xhigh',        // minimal…max；`off` 下探到 minimal
+    'grounding'         => true,           // → tools: [{type: "web_search"}]
+    'prompt_cache_key'  => 'session-42',   // 缓存亲和分组
+    'safety_identifier' => 'user-abc',     // 匿名化终端用户标识（≤64 字符）
+]);
+```
+
+> ⚠️ **Contributor 档会拿你的数据训练。** `muse-spark-1.3-contributor` 是同一个模型，价格 **$0.10 / $0.002 / $0.20** 每百万 token（约便宜 12 倍），代价是 Meta 会用你的 prompt 和回复训练后续模型（且速率限制降为 100 RPM，而非 3000）。catalog 收录了它，但**刻意不设别名**：除非你显式写出这个 id，否则不会有流量走到那里。
+
+Muse Spark 也可通过 OpenRouter（`meta/muse-spark-1.3`）和 Cursor 访问；只有原生 provider 能使用上述 Meta 专有字段。
+
+*v1.1.13 起*
 
 ---
 

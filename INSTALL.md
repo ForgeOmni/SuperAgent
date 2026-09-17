@@ -121,6 +121,7 @@ export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
 export DEEPSEEK_API_KEY=...        # DeepSeek V4 — since v0.9.6
 export XAI_API_KEY=...             # xAI Grok — since v1.0.8 (GROK_API_KEY also accepted)
+export META_API_KEY=...            # Meta Model API / Muse Spark — since v1.1.13 (MODEL_API_KEY also accepted)
 export OPENROUTER_API_KEY=...
 
 # DeepSeek multi-upstream relays (v0.9.8) — same V4 weights, alternate hosts.
@@ -732,6 +733,40 @@ $agent = new Agent(['provider' => 'qwen-anthropic', 'api_key' => env('DASHSCOPE_
 > The `qwen-anthropic` endpoint URL has not been officially documented by Alibaba in English as of 2026-05-22. The default `https://dashscope.aliyuncs.com/anthropic-mode/v1` is a best-guess; override via `base_url` if it 404s. Check `~/.qwen/settings.json` after installing qwen-code v0.16+ for an explicit `anthropic-base-url` field.
 
 Qwen OAuth was discontinued 2026-04-15 — only API key auth is supported.
+
+### Meta Model API — Muse Spark *(v1.1.13)*
+
+Nothing to install beyond the standard package. Issue a key in the Meta Developer Console, then:
+
+```bash
+export META_API_KEY=...        # MODEL_API_KEY (Meta's own name) also works
+```
+
+```php
+$agent = new Agent(['provider' => 'meta']);                       // → muse-spark-1.3
+$agent->run('refactor this module', ['reasoning_effort' => 'xhigh', 'grounding' => true]);
+```
+
+`muse-spark-1.3` is the default (1M context, $1.25/$0.15 cached/$4.25 per 1M, text + image + video + audio + PDF input). Reasoning is always on — the dial is `minimal…max` and `reasoning_effort: none` is a 400, so `off` floors at `minimal`. The same models are reachable over Meta's Anthropic-compatible route with `provider=anthropic` + `base_url=https://api.meta.ai`.
+
+> The `-contributor` ids are ~12x cheaper because Meta trains on your prompts and completions. They are catalogued but never aliased — name the id explicitly if you want that trade.
+
+### Meta Model API — Muse Spark *(v1.1.13)*
+
+Nothing to install beyond the standard package. Issue a key in the Meta Developer Console, then:
+
+```bash
+export META_API_KEY=...        # MODEL_API_KEY (Meta's own name) also works
+```
+
+```php
+$agent = new Agent(['provider' => 'meta']);                       // → muse-spark-1.3
+$agent->run('refactor this module', ['reasoning_effort' => 'xhigh', 'grounding' => true]);
+```
+
+`muse-spark-1.3` is the default (1M context, $1.25/$0.15 cached/$4.25 per 1M, text + image + video + audio + PDF input). Reasoning is always on — the dial is `minimal…max` and `reasoning_effort: none` is a 400, so `off` floors at `minimal`. The same models are reachable over Meta's Anthropic-compatible route with `provider=anthropic` + `base_url=https://api.meta.ai`.
+
+> The `-contributor` ids are ~12x cheaper because Meta trains on your prompts and completions. They are catalogued but never aliased — name the id explicitly if you want that trade.
 
 ### Pi session import *(v1.0.6)*
 

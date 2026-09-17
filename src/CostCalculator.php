@@ -160,6 +160,13 @@ class CostCalculator
         'kimi-k3' => ['input' => 3.00, 'output' => 15.0],
         'MiniMax-M3' => ['input' => 0.30, 'output' => 1.20],
 
+        // Meta Model API — Muse Spark. The `-contributor` rows must come
+        // first: the fuzzy prefix match walks insertion order, and
+        // 'muse-spark-1.3' is a prefix of 'muse-spark-1.3-contributor'.
+        'muse-spark-1.3-contributor' => ['input' => 0.10, 'output' => 0.20],
+        'muse-spark-1.2-contributor' => ['input' => 0.10, 'output' => 0.20],
+        'muse-spark' => ['input' => 1.25, 'output' => 4.25],
+
         // Ollama models (local, free)
         'llama2' => ['input' => 0.0, 'output' => 0.0],
         'llama2:7b' => ['input' => 0.0, 'output' => 0.0],

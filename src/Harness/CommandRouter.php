@@ -797,6 +797,12 @@ class CommandRouter
                 ['id' => 'gemini-2.5-pro',               'description' => 'Gemini 2.5 Pro — long context'],
                 ['id' => 'gemini-1.5-flash',             'description' => 'Gemini 1.5 Flash'],
             ],
+            'meta' => [
+                ['id' => 'muse-spark-1.3',     'description' => 'Muse Spark 1.3 — agentic coding flagship; effort minimal…max (no off switch)'],
+                ['id' => 'muse-spark-1.2',     'description' => 'Muse Spark 1.2 — previous version; best for audio input'],
+                ['id' => 'muse-spark-1.1',     'description' => 'Muse Spark 1.1 — original public preview'],
+                ['id' => 'muse-spark-1.3-contributor', 'description' => 'Muse Spark 1.3 Contributor — ~12x cheaper, TRAINS ON YOUR DATA'],
+            ],
             'openrouter' => [
                 ['id' => 'anthropic/claude-opus-4-5'],
                 ['id' => 'anthropic/claude-sonnet-4-5'],

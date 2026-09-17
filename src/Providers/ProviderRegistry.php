@@ -35,6 +35,9 @@ class ProviderRegistry
         'qwen-anthropic' => QwenAnthropicProvider::class,
         'glm' => GlmProvider::class,
         'minimax' => MiniMaxProvider::class,
+        // Meta Model API — Muse Spark family, OpenAI-compatible at
+        // api.meta.ai. See MetaProvider.
+        'meta' => MetaProvider::class,
         'deepseek' => DeepSeekProvider::class,
         // xAI Grok — OpenAI-compatible at api.x.ai.
         'grok' => GrokProvider::class,
@@ -124,9 +127,9 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'gemini' => [
-            // 3.7 Flash (GA 2026-08-13) is the coding/agent flagship and
-            // Google's recommended migration target from 3.5 Flash.
-            'model' => 'gemini-3.7-flash',
+            // 3.8 Flash (GA 2026-09-02) is the coding/agent flagship and
+            // Google's recommended migration target from 3.7 Flash.
+            'model' => 'gemini-3.8-flash',
             'max_tokens' => 8192,
             'max_retries' => 3,
         ],
@@ -137,7 +140,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'qwen' => [
-            'model' => 'qwen3.8-max',
+            'model' => 'qwen3.8-max-0902',
             'region' => 'intl',
             'max_tokens' => 8192,
             'max_retries' => 3,
@@ -149,7 +152,7 @@ class ProviderRegistry
             'max_retries' => 3,
         ],
         'glm' => [
-            'model' => 'glm-5.2',
+            'model' => 'glm-5.3',
             'region' => 'intl',
             'max_tokens' => 8192,
             'max_retries' => 3,
@@ -160,8 +163,15 @@ class ProviderRegistry
             'max_tokens' => 8192,
             'max_retries' => 3,
         ],
+        'meta' => [
+            // Muse Spark 1.3 (2026-09-02) — MSL's agentic coding flagship.
+            'model' => 'muse-spark-1.3',
+            'region' => 'default',
+            'max_tokens' => 8192,
+            'max_retries' => 3,
+        ],
         'deepseek' => [
-            'model' => 'deepseek-v4-flash',
+            'model' => 'deepseek-flash',
             'region' => 'default',
             'max_tokens' => 8192,
             'max_retries' => 3,
@@ -477,7 +487,7 @@ class ProviderRegistry
             'bedrock' => ['access_key', 'secret_key'],
             'ollama' => [], // No required keys for Ollama
             'gemini' => ['api_key'],
-            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax', 'deepseek', 'grok' => ['api_key'],
+            'kimi', 'qwen', 'qwen-native', 'glm', 'minimax', 'deepseek', 'grok', 'meta' => ['api_key'],
             default => [],
         };
 
@@ -577,6 +587,12 @@ class ProviderRegistry
             'grok' => [
                 'api_key' => $_ENV['XAI_API_KEY'] ?? getenv('XAI_API_KEY')
                     ?: ($_ENV['GROK_API_KEY'] ?? getenv('GROK_API_KEY')),
+            ],
+            'meta' => [
+                // META_API_KEY keeps our naming; MODEL_API_KEY is the name
+                // Meta's own docs and quickstarts use.
+                'api_key' => $_ENV['META_API_KEY'] ?? getenv('META_API_KEY')
+                    ?: ($_ENV['MODEL_API_KEY'] ?? getenv('MODEL_API_KEY')),
             ],
             default => throw new ProviderException("Unknown provider: {$name}", $name),
         };
@@ -684,6 +700,7 @@ class ProviderRegistry
             'glm'        => 'https://api.z.ai/api/paas/v4/models',
             'minimax'    => 'https://api.minimax.io/v1/text/models',
             'deepseek'   => 'https://api.deepseek.com/v1/models',
+            'meta'       => 'https://api.meta.ai/v1/models',
             'ollama'     => 'http://localhost:11434/api/tags',
             default      => null,  // bedrock uses AWS SDK — no plain probe
         };
@@ -754,6 +771,10 @@ class ProviderRegistry
 
         if (getenv('XAI_API_KEY') || getenv('GROK_API_KEY')) {
             $available[] = 'grok';
+        }
+
+        if (getenv('META_API_KEY') || getenv('MODEL_API_KEY')) {
+            $available[] = 'meta';
         }
 
         // Check if Ollama is running
@@ -866,6 +887,18 @@ class ProviderRegistry
                 'max_context' => 204_800,
                 'structured_output' => true,
                 'regions' => ['intl', 'cn'],
+            ],
+            'meta' => [
+                'streaming' => true,
+                'tools' => true,
+                'vision' => true,
+                // Muse Spark takes text / image / video / audio / PDF in.
+                'max_context' => 1_048_576,
+                'structured_output' => true,
+                // Reasoning is always on — there is no off switch, only
+                // the minimal…max effort dial.
+                'thinking' => true,
+                'regions' => ['default'],
             ],
             'deepseek' => [
                 'streaming' => true,

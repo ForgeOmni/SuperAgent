@@ -11716,3 +11716,56 @@ $agent->run('迁移数据库 schema', [
 > **未内置：** Meta 的 **Muse Spark 1.3**（MSL 的 agentic 编码旗舰，2026-09-02，1M ctx，$1.25/$4.25 每 M）可经 OpenRouter 与 Cursor 访问，catalog 已收录，但 SuperAgent 尚无原生 Meta provider —— 原生 `meta` provider 是另一项独立工作。
 
 测试：`ModelRefresh202609Test`（Fable 5.1 tool_choice 降级与透传、Astra effort 下限、异步工具门控、catalog/价格 pin），以及更新后的 `GeminiProviderTest`（3.8 默认、MINIMAL 收敛）、`GlmProviderTest`（5.3 默认、5.3-Flash 档位）、`DeepSeekProviderTest`、`QwenProviderTest`、`OpenAIResponsesProviderTest`、`CostCalculatorTest`。全量测试通过（3375）。
+
+## 101. 原生 Meta provider —— Meta Model API 上的 Muse Spark (v1.1.13)
+
+v1.1.12 把 Muse Spark 收进了 catalog，但只能经 OpenRouter 访问。这一版新增 `MetaProvider`，直连 Meta Model API（`https://api.meta.ai`），Meta 专有的请求字段这才真正可用。
+
+```php
+$agent = new Agent([
+    'provider' => 'meta',
+    'api_key'  => getenv('META_API_KEY'),   // 也读 MODEL_API_KEY（Meta 官方命名）
+]);                                          // → muse-spark-1.3
+```
+
+**为什么要单独写一个 provider 类，而不是改 base_url。** Muse Spark 是 OpenAI *兼容*，不是 OpenAI *相同*，其中五处差异会直接 400。`MetaProvider` 继承 `ChatCompletionsProvider`，正好覆盖这五处：
+
+| Meta 的行为 | 处理位置 |
+|---|---|
+| 用 `max_completion_tokens`，不是 `max_tokens` | `completionTokenParam()` |
+| 推理不可关闭 —— `reasoning_effort: none` → 400 | `reasoningEffortFragment()` 把 `off`/`none`/`disabled` 下探到 `minimal` |
+| `max` 档只有 1.3 才有 | `modelSupportsMaxEffort()` 在 1.1 / 1.2 上把 `max` 降为 `xhigh` |
+| `developer` 优先级高于 `system` | `buildRequestBody()` 把提升上来的 system 消息改角色 |
+| `stop` / `logprobs` / `logit_bias` / `prediction` / `modalities` / `audio` / `web_search_options` / `n > 1` → 400 | 在 `buildRequestBody()` 中、**`extra_body` 合并之后**剔除 |
+
+由于剔除发生在最后一步，从别的 provider 搬过来的 body 会被清洗而不是被拒 —— 这正是"直接把 base_url 指过去"式集成在生产环境翻车的典型原因。
+
+**Meta 专有选项。** 搜索接地是服务端工具而非开关，且在 token 之外按查询计费（$2.50 / 1000 次）：
+
+```php
+$agent->run('上周发布了什么？', [
+    'reasoning_effort'  => 'xhigh',        // minimal | low | medium | high | xhigh | max
+    'grounding'         => true,           // → tools: [{"type": "web_search"}]
+    'prompt_cache_key'  => 'session-42',   // 缓存亲和分组
+    'safety_identifier' => 'user-abc',     // 匿名化终端用户标识（≤64 字符）
+]);
+```
+
+`grounding` 会与你的函数工具**并存**而不是替换，并在基类没设置时补上 `tool_choice`（基类只在存在函数工具时才设）。
+
+**三种协议，一个 provider。** Meta 用 Responses API、本文的 Chat Completions API 和 Anthropic 兼容的 Messages API 暴露同一批模型与计费。Anthropic 那条路不需要新代码 —— 与 DeepSeek 的 Anthropic 路由用的是同一招：
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('META_API_KEY'),
+    'base_url' => 'https://api.meta.ai',
+    'model'    => 'muse-spark-1.3',
+]);
+```
+
+**Contributor 档刻意只能按 id 显式选择。** `muse-spark-1.3-contributor` 是同一个模型，$0.10 / $0.002 / $0.20 每百万 token（约便宜 12 倍），代价是 Meta 会用你的 prompt 和回复训练后续模型（速率限制也从 3000 RPM 降到 100）。它在 catalog 和 `/model` 选择器里都有，并写明了这笔交换，但 `ModelResolver` 种子**刻意不给它别名**：`muse`、`muse-spark`、`spark` 一律解析到标准档的 `muse-spark-1.3`，不会有流量隐式流向训练档模型。
+
+**顺带修复：** `ProviderRegistry::DEFAULTS` 里仍写着 `gemini-3.7-flash`、`qwen3.8-max`、`glm-5.2`、`deepseek-v4-flash`。这些默认值会传进构造函数，因此对走 registry 的调用方（也就是常规路径）来说，v1.1.12 里改的 `defaultModel()` 被它们遮蔽了。现在四个都已与各自 provider 对齐。
+
+测试：`MetaProviderTest`（18）—— base URL / key 解析（`META_API_KEY` 优先于 `MODEL_API_KEY`）、`max_completion_tokens`、system→developer 改角色、经 `extra_body` 注入的不支持参数被剔除、effort 下探与 1.2 上 `max`→`xhigh` 的降级、grounding 单独使用及与函数工具并存、cache-key / safety-identifier 透传、registry 解析与 catalog 价格。全量测试通过（3393）。

@@ -66,6 +66,9 @@ class TokenEstimator
         'deepseek-flash' => 1_048_576,
         'deepseek-v4' => 1_048_576,
         'kimi-k3' => 1_048_576,
+
+        // Meta Muse Spark
+        'muse-spark' => 1_048_576,
         'MiniMax-M3' => 1_048_576,
 
         // Default fallback

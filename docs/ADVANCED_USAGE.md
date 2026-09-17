@@ -11160,3 +11160,56 @@ $agent->run('migrate the schema', [
 > **Not shipped:** Meta's **Muse Spark 1.3** (MSL's agentic coding flagship, 2026-09-02, 1M ctx, $1.25/$4.25 per M) is reachable through OpenRouter and Cursor and is catalogued there, but SuperAgent has no native Meta provider — a native `meta` provider is a separate piece of work.
 
 Tests: `ModelRefresh202609Test` (Fable 5.1 tool_choice downgrade + pass-through, Astra effort floor, async-tool gating, catalog/pricing pins), plus updated `GeminiProviderTest` (3.8 default, MINIMAL clamp), `GlmProviderTest` (5.3 default, 5.3-Flash dial), `DeepSeekProviderTest`, `QwenProviderTest`, `OpenAIResponsesProviderTest`, `CostCalculatorTest`. Full suite green (3375).
+
+## 101. Native Meta provider — Muse Spark on the Meta Model API (v1.1.13)
+
+v1.1.12 catalogued Muse Spark but could only reach it through OpenRouter. This adds `MetaProvider`, a native route to Meta's Model API at `https://api.meta.ai`, so the Meta-specific request fields are actually available.
+
+```php
+$agent = new Agent([
+    'provider' => 'meta',
+    'api_key'  => getenv('META_API_KEY'),   // MODEL_API_KEY (Meta's own name) also read
+]);                                          // → muse-spark-1.3
+```
+
+**Why a provider class rather than a base-URL override.** Muse Spark is OpenAI-*compatible*, not OpenAI-*identical*, and five of the differences are hard 400s. `MetaProvider` extends `ChatCompletionsProvider` and overrides exactly those points:
+
+| Meta behaviour | Where it's handled |
+|---|---|
+| `max_completion_tokens`, not `max_tokens` | `completionTokenParam()` |
+| Reasoning can't be disabled — `reasoning_effort: none` → 400 | `reasoningEffortFragment()` floors `off`/`none`/`disabled` at `minimal` |
+| `max` tier exists only on 1.3 | `modelSupportsMaxEffort()` downgrades `max` → `xhigh` on 1.1 / 1.2 |
+| `developer` outranks `system` | `buildRequestBody()` re-roles the hoisted system message |
+| `stop` / `logprobs` / `logit_bias` / `prediction` / `modalities` / `audio` / `web_search_options` / `n > 1` → 400 | stripped in `buildRequestBody()` **after** `extra_body` merges |
+
+Because the strip runs last, a request body carried over from another provider is sanitised instead of rejected — the usual reason a "just point base_url at it" integration fails in production.
+
+**Meta-specific options.** Search grounding is a server-side tool rather than a flag, and Meta bills it per query ($2.50 / 1K) on top of tokens:
+
+```php
+$agent->run('what shipped last week?', [
+    'reasoning_effort'  => 'xhigh',        // minimal | low | medium | high | xhigh | max
+    'grounding'         => true,           // → tools: [{"type": "web_search"}]
+    'prompt_cache_key'  => 'session-42',   // cache-affinity group
+    'safety_identifier' => 'user-abc',     // pseudonymous end-user id (≤ 64 chars)
+]);
+```
+
+`grounding` merges alongside your function tools rather than replacing them, and sets `tool_choice` when the base class hasn't (the base only sets it when function tools are present).
+
+**Three protocols, one provider.** Meta serves the same models and billing over a Responses API, this Chat Completions API, and an Anthropic-compatible Messages API. The Anthropic route needs no new code — the same trick DeepSeek's Anthropic route uses:
+
+```php
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('META_API_KEY'),
+    'base_url' => 'https://api.meta.ai',
+    'model'    => 'muse-spark-1.3',
+]);
+```
+
+**Contributor tier is opt-in by id, on purpose.** `muse-spark-1.3-contributor` is the same model at $0.10 / $0.002 / $0.20 per M — ~12× cheaper — because Meta trains future models on your prompts and completions (and caps you at 100 RPM instead of 3,000). It is in the catalog and in the `/model` picker with the trade spelled out, but the `ModelResolver` seed deliberately gives it **no alias**: `muse`, `muse-spark` and `spark` all resolve to the standard-tier `muse-spark-1.3`, so nothing routes to a training-tier model implicitly.
+
+**Also fixed here:** `ProviderRegistry::DEFAULTS` still pinned `gemini-3.7-flash`, `qwen3.8-max`, `glm-5.2` and `deepseek-v4-flash`. Those defaults are passed into the constructor, so they shadowed the `defaultModel()` bumps made in v1.1.12 for anyone going through the registry (which is the normal path). All four now match their provider.
+
+Tests: `MetaProviderTest` (18) — base URL / key resolution (`META_API_KEY` beats `MODEL_API_KEY`), `max_completion_tokens`, system→developer re-role, unsupported-param stripping through `extra_body`, the effort floor and the 1.2 `max`→`xhigh` downgrade, grounding alone and alongside function tools, cache-key/safety-identifier pass-through, registry resolution and catalog pricing. Full suite green (3393).

@@ -37,6 +37,7 @@ echo $result->text();
 - [GPT-6 Astra / GPT-5.6](#gpt-6-astra--gpt-56-sol--terra--luna)
 - [Grok 4.6](#grok-46)
 - [DeepSeek V4.1 / V4](#deepseek-v41--v4)
+- [Meta Muse Spark](#meta-model-api--muse-spark)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (codex `/goal` parity)](#goal-mode-codex-goal-parity-v098)
@@ -114,6 +115,7 @@ Fourteen registry-backed providers, with region-aware base URLs and multiple aut
 | `qwen` | Alibaba Qwen (OpenAI-compat default) | API key; regions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE); default `qwen3.8-max-0902` — multimodal flagship snapshot *(Qwen3.8-Max-0902, v1.1.12)* |
 | `qwen-native` | Alibaba Qwen (DashScope-native body) | Kept for `parameters.thinking_budget` callers |
 | `glm` | BigModel GLM (GLM-5.3 default) | API key; regions `intl` / `cn`; thinking + reasoning-effort dial *(GLM-5.3 default + GLM-5.3-Flash, v1.1.12; GLM-5.3 dial, v1.1.11)* |
+| `meta` | Meta Model API (Muse Spark) | API key (`META_API_KEY` / `MODEL_API_KEY`); OpenAI-compatible at `api.meta.ai`; default `muse-spark-1.3` — always-on reasoning (`minimal…max`, no off switch), 1M ctx, text/image/video/audio/PDF in, search grounding *(v1.1.13)* |
 | `minimax` | MiniMax (M3 default) | API key; regions `intl` / `cn`; interleaved thinking + native image/video *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | API key; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(since v0.9.6, multi-upstream v0.9.8)* |
 | `grok` | xAI Grok | API key (`XAI_API_KEY` / `GROK_API_KEY`); OpenAI-compatible at `api.x.ai`; default `grok-4.6` — reasoning-effort dial (incl. `xhigh`) + cache pinning *(Grok 4.6, v1.1.11; since v1.0.8)* |
@@ -592,6 +594,55 @@ cached prefix at byte 0. Idempotent across rounds — feeding a
 compacted result back through the wrapper preserves the same prefix
 bytes, so DeepSeek's auto prefix cache keeps hitting on every
 `/compact`.
+
+---
+
+## Meta Model API — Muse Spark
+
+Muse Spark is Meta Superintelligence Labs' agentic coding family, served by the **Meta Model API** at `https://api.meta.ai`. `muse-spark-1.3` (2026-09-02) is the `meta` provider default: **1M-token context**, text + image + video + audio + PDF input, parallel tool calls with streamed arguments, structured outputs, and server-side search grounding. Pricing is **$1.25 in / $0.15 cached / $4.25 out** per million tokens.
+
+```php
+$agent = new Agent([
+    'provider' => 'meta',
+    'api_key'  => getenv('META_API_KEY'),        // or MODEL_API_KEY, Meta's own name
+    'model'    => 'muse-spark-1.3',              // or the `muse` alias
+]);
+```
+
+Meta exposes the same models over three protocols — a Responses API, an OpenAI-compatible Chat Completions API and an Anthropic-compatible Messages API. This provider wires **Chat Completions**; the Anthropic route needs no new code:
+
+```php
+// Anthropic wire against the same model + billing
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('META_API_KEY'),
+    'base_url' => 'https://api.meta.ai',
+    'model'    => 'muse-spark-1.3',
+]);
+```
+
+Its request surface differs from stock OpenAI in five ways — the SDK handles all of them:
+
+- **Reasoning cannot be switched off.** `reasoning_effort` is `minimal | low | medium | high | xhigh` (plus `max` on 1.3), and **`none` returns 400**. The cross-provider dial therefore *floors* at `minimal` instead of emitting an off switch, and `max` degrades to `xhigh` on 1.1 / 1.2, which don't carry the top tier.
+- **`max_completion_tokens`, not `max_tokens`.** The reasoning channel shares the completion budget; `max_tokens` is not part of Meta's supported surface.
+- **`developer` outranks `system`.** `system` is accepted for OpenAI compatibility, but `developer` is the documented highest-precedence instruction channel — the hoisted system prompt is re-roled automatically.
+- **Unsupported OpenAI params are stripped**: `stop`, `logprobs`, `logit_bias`, `prediction`, `modalities`, `audio`, `web_search_options`, and `n` > 1 each return 400. They are removed *after* `extra_body` merges, so a payload carried over from another provider is sanitised rather than rejected.
+- **Search grounding is a tool, not a flag** — `{"type": "web_search"}`, billed at $2.50 per 1,000 queries on top of tokens.
+
+```php
+$agent->run('what shipped in the last release?', [
+    'reasoning_effort'  => 'xhigh',        // minimal…max; `off` floors at minimal
+    'grounding'         => true,           // → tools: [{type: "web_search"}]
+    'prompt_cache_key'  => 'session-42',   // cache-affinity group
+    'safety_identifier' => 'user-abc',     // pseudonymous end-user id (≤64 chars)
+]);
+```
+
+> ⚠️ **Contributor tier trains on your data.** `muse-spark-1.3-contributor` is the same model at **$0.10 / $0.002 / $0.20** per M — roughly 12× cheaper — in exchange for Meta training future models on your prompts and completions (and a 100 RPM cap instead of 3,000). It is catalogued but deliberately **not** aliased: nothing routes there unless you name the id.
+
+Muse Spark is also reachable through OpenRouter (`meta/muse-spark-1.3`) and Cursor; the native provider is the only route that speaks these Meta-specific fields.
+
+*Since v1.1.13*
 
 ---
 

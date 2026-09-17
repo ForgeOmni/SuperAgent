@@ -121,6 +121,7 @@ export GLM_API_KEY=...
 export MINIMAX_API_KEY=...
 export DEEPSEEK_API_KEY=...        # DeepSeek V4 — depuis v0.9.6
 export XAI_API_KEY=...             # xAI Grok — depuis v1.0.8 (GROK_API_KEY accepté aussi)
+export META_API_KEY=...            # Meta Model API / Muse Spark — depuis v1.1.13 (MODEL_API_KEY aussi accepté)
 export OPENROUTER_API_KEY=...
 
 # Relais multi-upstream DeepSeek (v0.9.8) — mêmes poids V4, hôtes alternatifs.
@@ -754,6 +755,23 @@ $agent = new Agent(['provider' => 'qwen-anthropic', 'api_key' => env('DASHSCOPE_
 > L'URL du endpoint `qwen-anthropic` n'est pas officiellement documentée par Alibaba en anglais au 2026-05-22. Le défaut `https://dashscope.aliyuncs.com/anthropic-mode/v1` est une supposition ; override via `base_url` s'il renvoie 404. Vérifier `~/.qwen/settings.json` après avoir installé qwen-code v0.16+ pour un champ `anthropic-base-url` explicite.
 
 OAuth Qwen a été EOL le 2026-04-15 — seul l'auth par clé API est supporté.
+
+### Meta Model API — Muse Spark *(v1.1.13)*
+
+Rien à installer au-delà du paquet standard. Créez une clé dans la Meta Developer Console, puis :
+
+```bash
+export META_API_KEY=...        # MODEL_API_KEY (le nom de Meta) fonctionne aussi
+```
+
+```php
+$agent = new Agent(['provider' => 'meta']);                       // → muse-spark-1.3
+$agent->run('refactorise ce module', ['reasoning_effort' => 'xhigh', 'grounding' => true]);
+```
+
+`muse-spark-1.3` est le défaut (contexte 1 M, 1,25 $/0,15 $ en cache/4,25 $ par 1M, entrée texte + image + vidéo + audio + PDF). Le raisonnement est toujours actif — la molette va de `minimal` à `max` et `reasoning_effort: none` renvoie 400, donc `off` plancher à `minimal`. Les mêmes modèles sont accessibles via la route compatible Anthropic de Meta avec `provider=anthropic` + `base_url=https://api.meta.ai`.
+
+> Les ids `-contributor` sont ~12× moins chers parce que Meta entraîne ses modèles sur vos prompts et complétions. Ils sont catalogués mais jamais aliasés — nommez l'id explicitement si vous voulez cet échange.
 
 ### Import de session pi *(v1.0.6)*
 

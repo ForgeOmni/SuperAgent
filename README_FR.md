@@ -37,6 +37,7 @@ echo $result->text();
 - [GPT-6 Astra / GPT-5.6](#gpt-6-astra--gpt-56-sol--terra--luna)
 - [Grok 4.6](#grok-46)
 - [DeepSeek V4.1 / V4](#deepseek-v41--v4)
+- [Meta Muse Spark](#meta-model-api--muse-spark)
 - [MiniMax M3](#minimax-m3)
 - [GLM-5.3 / 5.3-Flash](#glm-53--53-flash)
 - [Goal mode (parité codex `/goal`)](#goal-mode-parité-codex-goal-v098)
@@ -114,6 +115,7 @@ Quatorze providers pilotés par un registre, avec URL de base par région et plu
 | `qwen` | Alibaba Qwen (OpenAI-compat par défaut) | Clé API ; régions `intl` / `us` / `cn` / `hk` / `code` (OAuth + PKCE) ; défaut `qwen3.8-max-0902` — instantané du fleuron multimodal *(Qwen3.8-Max-0902, v1.1.12)* |
 | `qwen-native` | Alibaba Qwen (body DashScope natif) | Conservé pour les appels avec `parameters.thinking_budget` |
 | `glm` | BigModel GLM (GLM-5.3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking + molette reasoning-effort *(défaut GLM-5.3 + GLM-5.3-Flash, v1.1.12 ; molette GLM-5.3, v1.1.11)* |
+| `meta` | Meta Model API (Muse Spark) | Clé API (`META_API_KEY` / `MODEL_API_KEY`) ; compatible OpenAI sur `api.meta.ai` ; défaut `muse-spark-1.3` — raisonnement toujours actif (`minimal…max`, pas d'interrupteur), 1 M de contexte, entrée texte/image/vidéo/audio/PDF, ancrage par recherche *(v1.1.13)* |
 | `minimax` | MiniMax (M3 par défaut) | Clé API ; régions `intl` / `cn` ; thinking entrelacé + image/vidéo natives *(M3, v1.1.1)* |
 | `deepseek` | DeepSeek V4 | Clé API ; upstreams `deepseek` / `beta` / `cn` / `nvidia_nim` / `fireworks` / `novita` / `openrouter` / `sglang` *(depuis v0.9.6, multi-upstream v0.9.8)* |
 | `grok` | xAI Grok | Clé API (`XAI_API_KEY` / `GROK_API_KEY`) ; compatible OpenAI sur `api.x.ai` ; défaut `grok-4.6` — molette reasoning-effort (incl. `xhigh`) + pinning de cache *(Grok 4.6, v1.1.11 ; depuis v1.0.8)* |
@@ -570,6 +572,55 @@ $compactor = new CacheAwareCompressor(
 ```
 
 Wrap n'importe quelle `CompressionStrategy`. Forme du résultat : `[head_pinned, summary_boundary, summary, tail_preserved]` avec le préfixe caché à l'octet 0. Idempotent sur plusieurs rounds — refeeder un résultat compacté préserve les mêmes octets de préfixe, donc le cache préfixe automatique de DeepSeek continue de hit à chaque `/compact`.
+
+---
+
+## Meta Model API — Muse Spark
+
+Muse Spark est la famille de modèles de codage agentique de Meta Superintelligence Labs, servie par la **Meta Model API** sur `https://api.meta.ai`. `muse-spark-1.3` (2026-09-02) est le défaut du provider `meta` : **contexte de 1 M de tokens**, entrée texte + image + vidéo + audio + PDF, appels d'outils parallèles avec arguments streamés, sorties structurées et ancrage par recherche côté serveur. Tarif : **1,25 $ en entrée / 0,15 $ en cache / 4,25 $ en sortie** par million de tokens.
+
+```php
+$agent = new Agent([
+    'provider' => 'meta',
+    'api_key'  => getenv('META_API_KEY'),        // ou MODEL_API_KEY, le nom de Meta
+    'model'    => 'muse-spark-1.3',              // ou l'alias `muse`
+]);
+```
+
+Meta expose les mêmes modèles via trois protocoles — une Responses API, une Chat Completions API compatible OpenAI et une Messages API compatible Anthropic. Ce provider câble **Chat Completions** ; la route Anthropic ne demande aucun code supplémentaire :
+
+```php
+// Wire Anthropic, même modèle et même facturation
+$agent = new Agent([
+    'provider' => 'anthropic',
+    'api_key'  => getenv('META_API_KEY'),
+    'base_url' => 'https://api.meta.ai',
+    'model'    => 'muse-spark-1.3',
+]);
+```
+
+Sa surface de requête diffère d'OpenAI sur cinq points — le SDK s'en charge intégralement :
+
+- **Le raisonnement ne peut pas être désactivé.** `reasoning_effort` vaut `minimal | low | medium | high | xhigh` (plus `max` sur 1.3), et **`none` renvoie 400**. La molette cross-provider *plancher* donc à `minimal` au lieu d'émettre un interrupteur, et `max` est ramené à `xhigh` sur 1.1 / 1.2, qui n'ont pas le palier supérieur.
+- **`max_completion_tokens`, pas `max_tokens`.** Le canal de raisonnement partage le budget de complétion ; `max_tokens` ne fait pas partie de la surface supportée par Meta.
+- **`developer` prime sur `system`.** `system` est accepté pour la compatibilité OpenAI, mais `developer` est le canal d'instructions de plus haute précédence documenté — le prompt système hissé est re-rôlé automatiquement.
+- **Les paramètres OpenAI non supportés sont retirés** : `stop`, `logprobs`, `logit_bias`, `prediction`, `modalities`, `audio`, `web_search_options` et `n` > 1 renvoient chacun un 400. Ils sont retirés *après* la fusion d'`extra_body`, donc une charge utile venue d'un autre provider est assainie plutôt que rejetée.
+- **L'ancrage par recherche est un outil, pas un drapeau** — `{"type": "web_search"}`, facturé 2,50 $ pour 1 000 requêtes en plus des tokens.
+
+```php
+$agent->run('qu\'est-ce qui a été livré dans la dernière version ?', [
+    'reasoning_effort'  => 'xhigh',        // minimal…max ; `off` plancher à minimal
+    'grounding'         => true,           // → tools: [{type: "web_search"}]
+    'prompt_cache_key'  => 'session-42',   // groupe d'affinité de cache
+    'safety_identifier' => 'user-abc',     // id utilisateur pseudonyme (≤ 64 caractères)
+]);
+```
+
+> ⚠️ **Le palier Contributor entraîne sur vos données.** `muse-spark-1.3-contributor` est le même modèle à **0,10 $ / 0,002 $ / 0,20 $** par M — environ 12× moins cher — en échange de l'autorisation donnée à Meta d'entraîner ses futurs modèles sur vos prompts et complétions (et d'un plafond de 100 RPM au lieu de 3 000). Il est catalogué mais délibérément **sans alias** : rien n'y est routé si vous ne nommez pas l'id.
+
+Muse Spark est aussi accessible via OpenRouter (`meta/muse-spark-1.3`) et Cursor ; seul le provider natif parle ces champs spécifiques à Meta.
+
+*Depuis v1.1.13*
 
 ---
 
