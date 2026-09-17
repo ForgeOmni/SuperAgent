@@ -28,7 +28,7 @@ this document is the package-side plan for them.
 
 ---
 
-## Wave 1 — v1.2.0 · Runtime compatibility (PHP 8.4 / 8.5, Laravel 13)
+## Wave 1 — v1.2.0 · Runtime compatibility (PHP 8.4 / 8.5, Laravel 13) — **shipped**
 
 **Why first:** Superroute's `master` runs Laravel 10 / PHP 8.1 and its `l13`
 branch runs Laravel 13 / PHP 8.5. One SuperAgent release line has to serve both,
@@ -65,9 +65,29 @@ L10 and L13; a scratch Laravel 13 / PHP 8.5 app can `composer require` the
 package and boot the service provider; `composer validate --strict` and the
 supply-chain workflow still pass.
 
-**Size:** mechanical but wide. The 43 signatures are a find-and-fix; the risk is
-in step 4, where an L13 difference may be hiding behind a test that only ever
-ran on L10.
+**What it actually took** (the estimate was half right):
+
+- 23 implicit-nullable signatures in `src`, not 43. The 43 came from a regex;
+  a tokenizer scan separates real parameters from comments and from promoted
+  properties that were already nullable.
+- Two deprecation families the plan had not counted: 6 `curl_close()` calls
+  (no-ops since 8.0) and 129 `Reflection*::setAccessible()` calls (no-ops since
+  8.1, which this package requires). 149 deprecations on 8.5 in total, now 0
+  from `src` or `tests`.
+- The risk was where the plan guessed, but one layer further out: not Laravel
+  13 itself — **PHPUnit 12**, which the L13 leg resolves to. It dropped
+  docblock metadata, so 9 `@dataProvider` annotations errored rather than
+  skipped, and it redirects `error_log` to a per-test file after `setUp()`,
+  which silently voided three assertions in `FeatureSpecValidationTest` —
+  including two negative ones that would have passed no matter what the code
+  did. Both found by running the real stack locally (Laravel 13.32 / PHPUnit
+  12.5 / PHP 8.5), not by reading release notes.
+- Known and accepted: PHPUnit 12 reports `phpunit.xml` as a deprecated schema
+  because `restrictDeprecations` is now `ignoreIndirectDeprecations`. The old
+  name still works on 12; the new one does not exist on 10, which the PHP 8.1
+  leg is pinned to. One config serves both until 8.1 is dropped.
+- Open, non-blocking: 87 PHPUnit *notices* on 12, all "mock object without
+  expectations — consider a stub".
 
 ---
 
